@@ -1,0 +1,83 @@
+import { HexGpuRenderer } from '@pixagram/upscaler';
+import init, { hex_upscale_config, get_memory } from '@pixagram/upscaler/wasm';
+// Namespace import so the optional `initThreadPool` export (present only in the
+// multi-threaded build) can be feature-detected without breaking single-threaded builds.
+import * as upscalerWasm from '@pixagram/upscaler/wasm';
+
+let renderer;
+await ensureUpscalerReady();
+
+export default async function upscale(imgd, scale, mode = "CPU") {
+
+    let o;
+    if ((""+mode).toUpperCase() === "GPU") {
+        if(typeof renderer === "undefined"){
+            renderer = HexGpuRenderer.create();
+        }else if(!renderer.isReady()){
+            renderer = HexGpuRenderer.create();
+        }
+
+        o = renderer.render(imgd, {
+            scale,
+            orientation: 'flat-top',
+            drawBorders: false,
+            borderColor: "#00000000",
+            borderThickness: "0",
+            backgroundColor: "#00000000"
+        });
+    } else {
+        // WASM/CPU path. When the multi-threaded build is loaded and the thread
+        // pool was started in ensureUpscalerReady(), hex_upscale_config fans the
+        // per-row work out across the rayon pool automatically. The call site is
+        // unchanged — only the internals run in parallel.
+        if(typeof renderer?.dispose === "function" ){  renderer.dispose(); }
+        const m = get_memory();
+        const r = hex_upscale_config(imgd.data, imgd.width, imgd.height, scale,  'flat-top', false, "#00000000", "0", "#00000000");
+        const om = new Uint8ClampedArray(
+            m.buffer,
+            r.ptr,
+            r.len
+        );
+        o = new ImageData(
+            new Uint8ClampedArray(om),
+            r.width,
+            r.height
+        );
+    }
+
+    return new ImageData(o.data, o.width, o.height);
+}
+
+export function dispose() {
+    if(typeof renderer === "undefined"){ return;}
+    if(typeof renderer.dispose !== "function" ){ return; }
+    return renderer.dispose();
+}
+
+/**
+ * Initialise the WASM module and, when the multi-threaded build is present,
+ * spin up the rayon thread pool. Runs at most once per JS context (the promise
+ * is memoised on globalThis) and is safe on every build/page:
+ *   - default (single-threaded) build -> initThreadPool isn't exported, skipped
+ *   - page without cross-origin isolation -> SharedArrayBuffer unavailable, skipped
+ * In every skipped case the module keeps working single-threaded, exactly as before.
+ */
+function ensureUpscalerReady() {
+    return (globalThis.__upscalerReady ??= (async () => {
+        await init();
+        // `initThreadPool` exists only in the multi-threaded build. Resolve it with a
+        // runtime-computed key so bundlers (webpack/Vite/etc.) don't emit an
+        // "export 'initThreadPool' was not found" warning against the single-threaded build.
+        const initThreadPool = upscalerWasm[["init", "Thread", "Pool"].join("")];
+        const canThread =
+            typeof initThreadPool === "function" &&
+            globalThis.crossOriginIsolated === true;
+        if (!canThread) return;
+        try {
+            const threads = globalThis.navigator?.hardwareConcurrency || 4;
+            await initThreadPool(threads);
+        } catch (err) {
+            console.warn("[upscaler] thread pool init failed; running single-threaded:", err);
+        }
+    })());
+}

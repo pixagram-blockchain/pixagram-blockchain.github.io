@@ -1,0 +1,352 @@
+const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+const AFunction = Object.getPrototypeOf( function(){}).constructor;
+
+var file_to_base64_process_function = new AFunction(`var t = function(file) {
+    "use strict";
+    
+    try {
+        
+        return new Promise(function(resolve, _) {
+            resolve(new FileReaderSync().readAsDataURL(file));
+        });
+        
+    } catch(error) {
+    
+        return new Promise(function(resolve, _) {
+            var reader = new FileReader();
+            reader.onload = function(){ resolve(reader.result)};
+            reader.readAsDataURL(file);
+        });
+    }
+    
+}; return t;`)();
+
+export const file_to_base64 = (file, callback_function = () => {}, pool = null) => {
+
+    if(pool !== null) {
+
+        pool.exec(file_to_base64_process_function, [
+            file
+        ]).catch((e) => {
+
+            return file_to_base64_process_function(file);
+        }).timeout(5 * 1000).then((r) => {
+
+            callback_function(r);
+        });
+
+    }else {
+
+        file_to_base64_process_function(file).then((r) => {
+
+            callback_function(r);
+        });
+    }
+};
+
+var base64_sanitize_process_function = function (base64, scale, resizer) {
+   
+    resizer = resizer || "pixelize";
+
+    function imgToImgD(imgo, width, height, resizer) {
+        
+        let ctx;
+        if(resizer === "pixelize" || resizer === "normal") {
+            let canvas, canvas2;
+            try {
+                canvas = new OffscreenCanvas(imgo.width, imgo.height);
+                canvas2 = new OffscreenCanvas(width, height);
+            }catch(e) {
+                canvas = document.createElement("canvas");
+                canvas2 = document.createElement("canvas");
+                canvas.width = imgo.width;
+                canvas.height = imgo.height;
+                canvas2.width = width;
+                canvas2.height = height;
+            }
+            let context = canvas.getContext("2d");
+            let context2 = canvas2.getContext("2d");
+                context.imageSmoothingEnabled = Boolean(resizer === "normal");
+                context2.imageSmoothingEnabled = Boolean(resizer === "normal");
+            context.drawImage(imgo, 0, 0, imgo.width, imgo.height);
+            context2.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, canvas2.width, canvas2.height);
+            ctx = context2;
+            
+        }else if(resizer === "doppel") {
+            ctx = scaler.processImage(imgo, width, height);
+        }
+        return ctx;
+    }
+
+    return new Promise(function(resolve, reject) {
+        var img = new Image();
+        var is_png = base64.startsWith("data:image/png;");
+        img.onload = function() {
+
+
+           
+            let width1 = img.naturalWidth * scale;
+            let height1 = img.naturalHeight * scale;
+            let ctx1 = imgToImgD(img, width1|0, height1|0, resizer);
+
+            try {
+                let imgd = ctx1.getImageData(0, 0, ctx1.canvas.width, ctx1.canvas.height);
+                createImageBitmap(imgd).then(function(bmp){
+                
+                    var canvas;
+                    try {
+                        canvas = new OffscreenCanvas(bmp.width, bmp.height);
+                    }catch (e) {
+                        canvas = document.createElement("canvas");
+                        canvas.height = bmp.height;
+                        canvas.width = bmp.width;
+                    }
+                    var ctx2 = canvas.getContext("bitmaprenderer");
+                        ctx2.imageSmoothingEnabled = false;
+                        ctx2.transferFromImageBitmap(bmp);
+                    
+                    canvas.convertToBlob({type: is_png ? "image/png": "image/jpeg"}).then(function(blb) {
+                        
+                        try {
+                            resolve(new FileReaderSync().readAsDataURL(blb));
+                        } catch(e2) {
+                            var reader = new FileReader();
+                            reader.onload = function(){ resolve(reader.result)};
+                            reader.readAsDataURL(blb);
+                        }
+                    });
+                });
+                
+            } catch(e){
+
+                let canvas = ctx1.canvas;
+                resolve(canvas.toDataURL(is_png ? "image/png": "image/jpeg")); 
+            }
+        };
+        img.onerror = function() { reject(); };
+        img.src = base64;
+    });
+};
+
+export const base64_sanitize = (base64, callback_function = () => {}, pool = null, scale = 1, resizer) => {
+
+    pool = null;
+    if(pool !== null) {
+
+        pool.exec(base64_sanitize_process_function, [
+            base64, scale, resizer
+        ]).catch((e) => {
+
+            base64_sanitize_process_function(base64, scale, resizer).then((r) => {
+                callback_function(r);
+            });
+        }).timeout(15 * 1000).then((r) => {
+
+            callback_function(r);
+        });
+
+    }else {
+
+        base64_sanitize_process_function(base64, scale, resizer).then((r) => {
+
+            callback_function(r);
+        });
+    }
+};
+
+var base64_to_bitmap_process_function = new AsyncFunction(`var t = async function(base64) {
+
+    "use strict";
+
+    return fetch(base64).then(function(res) {
+
+        return res.blob().then(function(blb){
+
+            return createImageBitmap(blb, {
+                resizeQuality: "pixelated",
+                premultiplyAlpha: 'premultiply'
+            });
+        });
+    });
+
+}; return t;`)();
+
+export const base64_to_bitmap = (base64, callback_function = () => {}, pool = null) => {
+
+        if(pool !== null) {
+
+            pool.exec(base64_to_bitmap_process_function, [
+                base64
+            ]).catch((e) => {
+
+                return base64_to_bitmap_process_function(base64);
+            }).timeout(5 * 1000).then((r) => {
+
+                callback_function(r);
+            });
+
+        }else {
+
+            base64_to_bitmap_process_function(base64).then((r) => {
+
+                callback_function(r);
+            });
+        }
+
+};
+
+export const file_to_bitmap = (file_or_blob, callback_function) => {
+
+    createImageBitmap(file_or_blob).then(callback_function);
+}
+
+export const bitmap_to_imagedata = (bitmap, resize_to =  1920*1080, callback_function = () => {}) => {
+
+    let scale = 1;
+    while (Math.round(bitmap.width * scale) * Math.round(bitmap.height * scale) > resize_to) { scale -= 0.01; }
+
+        try {
+
+            createImageBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, {
+                resizeWidth: Math.round(bitmap.width * scale),
+                resizeHeight: Math.round(bitmap.height * scale),
+                resizeQuality: "pixelated",
+                premultiplyAlpha: 'premultiply'
+            }).then(function (bitmap_resized){
+
+                let canvas;
+                try {
+
+                    canvas = new OffscreenCanvas(bitmap_resized.width, bitmap_resized.height);
+                } catch (e) {
+
+                    canvas = document.createElement("canvas");
+                    canvas.width = bitmap_resized.width;
+                    canvas.height = bitmap_resized.height;
+                }
+
+                let ctx = canvas.getContext("2d");
+                ctx.imageSmoothingEnabled = false;
+                ctx.drawImage(bitmap_resized, 0, 0, bitmap_resized.width, bitmap_resized.height);
+                callback_function(ctx.getImageData(0, 0, bitmap_resized.width, bitmap_resized.height));  // "getImageData" isn't available in web worker
+
+            });
+
+        } catch(err) {
+
+            let canvas;
+            try {
+
+                canvas = new OffscreenCanvas(Math.round(bitmap.width * scale), Math.round(bitmap.height * scale));
+            } catch (e) {
+
+                canvas = document.createElement("canvas");
+                canvas.width = Math.round(bitmap.width * scale);
+                canvas.height = Math.round(bitmap.height * scale);
+            }
+
+            let ctx = canvas.getContext("2d");
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+            callback_function(ctx.getImageData(0, 0, canvas.width, canvas.height));  // "getImageData" isn't available in web worker
+        }
+};
+
+export const imagedata_to_bitmap = (imgd, resize_to =  1920*1080, callback_function = () => {}) => {
+
+        let scale = 1;
+        while (Math.round(imgd.width * scale) * Math.round(imgd.height * scale) > resize_to) { scale -= 0.01; }
+
+
+        try {
+
+            createImageBitmap(imgd, 0, 0, imgd.width, imgd.height, {
+                resizeWidth: Math.round(imgd.width * scale),
+                resizeHeight: Math.round(imgd.height * scale),
+                premultiplyAlpha: 'premultiply',
+                resizeQuality: "pixelated"
+            }).then(function (bitmap_resized){
+
+                callback_function(bitmap_resized);  // "getImageData" isn't available in web worker
+            });
+
+        } catch(err) {
+
+            callback_function(null)
+        }
+};
+
+var imagedata_to_base64_process_function = new AFunction(`var t = function(imagedata, type) {
+
+    "use strict"
+    type = type || "image/png";
+    var quality = type.includes("webp") ? 1: type.includes("png") ? undefined: 0.7;
+    try {
+    
+        return new Promise(function(resolve, _) {
+
+            createImageBitmap(imagedata, 0, 0, imagedata.width, imagedata.height, {
+                premultiplyAlpha: 'premultiply',
+                resizeQuality: 'pixelated'
+            }).then((bmp) => {
+            
+                var canvas;
+                    canvas = new OffscreenCanvas(imagedata.width, imagedata.height);
+                var ctx = canvas.getContext("bitmaprenderer");
+                    ctx.imageSmoothingEnabled = false;
+                    ctx.transferFromImageBitmap(bmp);
+                
+                canvas.convertToBlob({type: type, quality: quality}).then((blb) => {
+                    try {
+                        resolve(new FileReaderSync().readAsDataURL(blb));
+                    } catch(e2) {
+                        var reader = new FileReader();
+                        reader.onload = function(){ resolve(reader.result)};
+                        reader.readAsDataURL(blb);
+                    }
+                });
+            });
+        });
+       
+    }catch (e) {
+    
+        return new Promise(function(resolve, _) {
+            var canvas = document.createElement("canvas");
+            canvas.width = imagedata.width;
+            canvas.height = imagedata.height;
+            var ctx = canvas.getContext("2d");
+            ctx.imageSmoothingEnabled = false;
+            ctx.putImageData(imagedata, 0, 0);
+            
+            var base64 = canvas.toDataURL(type, quality);
+            canvas = null;
+            resolve(base64);
+        });
+    }
+
+}; return t;`)();
+
+export const imagedata_to_base64 = (imagedata, type= "image/png", callback_function = () => {}, pool = null) => {
+
+        if(pool !== null) {
+
+            pool.exec(imagedata_to_base64_process_function, [
+                imagedata, type
+            ]).catch((e) => {
+
+                return imagedata_to_base64_process_function(imagedata, type);
+            }).timeout(5 * 1000).then((r) => {
+
+                callback_function(r);
+            });
+
+        }else {
+
+            imagedata_to_base64_process_function(imagedata, type).then((r) => {
+
+                callback_function(r);
+            });
+        }
+
+};
