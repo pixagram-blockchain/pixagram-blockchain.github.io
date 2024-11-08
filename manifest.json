@@ -1,0 +1,68 @@
+{
+  "manifest_version": 2,
+  "version": "1.0.0.0",
+  "author": "Affolter Matias",
+  "name": "Pixagram",
+  "start_url": "/",
+  "scope": "/",
+  "serviceworker": {
+    "src": "/service-worker.js",
+    "scope": "/"
+  },
+  "short_name": "Pixa",
+  "description": "Create pixel art on the blockchain, get paid to post, vote, and sell your artworks as NFTs. You can convert your pictures and prompt into real pixelated artworks.",
+  "display": "fullscreen",
+  "theme_color": "#000000",
+  "background_color": "#ffffff",
+  "browser_action": {
+    "default_icon": "/src/images/manifest/logo-shadow.png",
+    "default_popup": "index.html"
+  },
+  "icons": [
+    {
+      "src": "/src/images/manifest/logo.png",
+      "sizes": "1152x1152",
+      "type": "image/png"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Pixagram",
+      "short_name": "Pixa",
+      "description": "Create pixel art on the blockchain, get paid to post, vote, and sell your artworks as NFTs. You can convert your pictures and prompt into real pixelated artworks.",
+      "url": "/",
+      "icons": [
+        {
+          "src": "/src/images/manifest/logo.png",
+          "sizes": "1152x1152",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "id": "pixagram",
+  "dir": "ltr",
+  "lang": "en",
+  "orientation": "any",
+  "prefer_related_applications": true,
+  "related_applications": [
+    {
+      "platform": "webapp",
+      "url": "https://pixagram.io/",
+      "id": "pixagram.io"
+    }
+  ],
+  "categories": [
+    "social",
+    "media",
+    "entertainment",
+    "blockchain",
+    "finance",
+    "payments",
+    "blogging",
+    "photography"
+  ],
+  "edge_side_panel": {
+    "preferred_width": 960
+  }
+}
