@@ -284,7 +284,7 @@
                         for (var i = 0; i < hrefs.length; i++) {
                             var ss = hrefs[i];
                             if (ss.endsWith(".js")) {
-                                var e = document.createElement("script"); e.setAttribute("src", ss); e.setAttribute("type", "text/javascript"); e.setAttribute(ss.endsWith(_MAIN_JS_FILE_ENDS_WITH) ? "defer" : "defer", "true");
+                                var e = document.createElement("script"); e.setAttribute("src", ss); e.setAttribute("type", "text/javascript"); e.setAttribute((ss.endsWith(_MAIN_JS_FILE_ENDS_WITH) ? "defer" : "defer"), "true");
                                 scripts.appendChild(e);
                             } else if (ss.endsWith(".css")) {
                                 var e = document.createElement("link"); e.setAttribute("href", ss); e.setAttribute("rel", "stylesheet");
