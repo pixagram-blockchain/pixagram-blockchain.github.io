@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en" translate="no" style="overflow: hidden">
+<head>
+    <meta name="google" content="notranslate" />
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+
+    <!-- Title + Description meta data -->
+    <title id="meta-title">PIXA.PICS - Pixel-Art Editor & NFTs Laboratory</title>
+    <meta name="description" content="Make pixel art from real life images and draw on the image you can edit for free, filters, layers, library, are within the editor.">
+    <meta name="keywords" content="Pixel, Art, Anonymous, NFT, Crypto, Red, Free, Secure, Progressive, Web, App, Offline, Free, Open-Source, ">
+
+    <style>
+        img, video, canvas {
+            -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+            -webkit-tap-highlight-color: transparent;
+            -webkit-user-select: none;
+            -khtml-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        body.loaded {
+            position: relative;
+            content-visibility: initial;
+            background-color: #111;
+            animation-iteration-count: 1 !important;
+            animation-delay: 250ms !important;
+            animation-fill-mode: both !important;
+            animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
+            animation-name: ripupblend !important;
+            animation-duration: 1250ms !important;
+        }
+        @keyframes ripupblend {
+            0% {
+                mix-blend-mode: multiply;
+            }
+            100% {
+                mix-blend-mode: initial;
+            }
+        }
+        body.loaded::before {
+            content: "";
+            content-visibility: visible;
+            contain: paint style size layout !important;
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            z-index: 9999999;
+            top: 0;
+            left: 0;
+            background-image: radial-gradient(rgba(255, 255, 255, 0.2) 30%, rgba(255, 0, 0, 0.85) 40%,rgba(0, 255, 0, 0.85) 42%,rgba(0, 0, 255, 0.85) 44%, #5e4eff00 46%, rgba(255, 255, 255, 0.85) 60%, #00000000 65%) !important;
+            background-color: transparent !important;
+            background-size: 400% 150% !important;
+            background-position: 50% 50% !important;
+            animation-iteration-count: 1 !important;
+            animation-delay: 250ms !important;
+            animation-fill-mode: both !important;
+            animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
+            animation-name: ripup !important;
+            animation-duration: 1250ms !important;
+        }
+        @keyframes ripup {
+            0% {display: block !important; transform: translateY(175%); opacity: .6 }
+            15% { display: block !important; transform: translateY(75%); opacity: 1  }
+            30% { display: block !important; transform: translateY(25%); opacity: 0.3  }
+            60% { display: block !important; transform: translateY(-75%); opacity: 0  }
+            100% { display: none !important; transform: translateY(-100%); opacity: 0  }
+        }
+        body.loaded > #app {
+            contain: paint style layout;
+            content-visibility: auto;
+            position: relative;
+            will-change: auto;
+            overflow: hidden;
+        }
+        body.loading[datainitiated=true] > #app {
+            contain: paint style layout;
+            will-change: contents;
+            content-visibility: visible;
+        }
+        body.loading[datainitiated=false] > #app {
+            contain: size paint style layout;
+            will-change: auto;
+            content-visibility: visible;
+        }
+        body.loading[datainitiated=false] {
+            animation-fill-mode: both;
+            animation-name: bounce;
+            animation-duration: 1000ms;
+            animation-delay: 450ms;
+            animation-timing-function: ease-in-out;
+            animation-iteration-count: infinite;
+            overflow: auto;
+        }
+        @keyframes bounce {
+            0% {filter: brightness(1) contrast(1);transform: scale(1.1);}
+            25% {filter: brightness(1.3) contrast(0.85);transform: scale(1.15);}
+            50% {filter: brightness(1) contrast(1);transform: scale(1);}
+            75% { filter: brightness(1.1) contrast(0.95); transform: scale(1.15); }
+            100% { filter: brightness(1) contrast(1); transform: scale(1.1); }
+        }
+        body {
+            background-color: #fff;
+        }
+        body::before {
+            mix-blend-mode: initial;
+            content-visibility: visible;
+            pointer-events: none;
+            contain: size paint style layout;
+            content: "Loading";
+            position: fixed;
+            z-index: 9999999;
+            background-color: #fff;
+            background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHN0eWxlPSJpc29sYXRpb246aXNvbGF0ZSIgdmlld0JveD0iMCAwIDIwMDAgMjAwMCIgd2lkdGg9IjIwMDBwdCIgaGVpZ2h0PSIyMDAwcHQiPjxkZWZzPjxjbGlwUGF0aCBpZD0iYSI+PHBhdGggZD0iTTAgMGgyMDAwdjIwMDBIMHoiLz48L2NsaXBQYXRoPjwvZGVmcz48ZyBjbGlwLXBhdGg9InVybCgjYSkiPjxjbGlwUGF0aCBpZD0iYiI+PHBhdGggZmlsbD0iI0ZGRiIgZD0iTTAgMGgyMDAwdjIwMDBIMHoiLz48L2NsaXBQYXRoPjxnIGNsaXAtcGF0aD0idXJsKCNiKSI+PGNsaXBQYXRoIGlkPSJjIj48cGF0aCBmaWxsPSIjRkZGIiBkPSJNMCAwaDIwMDB2MjAwMEgweiIvPjwvY2xpcFBhdGg+PGcgY2xpcC1wYXRoPSJ1cmwoI2MpIj48Y2xpcFBhdGggaWQ9ImQiPjxwYXRoIGZpbGw9IiNGRkYiIGQ9Ik0wIDBoMjAwMHYyMDAwSDB6Ii8+PC9jbGlwUGF0aD48ZyBjbGlwLXBhdGg9InVybCgjZCkiPjxkZWZzPjxmaWx0ZXIgaWQ9ImUiIHg9Ii0yMDAlIiB5PSItMjAwJSIgd2lkdGg9IjQwMCUiIGhlaWdodD0iNDAwJSIgZmlsdGVyVW5pdHM9Im9iamVjdEJvdW5kaW5nQm94IiBjb2xvci1pbnRlcnBvbGF0aW9uLWZpbHRlcnM9InNSR0IiPjxmZUdhdXNzaWFuQmx1ciB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIGluPSJTb3VyY2VHcmFwaGljIiBzdGREZXZpYXRpb249Ijg0LjU4NCIvPjxmZU9mZnNldCB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHJlc3VsdD0icGZfMTAwX29mZnNldEJsdXIiLz48ZmVGbG9vZCB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIGZsb29kLWNvbG9yPSIjMDAwIiBmbG9vZC1vcGFjaXR5PSIxIi8+PGZlQ29tcG9zaXRlIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgaW4yPSJwZl8xMDBfb2Zmc2V0Qmx1ciIgb3BlcmF0b3I9ImluIiByZXN1bHQ9InBmXzEwMF9kcm9wU2hhZG93Ii8+PGZlQmxlbmQgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiBpbj0iU291cmNlR3JhcGhpYyIgaW4yPSJwZl8xMDBfZHJvcFNoYWRvdyIvPjwvZmlsdGVyPjwvZGVmcz48ZyBmaWx0ZXI9InVybCgjZSkiPjxwYXRoIGQ9Ik0zNzAgMjUwaDEyNjBjNjYuMjMgMCAxMjAgNTMuNzcgMTIwIDEyMHYxMjYwYzAgNjYuMjMtNTMuNzcgMTIwLTEyMCAxMjBIMzcwYy02Ni4yMyAwLTEyMC01My43Ny0xMjAtMTIwVjM3MGMwLTY2LjIzIDUzLjc3LTEyMCAxMjAtMTIweiIvPjwvZz48cGF0aCBmaWxsPSIjMEZGIiBkPSJNODE3LjM3IDI1MHY0MjcuNWgtNjUuMjAxVjI1MHoiLz48cGF0aCBmaWxsPSIjRkYwIiBkPSJNOTA3LjUxNSAyNTB2NDI3LjVoLTY1LjAyOVYyNTB6Ii8+PHBhdGggZmlsbD0iI0YwRiIgZD0iTTk5OS44NjYgMjUwdjQyNy41aC02NS40OTVWMjUweiIvPjxwYXRoIGQ9Ik0xNzQ4LjUyNyAxNjcxLjYxN3EzLjYyMi0xMS45MyAyLjQ4Ni0zNC42NjR2LTEwNC4wNzVxLTEwMy4zNTMgNzEuMzA1LTM1MS44MzggMTAyLjEwOGMtMjQ4LjQ4NCAzMC44MDItMjc0Ljc5MS05NC43MTUtNDg2LjkxMi0xMDIuMTA4cS0yMTIuMTIxLTcuMzkyLTM5OC40MDEgMTYyLjQ4MSAxOS43NjItNzUuNTQzIDAtMTA3LjA5NWMtNTYuOTE5LTkwLjg3Ni0xNjguOTAyLTk1LjQyNy0yNjIuODUyLTg1LjQyMVYxNjIwLjJsMzY0Ljc4MSAxMTYuNjk5IDEwNzUuODA5LTM0LjE0NyA1Ni45MjctMzEuMTM1eiIgZmlsbD0icmVkIi8+PHBhdGggZD0iTTE3NDguNTI3IDE2NzEuNjE3cS0xNTUuMzc0LTEyMy4xMTUtMzczLjM3NC0xMzcuNzUyYy0yMTgtMTQuNjM4LTM2OCAxMzguMjQzLTQzNiAxNTEuMjU0LTY4IDEzLjAxMS0xMzguNzgzLTEzOC4xNzctNDgwLTEyMS45NzlxLTExMC4xMTYuNjA4LTIwOC42NjcgNDQuMjgxIDI5LjAyNyAxMTMuNjIgMTIwLjUyNyAxMjkuNDc4IDg5LjExMSAxLjE3NCAxMjc2Ljg5LTkuMTMybDEwMC42MjQtNTYuMTV6IiBmaWxsPSIjMEYwIi8+PHBhdGggZD0iTTE3NDguNTI3IDE2NzEuNjE3cS0xMjIuMjY0IDgzLjk2OS0zNzMuNTE0LTI3Ljk5Yy0zMTQuNjU5LTk2Ljg4NS0zMjAuNzI1IDI0LjQwOS01ODYuMjUgMjcuOTlxLTM3OS4xNjIgNTcuMTc4LTUzNy43NS02NC4xOTYtNy41NDIgNzYuODQ2IDI5LjIwOCAxMDguNTYgMzYuNzUgMzEuNzE1IDgyLjczNyAzNC4wMTloMTI4NS45NDRxMzIuMTExLTMuOTY0IDYwLjk4Ni0yMy43NjEgMjguODc1LTE5Ljc5NiAzOC42MzktNTQuNjIyeiIgZmlsbD0iIzAwRiIvPjxwYXRoIGQ9Ik05MjUgMTM3NWgzOTcuNWMyOC45NzYgMCA1Mi41LTIzLjUyNCA1Mi41LTUyLjV2LTY0NWMwLTI4Ljk3Ni0yMy41MjQtNTIuNS01Mi41LTUyLjVoLTY0NWMtMjguOTc2IDAtNTIuNSAyMy41MjQtNTIuNSA1Mi41VjE3NTBoMzAwdi0zNzV6bS0xMy43NS01MDBoMTc3LjVjMjAuMDA3IDAgMzYuMjUgMTYuMjQzIDM2LjI1IDM2LjI1djE3Ny41YzAgMjAuMDA3LTE2LjI0MyAzNi4yNS0zNi4yNSAzNi4yNWgtMTc3LjVjLTIwLjAwNyAwLTM2LjI1LTE2LjI0My0zNi4yNS0zNi4yNXYtMTc3LjVjMC0yMC4wMDcgMTYuMjQzLTM2LjI1IDM2LjI1LTM2LjI1eiIgZmlsbC1ydWxlPSJldmVub2RkIiBmaWxsPSIjRkZGIi8+PC9nPjwvZz48L2c+PHBhdGggZD0iTTE1NTIuNDg1IDQwNS42ODJjMjUuNjY3LjUgMzkuNjY3IDE0LjUgNDAuODMzIDQyLjE2NnYyMTguNDU5YzAgMjEuNzMyLTExLjc2MiAzOS4zNzUtMjYuMjUgMzkuMzc1aC05Ny41Yy0xNC40ODggMC0yNi4yNS0xNy42NDMtMjYuMjUtMzkuMzc1di02Mi41cS02LjA2Mi00MC41LTQ4LjQzNy00OC4xMjVoLTYyLjE4OGMtMjEuNzMyIDAtMzkuMzc1LTExLjc2Mi0zOS4zNzUtMjYuMjV2LTk3LjVjMC0xNC40ODggMTcuNjQzLTI2LjI1IDM5LjM3NS0yNi4yNWgyMTkuNzkyeiIgZmlsbD0iI0ZGRiIgc3R5bGU9Imlzb2xhdGlvbjppc29sYXRlIi8+PC9nPjwvc3ZnPg==");
+            background-size: 25%;
+            background-position: center;
+            background-repeat: no-repeat;
+            box-sizing: border-box;
+            background-clip: padding-box;
+            padding: 0;
+            margin: 0;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            height: 100vh;
+            width: 100vw;
+            transform-origin: center;
+            will-change: auto;
+            animation-fill-mode: both;
+            animation-name: bounce-in;
+            animation-duration: 400ms;
+            animation-delay: 0ms;
+            animation-timing-function: ease;
+            animation-iteration-count: 1;
+        }
+        @keyframes bounce-in {
+            0% {
+                will-change: transform;
+                filter: opacity(0);
+                transform: scale(0);
+            }
+            50% {
+                filter: opacity(1.1);
+                transform: scale(1.2);
+            }
+            75% { transform: scale(1); }
+            100% {will-change: auto;
+                transform: scale(1.1); }
+        }
+        body.loading  {
+            mix-blend-mode: multiply;
+            font-size: 0 !important;
+            content-visibility: visible;
+            background-color: #333333;
+            contain: size style layout;
+            padding: 0;
+            margin: 0;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            min-height: 100%;
+            min-width: 100%;
+        }
+        body[datainitiated=true]::before {
+            contain: size paint style layout;
+            will-change: transform, filter;
+            animation-iteration-count: 1;
+            animation-delay: 120ms;
+            animation-fill-mode: both;
+            animation-timing-function: ease-out;
+            animation-name: zoom-out;
+            animation-duration: 360ms;
+        }
+        @keyframes zoom-out {
+            0% {
+                transform: scale(1);
+                filter: opacity(1);
+                content-visibility: visible !important;
+                display: initial;
+            }
+            100% {
+                transform: scale(6);
+                filter: opacity(0.2);
+                content-visibility: visible !important;
+                display: none;
+                will-change: none;
+            }
+        }
+    </style>
+    <!-- CSS -->
+
+    <script async src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "3f18a915cd7d481d94711fdebfa555a2"}'></script>
+    <!-- Open graph metadata -->
+    <meta property="og:type" content="website"/>
+    <meta property="og:url" content="https://pixa.pics"/>
+    <meta property="og:site_name" content="PIXA.PICS" />
+    <meta property="og:title" content="Pixel-Art Editor & NFTs Laboratory"/>
+    <meta property="og:description" content="Make pixel art from real life images and draw on the image you can edit for free, filters, layers, library, are within the editor."/>
+
+    <meta property="og:image" content="https://raw.githubusercontent.com/pixa-pics/pixa-pics.github.io/master/src/images/og/pixapics_logo_og_s.jpeg"/>
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="384" />
+    <meta property="og:image:height" content="384" />
+    <meta property="og:image:alt" content="Preview of the logo of the pixel art editor as a web app named pixa.pics." />
+
+    <meta property="og:image" content="https://raw.githubusercontent.com/pixa-pics/pixa-pics.github.io/master/src/images/og/pixapics_logo_og_m.jpeg"/>
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Preview of the pixel art editor as a web app named pixa.pics." />
+
+
+    <!-- Mobile chrome toolbar color + Favicon -->
+    <link rel="icon" href="/src/images/favicon.ico">
+    <meta name="theme-color" content="#060E23FF" />
+
+    <!-- Add to homescreen for Chrome on Android. Fallback for manifest.json -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="PIXA PICS">
+
+    <!-- Add to homescreen for Safari on iOS -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="PIXA PICS">
+
+    <!-- Homescreen icons -->
+    <link rel="apple-touch-icon" href="/src/images/manifest/logo-white.png">
+
+    <!-- Tile icon for Windows 8 (144x144 + tile color) -->
+    <meta name="msapplication-TileImage" content="/src/images/manifest/logo-white.png">
+    <meta name="msapplication-TileColor" content="#ffffff">
+    <meta name="msapplication-tap-highlight" content="no">
+</head>
+<body class="loading">
+<div id="app"></div>
+<div id="scripts"></div>
+</body>
+<footer>
+    <!-- Service worker -->
+    <script type="text/javascript">
+
+        "use strict";
+        /* LOAD JS FILE (in two "moves") */
+        var _FIRED_IT_STATE = "";
+        var _LET_FIRE_IT = function(is_service_worker_activation_successful) {
+
+            return new Promise(function(resolve, reject){
+
+                var _MAIN_JS_FILE_ENDS_WITH = "norris.min.js";
+                var _POST_FILES = Array.of( "/src/fonts/normative/index.css", "/src/fonts/industry/index.css");
+                var _PRE_FILES = Array.of("/client/chunk_norris.min.js");
+                var scripts = document.getElementById("scripts");
+                if (is_service_worker_activation_successful) { console.log("GREAT, the service worker has been activated with success.") } else {console.log("GOOD, the service worker installation has been ignored successfully.")}
+
+                // Load pre-used (PRE) file or finally used ones (POST)
+                var fire_it = function (what) {
+
+                    var hrefs = new Array();
+                    var clean = !Boolean(is_service_worker_activation_successful);
+
+                    if (Boolean(what === "FIRST" && Boolean(_FIRED_IT_STATE !== "FIRST" && _FIRED_IT_STATE !== "LAST")) || Boolean(what === "LAST" && Boolean(_FIRED_IT_STATE !== "FIRST" && _FIRED_IT_STATE !== "LAST"))) {
+                        hrefs = hrefs.concat(_PRE_FILES); console.log("First files to load have been ignited.")
+                        _FIRED_IT_STATE = "FIRST";
+                    }
+
+                    if (Boolean(what === "LAST" && Boolean(_FIRED_IT_STATE === "FIRST" || _FIRED_IT_STATE !== "LAST"))) {
+                        hrefs = hrefs.concat(_POST_FILES); console.log("Last files to load have been ignited.")
+                        _FIRED_IT_STATE = "LAST";
+                    }
+
+                    var removed = [];
+
+                    if(clean){
+                        scripts.innerHTML = "";
+                    }
+
+                    removed = removed.concat([Promise.resolve()]);
+                    return Promise.allSettled(removed).finally(function (){
+                        for (var i = 0; i < hrefs.length; i++) {
+                            var ss = hrefs[i];
+                            if (ss.endsWith(".js")) {
+                                var e = document.createElement("script"); e.setAttribute("src", ss); e.setAttribute("type", "text/javascript"); e.setAttribute(ss.endsWith(_MAIN_JS_FILE_ENDS_WITH) ? "defer" : "defer", "true");
+                                scripts.appendChild(e);
+                            } else if (ss.endsWith(".css")) {
+                                var e = document.createElement("link"); e.setAttribute("href", ss); e.setAttribute("rel", "stylesheet");
+                                scripts.appendChild(e);
+                            }
+                        }
+
+                        return Promise.resolve();
+                    });
+                };
+
+                // This event fires after doc ready state is interactive and before it is complete, it doesn't wait on resources to be loaded
+                document.addEventListener('readystatechange', function () {
+
+                    if (document.readyState === "complete") {resolve(fire_it("LAST"));}else { resolve(fire_it("FIRST")); }
+                });
+
+            });
+        };
+
+        /* TRY INSTALL SERVICE WORKER, FINALLY LOAD JS FILE */
+        var _REGISTER_SERVICE_WORKER = function() {
+            _FIRED_IT_STATE = "";
+            return new Promise(function(resolve, reject){
+                if ("serviceWorker" in navigator) {
+                    navigator.serviceWorker.register("/service-worker.js", {
+                        scope: "/"
+                    }).then(function(r) {
+                        r = r || {};
+                        _LET_FIRE_IT(true).catch(function(){
+                            reject();
+                        }).then(function(){resolve();});
+                    })
+                }else { _LET_FIRE_IT(false).then(function(){resolve();}); }
+            });
+        };
+
+        var _RELOAD = function() {
+            setTimeout(function (){
+                try{
+                    location.reload(true);
+                } catch (x){
+                    location.replace(location.href);
+                }
+            }, 100);
+        };
+
+        var _LISTEN_RELOAD = function() {
+            document.addEventListener('load', function () {
+                _REGISTER_SERVICE_WORKER().catch(_RELOAD).then(_LISTEN_RELOAD);
+            });
+        };
+
+        _REGISTER_SERVICE_WORKER().catch(_RELOAD).then(_LISTEN_RELOAD);
+
+    </script>
+</footer>
+</html>
