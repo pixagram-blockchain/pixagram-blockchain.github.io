@@ -246,7 +246,6 @@
         "use strict";
         /* TRY INSTALL SERVICE WORKER, FINALLY LOAD JS FILE */
         var _REGISTER_SERVICE_WORKER = function() {
-            _FIRED_IT_STATE = "";
             return new Promise(function(resolve, reject){
                 if ("serviceWorker" in navigator) {
                     navigator.serviceWorker.register("/service-worker.js", {
