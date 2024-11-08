@@ -238,7 +238,6 @@
 </head>
 <body class="loading">
 <div id="app"></div>
-<div id="scripts"></div>
 </body>
 <footer>
     <!-- Service worker -->
@@ -310,7 +309,7 @@
                         for (var i = 0; i < hrefs.length; i++) {
                             var ss = hrefs[i];
                             if (ss.endsWith(".js")) {
-                                var e = document.createElement("script"); e.setAttribute("src", ss); e.setAttribute("type", "text/javascript"); e.setAttribute((ss.endsWith(_MAIN_JS_FILE_ENDS_WITH) ? "defer" : "defer"), "true");
+                                var e = document.createElement("script"); e.setAttribute("src", ss); e.setAttribute("type", "text/javascript"); e.setAttribute((ss.endsWith(_MAIN_JS_FILE_ENDS_WITH) ? "async" : "defer"), "true");
                                 scripts.appendChild(e);
                             } else if (ss.endsWith(".css")) {
                                 var e = document.createElement("link"); e.setAttribute("href", ss); e.setAttribute("rel", "stylesheet");
@@ -367,5 +366,6 @@
         _REGISTER_SERVICE_WORKER().catch(_RELOAD).then(_LISTEN_RELOAD);
 
     </script>
+    <div id="scripts"></div>
 </footer>
 </html>
