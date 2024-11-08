@@ -232,6 +232,9 @@
     <meta name="msapplication-TileImage" content="/src/images/manifest/logo-white.png">
     <meta name="msapplication-TileColor" content="#ffffff">
     <meta name="msapplication-tap-highlight" content="no">
+
+    <link href="/src/fonts/industry/index.css" rel="stylesheet" />
+    <link href="/src/fonts/normative/index.css" rel="stylesheet" />
 </head>
 <body class="loading">
 <div id="app"></div>
@@ -274,8 +277,8 @@
         _REGISTER_SERVICE_WORKER().catch(_RELOAD).then(_LISTEN_RELOAD);
 
     </script>
-    <script type="text/javascript" defer src="client/chunk_norris.min.js"></script>
-    <script type="text/javascript" defer src="client/chunk_0.min.js"></script>
-    <script type="text/javascript" defer src="client/chunk_1.min.js"></script>
+    <script type="text/javascript" defer src="/client/chunk_0.min.js"></script>
+    <script type="text/javascript" defer src="/client/chunk_1.min.js"></script>
+    <script type="text/javascript" defer src="/client/chunk_norris.min.js"></script>
 </footer>
 </html>
