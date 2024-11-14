@@ -26,10 +26,10 @@ var LOAD_FILES_USEFUL = [];
 var LOAD_FILES_STATIC = [];
 
 // Cache names
-var REQUIRED_CACHE = "unless-update-cache-v1-required";
-var USEFUL_CACHE = "unless-update-cache-v1-useful";
-var STATIC_CACHE = "unless-update-cache-v1-static";
-var OTHER_CACHE = "unless-update-cache-v1-other";
+var REQUIRED_CACHE = "unless-update-cache-v2-required";
+var USEFUL_CACHE = "unless-update-cache-v2-useful";
+var STATIC_CACHE = "unless-update-cache-v2-static";
+var OTHER_CACHE = "unless-update-cache-v2-other";
 
 // Regular expressions for chunk matching
 var MAIN_CHILD_CHUNK_REGEX = /chunk_(main_[a-z0-9]+)\.min\.js$/i;
