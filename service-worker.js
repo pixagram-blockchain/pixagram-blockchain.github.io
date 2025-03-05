@@ -21,19 +21,19 @@ var F_SND = function (n) { return `/src/sounds/${n}.mp3`; };
 var F_VID = function (n) { return `/src/videos/${n}.mp4`; };
 
 var INSTALL_FILES_USEFUL = ["/src/images/favicon.ico", "/src/images/manifest/logo-white.png", "/src/fonts/industry/index.css", "/src/fonts/normative/index.css"];
-var LOAD_FILES_REQUIRED = [].concat(new Array(46).map(F_CNK));
+var LOAD_FILES_REQUIRED = [];
 var LOAD_FILES_USEFUL = [];
 var LOAD_FILES_STATIC = [];
 
 // Cache names
-var REQUIRED_CACHE = "unless-update-cache-v30-required";
-var USEFUL_CACHE = "unless-update-cache-v30-useful";
-var STATIC_CACHE = "unless-update-cache-v30-static";
-var OTHER_CACHE = "unless-update-cache-v30-other";
+var REQUIRED_CACHE = "unless-update-cache-v31-required";
+var USEFUL_CACHE = "unless-update-cache-v31-useful";
+var STATIC_CACHE = "unless-update-cache-v31-static";
+var OTHER_CACHE = "unless-update-cache-v31-other";
 
 // Regular expressions for chunk matching
-var MAIN_CHILD_CHUNK_REGEX = /chunk_(main_[a-z0-9]+)\.min\.js$/i;
-var CHILD_CHUNK_REGEX = /chunk_([a-zA-Z_\-0-9]+)\.min\.js$/i;
+var MAIN_CHILD_CHUNK_REGEX = /chunk_(main_[a-zA-Z0-9_-]+)\.min\.js$/i;
+var CHILD_CHUNK_REGEX = /chunk_([a-zA-Z0-9_-]+)\.min\.js$/i;
 
 // Cache objects and their initialization
 function initializeCache(cacheName, cacheObject) {
