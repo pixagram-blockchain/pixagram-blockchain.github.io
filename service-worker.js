@@ -26,10 +26,10 @@ var LOAD_FILES_USEFUL = [];
 var LOAD_FILES_STATIC = [];
 
 // Cache names
-var REQUIRED_CACHE = "unless-update-cache-v73-required";
-var USEFUL_CACHE = "unless-update-cache-v73-useful";
-var STATIC_CACHE = "unless-update-cache-v73-static";
-var OTHER_CACHE = "unless-update-cache-v73-other";
+var REQUIRED_CACHE = "unless-update-cache-v74-required";
+var USEFUL_CACHE = "unless-update-cache-v74-useful";
+var STATIC_CACHE = "unless-update-cache-v74-static";
+var OTHER_CACHE = "unless-update-cache-v74-other";
 
 // Regular expressions for chunk matching
 var MAIN_CHILD_CHUNK_REGEX = /chunk_(main_[a-zA-Z0-9_-]+)\.min\.js$/i;
@@ -151,17 +151,17 @@ self.addEventListener("fetch", function(event) {
 
     }else if(same_site && url.endsWith("chunk_norris.min.js")) {
 
-        event.respondWith(serve_cache(required_cache, "/client/chunk_norris.min.js"));
+        event.respondWith(serve_cache(required_cache, "client/chunk_norris.min.js"));
 
     }else if(same_site && (url.match(MAIN_CHILD_CHUNK_REGEX) || []).length >= 1) {
 
         const middle_name = url.match(MAIN_CHILD_CHUNK_REGEX)[1];
-        event.respondWith(serve_cache(required_cache, `/client/chunk_${middle_name}.min.js`));
+        event.respondWith(serve_cache(required_cache, `client/chunk_${middle_name}.min.js`));
 
     }else if(same_site && (url.match(CHILD_CHUNK_REGEX) || []).length >= 1) {
 
         const middle_name = url.match(CHILD_CHUNK_REGEX)[1];
-        event.respondWith(serve_cache(required_cache, `/client/chunk_${middle_name}.min.js`));
+        event.respondWith(serve_cache(required_cache, `client/chunk_${middle_name}.min.js`));
 
     }else if(event.request.mode === "navigate") {
 
