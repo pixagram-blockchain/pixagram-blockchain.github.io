@@ -26,10 +26,10 @@ var LOAD_FILES_USEFUL = [];
 var LOAD_FILES_STATIC = [];
 
 // Cache names
-var REQUIRED_CACHE = "unless-update-cache-v75-required";
-var USEFUL_CACHE = "unless-update-cache-v75-useful";
-var STATIC_CACHE = "unless-update-cache-v75-static";
-var OTHER_CACHE = "unless-update-cache-v75-other";
+var REQUIRED_CACHE = "unless-update-cache-v76-required";
+var USEFUL_CACHE = "unless-update-cache-v76-useful";
+var STATIC_CACHE = "unless-update-cache-v76-static";
+var OTHER_CACHE = "unless-update-cache-v76-other";
 
 // Regular expressions for chunk matching
 var MAIN_CHILD_CHUNK_REGEX = /chunk_(main_[a-zA-Z0-9_-]+)\.min\.js$/i;
@@ -118,7 +118,7 @@ self.addEventListener("fetch", function(event) {
 
         event.respondWith(fetch(request));
 
-    }else if(either_starts_with(["data:,all"], url)) {
+    } else if(either_starts_with(["data:,all"], url)) {
 
         event.respondWith(
             Promise.all([
@@ -151,21 +151,21 @@ self.addEventListener("fetch", function(event) {
 
     }else if(same_site && url.endsWith("chunk_norris.min.js")) {
 
-        event.respondWith(serve_cache(required_cache, "client/chunk_norris.min.js"));
+        event.respondWith(serve_cache(required_cache, "//client/chunk_norris.min.js"));
 
     }else if(same_site && (url.match(MAIN_CHILD_CHUNK_REGEX) || []).length >= 1) {
 
         const middle_name = url.match(MAIN_CHILD_CHUNK_REGEX)[1];
-        event.respondWith(serve_cache(required_cache, `client/chunk_${middle_name}.min.js`));
+        event.respondWith(serve_cache(required_cache, `//client/chunk_${middle_name}.min.js`));
 
     }else if(same_site && (url.match(CHILD_CHUNK_REGEX) || []).length >= 1) {
 
         const middle_name = url.match(CHILD_CHUNK_REGEX)[1];
-        event.respondWith(serve_cache(required_cache, `client/chunk_${middle_name}.min.js`));
+        event.respondWith(serve_cache(required_cache, `//client/chunk_${middle_name}.min.js`));
 
     }else if(event.request.mode === "navigate") {
 
-        event.respondWith(serve_cache(required_cache, "/"));
+        event.respondWith(serve_cache(required_cache, "//index.html"));
 
     } else if(event.request.method === "GET") {
 
