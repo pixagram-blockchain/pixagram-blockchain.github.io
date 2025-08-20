@@ -1,0 +1,200 @@
+<!doctype html><html lang="en" translate="no" style="overflow: hidden"><head><meta name="google" content="notranslate"/><meta charset="utf-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin"/><meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp"/><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title id="meta-title">Pixagram.io - Social Media Blockchain</title><meta name="description" content="Make pixel art from real life images and draw on the image you can edit for free, filters, layers, library, are within the editor."><meta name="keywords" content="Pixel, Art, Anonymous, NFT, Crypto, Red, Free, Secure, Progressive, Web, App, Offline, Free, Open-Source, "><style>html, body {
+            overscroll-behavior-y: contain;
+            overscroll-behavior-x: none;
+            touch-action: pan-x pan-y; /* Keep touch support */
+        }
+
+        img, video, canvas {
+            -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+            -webkit-tap-highlight-color: transparent;
+            -webkit-user-select: none;
+            -khtml-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        body.loaded {
+            position: relative;
+            content-visibility: initial;
+            background-color: #111;
+            animation-iteration-count: 1 !important;
+            animation-delay: 250ms !important;
+            animation-fill-mode: both !important;
+            animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
+            animation-name: ripupblend !important;
+            animation-duration: 1250ms !important;
+        }
+        @keyframes ripupblend {
+            0% {
+                mix-blend-mode: multiply;
+            }
+            100% {
+                mix-blend-mode: initial;
+            }
+        }
+        body.loaded::before {
+            content: "";
+            content-visibility: visible;
+            contain: paint style size layout !important;
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            z-index: 9999999;
+            top: 0;
+            left: 0;
+            background-image: radial-gradient(transparent 0%, transparent 30%, red 33%, darkorange 36%, greenyellow 39%, aqua 42%, cornflowerblue 45%, mediumpurple 48%, transparent 51%, transparent 100%) !important;
+            background-color: transparent !important;
+            background-size: 400% 150% !important;
+            background-position: 50% 25% !important;
+            background-blend-mode: overlay;
+            animation-iteration-count: 1 !important;
+            animation-delay: 250ms !important;
+            animation-fill-mode: both !important;
+            animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
+            animation-name: ripup !important;
+            animation-duration: 1250ms !important;
+        }
+        @keyframes ripup {
+            0% {display: block !important; transform: translateY(175%); opacity: .5 }
+            15% { display: block !important; transform: translateY(75%); opacity: 1  }
+            45% { display: block !important; transform: translateY(25%); opacity: 0.1  }
+            60% { display: block !important; transform: translateY(-75%); opacity: 0  }
+            100% { display: none !important; transform: translateY(-100%); opacity: 0  }
+        }
+        body.loaded > #app {
+            contain: size style layout;
+            content-visibility: auto;
+            position: relative;
+            will-change: auto;
+            overflow: hidden;
+            background-color: black;
+        }
+        body.loading[datainitiated=true] > #app {
+            contain: size style layout;
+            will-change: contents;
+            content-visibility: visible;
+        }
+        body.loading[datainitiated=false] > #app {
+            contain: size style layout;
+            will-change: auto;
+            content-visibility: visible;
+        }
+        body.loading[datainitiated=false] {
+            animation-fill-mode: both;
+            animation-name: bounce;
+            animation-duration: 1000ms;
+            animation-delay: 450ms;
+            animation-timing-function: ease-in-out;
+            animation-iteration-count: infinite;
+            overflow: auto;
+        }
+        @keyframes bounce {
+            0% {filter: brightness(1) contrast(1);transform: scale(1.1);}
+            25% {filter: brightness(1.3) contrast(0.85);transform: scale(1.15);}
+            50% {filter: brightness(1) contrast(1);transform: scale(1);}
+            75% { filter: brightness(1.1) contrast(0.95); transform: scale(1.15); }
+            100% { filter: brightness(1) contrast(1); transform: scale(1.1); }
+        }
+        body {
+            background-color: #fff;
+        }
+        body::before {
+            mix-blend-mode: initial;
+            content-visibility: visible;
+            pointer-events: none;
+            contain: size paint style layout;
+            content: " ";
+            position: fixed;
+            z-index: 9999999;
+            background-color: #fff;
+            background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTAwIDI1MDAiIHdpZHRoPSIzMzMzLjMzMyIgaGVpZ2h0PSIzMzMzLjMzMyIgeG1sbnM6dj0iaHR0cHM6Ly92ZWN0YS5pby9uYW5vIj48ZGVmcz48Y2xpcFBhdGggaWQ9IkEiPjxwYXRoIGQ9Ik0wIDBoMjUwMHYyNTAwSDB6Ii8+PC9jbGlwUGF0aD48L2RlZnM+PGcgY2xpcC1wYXRoPSJ1cmwoI0EpIj48ZGVmcz48ZmlsdGVyIGlkPSJCIiB4PSItMjAwJSIgeT0iLTIwMCUiIHdpZHRoPSI0MDAlIiBoZWlnaHQ9IjQwMCUiIGNvbG9yLWludGVycG9sYXRpb24tZmlsdGVycz0ic1JHQiI+PGZlR2F1c3NpYW5CbHVyIGluPSJTb3VyY2VHcmFwaGljIiBzdGREZXZpYXRpb249IjgxLjU3OSIvPjxmZU9mZnNldCByZXN1bHQ9IkEiLz48ZmVGbG9vZCBmbG9vZC1jb2xvcj0iIzAwMCIgZmxvb2Qtb3BhY2l0eT0iMSIvPjxmZUNvbXBvc2l0ZSBpbjI9IkEiIG9wZXJhdG9yPSJpbiIvPjxmZUJsZW5kIGluPSJTb3VyY2VHcmFwaGljIi8+PC9maWx0ZXI+PC9kZWZzPjxnIGZpbHRlcj0idXJsKCNCKSI+PHBhdGggZD0iTTQ5MCAzMDBoMTUyMGMxMDQuODY0IDAgMTkwIDg1LjEzNiAxOTAgMTkwdjE1MjBjMCAxMDQuODY0LTg1LjEzNiAxOTAtMTkwIDE5MEg0OTBjLTEwNC44NjQgMC0xOTAtODUuMTM2LTE5MC0xOTBWNDkwYzAtMTA0Ljg2NCA4NS4xMzYtMTkwIDE5MC0xOTB6Ii8+PC9nPjxwYXRoIGQ9Ik0xODMxIDQ4MmgtMTQ0LjE4Yy0yNy40OTYgMC00OS44MiAyMi4zMjQtNDkuODIgNDkuODJ2ODguMzZjMCAyNy40OTYgMjIuMzI0IDQ5LjgyIDQ5LjgyIDQ5LjgySDE3NTBxNDAuNSAyLjUgNTkgMThjMTguNSAxNS41IDIxLjQzOCA0Ny42MjUgMjIgNjJ2NjQuMThjMCAyNy40OTYgMjIuMzI0IDQ5LjgyIDQ5LjgyIDQ5LjgyaDg4LjM2YzI3LjQ5NiAwIDQ5LjgyLTIyLjMyNCA0OS44Mi00OS44MlY2NzB2LTQ5LjgyVjU1M2MtMS00Mi4zMzMtMzEuNjY3LTY5LjY2Ny03OS03MWgtNTkuMThIMTgzMXptLTcyMSA1NjhoMjgwYzMzLjExNSAwIDYwIDI2Ljg4NSA2MCA2MHYyODBjMCAzMy4xMTUtMjYuODg1IDYwLTYwIDYwaC0yODBjLTMzLjExNSAwLTYwLTI2Ljg4NS02MC02MHYtMjgwYzAtMzMuMTE1IDI2Ljg4NS02MCA2MC02MGgwem00MCA3MDB2NDUwSDc1MHYtNTMwaDB2LTQyMC00MjBjMC00NC4xNTMgMzUuODQ3LTgwIDgwLTgwaDg0MGM0NC4xNTMgMCA4MCAzNS44NDcgODAgODB2ODQwYzAgNDQuMTUzLTM1Ljg0NyA4MC04MCA4MGgtNTIwIDB6IiBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGZpbGw9IiNmZmYiLz48L2c+PC9zdmc+");
+            background-size: min(75vh, min(75vw, max(25vh, 25vw)));
+            background-position: center;
+            background-repeat: no-repeat;
+            box-sizing: border-box;
+            background-clip: padding-box;
+            padding: 0;
+            margin: 0;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            height: 100vh;
+            width: 100vw;
+            transform-origin: center;
+            will-change: auto;
+            animation-fill-mode: both;
+            animation-name: bounce-in;
+            animation-duration: 400ms;
+            animation-delay: 0ms;
+            animation-timing-function: ease;
+            animation-iteration-count: 1;
+        }
+        @keyframes bounce-in {
+            0% {
+                will-change: transform;
+                filter: opacity(0);
+                transform: scale(0);
+            }
+            50% {
+                filter: opacity(1.1);
+                transform: scale(1.2);
+            }
+            75% { transform: scale(1); }
+            100% {will-change: auto;
+                transform: scale(1.1); }
+        }
+        body.loading  {
+            mix-blend-mode: multiply;
+            font-size: 0 !important;
+            content-visibility: visible;
+            background-color: #333333;
+            contain: size style layout;
+            padding: 0;
+            margin: 0;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            min-height: 100%;
+            min-width: 100%;
+        }
+        body[datainitiated=true]::before {
+            contain: size style layout;
+            will-change: transform, filter;
+            animation-iteration-count: 1;
+            animation-delay: 120ms;
+            animation-fill-mode: both;
+            animation-timing-function: ease-out;
+            animation-name: zoom-out;
+            animation-duration: 360ms;
+        }
+        @keyframes zoom-out {
+            0% {
+                transform: scale(1);
+                filter: opacity(1);
+                content-visibility: visible !important;
+                display: initial;
+            }
+            100% {
+                transform: scale(6);
+                filter: opacity(0.2);
+                content-visibility: visible !important;
+                display: none;
+                will-change: none;
+            }
+        }</style><meta property="og:type" content="website"/><meta property="og:url" content="https://pixagram.io"/><meta property="og:site_name" content="Pixagram.io"/><meta property="og:title" content="Seize the Day in Pixel Art NFTs on the Blockchain"/><meta property="og:description" content="Use the social media blockchain — Pixagram — where your artworks become as enduring as diamond. Transform photos into pixel art using pixa.pics, then mint, post, and thrive on our NFT-powered network."/><meta property="og:image" content="https://raw.githubusercontent.com/pixa-pics/pixa-pics.github.io/master/src/images/og/pixagram_logo_og_s.jpeg"/><meta property="og:image:type" content="image/jpeg"/><meta property="og:image:width" content="384"/><meta property="og:image:height" content="384"/><meta property="og:image:alt" content="Preview of the logo of the social media platform : Pixagram.io."/><meta property="og:image" content="https://raw.githubusercontent.com/pixa-pics/pixa-pics.github.io/master/src/images/og/pixagram_logo_og_m.jpeg"/><meta property="og:image:type" content="image/jpeg"/><meta property="og:image:width" content="1200"/><meta property="og:image:height" content="630"/><meta property="og:image:alt" content="Preview of the social media platform : Pixagram.io."/><link rel="icon" href="/src/images/favicon.ico"><meta name="theme-color" content="#000000FF"/><link rel="manifest" href="/manifest.json"><meta name="mobile-web-app-capable" content="yes"><meta name="application-name" content="Pixagram"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="Pixagram"><link rel="apple-touch-icon" href="/src/images/manifest/logo-shadow.png"><meta name="msapplication-TileImage" content="/src/images/manifest/logo-white.png"><meta name="msapplication-TileColor" content="#ffffff"><meta name="msapplication-tap-highlight" content="no"><script>navigator.serviceWorker.register("/service-worker.js", {scope: "/"}).then(function (){
+            const fonts = [
+                "/src/fonts/industry/index.css",
+                "/src/fonts/normative/index.css",
+                "/src/fonts/redhat/index.css"
+            ];
+
+            fonts.forEach(href => {
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = href;
+                document.head.appendChild(link);
+            });
+
+        });</script><script defer="defer" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "144d4f17a3314b54abbea80fb246e85e"}'></script></head><body class="loading"><div id="app"></div><script src="client/chunk_norris.min.js"></script></body><footer></footer></html>
