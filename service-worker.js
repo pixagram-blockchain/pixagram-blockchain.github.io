@@ -20,16 +20,16 @@ var F_CNK = function (n, i) { return `/client/chunk_${typeof n == "undefined" ? 
 var F_SND = function (n) { return `/src/sounds/${n}.mp3`; };
 var F_VID = function (n) { return `/src/videos/${n}.mp4`; };
 
-var INSTALL_FILES_USEFUL = ["/src/images/favicon.ico", "/src/images/manifest/logo-white.png", "/src/fonts/industry/index.css", "/src/fonts/normative/index.css"];
+var INSTALL_FILES_USEFUL = ["/src/images/favicon.ico", "/src/images/manifest/logo-white.png", "/src/fonts/industry/index.css", "/src/fonts/redhat/index.css", "/src/fonts/normative/index.css"];
 var LOAD_FILES_REQUIRED = [];
 var LOAD_FILES_USEFUL = [];
 var LOAD_FILES_STATIC = [];
 
 // Cache names
-var REQUIRED_CACHE = "unless-update-cache-v107-required";
-var USEFUL_CACHE = "unless-update-cache-v107-useful";
-var STATIC_CACHE = "unless-update-cache-v107-static";
-var OTHER_CACHE = "unless-update-cache-v107-other";
+var REQUIRED_CACHE = "unless-update-cache-v108-required";
+var USEFUL_CACHE = "unless-update-cache-v108-useful";
+var STATIC_CACHE = "unless-update-cache-v108-static";
+var OTHER_CACHE = "unless-update-cache-v108-other";
 
 // Regular expressions for chunk matching
 var MAIN_CHILD_CHUNK_REGEX = /chunk_(main_[a-zA-Z0-9_-]+)\.min\.js$/i;
