@@ -26,10 +26,10 @@ var LOAD_FILES_USEFUL = [];
 var LOAD_FILES_STATIC = [];
 
 // Cache names
-var REQUIRED_CACHE = "unless-update-cache-v129-required";
-var USEFUL_CACHE = "unless-update-cache-v129-useful";
-var STATIC_CACHE = "unless-update-cache-v129-static";
-var OTHER_CACHE = "unless-update-cache-v129-other";
+var REQUIRED_CACHE = "unless-update-cache-v130-required";
+var USEFUL_CACHE = "unless-update-cache-v130-useful";
+var STATIC_CACHE = "unless-update-cache-v130-static";
+var OTHER_CACHE = "unless-update-cache-v130-other";
 
 // Regular expressions for chunk matching
 var MAIN_CHILD_CHUNK_REGEX = /chunk_(main_[a-zA-Z0-9_-]+)\.min\.js$/i;
@@ -114,9 +114,9 @@ self.addEventListener("fetch", function(event) {
 
         event.respondWith(fetch(request));
 
-    }else if(request.method === "POST" || either_starts_with(["data:image", "blob:http", "data:application"], url)) {
+    }else if(either_starts_with(["data:image", "blob:http", "data:application"], url)) {
 
-        event.respondWith(fetch(request));
+        event.respondWith(request.url);
 
     } else if(either_starts_with(["data:,all"], url)) {
 
@@ -165,7 +165,7 @@ self.addEventListener("fetch", function(event) {
 
     }else if(event.request.mode === "navigate") {
 
-        event.respondWith(serve_cache(required_cache, "/"));
+        event.respondWith(serve_cache(required_cache, request.url));
 
     } else if(event.request.method === "GET") {
 
