@@ -33,9 +33,11 @@
             }
         }
         body.loaded::before {
+            opacity: 0 !important;
+            visibility: hidden !important;
             content: "";
             content-visibility: visible;
-            contain: style size layout !important;
+            contain: paint style size layout !important;
             position: fixed;
             width: 100%;
             height: 100%;
