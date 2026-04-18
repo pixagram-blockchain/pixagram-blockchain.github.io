@@ -32,10 +32,10 @@ var LOAD_FILES_USEFUL = [];
 var LOAD_FILES_STATIC = [];
 
 // Cache names
-var REQUIRED_CACHE = "unless-update-cache-v163-required";
-var USEFUL_CACHE = "unless-update-cache-v163-useful";
-var STATIC_CACHE = "unless-update-cache-v163-static";
-var OTHER_CACHE = "unless-update-cache-v163-other";
+var REQUIRED_CACHE = "unless-update-cache-v164-required";
+var USEFUL_CACHE = "unless-update-cache-v164-useful";
+var STATIC_CACHE = "unless-update-cache-v164-static";
+var OTHER_CACHE = "unless-update-cache-v164-other";
 var ALL_CACHES = [REQUIRED_CACHE, STATIC_CACHE, USEFUL_CACHE, OTHER_CACHE];
 
 // Regular expressions for chunk matching
