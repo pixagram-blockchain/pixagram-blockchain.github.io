@@ -20,6 +20,21 @@ var F_CNK = function (n, i) { return "/client/chunk_" + (typeof n == "undefined"
 var F_SND = function (n) { return "/src/sounds/" + n + ".mp3"; };
 var F_VID = function (n) { return "/src/videos/" + n + ".mp4"; };
 
+// NSFW model (nsfwjs MobileNetV2, ~4 MB layers model) + tfjs-wasm binaries.
+// These rarely change and are worth pre-caching so the off-thread NSFW
+// classifier loads instantly (and offline) after the first install.
+var NSFW_MODEL_DIR = "/src/models/nsfw/mobilenet_v2/";
+var TFJS_WASM_DIR = "/src/wasm/tfjs/";
+var INSTALL_FILES_NSFW = [
+    NSFW_MODEL_DIR + "model.json",
+    NSFW_MODEL_DIR + "group1-shard1of1.bin",
+    // tfjs-backend-wasm ships a few variants; the loader picks the supported
+    // one at runtime. Caching all three keeps it offline-capable everywhere.
+    TFJS_WASM_DIR + "tfjs-backend-wasm.wasm",
+    TFJS_WASM_DIR + "tfjs-backend-wasm-simd.wasm",
+    TFJS_WASM_DIR + "tfjs-backend-wasm-threaded-simd.wasm"
+];
+
 var INSTALL_FILES_USEFUL = [
     "/src/images/favicon.ico",
     "/src/images/manifest/logo-white.png",
@@ -32,10 +47,10 @@ var LOAD_FILES_USEFUL = [];
 var LOAD_FILES_STATIC = [];
 
 // Cache names
-var REQUIRED_CACHE = "unless-update-cache-v181-required";
-var USEFUL_CACHE = "unless-update-cache-v181-useful";
-var STATIC_CACHE = "unless-update-cache-v181-static";
-var OTHER_CACHE = "unless-update-cache-v181-other";
+var REQUIRED_CACHE = "unless-update-cache-v184-required";
+var USEFUL_CACHE = "unless-update-cache-v184-useful";
+var STATIC_CACHE = "unless-update-cache-v184-static";
+var OTHER_CACHE = "unless-update-cache-v184-other";
 var ALL_CACHES = [REQUIRED_CACHE, STATIC_CACHE, USEFUL_CACHE, OTHER_CACHE];
 
 // Regular expressions for chunk matching
@@ -82,6 +97,40 @@ function fetchAndCache(url, cache) {
     });
 }
 
+// ─── Guarded fetch for binary model assets (.wasm/.bin/model.json) ───
+// A misconfigured SPA dev server / CDN often answers an unknown path with a
+// 200 + index.html. If we cached that under a .wasm URL, WebAssembly.compile
+// would choke on "<!DO…" (magic-word error) on every load until the cache is
+// versioned out. So: verify the body really is the asset before caching, and
+// never serve/cache an HTML page in place of a binary.
+function looksLikeHTML(response) {
+    var ct = (response.headers.get("content-type") || "").toLowerCase();
+    return ct.indexOf("text/html") !== -1;
+}
+function serveBinaryAsset(cachePromise, url) {
+    return cachePromise.then(function (cache) {
+        return cache.match(url).then(function (cached) {
+            // Trust a cached entry only if it isn't an HTML page.
+            if (cached && cached.status === 200 && !looksLikeHTML(cached)) {
+                return cached;
+            }
+            return fetch(url).then(function (response) {
+                if (response && response.status === 200 && !looksLikeHTML(response)) {
+                    try { cache.put(url, response.clone()); } catch (e) {}
+                    return response;
+                }
+                // Got HTML or an error for a binary asset → do NOT cache it.
+                // Surface a clear failure so the model loader's fallback runs
+                // (WASM → WebGL → CPU) instead of poisoning the cache.
+                if (cached && cached.status === 200 && !looksLikeHTML(cached)) return cached;
+                return response; // let the caller see the real (bad) response
+            });
+        });
+    }).catch(function () {
+        return fetch(url);
+    });
+}
+
 // ─── SPA fallback: serve "/" for any HTML navigation request ───
 function serveSPAFallback() {
     return required_cache.then(function (cache) {
@@ -102,6 +151,15 @@ self.addEventListener("install", function (event) {
         Promise.allSettled([
             useful_cache.then(function (cache) {
                 return cache.addAll(INSTALL_FILES_USEFUL);
+            }),
+            // NSFW assets: cache each individually so a missing wasm variant
+            // (only one is actually needed at runtime) never fails install.
+            useful_cache.then(function (cache) {
+                return Promise.allSettled(
+                    INSTALL_FILES_NSFW.map(function (u) {
+                        return cache.add(u);
+                    })
+                );
             })
         ])
     );
@@ -146,9 +204,19 @@ self.addEventListener("fetch", function (event) {
     var referrer = request.referrer || "";
     var same_site = referrer && new URL(url).origin === new URL(referrer).origin;
 
+    // ── NSFW model + tfjs wasm (same-origin) → useful cache ──
+    // Handled before the same_site block because these are fetched from the
+    // classification Web Worker, whose requests often carry no referrer, so
+    // `same_site` would be false and the assets would skip the cache.
+    var sameOrigin = new URL(url).origin === self.location.origin;
+    if (sameOrigin && (url.indexOf("/src/models/nsfw/") !== -1 || url.indexOf("/src/wasm/tfjs/") !== -1)) {
+        event.respondWith(serveBinaryAsset(useful_cache, url));
+        return;
+    }
+
     if (same_site) {
         // Static assets → useful cache
-        if (either_ends_with([".wasm", ".png", ".json", ".svg", ".jpg", ".jpeg", ".gif", ".ico", ".onnx", ".woff2", ".ttf", ".css"], url)) {
+        if (either_ends_with([".wasm", ".png", ".json", ".svg", ".jpg", ".jpeg", ".gif", ".ico", ".onnx", ".woff2", ".ttf", ".css", ".bin"], url)) {
             event.respondWith(serve_cache(useful_cache, url));
             return;
         }
