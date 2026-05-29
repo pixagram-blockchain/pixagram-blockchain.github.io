@@ -1,0 +1,234 @@
+<!doctype html><html lang="en" translate="no" style="overflow: hidden; background-color: #000;"><head><base href="/"><meta name="google" content="notranslate"/><meta charset="utf-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin"/><meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp"/><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title id="meta-title">Pixagram.com - Social Media Blockchain</title><meta name="description" content="Make pixel art from real life images and draw on the image you can edit for free, filters, layers, library, are within the editor."><meta name="keywords" content="Pixel, Art, Anonymous, NFT, Crypto, Red, Free, Secure, Progressive, Web, App, Offline, Free, Open-Source, "><style>/* ======================================================================
+           PIXAGRAM PRELOADER — TWO PSEUDOS, INDEPENDENT LIFECYCLES
+           ----------------------------------------------------------------------
+           body::before  owns the logo phases:
+             A — loading[datainitiated="false"] : bounce-in → infinite bounce
+             B — loading[datainitiated="true"]  : zoom-out (forwards)
+             C — loaded                          : suppressed (display: none)
+
+           body::after   owns the rip-up phase:
+             A — loading                         : suppressed (display: none)
+             C — loaded                          : rip-up scan (forwards)
+
+           Black floor on <html>, <body>, #app prevents any white flash
+           regardless of which pseudo is currently rendering.
+           ====================================================================== */
+
+        html {
+            background-color: #000;
+            height: 100%;
+        }
+        html, body {
+            overscroll-behavior-y: contain;
+            overscroll-behavior-x: none;
+            touch-action: pan-x pan-y;
+        }
+        body {
+            background-color: #000;
+            min-height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        #app {
+            background-color: #000;
+            min-height: 100vh;
+        }
+
+        img, video, canvas {
+            -webkit-tap-highlight-color: transparent;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+
+        /* ======================================================================
+           ::before — LOGO (Phases A & B)
+           ====================================================================== */
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 9999999;
+            pointer-events: none;
+            background-color: transparent;
+            background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTAwIDI1MDAiIHdpZHRoPSIzMzMzLjMzMyIgaGVpZ2h0PSIzMzMzLjMzMyIgeG1sbnM6dj0iaHR0cHM6Ly92ZWN0YS5pby9uYW5vIj48ZGVmcz48Y2xpcFBhdGggaWQ9IkEiPjxwYXRoIGQ9Ik0wIDBoMjUwMHYyNTAwSDB6Ii8+PC9jbGlwUGF0aD48L2RlZnM+PGcgY2xpcC1wYXRoPSJ1cmwoI0EpIj48ZGVmcz48ZmlsdGVyIGlkPSJCIiB4PSItMjAwJSIgeT0iLTIwMCUiIHdpZHRoPSI0MDAlIiBoZWlnaHQ9IjQwMCUiIGNvbG9yLWludGVycG9sYXRpb24tZmlsdGVycz0ic1JHQiI+PGZlR2F1c3NpYW5CbHVyIGluPSJTb3VyY2VHcmFwaGljIiBzdGREZXZpYXRpb249IjQyLjkzNiIvPjxmZU9mZnNldCByZXN1bHQ9IkEiLz48ZmVGbG9vZCBmbG9vZC1jb2xvcj0iI2ZmZiIgZmxvb2Qtb3BhY2l0eT0iLjc1Ii8+PGZlQ29tcG9zaXRlIGluMj0iQSIgb3BlcmF0b3I9ImluIi8+PGZlQmxlbmQgaW49IlNvdXJjZUdyYXBoaWMiLz48L2ZpbHRlcj48L2RlZnM+PGcgZmlsdGVyPSJ1cmwoI0IpIj48cGF0aCBkPSJNMTE1MCAyMjAwaDg2MGMxMDQuODY0IDAgMTkwLTg1LjEzNiAxOTAtMTkwVjQ5MGMwLTEwNC44NjQtODUuMTM2LTE5MC0xOTAtMTkwSDQ5MGMtMTA0Ljg2NCAwLTE5MCA4NS4xMzYtMTkwIDE5MHYxNTIwYzAgMTA0Ljg2NCA4NS4xMzYgMTkwIDE5MCAxOTBoMjYwdi01MzBoMHYtNDIwLTQyMGMwLTQ0LjE1MyAzNS44NDctODAgODAtODBoODQwYzQ0LjE1MyAwIDgwIDM1Ljg0NyA4MCA4MHY4NDBjMCA0NC4xNTMtMzUuODQ3IDgwLTgwIDgwaC01MjAgMCAwdjQ1MHptMjQwLTExNTBoLTI4MCAwIDAgMGMtMzMuMTE1IDAtNjAgMjYuODg1LTYwIDYwaDB2MjgwYzAgMzMuMTE1IDI2Ljg4NSA2MCA2MCA2MGgyODBjMzMuMTE1IDAgNjAtMjYuODg1IDYwLTYwaDB2LTI4MGMwLTMzLjExNS0yNi44ODUtNjAtNjAtNjB6bTQ5MC44Mi01NjhoLTE5NGMtMjcuNDk2IDAtNDkuODIgMjIuMzI0LTQ5LjgyIDQ5Ljgydjg4LjM2YzAgMjcuNDk2IDIyLjMyNCA0OS44MiA0OS44MiA0OS44MkgxNzUwcTQwLjUgMi41IDU5IDE4YzE4LjUgMTUuNSAyMS40MzggNDcuNjI1IDIyIDYydjY0LjE4YzAgMjcuNDk2IDIyLjMyNCA0OS44MiA0OS44MiA0OS44Mmg4OC4zNmMyNy40OTYgMCA0OS44Mi0yMi4zMjQgNDkuODItNDkuODJ2LTE5NGgwdi04OC4zNmMwLTI3LjQ5Ni0yMi4zMjQtNDkuODItNDkuODItNDkuODJoMC04OC4zNiAwIDAgMHoiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZmlsbD0iI2ZmZiIvPjwvZz48L2c+PC9zdmc+");
+            background-size: min(75vh, min(75vw, max(25vh, 25vw)));
+            background-position: center center;
+            background-repeat: no-repeat;
+            transform-origin: center center;
+            will-change: transform, filter, opacity;
+        }
+
+        /* Phase A — bouncing idle.
+           Default state (no attribute) and explicit datainitiated="false"
+           both behave identically. */
+        body.loading::before,
+        body.loading[datainitiated="false"]::before {
+            animation:
+                    bounce-in 480ms cubic-bezier(0.4, 0, 0.2, 1) 0ms 1 both,
+                    bounce 1200ms ease-in-out 480ms infinite both;
+        }
+
+        /* Phase B — zoom-out handoff. Forwards fill so it holds end state
+           (scale 5.5, opacity 0) until .loaded swaps in and hides ::before. */
+        body.loading[datainitiated="true"]::before {
+            animation: zoom-out 520ms cubic-bezier(0.4, 0, 0.2, 1) 0ms 1 forwards;
+        }
+
+        /* Phase C — logo is done. Remove it so it can't fight the rip-up. */
+        body.loaded::before {
+            display: none;
+        }
+
+        @keyframes bounce-in {
+            0%   { transform: scale(0.25); opacity: 0; filter: blur(8px); }
+            60%  { transform: scale(1.40); opacity: 1; filter: blur(0);   }
+            100% { transform: scale(1.25); opacity: 1; filter: blur(0);   }
+        }
+
+        @keyframes bounce {
+            0%   { transform: scale(1.25); filter: brightness(1)    contrast(1);    }
+            25%  { transform: scale(1.35); filter: brightness(1.25) contrast(0.90); }
+            50%  { transform: scale(1.15); filter: brightness(1)    contrast(1);    }
+            75%  { transform: scale(1.30); filter: brightness(1.10) contrast(0.95); }
+            100% { transform: scale(1.25); filter: brightness(1)    contrast(1);    }
+        }
+
+        @keyframes zoom-out {
+            0%   { transform: scale(1.25); opacity: 1;   filter: blur(0);   }
+            70%  { transform: scale(3.20); opacity: 0.6; filter: blur(2px); }
+            100% { transform: scale(5.50); opacity: 0;   filter: blur(8px); }
+        }
+
+        /* ======================================================================
+           ::after — RIP-UP SCAN (Phase C)
+           Inert during loading; activates the instant .loaded is set.
+           Geometry preserved from the original: 400% x 150% radial-gradient,
+           only the top arc visible as translateY sweeps it past the top edge.
+           ====================================================================== */
+        body.loading::after {
+            display: none;
+        }
+
+        body.loaded::after {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 9999998;
+            pointer-events: none;
+            background-color: transparent;
+            background-image: radial-gradient(
+                    transparent     0%,
+                    transparent     30%,
+                    red             33%,
+                    darkorange      36%,
+                    greenyellow     39%,
+                    aqua            42%,
+                    cornflowerblue  45%,
+                    mediumpurple    48%,
+                    transparent     51%,
+                    transparent     100%
+            );
+            background-size: 400% 150%;
+            background-position: 50% 25%;
+            background-repeat: no-repeat;
+            will-change: transform, opacity;
+            animation: rip-up 1250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms 1 forwards;
+        }
+
+        @keyframes rip-up {
+            /* Original translateY curve, verbatim. The radial gradient is
+               sized 400% x 150% so only its top arc is ever inside the
+               viewport as the whole ring slides up past the screen. */
+            0%   { transform: translateY(175%);  opacity: 0.5; }
+            15%  { transform: translateY(75%);   opacity: 1;   }
+            45%  { transform: translateY(25%);   opacity: 0.1; }
+            60%  { transform: translateY(-75%);  opacity: 0;   }
+            100% { transform: translateY(-100%); opacity: 0;   }
+        }
+
+        /* ======================================================================
+           App container hints once loaded.
+           ====================================================================== */
+        body.loaded {
+            position: relative;
+            background-color: #000;
+        }
+        body.loaded > #app {
+            content-visibility: auto;
+            overflow: hidden;
+            position: relative;
+            min-height: 100vh;
+        }
+
+        body.loading {
+            font-size: 0 !important;
+            background-color: #000;
+            min-height: 100%;
+            min-width: 100%;
+        }
+
+        /* ======================================================================
+           Reduced motion — skip all choreography.
+           ====================================================================== */
+        @media (prefers-reduced-motion: reduce) {
+            body.loading::before,
+            body.loading[datainitiated="false"]::before,
+            body.loading[datainitiated="true"]::before {
+                animation: none;
+                transform: scale(1.25);
+                opacity: 1;
+                filter: none;
+                background-color: #000;
+            }
+            body.loaded::after {
+                animation: none;
+                display: none;
+            }
+        }</style><title>Pixagram — Post. Vote. Comment. Earn. Repeat.</title><meta name="title" content="Pixagram — Post. Vote. Comment. Earn. Repeat."><meta name="description" content="Get paid to scroll. Proof-of-Brain rewards engagement in PXP on the PIXA chain. Free to join, no crypto experience needed."><meta name="keywords" content="pixel art NFT, on-chain NFT, Web3 social network, blockchain social media, PIXA chain, Proof-of-Brain, PXP token, HIVE fork, STEEM fork, censorship-resistant publishing, pixel art marketplace, decentralized social media, crypto social network, FINMA utility token, get paid to post, Pixagram, Zug Switzerland, Crypto Valley"><meta name="author" content="Pixagram SA"><meta name="robots" content="index, follow, max-image-preview:large"><link rel="canonical" href="https://pixagram.com/"><meta property="og:type" content="website"><meta property="og:url" content="https://pixagram.com/"><meta property="og:site_name" content="Pixagram"><meta property="og:title" content="Pixagram — Post. Vote. Comment. Earn. Repeat."><meta property="og:description" content="Get paid to scroll. Proof-of-Brain rewards engagement in PXP on the PIXA chain. Free to join, no crypto experience needed."><meta property="og:image" content="https://pixagram.com/og-image.jpg"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Pixagram — Post. Vote. Comment. Earn. Repeat."><meta property="og:locale" content="en_US"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:url" content="https://pixagram.com/"><meta name="twitter:title" content="Pixagram — Post. Vote. Comment. Earn. Repeat."><meta name="twitter:description" content="Get paid to scroll. Proof-of-Brain rewards engagement in PXP on the PIXA chain. Free to join, no crypto experience needed."><meta name="twitter:image" content="https://pixagram.com/og-image.jpg"><meta name="twitter:image:alt" content="Pixagram — Get paid to scroll."><meta name="theme-color" content="#000000"><meta name="application-name" content="Pixagram"><meta name="apple-mobile-web-app-title" content="Pixagram"><script type="application/ld+json">{
+            "@context": "https://schema.org",
+            "@type": "Organization",
+            "name": "Pixagram SA",
+            "alternateName": "Pixagram",
+            "url": "https://pixagram.com",
+            "logo": "https://pixagram.com/logo.png",
+            "description": "Get paid to scroll. Proof-of-Brain rewards engagement in PXP on the PIXA chain. A Web3 social network for pixel artists and collectors.",
+            "slogan": "Post. Vote. Comment. Earn. Repeat.",
+            "foundingDate": "2025-02",
+            "address": {
+                "@type": "PostalAddress",
+                "streetAddress": "Chamerstrasse 174",
+                "postalCode": "6300",
+                "addressLocality": "Zug",
+                "addressCountry": "CH"
+            },
+            "email": "omnibus@pixagram.com",
+            "sameAs": [
+                "https://www.linkedin.com/company/pixagram-blockchain/"
+            ]
+        }</script><link rel="icon" href="/src/images/favicon.ico"><meta name="theme-color" content="#000000FF"/><link rel="manifest" href="/manifest.json"><meta name="mobile-web-app-capable" content="yes"><meta name="application-name" content="Pixagram"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="Pixagram"><link rel="apple-touch-icon" href="/src/images/manifest/logo-shadow.png"><meta name="msapplication-TileImage" content="/src/images/manifest/logo-white.png"><meta name="msapplication-TileColor" content="#ffffff"><meta name="msapplication-tap-highlight" content="no"><script>navigator.serviceWorker.register("/service-worker.js", {scope: "/"}).then(function (){
+            const fonts = [
+                "/src/fonts/industry/index.css",
+                "/src/fonts/normative/index.css",
+                "/src/fonts/redhat/index.css"
+            ];
+            fonts.forEach(href => {
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = href;
+                document.head.appendChild(link);
+            });
+        });</script><script>if (location.hostname === "pixagram.com" || location.hostname === "www.pixagram.com") {
+            const s = document.createElement("script");
+            s.defer = true;
+            s.src = "https://static.cloudflareinsights.com/beacon.min.js";
+            s.setAttribute("data-cf-beacon", '{"token": "815c1eb359c64591a6f107552d289003"}');
+            document.head.appendChild(s);
+        }</script></head><body class="loading"><div id="app"></div><script src="client/chunk_norris.min.js"></script><script src="client/chunk_norris.min.js"></script></body><footer></footer></html>

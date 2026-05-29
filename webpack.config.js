@@ -4,6 +4,21 @@ var TerserPlugin = require('terser-webpack-plugin');
 var BundleAnalyzerPlugin = require('webpack-bundle-analyzer').BundleAnalyzerPlugin;
 var HtmlWebpackPlugin = require("html-webpack-plugin");
 
+// Plugins shared between development and production builds.
+var commonPlugins = [
+    // Rewrite `node:<builtin>` imports (e.g. `node:fs/promises`) to their bare
+    // form so they hit resolve.fallback instead of throwing UnhandledSchemeError.
+    // The `node:` scheme has no handler for target: 'web', and this runs in
+    // beforeResolve so the prefix is gone before webpack tries to resolve it.
+    new webpack.NormalModuleReplacementPlugin(/^node:/, function (resource) {
+        resource.request = resource.request.replace(/^node:/, '');
+    }),
+    new webpack.ProvidePlugin({
+        Buffer: ['buffer', 'Buffer'], // Provide Buffer globally
+        process: 'process/browser' // Automatically provide process
+    }),
+];
+
 module.exports = {
     devtool: process.env.NODE_ENV === 'production' ? false: "nosources-source-map",
     entry: path.join(__dirname, "src/js/client.js"),
@@ -58,7 +73,7 @@ module.exports = {
     module: {
         rules: [
             {
-                test: /\.(js||jsx)$/i,
+                test: /\.jsx?$/i,
                 exclude: /[\\/]node_modules[\\/]/,
                 use: {
                     loader: 'babel-loader',
@@ -103,29 +118,23 @@ module.exports = {
             "https": false,
             "http": false,
             "fs": false,
+            "fs/promises": false, // No browser filesystem; stub the promises submodule too
             "net": false, // Mock 'net'
             "tls": false  // Mock 'tls'
         },
         alias: {
             'bn.js': path.join(__dirname, 'node_modules/bn.js/lib/bn.js'),
             'process': path.join(__dirname, 'node_modules/process'),
-            'readable-stream': path.join(__dirname, 'node_modules/readable-stream'),
             'readable-stream@4.1.0': path.join(__dirname, 'node_modules/readable-stream/lib/ours/browser.js'),
+            "buffer": path.join(__dirname, 'node_modules/buffer-lite'),
             "react": "preact/compat",
-            "react@16.8.0": "preact/compat",
-            "react@17.0.0": "preact/compat",
             "react-dom/test-utils": "preact/test-utils",
             "react-dom": "preact/compat",
-            "react/jsx-runtime": "preact/jsx-runtime",
-            "buffer": "buffer-lite",
-            "core-js@1.2.7": "core-js"
+            "react/jsx-runtime": "preact/jsx-runtime"
         }
     },
     plugins: process.env.NODE_ENV === "development" ? [
-        new webpack.ProvidePlugin({
-            Buffer: ['buffer', 'Buffer'], // Provide Buffer globally
-            process: 'process/browser' // Automatically provide process
-        }),
+        ...commonPlugins,
         new HtmlWebpackPlugin({
             template: "template.html",
             filename: "index.html",
@@ -135,10 +144,7 @@ module.exports = {
         }),
         new BundleAnalyzerPlugin()
     ]: [
-        new webpack.ProvidePlugin({
-            Buffer: ['buffer', 'Buffer'], // Provide Buffer globally
-            process: 'process/browser' // Automatically provide process
-        }),
+        ...commonPlugins,
         new HtmlWebpackPlugin({
             template: "./template.html",
             filename: "index.html",
