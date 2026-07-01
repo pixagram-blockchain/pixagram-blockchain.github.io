@@ -192,6 +192,70 @@
                 animation: none;
                 display: none;
             }
+        }
+
+        /* ======================================================================
+           UPDATE TOAST
+           Shown when a newer service worker claims this tab mid-session (see
+           the controllerchange listener below). Independent of the preloader's
+           z-index stack above — it can only ever appear once .loaded is
+           showing, so the two never need to coexist. Deliberately monochrome:
+           the rip-up transition already owns this page's one color moment.
+           ====================================================================== */
+        #pxg-update-toast {
+            position: fixed;
+            left: 50%;
+            bottom: 24px;
+            transform: translate(-50%, 12px);
+            z-index: 999997;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            max-width: calc(100vw - 32px);
+            padding: 12px 14px 12px 18px;
+            background: #111;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+            color: #fff;
+            font-size: 14px;
+            line-height: 1.3;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 220ms ease, transform 220ms ease;
+        }
+        #pxg-update-toast.visible {
+            opacity: 1;
+            transform: translate(-50%, 0);
+            pointer-events: auto;
+        }
+        #pxg-update-toast span {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+        #pxg-update-toast button {
+            flex: 0 0 auto;
+            border: 0;
+            border-radius: 6px;
+            padding: 7px 12px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        #pxg-update-toast .pxg-refresh {
+            background: #fff;
+            color: #000;
+        }
+        #pxg-update-toast .pxg-dismiss {
+            background: transparent;
+            color: rgba(255, 255, 255, 0.55);
+            padding: 7px 8px;
+            font-weight: 400;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #pxg-update-toast {
+                transition: none;
+            }
         }</style><title>Pixagram — Post. Vote. Comment. Earn. Repeat.</title><meta name="title" content="Pixagram — Post. Vote. Comment. Earn. Repeat."><meta name="description" content="Any photo to pixel art in three clicks, free. Stored 100% on-chain — no broken links, no algorithm rationing your reach. Your work, permanently yours."><meta name="keywords" content="pixel art NFT, on-chain pixel art, 100% on-chain storage, photo to pixel art, free pixel art converter, Web3 social network, blockchain social media, decentralized social media, censorship-resistant publishing, no broken links, permanent NFT storage, own your art, pixel art marketplace, PIXA chain, PXP utility token, HIVE fork, STEEM fork, crypto social network, pixel art collectors, retro pixel art, FINMA utility token, Pixagram, Zug, Crypto Valley"><meta name="author" content="Pixagram SA"><meta name="robots" content="index, follow, max-image-preview:large"><link rel="canonical" href="https://pixagram.com/"><meta property="og:type" content="website"><meta property="og:url" content="https://pixagram.com/"><meta property="og:site_name" content="Pixagram"><meta property="og:title" content="Pixagram — Post. Vote. Comment. Earn. Repeat."><meta property="og:description" content="Any photo to pixel art in three clicks, free. Stored 100% on-chain — no broken links, no algorithm rationing your reach. Your work, permanently yours."><meta property="og:image" content="https://pixagram.com/og-image.jpg"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Pixagram — Post. Vote. Comment. Earn. Repeat."><meta property="og:locale" content="en_US"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:url" content="https://pixagram.com/"><meta name="twitter:title" content="Pixagram — Post. Vote. Comment. Earn. Repeat."><meta name="twitter:description" content="Any photo to pixel art in three clicks, free. Stored 100% on-chain — no broken links, no algorithm rationing your reach. Your work, permanently yours."><meta name="twitter:image" content="https://pixagram.com/og-image.jpg"><meta name="twitter:image:alt" content="Pixagram — pixel art you own, 100% on-chain."><meta name="theme-color" content="#000000"><meta name="application-name" content="Pixagram"><meta name="apple-mobile-web-app-title" content="Pixagram"><script type="application/ld+json">{
             "@context": "https://schema.org",
             "@type": "Organization",
@@ -213,7 +277,7 @@
             "sameAs": [
                 "https://www.linkedin.com/company/pixagram-blockchain/"
             ]
-        }</script><link rel="icon" href="/src/images/favicon.ico"><meta name="theme-color" content="#000000FF"/><link rel="manifest" href="/manifest.json"><meta name="mobile-web-app-capable" content="yes"><meta name="application-name" content="Pixagram"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="Pixagram"><link rel="apple-touch-icon" href="/src/images/manifest/logo-shadow.png"><meta name="msapplication-TileImage" content="/src/images/manifest/logo-white.png"><meta name="msapplication-TileColor" content="#ffffff"><meta name="msapplication-tap-highlight" content="no"><script>navigator.serviceWorker.register("/service-worker.js", {scope: "/"}).then(function (){
+        }</script><link rel="icon" href="/src/images/favicon.ico"><meta name="theme-color" content="#000000FF"/><link rel="manifest" href="/manifest.json"><meta name="mobile-web-app-capable" content="yes"><meta name="application-name" content="Pixagram"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="Pixagram"><link rel="apple-touch-icon" href="/src/images/manifest/logo-shadow.png"><meta name="msapplication-TileImage" content="/src/images/manifest/logo-white.png"><meta name="msapplication-TileColor" content="#ffffff"><meta name="msapplication-tap-highlight" content="no"><script>const loadFonts = () => {
             const fonts = [
                 "/src/fonts/industry/index.css",
                 "/src/fonts/normative/index.css",
@@ -225,7 +289,50 @@
                 link.href = href;
                 document.head.appendChild(link);
             });
-        });</script><script>if (location.hostname === "pixagram.com" || location.hostname === "www.pixagram.com") {
+        };
+
+        if ('serviceWorker' in navigator) {
+            let swHadController = !!navigator.serviceWorker.controller;
+
+            navigator.serviceWorker.register("/service-worker.js", {scope: "/"})
+                .then(loadFonts)
+                .catch(loadFonts); // registration can still fail; fonts load regardless
+
+            // clients.claim() in the new worker's activate handler can hand
+            // control of this tab to a newer version mid-session. The very
+            // first controllerchange (no controller -> a controller) is just
+            // this page's initial claim, not a version swap — only react
+            // from the second time on.
+            navigator.serviceWorker.addEventListener("controllerchange", () => {
+                if (!swHadController) {
+                    swHadController = true;
+                    return;
+                }
+                showUpdateToast();
+            });
+        } else {
+            loadFonts();
+        }
+
+        function showUpdateToast() {
+            if (document.getElementById("pxg-update-toast")) return;
+            const toast = document.createElement("div");
+            toast.id = "pxg-update-toast";
+            toast.setAttribute("role", "status");
+            toast.setAttribute("aria-live", "polite");
+            toast.innerHTML = `
+                <span>A new version of Pixagram is ready.</span>
+                <button class="pxg-refresh" type="button">Refresh</button>
+                <button class="pxg-dismiss" type="button" aria-label="Dismiss">&times;</button>
+            `;
+            document.body.appendChild(toast);
+            toast.querySelector(".pxg-refresh").addEventListener("click", () => location.reload());
+            toast.querySelector(".pxg-dismiss").addEventListener("click", () => {
+                toast.classList.remove("visible");
+                setTimeout(() => toast.remove(), 250);
+            });
+            requestAnimationFrame(() => toast.classList.add("visible"));
+        }</script><script>if (location.hostname === "pixagram.com" || location.hostname === "www.pixagram.com") {
             const s = document.createElement("script");
             s.defer = true;
             s.src = "https://static.cloudflareinsights.com/beacon.min.js";

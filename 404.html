@@ -207,6 +207,70 @@
                 display: none;
             }
         }
+
+        /* ======================================================================
+           UPDATE TOAST
+           Shown when a newer service worker claims this tab mid-session (see
+           the controllerchange listener below). Independent of the preloader's
+           z-index stack above — it can only ever appear once .loaded is
+           showing, so the two never need to coexist. Deliberately monochrome:
+           the rip-up transition already owns this page's one color moment.
+           ====================================================================== */
+        #pxg-update-toast {
+            position: fixed;
+            left: 50%;
+            bottom: 24px;
+            transform: translate(-50%, 12px);
+            z-index: 999997;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            max-width: calc(100vw - 32px);
+            padding: 12px 14px 12px 18px;
+            background: #111;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+            color: #fff;
+            font-size: 14px;
+            line-height: 1.3;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 220ms ease, transform 220ms ease;
+        }
+        #pxg-update-toast.visible {
+            opacity: 1;
+            transform: translate(-50%, 0);
+            pointer-events: auto;
+        }
+        #pxg-update-toast span {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+        #pxg-update-toast button {
+            flex: 0 0 auto;
+            border: 0;
+            border-radius: 6px;
+            padding: 7px 12px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        #pxg-update-toast .pxg-refresh {
+            background: #fff;
+            color: #000;
+        }
+        #pxg-update-toast .pxg-dismiss {
+            background: transparent;
+            color: rgba(255, 255, 255, 0.55);
+            padding: 7px 8px;
+            font-weight: 400;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #pxg-update-toast {
+                transition: none;
+            }
+        }
     </style>
 
     <title>Pixagram — Post. Vote. Comment. Earn. Repeat.</title>
@@ -282,7 +346,7 @@
     <meta name="msapplication-tap-highlight" content="no">
 
     <script type="text/javascript">
-        navigator.serviceWorker.register("/service-worker.js", {scope: "/"}).then(function (){
+        const loadFonts = () => {
             const fonts = [
                 "/src/fonts/industry/index.css",
                 "/src/fonts/normative/index.css",
@@ -294,7 +358,50 @@
                 link.href = href;
                 document.head.appendChild(link);
             });
-        });
+        };
+
+        if ('serviceWorker' in navigator) {
+            let swHadController = !!navigator.serviceWorker.controller;
+
+            navigator.serviceWorker.register("/service-worker.js", {scope: "/"})
+                .then(loadFonts)
+                .catch(loadFonts); // registration can still fail; fonts load regardless
+
+            // clients.claim() in the new worker's activate handler can hand
+            // control of this tab to a newer version mid-session. The very
+            // first controllerchange (no controller -> a controller) is just
+            // this page's initial claim, not a version swap — only react
+            // from the second time on.
+            navigator.serviceWorker.addEventListener("controllerchange", () => {
+                if (!swHadController) {
+                    swHadController = true;
+                    return;
+                }
+                showUpdateToast();
+            });
+        } else {
+            loadFonts();
+        }
+
+        function showUpdateToast() {
+            if (document.getElementById("pxg-update-toast")) return;
+            const toast = document.createElement("div");
+            toast.id = "pxg-update-toast";
+            toast.setAttribute("role", "status");
+            toast.setAttribute("aria-live", "polite");
+            toast.innerHTML = `
+                <span>A new version of Pixagram is ready.</span>
+                <button class="pxg-refresh" type="button">Refresh</button>
+                <button class="pxg-dismiss" type="button" aria-label="Dismiss">&times;</button>
+            `;
+            document.body.appendChild(toast);
+            toast.querySelector(".pxg-refresh").addEventListener("click", () => location.reload());
+            toast.querySelector(".pxg-dismiss").addEventListener("click", () => {
+                toast.classList.remove("visible");
+                setTimeout(() => toast.remove(), 250);
+            });
+            requestAnimationFrame(() => toast.classList.add("visible"));
+        }
     </script>
 
     <script>

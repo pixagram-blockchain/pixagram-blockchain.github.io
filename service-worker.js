@@ -32,7 +32,7 @@ var LOAD_FILES_USEFUL = [];
 var LOAD_FILES_STATIC = [];
 
 // Cache names
-var V = "v203";
+var V = "v204";
 var REQUIRED_CACHE = "unless-update-cache-"+V+"-required";
 var USEFUL_CACHE = "unless-update-cache-"+V+"-useful";
 var STATIC_CACHE = "unless-update-cache-"+V+"-static";
@@ -99,6 +99,10 @@ function serveSPAFallback() {
 // Install
 // ═══════════════════════════════════════════════════
 self.addEventListener("install", function (event) {
+    // Activate this version as soon as install finishes, instead of
+    // waiting for every tab running the previous worker to close.
+    self.skipWaiting();
+
     // Cache useful static assets individually so one missing file never
     // fails the whole install.
     event.waitUntil(
@@ -211,14 +215,19 @@ self.addEventListener("fetch", function (event) {
 // ═══════════════════════════════════════════════════
 self.addEventListener("activate", function (event) {
     event.waitUntil(
-        caches.keys().then(function (keys) {
-            return Promise.all(
-                keys.filter(function (key) {
-                    return ALL_CACHES.indexOf(key) === -1;
-                }).map(function (key) {
-                    return caches.delete(key);
-                })
-            );
-        })
+        Promise.all([
+            // Take control of already-open tabs immediately, instead of
+            // only affecting the next full navigation.
+            self.clients.claim(),
+            caches.keys().then(function (keys) {
+                return Promise.all(
+                    keys.filter(function (key) {
+                        return ALL_CACHES.indexOf(key) === -1;
+                    }).map(function (key) {
+                        return caches.delete(key);
+                    })
+                );
+            })
+        ])
     );
 });
