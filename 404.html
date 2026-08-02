@@ -9,6 +9,43 @@
     <meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp" />
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 
+    <!-- ══════════════════════════════════════════════════════════════════
+         STARTUP HINTS
+         Entry preload: starts the main-bundle fetch at the first bytes of
+         HTML parse instead of when the parser reaches the end of <body>
+         (end-of-body scripts are discovered by the preload scanner, but at
+         a lower priority — this pins it to Highest).
+         Preconnects: the first blockchain call (api.pixagram.com, CORS ⇒
+         crossorigin variant) and the first feed images (image proxy) pay
+         DNS+TCP+TLS while the bundle downloads/evaluates, instead of at
+         first use. turbo-gateway media loads later, so it only gets the
+         cheap DNS warm — idle sockets are not free.
+         ══════════════════════════════════════════════════════════════════ -->
+    <link rel="preload" href="/client/chunk_norris.min.js" as="script">
+    <link rel="preconnect" href="https://api.pixagram.com" crossorigin>
+    <link rel="dns-prefetch" href="https://api.pixagram.com">
+    <link rel="preconnect" href="https://pixa-image-service.p1x4.workers.dev">
+    <link rel="dns-prefetch" href="https://pixa-image-service.p1x4.workers.dev">
+    <link rel="dns-prefetch" href="https://turbo-gateway.com">
+
+    <!-- Font CSS: still injected as stylesheets via JS below (so they never
+         render-block), but their fetches now start at HTML parse. -->
+    <link rel="preload" href="/src/fonts/industry/index.css" as="style">
+    <link rel="preload" href="/src/fonts/normative/index.css" as="style">
+    <link rel="preload" href="/src/fonts/redhat/index.css" as="style">
+
+    <!-- OPTIONAL — verify in the /client/ build output first:
+         client.js now names its warm imports via webpackChunkName. IF the
+         webpack output.chunkFilename pattern contains [name], the three big
+         lazy chunks get stable filenames and can be preloaded here, moving
+         their fetch from "main bundle evaluated" to "HTML parsed". Enable
+         only after confirming the exact filenames on disk — a wrong href
+         preloads a 404 on every visit:
+    <link rel="preload" href="/client/chunk_pixaproxyapi.min.js" as="script">
+    <link rel="preload" href="/client/chunk_dpixa.min.js" as="script">
+    <link rel="preload" href="/client/chunk_sanitizer.min.js" as="script">
+    -->
+
     <title id="meta-title">Pixagram — Post. Vote. Comment. Earn. Repeat.</title>
 
     <style>
@@ -309,12 +346,18 @@
             });
         };
 
+        // Fonts no longer wait for the SW registration promise — that chained
+        // the font-CSS fetches behind a registration round-trip for no
+        // benefit (the worker's install step caches the font CSS on its own,
+        // independent of when these <link>s are injected, and the preload
+        // hints in <head> have already started the fetches).
+        loadFonts();
+
         if ('serviceWorker' in navigator) {
             let swHadController = !!navigator.serviceWorker.controller;
 
             navigator.serviceWorker.register("/service-worker.js", {scope: "/"})
-                .then(loadFonts)
-                .catch(loadFonts); // registration can still fail; fonts load regardless
+                .catch(function () { /* registration failed — app still works, uncached */ });
 
             // clients.claim() in the new worker's activate handler hands
             // control of this tab to a newer version mid-session — and its
@@ -331,8 +374,6 @@
                 }
                 applyUpdateNow();
             });
-        } else {
-            loadFonts();
         }
 
         function applyUpdateNow() {

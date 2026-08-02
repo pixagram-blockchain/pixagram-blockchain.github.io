@@ -27,12 +27,21 @@ var INSTALL_FILES_USEFUL = [
     "/src/fonts/redhat/index.css",
     "/src/fonts/normative/index.css"
 ];
+// Precached at install into the REQUIRED cache. These two are special: on
+// the FIRST visit they are fetched before the worker controls the page, so
+// normal browsing never puts them in cache — without this list, visit #2
+// paid full network for the HTML and the entry bundle. Served cache-first,
+// which is safe under the existing deploy rule: V bumps on every deploy.
+var INSTALL_FILES_REQUIRED = [
+    "/",
+    "/client/chunk_norris.min.js"
+];
 var LOAD_FILES_REQUIRED = [];
 var LOAD_FILES_USEFUL = [];
 var LOAD_FILES_STATIC = [];
 
 // Cache names
-var V = "v220";
+var V = "v221";
 var REQUIRED_CACHE = "unless-update-cache-"+V+"-required";
 var USEFUL_CACHE = "unless-update-cache-"+V+"-useful";
 var STATIC_CACHE = "unless-update-cache-"+V+"-static";
@@ -106,13 +115,22 @@ self.addEventListener("install", function (event) {
     // Cache useful static assets individually so one missing file never
     // fails the whole install.
     event.waitUntil(
-        useful_cache.then(function (cache) {
-            return Promise.allSettled(
-                INSTALL_FILES_USEFUL.map(function (u) {
-                    return cache.add(u);
-                })
-            );
-        })
+        Promise.all([
+            useful_cache.then(function (cache) {
+                return Promise.allSettled(
+                    INSTALL_FILES_USEFUL.map(function (u) {
+                        return cache.add(u);
+                    })
+                );
+            }),
+            required_cache.then(function (cache) {
+                return Promise.allSettled(
+                    INSTALL_FILES_REQUIRED.map(function (u) {
+                        return cache.add(u);
+                    })
+                );
+            })
+        ])
     );
 });
 

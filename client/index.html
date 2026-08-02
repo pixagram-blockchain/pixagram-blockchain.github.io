@@ -1,4 +1,4 @@
-<!doctype html><html lang="en" translate="no" style="overflow: hidden; background-color: #000;"><head><base href="/"><meta name="google" content="notranslate"/><meta charset="utf-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin"/><meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp"/><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title id="meta-title">Pixagram — Post. Vote. Comment. Earn. Repeat.</title><style>/* ======================================================================
+<!doctype html><html lang="en" translate="no" style="overflow: hidden; background-color: #000;"><head><base href="/"><meta name="google" content="notranslate"/><meta charset="utf-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin"/><meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp"/><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><link rel="preload" href="/client/chunk_norris.min.js" as="script"><link rel="preconnect" href="https://api.pixagram.com" crossorigin><link rel="dns-prefetch" href="https://api.pixagram.com"><link rel="preconnect" href="https://pixa-image-service.p1x4.workers.dev"><link rel="dns-prefetch" href="https://pixa-image-service.p1x4.workers.dev"><link rel="dns-prefetch" href="https://turbo-gateway.com"><link rel="preload" href="/src/fonts/industry/index.css" as="style"><link rel="preload" href="/src/fonts/normative/index.css" as="style"><link rel="preload" href="/src/fonts/redhat/index.css" as="style"><title id="meta-title">Pixagram — Post. Vote. Comment. Earn. Repeat.</title><style>/* ======================================================================
            PIXAGRAM PRELOADER — TWO PSEUDOS, INDEPENDENT LIFECYCLES
            ----------------------------------------------------------------------
            body::before  owns the logo phases:
@@ -243,12 +243,18 @@
             });
         };
 
+        // Fonts no longer wait for the SW registration promise — that chained
+        // the font-CSS fetches behind a registration round-trip for no
+        // benefit (the worker's install step caches the font CSS on its own,
+        // independent of when these <link>s are injected, and the preload
+        // hints in <head> have already started the fetches).
+        loadFonts();
+
         if ('serviceWorker' in navigator) {
             let swHadController = !!navigator.serviceWorker.controller;
 
             navigator.serviceWorker.register("/service-worker.js", {scope: "/"})
-                .then(loadFonts)
-                .catch(loadFonts); // registration can still fail; fonts load regardless
+                .catch(function () { /* registration failed — app still works, uncached */ });
 
             // clients.claim() in the new worker's activate handler hands
             // control of this tab to a newer version mid-session — and its
@@ -265,8 +271,6 @@
                 }
                 applyUpdateNow();
             });
-        } else {
-            loadFonts();
         }
 
         function applyUpdateNow() {
