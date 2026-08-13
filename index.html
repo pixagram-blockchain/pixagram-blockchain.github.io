@@ -18,15 +18,16 @@
          Preconnects: the first blockchain call (api.pixagram.com, CORS ⇒
          crossorigin variant) and the first feed images (image proxy) pay
          DNS+TCP+TLS while the bundle downloads/evaluates, instead of at
-         first use. turbo-gateway media loads later, so it only gets the
-         cheap DNS warm — idle sockets are not free.
+         first use. All feed media now flows through the image proxy: it
+         takes ?url=<turbo-gateway URL> and fetches the bytes edge-side, so
+         the browser never opens a socket to turbo-gateway — a client DNS
+         warm for it would be dead weight (idle sockets are not free).
          ══════════════════════════════════════════════════════════════════ -->
     <link rel="preload" href="/client/chunk_norris.min.js" as="script">
     <link rel="preconnect" href="https://api.pixagram.com" crossorigin>
     <link rel="dns-prefetch" href="https://api.pixagram.com">
     <link rel="preconnect" href="https://pixa-image-service.p1x4.workers.dev">
     <link rel="dns-prefetch" href="https://pixa-image-service.p1x4.workers.dev">
-    <link rel="dns-prefetch" href="https://turbo-gateway.com">
 
     <!-- Font CSS: still injected as stylesheets via JS below (so they never
          render-block), but their fetches now start at HTML parse. -->
