@@ -41,7 +41,7 @@ var LOAD_FILES_USEFUL = [];
 var LOAD_FILES_STATIC = [];
 
 // Cache names
-var V = "v230";
+var V = "v231";
 var REQUIRED_CACHE = "unless-update-cache-"+V+"-required";
 var USEFUL_CACHE = "unless-update-cache-"+V+"-useful";
 var STATIC_CACHE = "unless-update-cache-"+V+"-static";
