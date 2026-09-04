@@ -200,6 +200,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "від",
         "to": "у відповідь",
+        "proposals": "Пропозиції",
+        "discussion": "Обговорення",
+        "marketing": "Маркетинг",
+        "legal": "Юридичні питання",
+        "risks": "Ризики",
+        "bug_reports": "Звіти про помилки",
+        "community": "Спільнота"
     },
 
     components: {
@@ -1583,6 +1590,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "Транслюйте новий набір параметрів ланцюга як <strong>@{{currentAccount}}</strong>. Плата за створення акаунта, максимальний розмір блоку та відсоткова ставка PXS заблоковані в цьому релізі. Оновіть свій URL witness нижче.",
             "you_can_vote_for_up_to_30": "Ви можете голосувати за до 30 witnesses, тоді як для ведення блокчейну потрібен лише 21 witness."
         },
+        "governance_dialog": {
+            "viability_management": "Управління життєздатністю",
+            "take_actions": "Діяти",
+            "governs_the_system_attributes_through_proposals": "Керує атрибутами системи через пропозиції та голосування witnesses. Це рівень управління, який забезпечує ухвалення рішень в екосистемі Pixagram.",
+            "attributes": "Атрибути",
+            "documentation": "Документація",
+            "enabled_by_viability_management_view_system_stat": "Забезпечується управлінням життєздатністю. Переглядайте стан системи, мережеві точки доступу та дані про виробництво блоків у реальному часі.",
+            "methods": "Методи",
+            "guides": "Посібники",
+            "associated_to_metrics_download_theory_documents": "Пов’язані з метриками. Завантажте теоретичні документи, методичні посібники та протоколи для ефективної роботи з аналітичною системою.",
+            "metrics": "Метрики",
+            "analytics": "Аналітика",
+            "measured_by_the_system_track_key_performance": "Вимірюються системою. Відстежуйте ключові показники ефективності, стежте за цілями й аналізуйте стан екосистеми.",
+            "control_tower": "Диспетчерська вежа",
+            "dashboard": "Панель керування",
+            "monitor_the_entire_ecosystem_from_a_centralized": "Спостерігайте за всією екосистемою з єдиної панелі. Аналітика в реальному часі й огляд системи.",
+            "disruptions": "Збої",
+            "reports": "Звіти",
+            "affects_viability_management_track_and_report_is": "Впливає на управління життєздатністю. Відстежуйте проблеми й повідомляйте про них за темами спільноти: управління, юридичні питання, ризики, маркетинг та інші."
+        },
         "gdattributes": {
             "with_transactions": "з {{txCount}} транзакціями",
             "system_status": "Стан системи",
@@ -1820,7 +1847,8 @@ export default {
             "signup": "Зареєструватися",
             "the_portal_opens_soon": "Портал {{title}} скоро відкриється.",
             "opens_soon": "{{title}} скоро відкриється.",
-            "banner_closed": "Банер закрито."
+            "banner_closed": "Банер закрито.",
+            "create_discuss_and_vote": "Створюйте, обговорюйте й голосуйте"
         },
         "settings_panel": {
             "60_authors_40_curators": "60% авторам / 40% кураторам",
@@ -2204,7 +2232,17 @@ export default {
         "gddisruptions": {
             "urgent": "Терміново",
             "report_categories": "Категорії звітів",
-            "select_a_topic_to_view_reports_and": "Оберіть тему, щоб переглянути звіти й долучитися до обговорень спільноти. Ці звіти про збої впливають на рішення з управління життєздатністю."
+            "select_a_topic_to_view_reports_and": "Оберіть тему, щоб переглянути звіти й долучитися до обговорень спільноти. Ці звіти про збої впливають на рішення з управління життєздатністю.",
+            "subscribers": "підписників",
+            "turn_a_report_into_action_create_a": "Перетворіть звіт на дію: створіть пропозицію, обговоріть її та проголосуйте за її фінансування зі скарбниці.",
+            "general_discussions_about_the_pixagram_ecosystem": "Загальні обговорення екосистеми Pixagram, запити функцій і відгуки спільноти.",
+            "proposals_voting_discussions_and_decision_making": "Пропозиції, обговорення голосувань і процеси ухвалення рішень в екосистемі.",
+            "marketing_initiatives_partnerships_and_promotion": "Маркетингові ініціативи, партнерства та рекламні кампанії для Pixagram.",
+            "legal_considerations_compliance_discussions_and": "Юридичні питання, обговорення відповідності вимогам і регуляторні новини, що стосуються екосистеми.",
+            "risk_assessment_threat_analysis_and_mitigation_s": "Оцінка ризиків, аналіз загроз і стратегії їх зменшення для безпеки екосистеми.",
+            "security_audits_vulnerability_reports_and_best_p": "Аудити безпеки, звіти про вразливості та рекомендації щодо безпечного використання.",
+            "report_bugs_technical_issues_and_track_their": "Повідомляйте про помилки й технічні проблеми та відстежуйте стан їх вирішення.",
+            "community_events_meetups_collaborations_and_soci": "Події спільноти, зустрічі, співпраця та соціальні ініціативи."
         },
         "gdmetrics": {
             "key_metrics": "Ключові метрики",

@@ -135,8 +135,18 @@ function renderPostBody(body) {
  * DOMParser produces an inert document (no script execution, no fetches),
  * and what we serialize back is the output of the very parser that will
  * re-parse it at the dangerouslySetInnerHTML boundary — no mutation gap.
+ *
+ * The boundary guard (ArticleBody below) runs safeHTML() one more time, and
+ * a plain safeHTML() would strip these ids right back out — that is why the
+ * TOC clicks used to find no target. ARTICLE_GUARD tells it the one id shape
+ * it may keep, on headings only; everything else the guard does is unchanged.
  */
 const HEADING_SELECTOR = "h1, h2, h3, h4, h5, h6";
+const HEADING_ID_PREFIX = "bp-";
+const HEADING_ID_RE = /^bp-[a-z0-9-]+$/;          // prefix + slugifyHeading alphabet
+// One frozen object, module-wide: safeHTML caches its compiled config per
+// options object, so this must not be an inline literal at the call site.
+const ARTICLE_GUARD = Object.freeze({ allowedIds: HEADING_ID_RE });
 
 function slugifyHeading(text) {
     return (text || "")
@@ -167,7 +177,7 @@ function processArticleHtml(safeHtml) {
     nodes.forEach((el) => {
         const text = (el.textContent || "").replace(/\s+/g, " ").trim();
         if (!text) return;
-        const base = "bp-" + slugifyHeading(text);
+        const base = HEADING_ID_PREFIX + slugifyHeading(text);
         let id = base;
         if (counters[base] === undefined) {
             counters[base] = 0;
@@ -185,6 +195,29 @@ function processArticleHtml(safeHtml) {
     });
     return { html: doc.body.innerHTML, headings };
 }
+
+/**
+ * The rendered article — the ONE dangerouslySetInnerHTML boundary for the
+ * post body. safeHTML() stays the last call before the DOM, with the TOC
+ * namespace declared through ARTICLE_GUARD (a plain safeHTML() here stripped
+ * the "bp-" heading ids, so the side menu had nothing to scroll to).
+ *
+ * memo(): every prop is referentially stable — `html` is the memoized string
+ * out of _get_article, `className` comes from withStyles, `setRef` and
+ * `onClick` are instance arrows — so this re-renders once per body change
+ * instead of on every dialog render. The dialog re-renders on each scroll
+ * frame (_scrollTop), and running the guard over a 500 kB article per frame
+ * was the cost _get_article's memoization was meant to remove; the guard
+ * itself is untouched — it just isn't re-run on identical input.
+ */
+const ArticleBody = memo(({ className, html, setRef, onClick }) => (
+    <div
+        className={className}
+        ref={setRef}
+        onClick={onClick}
+        dangerouslySetInnerHTML={{ __html: safeHTML(html, ARTICLE_GUARD) }}
+    />
+));
 
 // ── Image lightbox (hero zoom) tuning ────────────────────────────────────
 const LIGHTBOX_VIEWPORT_RATIO = 0.8;      // zoomed image fits 80% of the screen
@@ -1649,7 +1682,7 @@ class BlogPostDialog extends React.PureComponent {
         if (!cache || !root) return [];
         const memo = this._headingEls;
         if (memo && memo.token === cache && memo.root === root) return memo.els;
-        const els = Array.prototype.slice.call(root.querySelectorAll('[id^="bp-"]'));
+        const els = Array.prototype.slice.call(root.querySelectorAll('[id^="' + HEADING_ID_PREFIX + '"]'));
         this._headingEls = { token: cache, root, els };
         return els;
     }
@@ -2994,11 +3027,11 @@ class BlogPostDialog extends React.PureComponent {
                                                     </div>
                                                 </div>
 
-                                                <div
+                                                <ArticleBody
                                                     className={classes.blogContent}
-                                                    ref={this._set_article_ref}
+                                                    html={article.html}
+                                                    setRef={this._set_article_ref}
                                                     onClick={this._on_article_click}
-                                                    dangerouslySetInnerHTML={{ __html: safeHTML(article.html) }}
                                                 />
 
                                                 <div className={classes.chipTags}>

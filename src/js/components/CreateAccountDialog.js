@@ -26,6 +26,8 @@ import {validateUsername, generateMnemonic, generateMasterKey, generatePDF, getW
 import Collapse from "@material-ui/core/Collapse";
 import ChipInput from "./ChipInput";
 import SeedPhraseMenu from "./SeedPhraseMenu";
+import TermsOfUse from "./TermsOfUse";
+import PrivacyPolicy from "./PrivacyPolicy";
 import SeedPlus from "../icons/SeedPlus";
 import Visibility from "@material-ui/icons/Visibility";
 import VisibilityOff from "@material-ui/icons/VisibilityOff";
@@ -38,6 +40,8 @@ import CheckCircleOutlineIcon from '@material-ui/icons/CheckCircleOutline';
 import SendIcon from '@material-ui/icons/Send';
 import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
 import Tooltip from "@material-ui/core/Tooltip";
+import Tab from "@material-ui/core/Tab";
+import Tabs from "@material-ui/core/Tabs";
 import * as actions from "../actions/utils";
 
 import getIT from "../data/pixaLogoWhite";
@@ -312,6 +316,13 @@ const ST_W_360PX__FS_60PX__FW_400 = { width: "360px", fontSize: "60px", fontWeig
 const ST_W_360PX__FS_20PX__FW_400 = { width: "360px", fontSize: "20px", fontWeight: "400", margin: "24px 16px" };
 const ST_P_24PX = { padding: "24px" };
 const ST_POS_ABSOLUTE__W_0__H_0 = { position: 'absolute', width: 0, height: 0, overflow: 'hidden', opacity: 0, pointerEvents: 'none' };
+
+// Agreement modal (step 0): one tab per legal document. Key paths only —
+// t() must run inside render() so the labels follow the active locale.
+const TERMS_MODAL_TITLE_KEYS = [
+    "components.create_account_dialog.terms_of_use",
+    "components.create_account_dialog.privacy_policy",
+];
 
 const pixaLogoWhite = getIT();
 
@@ -1177,10 +1188,59 @@ const styles = theme => ({
         "& .MuiDialog-paper": {
             background: "#171717",
             borderRadius: "21px",
+            // Fixed height: switching between the Terms of Use and the (much
+            // shorter) Privacy Policy must not resize the modal. The
+            // DialogContent below is the scroll container.
+            height: "min(calc(100% - 64px), 900px)",
         },
-        // Placeholder body — the Terms and Conditions content will land here.
-        "& .MuiDialogContent-root": {
-            minHeight: 120,
+        "& .MuiDialog-paperFullScreen": {
+            borderRadius: 0,
+            height: "100%",
+        },
+    },
+    // Same pill tabs as AppInfoDialog.cardTabs, so the two places the
+    // documents are shown look alike.
+    termsTabs: {
+        backgroundColor: "#171717",
+        "& .MuiTab-root": {
+            minWidth: "72px !important"
+        },
+        "& .MuiTab-textColorPrimary.Mui-selected": {
+            backgroundColor: "transparent",
+        },
+        "& .MuiTab-textColorPrimary.Mui-selected .MuiTab-wrapper": {
+            color: "#171717 !important"
+        },
+        "& .MuiTab-fullWidth": {
+            backgroundColor: "transparent",
+            color: "#989898",
+            transition: "all 225ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
+            borderRadius: "21px"
+        },
+        "& .MuiTab-fullWidth:hover": {
+            backgroundColor: "rgba(255,255,255,0.06)"
+        },
+        "& span.MuiTabs-indicator": {
+            zIndex: "-1",
+            height: "48px",
+            backgroundColor: "#c7c7c7",
+            borderRadius: "21px",
+            transform: "scale3d(0.875, 0.75, 1)"
+        },
+        margin: "0px 16px 8px 16px",
+        width: "calc(100% - 32px)",
+        borderRadius: "21px",
+        flexShrink: 0,
+        zIndex: 1,
+    },
+    termsContent: {
+        // Explicit scroll container (MUI's scroll="paper" default) — the
+        // tab-change handler resets its scrollTop.
+        overflowY: "auto",
+        "& > div": {
+            // The documents' own <div> wrapper; keep the last paragraph clear
+            // of the action bar when scrolled to the bottom.
+            paddingBottom: 8,
         },
     },
     capacityCard: {
@@ -1439,7 +1499,7 @@ const StepGenerate = memo(function StepGenerate({
                         name="terms-agreement"
                     />
                 }
-                label={"I have read the Terms and Conditions and fully agree with them."}
+                label={t("components.create_account_dialog.i_have_read_the_terms_of_use_and")}
             />
             <div
                 className={classes.advancedToggle}
@@ -1990,9 +2050,11 @@ class CreateAccountDialog extends React.PureComponent {
             // ── New flow state ───────────────────────────────────────────────
             // Step 0: Advanced Configuration collapse open/closed
             _advancedOpen: false,
-            // Step 0: Terms & Conditions agreement + its (empty, for now) modal
+            // Step 0: Terms of Use / Privacy Policy agreement + its modal
+            // (_termsTab: 0 = Terms of Use, 1 = Privacy Policy)
             _termsAccepted: false,
             _termsModalOpen: false,
+            _termsTab: 0,
             // True once a taken username has been detected (auto-cleared seed
             // and the user can now enter their own to recover).
             _recoveryMode: false,
@@ -2271,11 +2333,15 @@ class CreateAccountDialog extends React.PureComponent {
             _pending_username_validation,
             _username_available,
             _recoveryMode,
+            _termsAccepted,
         } = this.state;
 
         if (!_username.length) return false;
         if (_username_syntax_error && _username_syntax_error.length) return false;
         if (_pending_username_validation) return false;
+        // Terms of Use + Privacy Policy must be explicitly accepted before
+        // NEXT / RECOVER (the Terms bind the Interface, recovery included).
+        if (!_termsAccepted) return false;
 
         const seed_ok = [12, 15, 18, 21, 24].indexOf(_seed.length) !== -1;
 
@@ -2349,6 +2415,18 @@ class CreateAccountDialog extends React.PureComponent {
 
     _handleTermsModalClose = () => {
         this.setState({ _termsModalOpen: false }, () => this.forceUpdate());
+    };
+
+    /** Switch between the Terms of Use and the Privacy Policy tab. */
+    _handleTermsTabChange = (e, value) => {
+        this.setState({ _termsTab: value }, () => {
+            if (this._termsContentEl) this._termsContentEl.scrollTop = 0;
+            this.forceUpdate();
+        });
+    };
+
+    _setTermsContentRef = (el) => {
+        this._termsContentEl = el || null;
     };
 
     /**
@@ -3448,6 +3526,7 @@ class CreateAccountDialog extends React.PureComponent {
             _advancedOpen,
             _termsAccepted,
             _termsModalOpen,
+            _termsTab,
             _recoveryMode,
             _country,
             _dialCode,
@@ -3652,24 +3731,36 @@ class CreateAccountDialog extends React.PureComponent {
                         </div>
                     </div>
                 </Dialog>
-                {/* Terms & Conditions modal — intentionally EMPTY for now: the
-                    ToU content will be dropped into the DialogContent below once
-                    it is finalized. Opened by any click on the step-0 agreement
-                    checkbox or its label. */}
+                {/* Terms of Use / Privacy Policy modal — opened by any click on
+                    the step-0 agreement checkbox or its label. Renders the same
+                    two components as AppInfoDialog (strings in locales/en.js
+                    under components.terms_of_use / components.privacy_policy). */}
                 <Dialog
                     className={classes.termsDialog}
                     open={_termsModalOpen}
                     onClose={this._handleTermsModalClose}
+                    fullScreen={_fullscreen}
                     fullWidth={true}
-                    maxWidth={"sm"}
+                    maxWidth={"md"}
                 >
-                    <DialogTitle>{"Terms and Conditions"}</DialogTitle>
-                    <DialogContent>
-                        {/* Intentionally empty. */}
+                    <DialogTitle>{t(TERMS_MODAL_TITLE_KEYS[_termsTab] || TERMS_MODAL_TITLE_KEYS[0])}</DialogTitle>
+                    <Tabs
+                        className={classes.termsTabs}
+                        value={_termsTab}
+                        variant="fullWidth"
+                        indicatorColor="primary"
+                        textColor="primary"
+                        onChange={this._handleTermsTabChange}
+                    >
+                        <Tab icon={t(TERMS_MODAL_TITLE_KEYS[0])} />
+                        <Tab icon={t(TERMS_MODAL_TITLE_KEYS[1])} />
+                    </Tabs>
+                    <DialogContent ref={this._setTermsContentRef} className={classes.termsContent}>
+                        {_termsTab === 1 ? <PrivacyPolicy/> : <TermsOfUse/>}
                     </DialogContent>
                     <DialogActions>
                         <Button variant="text" color="primary" onClick={this._handleTermsModalClose}>
-                            {"CLOSE"}
+                            {t("words.close", {TUC: true})}
                         </Button>
                     </DialogActions>
                 </Dialog>

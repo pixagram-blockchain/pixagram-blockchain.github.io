@@ -207,6 +207,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "από",
         "to": "προς",
+        "proposals": "Προτάσεις",
+        "discussion": "Συζήτηση",
+        "marketing": "Μάρκετινγκ",
+        "legal": "Νομικά",
+        "risks": "Κίνδυνοι",
+        "bug_reports": "Αναφορές σφαλμάτων",
+        "community": "Κοινότητα"
     },
 
     components: {
@@ -1590,6 +1597,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "Μεταδώστε ένα νέο σύνολο παραμέτρων της αλυσίδας ως <b>@{{currentAccount}}</b>. Το τέλος δημιουργίας λογαριασμού, το μέγιστο μέγεθος μπλοκ και το επιτόκιο PXS είναι κλειδωμένα σε αυτή την έκδοση. Ενημερώστε το URL του witness σας παρακάτω.",
             "you_can_vote_for_up_to_30": "Μπορείτε να ψηφίσετε έως 30 witnesses, ενώ μόνο 21 χρειάζονται για να οδηγήσουν το blockchain."
         },
+        "governance_dialog": {
+            "viability_management": "Διαχείριση βιωσιμότητας",
+            "take_actions": "Αναλάβετε δράση",
+            "governs_the_system_attributes_through_proposals": "Διέπει τα χαρακτηριστικά του συστήματος μέσω προτάσεων και ψηφοφορίας witnesses. Είναι το επίπεδο διακυβέρνησης που επιτρέπει τη λήψη αποφάσεων στο οικοσύστημα Pixagram.",
+            "attributes": "Χαρακτηριστικά",
+            "documentation": "Τεκμηρίωση",
+            "enabled_by_viability_management_view_system_stat": "Ενεργοποιείται από τη διαχείριση βιωσιμότητας. Δείτε την κατάσταση του συστήματος, τα endpoints του δικτύου και την παραγωγή μπλοκ σε πραγματικό χρόνο.",
+            "methods": "Μέθοδοι",
+            "guides": "Οδηγοί",
+            "associated_to_metrics_download_theory_documents": "Συνδέονται με τους δείκτες. Κατεβάστε θεωρητικά έγγραφα, μεθοδολογικούς οδηγούς και πρωτόκολλα για την αποτελεσματική χρήση του συστήματος ανάλυσης.",
+            "metrics": "Δείκτες",
+            "analytics": "Αναλυτικά",
+            "measured_by_the_system_track_key_performance": "Μετρώνται από το σύστημα. Παρακολουθήστε βασικούς δείκτες απόδοσης, εποπτεύστε στόχους και αναλύστε την υγεία του οικοσυστήματος.",
+            "control_tower": "Πύργος ελέγχου",
+            "dashboard": "Πίνακας ελέγχου",
+            "monitor_the_entire_ecosystem_from_a_centralized": "Παρακολουθήστε ολόκληρο το οικοσύστημα από έναν κεντρικό πίνακα ελέγχου. Πληροφορίες σε πραγματικό χρόνο και επισκόπηση του συστήματος.",
+            "disruptions": "Διαταραχές",
+            "reports": "Αναφορές",
+            "affects_viability_management_track_and_report_is": "Επηρεάζει τη διαχείριση βιωσιμότητας. Παρακολουθήστε και αναφέρετε προβλήματα στα θέματα της κοινότητας: διακυβέρνηση, νομικά, κίνδυνοι, μάρκετινγκ κ.ά."
+        },
         "gdattributes": {
             "with_transactions": "με {{txCount}} συναλλαγές",
             "system_status": "Κατάσταση συστήματος",
@@ -1827,7 +1854,8 @@ export default {
             "signup": "Εγγραφή",
             "the_portal_opens_soon": "Το portal {{title}} ανοίγει σύντομα.",
             "opens_soon": "Το {{title}} ανοίγει σύντομα.",
-            "banner_closed": "Το μπάνερ έκλεισε."
+            "banner_closed": "Το μπάνερ έκλεισε.",
+            "create_discuss_and_vote": "Δημιουργήστε, συζητήστε και ψηφίστε"
         },
         "settings_panel": {
             "60_authors_40_curators": "60 % Συγγραφείς / 40 % Επιμελητές",
@@ -2210,7 +2238,17 @@ export default {
         "gddisruptions": {
             "urgent": "Επείγον",
             "report_categories": "Κατηγορίες αναφορών",
-            "select_a_topic_to_view_reports_and": "Επιλέξτε ένα θέμα για να δείτε αναφορές και να συμμετάσχετε στις συζητήσεις της κοινότητας. Αυτές οι αναφορές διαταραχών επηρεάζουν τις αποφάσεις διαχείρισης της βιωσιμότητας."
+            "select_a_topic_to_view_reports_and": "Επιλέξτε ένα θέμα για να δείτε αναφορές και να συμμετάσχετε στις συζητήσεις της κοινότητας. Αυτές οι αναφορές διαταραχών επηρεάζουν τις αποφάσεις διαχείρισης της βιωσιμότητας.",
+            "subscribers": "συνδρομητές",
+            "turn_a_report_into_action_create_a": "Μετατρέψτε μια αναφορά σε δράση: δημιουργήστε μια πρόταση, συζητήστε την και ψηφίστε για τη χρηματοδότησή της από το ταμείο.",
+            "general_discussions_about_the_pixagram_ecosystem": "Γενικές συζητήσεις για το οικοσύστημα Pixagram, αιτήματα για λειτουργίες και σχόλια της κοινότητας.",
+            "proposals_voting_discussions_and_decision_making": "Προτάσεις, συζητήσεις ψηφοφορίας και διαδικασίες λήψης αποφάσεων για το οικοσύστημα.",
+            "marketing_initiatives_partnerships_and_promotion": "Πρωτοβουλίες μάρκετινγκ, συνεργασίες και διαφημιστικές καμπάνιες για το Pixagram.",
+            "legal_considerations_compliance_discussions_and": "Νομικά ζητήματα, συζητήσεις συμμόρφωσης και ρυθμιστικές εξελίξεις που επηρεάζουν το οικοσύστημα.",
+            "risk_assessment_threat_analysis_and_mitigation_s": "Αξιολόγηση κινδύνων, ανάλυση απειλών και στρατηγικές μετριασμού για την ασφάλεια του οικοσυστήματος.",
+            "security_audits_vulnerability_reports_and_best_p": "Έλεγχοι ασφαλείας, αναφορές ευπαθειών και βέλτιστες πρακτικές για ασφαλή χρήση.",
+            "report_bugs_technical_issues_and_track_their": "Αναφέρετε σφάλματα και τεχνικά προβλήματα και παρακολουθήστε την πορεία επίλυσής τους.",
+            "community_events_meetups_collaborations_and_soci": "Εκδηλώσεις της κοινότητας, συναντήσεις, συνεργασίες και κοινωνικές πρωτοβουλίες."
         },
         "gdmetrics": {
             "key_metrics": "Βασικοί δείκτες",

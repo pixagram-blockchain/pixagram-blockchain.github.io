@@ -197,6 +197,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "szerző:",
         "to": "válasz:",
+        "proposals": "Javaslatok",
+        "discussion": "Beszélgetés",
+        "marketing": "Marketing",
+        "legal": "Jogi",
+        "risks": "Kockázatok",
+        "bug_reports": "Hibajelentések",
+        "community": "Közösség"
     },
 
     components: {
@@ -1580,6 +1587,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "Sugározz új láncparaméter-készletet <strong>@{{currentAccount}}</strong> néven. A fióklétrehozási díj, a maximális blokkméret és a PXS-kamatláb ebben a kiadásban zárolva van. Frissítsd lent a witness URL-edet.",
             "you_can_vote_for_up_to_30": "Legfeljebb 30 witnessre szavazhatsz, miközben a blokklánc vezetéséhez csak 21 witness szükséges."
         },
+        "governance_dialog": {
+            "viability_management": "Életképesség-kezelés",
+            "take_actions": "Cselekedj",
+            "governs_the_system_attributes_through_proposals": "A rendszer attribútumait javaslatokon és witness-szavazásokon keresztül irányítja. Ez a kormányzási réteg teszi lehetővé a döntéshozatalt a Pixagram-ökoszisztémában.",
+            "attributes": "Attribútumok",
+            "documentation": "Dokumentáció",
+            "enabled_by_viability_management_view_system_stat": "Az életképesség-kezelés teszi lehetővé. Tekintsd meg a rendszerállapotot, a hálózati végpontokat és a blokkgyártás valós idejű adatait.",
+            "methods": "Módszerek",
+            "guides": "Útmutatók",
+            "associated_to_metrics_download_theory_documents": "A metrikákhoz kapcsolódik. Tölts le elméleti dokumentumokat, módszertani útmutatókat és protokollokat az elemzőrendszer hatékony használatához.",
+            "metrics": "Metrikák",
+            "analytics": "Elemzés",
+            "measured_by_the_system_track_key_performance": "A rendszer méri. Kövesd a kulcsfontosságú teljesítménymutatókat, figyeld a célokat, és elemezd az ökoszisztéma állapotát.",
+            "control_tower": "Irányítótorony",
+            "dashboard": "Irányítópult",
+            "monitor_the_entire_ecosystem_from_a_centralized": "Figyeld a teljes ökoszisztémát egy központi irányítópultról. Valós idejű betekintés és rendszeráttekintés.",
+            "disruptions": "Zavarok",
+            "reports": "Jelentések",
+            "affects_viability_management_track_and_report_is": "Hatással van az életképesség-kezelésre. Kövesd és jelentsd a problémákat a közösségi témákban: kormányzás, jog, kockázatok, marketing és mások."
+        },
         "gdattributes": {
             "with_transactions": "{{txCount}} tranzakcióval",
             "system_status": "Rendszerállapot",
@@ -1817,7 +1844,8 @@ export default {
             "signup": "Regisztráció",
             "the_portal_opens_soon": "A(z) {{title}} portál hamarosan nyílik.",
             "opens_soon": "{{title}} hamarosan nyílik.",
-            "banner_closed": "Banner bezárva."
+            "banner_closed": "Banner bezárva.",
+            "create_discuss_and_vote": "Hozz létre, beszéld meg és szavazz"
         },
         "settings_panel": {
             "60_authors_40_curators": "60% szerzők / 40% kurátorok",
@@ -2201,7 +2229,17 @@ export default {
         "gddisruptions": {
             "urgent": "Sürgős",
             "report_categories": "Jelentéskategóriák",
-            "select_a_topic_to_view_reports_and": "Válassz témát a jelentések megtekintéséhez és a közösségi beszélgetésekhez való csatlakozáshoz. Ezek a zavarjelentések befolyásolják az életképesség-kezelési döntéseket."
+            "select_a_topic_to_view_reports_and": "Válassz témát a jelentések megtekintéséhez és a közösségi beszélgetésekhez való csatlakozáshoz. Ezek a zavarjelentések befolyásolják az életképesség-kezelési döntéseket.",
+            "subscribers": "feliratkozó",
+            "turn_a_report_into_action_create_a": "Tegyél a jelentésből tettet: hozz létre egy javaslatot, beszéld meg, és szavazz a kincstárból történő finanszírozásáról.",
+            "general_discussions_about_the_pixagram_ecosystem": "Általános beszélgetések a Pixagram-ökoszisztémáról, funkciókérések és közösségi visszajelzések.",
+            "proposals_voting_discussions_and_decision_making": "Javaslatok, szavazási beszélgetések és döntéshozatali folyamatok az ökoszisztéma számára.",
+            "marketing_initiatives_partnerships_and_promotion": "Marketingkezdeményezések, partnerségek és promóciós kampányok a Pixagram számára.",
+            "legal_considerations_compliance_discussions_and": "Jogi szempontok, megfelelőségi beszélgetések és az ökoszisztémát érintő szabályozási frissítések.",
+            "risk_assessment_threat_analysis_and_mitigation_s": "Kockázatértékelés, fenyegetéselemzés és kockázatcsökkentő stratégiák az ökoszisztéma biztonságáért.",
+            "security_audits_vulnerability_reports_and_best_p": "Biztonsági auditok, sebezhetőségi jelentések és a biztonságos használat bevált gyakorlatai.",
+            "report_bugs_technical_issues_and_track_their": "Jelents hibákat és technikai problémákat, és kövesd nyomon a megoldásuk állapotát.",
+            "community_events_meetups_collaborations_and_soci": "Közösségi események, találkozók, együttműködések és társadalmi kezdeményezések."
         },
         "gdmetrics": {
             "key_metrics": "Kulcsmetrikák",

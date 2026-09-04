@@ -11,8 +11,8 @@
 //      cache invalidations.
 //   3. The UI is split into independent leaves:
 //        MainView, CommunityItem, TagChip, TagChipIcon, ProfileImage,
-//        ActionButtons, ProfileHeader, CTASection, PortalIconTile, FriendTile,
-//        FeedTile, LoginView, LoggedOutHeader, LoadingView, NotificationsLayer,
+//        ActionButtons, ProfileHeader, CTASection, ProposalsTile, PortalIconTile,
+//        FriendTile, FeedTile, LoginView, LoggedOutHeader, LoadingView, NotificationsLayer,
 //        AppsMenu, AppsMenuEntry.
 //      Each one re-renders only when its own slice of state changes - chips,
 //      communities, notif badge, profile header, etc. are skipped entirely.
@@ -39,7 +39,7 @@ import AccountBalanceWallet from "@material-ui/icons/AccountBalanceWallet"; // e
 import ExitToApp from "@material-ui/icons/ExitToApp";
 import Tooltip from "@material-ui/core/Tooltip";
 import * as actions from "../actions/utils";
-import { HISTORY } from "../utils/constants";
+import { HISTORY, PROPOSALS_PORTAL, COMMUNITY_PORTALS } from "../utils/constants";
 import NewspaperVariant from "../icons/NewspaperVariant";
 import Chip from "@material-ui/core/Chip";
 import Typography from "@material-ui/core/Typography";
@@ -56,6 +56,7 @@ import Skeleton from "@material-ui/lab/Skeleton";
 import LogoutModal from "./LogoutModal";
 import NotificationsDialog from "./NotificationsDialog";
 import Fade from "@material-ui/core/Fade";
+import BallotRounded from "@material-ui/icons/BallotRounded";
 import ForumRounded from "@material-ui/icons/ForumRounded";
 import HowToVoteRounded from "@material-ui/icons/HowToVoteRounded";
 import TrendingUpRounded from "@material-ui/icons/TrendingUpRounded";
@@ -191,6 +192,23 @@ const styles = theme => ({
         width: 56, height: 56, borderRadius: "16px", backgroundColor: "#101010",
         fontSize: "20px", color: "#888"
     },
+    // The proposals row leading the Governance grid: spans all four columns
+    // (the grid centres its items, so it must also stretch itself), keeps the
+    // tiles' 56px height and radius, and carries a label + one-line hint
+    // beside the avatar square instead of hiding the name in a tooltip.
+    discoverWideTile: {
+        gridColumn: "1 / -1", justifySelf: "stretch", width: "100%", height: 56,
+        display: "flex", alignItems: "center", justifyContent: "flex-start", textAlign: "left",
+        gap: "12px", paddingRight: "16px", backgroundColor: "#101010",
+        transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
+        "&:hover": {
+            transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
+            backgroundColor: "#171717"
+        }
+    },
+    discoverWideText: { display: "flex", flexDirection: "column", flex: 1, minWidth: 0 },
+    discoverWideTitle: { fontWeight: 600, fontSize: "14px", lineHeight: "18px", color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+    discoverWideSub: { fontSize: "12px", lineHeight: "16px", color: "#888", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
     // The relocated feed button, leading the "Friends" row: same 56px rounded
     // square as the friend tiles, carrying the old header-highlight treatment.
     feedTile: {
@@ -233,23 +251,35 @@ const styles = theme => ({
 const TAGS = ["selfies", "gaming", "fantasy", "landscape", "retro", "couples", "technology", "animals", "family", "sport", "holidays", "work", "pets", "abstract", "nude", "friends", "drawing", "vehicules", "events", "hobbies", "art", "myself", "fun", "intro", "travel", "fashion", "nature", "space", "comics"];
 
 // ── Discover sections configuration ──────────────────────────────────────────
-// The eight official governance portals, shown as an icon-only grid (2 rows ×
-// 4). The grid is ALWAYS displayed, even before the portals exist on-chain:
-// each definition carries a themed fallback icon, and entries are enriched
-// with the real avatar + link when a portal with a matching TITLE
-// (case-insensitive) shows up in the listCommunities result. Unlinked tiles
-// show the themed icon and answer clicks with a "coming soon" snackbar —
-// adjust the titles here if the official portal titles ever change.
-const GOVERNANCE_PORTALS = [
-    { title: "Discussion",  icon: ForumRounded },
-    { title: "Governance",  icon: HowToVoteRounded },
-    { title: "Marketing",   icon: TrendingUpRounded },
-    { title: "Legal",       icon: AccountBalanceRounded },
-    { title: "Risks",       icon: WarningRounded },
-    { title: "Security",    icon: SecurityRounded },
-    { title: "Bug Reports", icon: BugReportRounded },
-    { title: "Community",   icon: PeopleRounded },
-];
+// The official governance portals: the proposals row (full width) followed
+// by the eight topical portals as an icon-only grid (2 rows × 4). Ids and
+// order are owned by utils/constants (PROPOSALS_PORTAL, COMMUNITY_PORTALS) —
+// this map only attaches, per portal `name`, what the drawer adds on top of
+// `{ name, id }`: a themed fallback icon and the label (plus the one-line
+// hint of the proposals row). Labels are thunks over t(), resolved by the
+// tiles at render time — NOT inside the `governance` memo, which doesn't
+// re-run on a language switch; portal names live in `words` because the
+// Disruptions grid prints the same ones. The section is ALWAYS displayed
+// while logged in, even before the portals exist on-chain: tiles start as
+// themed-icon placeholders and are enriched with the real avatar + title
+// when a community whose chain name equals the portal id shows up in the
+// listCommunities result. Enriched or not, every tile links to its portal.
+const PORTAL_PRESENTATION = {
+    proposals:   { label: () => t("words.proposals"),   sublabel: () => t("components.menu_content.create_discuss_and_vote"), icon: BallotRounded },
+    discussions: { label: () => t("words.discussion"),  icon: ForumRounded },
+    governance:  { label: () => t("words.governance"),  icon: HowToVoteRounded },
+    marketing:   { label: () => t("words.marketing"),   icon: TrendingUpRounded },
+    legal:       { label: () => t("words.legal"),       icon: AccountBalanceRounded },
+    risks:       { label: () => t("words.risks"),       icon: WarningRounded },
+    security:    { label: () => t("words.security"),    icon: SecurityRounded },
+    bugs:        { label: () => t("words.bug_reports"), icon: BugReportRounded },
+    community:   { label: () => t("words.community"),   icon: PeopleRounded },
+};
+
+// A tile's display name: the on-chain community title once enriched, else
+// the drawer's own translated label, else the bare id. Called at render /
+// click time so it always reflects the current language.
+const portalTitle = (portal) => portal.title || (portal.label ? portal.label() : portal.id);
 
 // ── Apps menu configuration ──────────────────────────────────────────────────
 // Entries behind the grid ("Apps") button in the logged-in header — the old
@@ -273,6 +303,7 @@ const FEED_PAGE_SIZE = 20;      // posts per feed page
 const FEED_MAX_PAGES = 3;       // hard cap: 3 × 20 = 60 posts scanned
 const DISCOVER_TAGS_MAX = 24;   // random trending tags shown in "Trending"
 const DISCOVER_PORTALS_MAX = 6; // random trending portals (must stay < 8)
+const COMMUNITIES_FETCH_LIMIT = 100; // listCommunities page size
 
 // When the Feed page was last seen, as a ms epoch. The Feed page owns this
 // value and writes it on view:
@@ -506,26 +537,24 @@ CommunityItem.displayName = "CommunityItem";
 // Main view
 // ============================================================================
 
+// ----- Shared click handler of the governance tiles: every tile links to
+// its canonical portal id, enriched or not — the ids are reserved at
+// genesis, so there is no "opens soon" state to fall back to. Keyed on the
+// id rather than the tile object so enrichment re-renders keep the handler.
+const usePortalClick = (portal, onGoToCommunity) =>
+    useCallback(() => onGoToCommunity(portal.id), [portal.id, onGoToCommunity]);
+
 // ----- Governance portal tile: avatar-only rounded square, no title or
 // description — the portal name lives in the tooltip. Tiles are rendered
 // even when the portal doesn't exist on-chain yet: those show their themed
-// fallback icon and answer clicks with a "coming soon" snackbar instead of
-// navigating.
+// fallback icon and still link to the portal's canonical id.
 const PortalIconTile = React.memo(({ classes, portal, onGoToCommunity }) => {
     useLanguage();
-    const handleClick = useCallback(() => {
-        if (portal.name) {
-            onGoToCommunity(portal.name);
-        } else {
-            actions.trigger_snackbar(t("components.menu_content.the_portal_opens_soon", {
-                title: (portal.title || "portal")
-            }));
-        }
-    }, [portal.name, portal.title, onGoToCommunity]);
+    const handleClick = usePortalClick(portal, onGoToCommunity);
     const image = portal.image || "";
     const FallbackIcon = portal.icon || Community;
     return (
-        <Tooltip title={portal.title || portal.name}>
+        <Tooltip title={portalTitle(portal)}>
             <ButtonBase className={classes.discoverTile} onClick={handleClick}>
                 <Avatar src={image || undefined} className={"pixelated " + classes.discoverTileAvatar}>
                     {!image && <FallbackIcon />}
@@ -535,6 +564,31 @@ const PortalIconTile = React.memo(({ classes, portal, onGoToCommunity }) => {
     );
 }, (prev, next) => prev.portal === next.portal && prev.onGoToCommunity === next.onGoToCommunity);
 PortalIconTile.displayName = "PortalIconTile";
+
+// ----- Proposals tile: the full-width row that leads the Governance grid,
+// above the eight portal tiles. Same anatomy as a portal tile (avatar
+// square, themed fallback icon, same click gate) stretched into a labelled
+// row, because proposals are the one governance portal that asks for an
+// action rather than a topic — so the label and its hint are printed
+// instead of tucked into a tooltip.
+const ProposalsTile = React.memo(({ classes, portal, onGoToCommunity }) => {
+    useLanguage();
+    const handleClick = usePortalClick(portal, onGoToCommunity);
+    const image = portal.image || "";
+    const FallbackIcon = portal.icon || BallotRounded;
+    return (
+        <ButtonBase className={classes.discoverTile + " " + classes.discoverWideTile} onClick={handleClick}>
+            <Avatar src={image || undefined} className={"pixelated " + classes.discoverTileAvatar}>
+                {!image && <FallbackIcon />}
+            </Avatar>
+            <span className={classes.discoverWideText}>
+                <span className={classes.discoverWideTitle}>{portalTitle(portal)}</span>
+                {portal.sublabel && <span className={classes.discoverWideSub}>{portal.sublabel()}</span>}
+            </span>
+        </ButtonBase>
+    );
+}, (prev, next) => prev.portal === next.portal && prev.onGoToCommunity === next.onGoToCommunity);
+ProposalsTile.displayName = "ProposalsTile";
 
 // ----- Friend tile: a recent feed author as a rounded square with an
 // unseen-posts badge ("4+"). Clicking it navigates to their profile.
@@ -576,7 +630,8 @@ FeedTile.displayName = "FeedTile";
 
 // ----- The main view: Friends row (led by the feed tile), random trending
 // tags (led by the home chip) and random trending portals, the Governance
-// icon grid (2 × 4), then the two "Recommended" closers — the tags and
+// grid (full-width proposals row, then the 2 × 4 portal icons), then the
+// two "Recommended" closers — the tags and
 // portals that the random trending samples did NOT pick, so together the
 // sections cover everything fetched. Every section carries its own <Fade> —
 // one shared duration, index-staggered transitionDelay — so they appear
@@ -586,7 +641,7 @@ FeedTile.displayName = "FeedTile";
 // in), NOT on the friend count — the feed must stay reachable even when no
 // recent friend activity exists (friends is always empty while logged out).
 const MainView = React.memo(({
-                                 classes, governancePortals, friends, feedEnabled,
+                                 classes, proposalsPortal, governancePortals, friends, feedEnabled,
                                  trendingTags, trendingPortals,
                                  recommendedTags, recommendedPortals,
                                  onGoToCommunity, onGoToProfile, onGoToFeed, onTagClick
@@ -633,8 +688,11 @@ const MainView = React.memo(({
                         <div>
                             <ListSubheader disableSticky className={classes.metaListHeader}>{t("components.menu_content.governance_portals")}</ListSubheader>
                             <div className={classes.discoverGrid}>
+                                {proposalsPortal && (
+                                    <ProposalsTile classes={classes} portal={proposalsPortal} onGoToCommunity={onGoToCommunity} />
+                                )}
                                 {governancePortals.map(p => (
-                                    <PortalIconTile key={"gov-" + (p.name || p.title)} classes={classes} portal={p} onGoToCommunity={onGoToCommunity} />
+                                    <PortalIconTile key={"gov-" + p.key} classes={classes} portal={p} onGoToCommunity={onGoToCommunity} />
                                 ))}
                             </div>
                         </div>
@@ -668,6 +726,7 @@ const MainView = React.memo(({
         prev.onGoToFeed === next.onGoToFeed &&
         prev.onTagClick === next.onTagClick &&
         prev.feedEnabled === next.feedEnabled &&
+        prev.proposalsPortal === next.proposalsPortal &&
         shallowArrayEqual(prev.governancePortals, next.governancePortals) &&
         shallowArrayEqual(prev.friends, next.friends) &&
         shallowArrayEqual(prev.trendingTags, next.trendingTags) &&
@@ -894,7 +953,7 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
         if (!pixaAPI) return;
         try {
             if (pixaAPI.communities && pixaAPI.communities.listCommunities) {
-                const result = await pixaAPI.communities.listCommunities({ sort: "rank", limit: 100 });
+                const result = await pixaAPI.communities.listCommunities({ sort: "rank", limit: COMMUNITIES_FETCH_LIMIT });
                 const list = Array.isArray(result) ? result : [];
                 if (isMounted.current) setCommunities(list);
 
@@ -1249,27 +1308,36 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
     // ---- Discover data (derived) ----
     // Governance portals: logged-in users only — MainView drops the
     // section when the array is empty (same mechanism as Friends while
-    // logged out). When logged in: ALWAYS all eight, in GOVERNANCE_PORTALS
-    // order. Each tile starts as a linkless themed-icon placeholder and is
-    // enriched with the real name/avatar once a portal with a matching title
-    // appears in the fetched list — so the grid is visible from the very
-    // first paint, links or not.
-    const governancePortals = useMemo(() => {
-        if (!isLoggedIn) return [];
-        const byTitle = new Map();
+    // logged out). When logged in: ALWAYS the proposals row plus all eight
+    // portals, in utils/constants order. A tile starts as a themed-icon
+    // placeholder carrying its translated label (a thunk — see portalTitle)
+    // and is enriched with the real avatar + title once a fetched community
+    // whose chain name equals the portal id appears — so the grid is visible
+    // from the very first paint. Enrichment only changes what a tile shows,
+    // never where it links: every tile navigates to its canonical id.
+    const governance = useMemo(() => {
+        if (!isLoggedIn) return { proposals: null, portals: [] };
+        const byId = new Map();
         for (const c of communities) {
-            if (c && c.title) byTitle.set(String(c.title).toLowerCase(), c);
+            if (c && c.name) byId.set(c.name, c);
         }
-        return GOVERNANCE_PORTALS.map(def => {
-            const match = byTitle.get(def.title.toLowerCase());
+        const tile = (def) => {
+            const match = byId.get(def.id);
+            const look = PORTAL_PRESENTATION[def.name] || {};
             return {
-                title: (match && match.title) || def.title,
-                name: (match && match.name) || null,
+                key: def.name,
+                id: def.id,
+                title: (match && match.title) || null,
+                label: look.label || null,
+                sublabel: look.sublabel || null,
                 image: (match && (match.image || match.avatar_url || match.avatar)) || "",
-                icon: def.icon
+                icon: look.icon || Community
             };
-        });
+        };
+        return { proposals: tile(PROPOSALS_PORTAL), portals: COMMUNITY_PORTALS.map(tile) };
     }, [isLoggedIn, communities]);
+    const proposalsPortal = governance.proposals;
+    const governancePortals = governance.portals;
 
     // Random samples for the two "Trending" sections. Indices are keyed on
     // LENGTH so the image-enrichment pass (new array identity, same length)
@@ -1340,6 +1408,7 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
                 <div className={classes.mainScroll}>
                     <MainView
                         classes={classes}
+                        proposalsPortal={proposalsPortal}
                         governancePortals={governancePortals}
                         friends={friends}
                         feedEnabled={isLoggedIn}

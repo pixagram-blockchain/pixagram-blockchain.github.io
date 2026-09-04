@@ -197,6 +197,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "käyttäjältä",
         "to": "käyttäjälle",
+        "proposals": "Ehdotukset",
+        "discussion": "Keskustelu",
+        "marketing": "Markkinointi",
+        "legal": "Lakiasiat",
+        "risks": "Riskit",
+        "bug_reports": "Virheraportit",
+        "community": "Yhteisö"
     },
 
     components: {
@@ -1580,6 +1587,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "Lähetä uusi ketjuparametrien joukko tilinä <strong>@{{currentAccount}}</strong>. Tilin luontimaksu, lohkon enimmäiskoko ja PXS-korko on lukittu tässä julkaisussa. Päivitä witness-URL:si alla.",
             "you_can_vote_for_up_to_30": "Voit äänestää enintään 30 witnessiä, vaikka vain 21 witnessiä tarvitaan johtamaan lohkoketjua."
         },
+        "governance_dialog": {
+            "viability_management": "Elinkelpoisuuden hallinta",
+            "take_actions": "Ryhdy toimeen",
+            "governs_the_system_attributes_through_proposals": "Ohjaa järjestelmän attribuutteja ehdotusten ja witness-äänestysten kautta. Tämä on hallintokerros, joka mahdollistaa päätöksenteon Pixagram-ekosysteemissä.",
+            "attributes": "Attribuutit",
+            "documentation": "Dokumentaatio",
+            "enabled_by_viability_management_view_system_stat": "Elinkelpoisuuden hallinnan mahdollistama. Näytä järjestelmän tila, verkon päätepisteet ja lohkojen tuotanto reaaliajassa.",
+            "methods": "Menetelmät",
+            "guides": "Oppaat",
+            "associated_to_metrics_download_theory_documents": "Liittyvät metriikoihin. Lataa teoria-asiakirjoja, menetelmäoppaita ja protokollia analytiikkajärjestelmän tehokkaaseen käyttöön.",
+            "metrics": "Metriikat",
+            "analytics": "Analytiikka",
+            "measured_by_the_system_track_key_performance": "Järjestelmän mittaamat. Seuraa keskeisiä suorituskykymittareita, valvo tavoitteita ja analysoi ekosysteemin kuntoa.",
+            "control_tower": "Valvontatorni",
+            "dashboard": "Kojelauta",
+            "monitor_the_entire_ecosystem_from_a_centralized": "Valvo koko ekosysteemiä keskitetystä kojelaudasta. Reaaliaikaisia näkymiä ja järjestelmän yleiskatsaus.",
+            "disruptions": "Häiriöt",
+            "reports": "Raportit",
+            "affects_viability_management_track_and_report_is": "Vaikuttaa elinkelpoisuuden hallintaan. Seuraa ja raportoi ongelmia yhteisön eri aiheissa: hallinto, lakiasiat, riskit, markkinointi ja muut."
+        },
         "gdattributes": {
             "with_transactions": "sisältäen {{txCount}} tapahtumaa",
             "system_status": "Järjestelmän tila",
@@ -1817,7 +1844,8 @@ export default {
             "signup": "Rekisteröidy",
             "the_portal_opens_soon": "{{title}}-portaali avautuu pian.",
             "opens_soon": "{{title}} avautuu pian.",
-            "banner_closed": "Banneri suljettu."
+            "banner_closed": "Banneri suljettu.",
+            "create_discuss_and_vote": "Luo, keskustele ja äänestä"
         },
         "settings_panel": {
             "60_authors_40_curators": "60 % tekijät / 40 % kuraattorit",
@@ -2201,7 +2229,17 @@ export default {
         "gddisruptions": {
             "urgent": "Kiireellinen",
             "report_categories": "Raporttikategoriat",
-            "select_a_topic_to_view_reports_and": "Valitse aihe nähdäksesi raportit ja liittyäksesi yhteisökeskusteluihin. Nämä häiriöraportit vaikuttavat elinkelpoisuuden hallintapäätöksiin."
+            "select_a_topic_to_view_reports_and": "Valitse aihe nähdäksesi raportit ja liittyäksesi yhteisökeskusteluihin. Nämä häiriöraportit vaikuttavat elinkelpoisuuden hallintapäätöksiin.",
+            "subscribers": "tilaajaa",
+            "turn_a_report_into_action_create_a": "Muuta raportti toiminnaksi: luo ehdotus, keskustele siitä ja äänestä sen rahoittamisesta kassasta.",
+            "general_discussions_about_the_pixagram_ecosystem": "Yleistä keskustelua Pixagram-ekosysteemistä, ominaisuustoiveita ja yhteisön palautetta.",
+            "proposals_voting_discussions_and_decision_making": "Ehdotukset, äänestyskeskustelut ja ekosysteemin päätöksentekoprosessit.",
+            "marketing_initiatives_partnerships_and_promotion": "Markkinointialoitteet, kumppanuudet ja Pixagramin mainoskampanjat.",
+            "legal_considerations_compliance_discussions_and": "Oikeudelliset näkökohdat, vaatimustenmukaisuuskeskustelut ja ekosysteemiin vaikuttavat sääntelypäivitykset.",
+            "risk_assessment_threat_analysis_and_mitigation_s": "Riskien arviointi, uhka-analyysi ja lieventämisstrategiat ekosysteemin turvallisuuden hyväksi.",
+            "security_audits_vulnerability_reports_and_best_p": "Tietoturva-auditoinnit, haavoittuvuusraportit ja turvallisen käytön parhaat käytännöt.",
+            "report_bugs_technical_issues_and_track_their": "Ilmoita bugeista ja teknisistä ongelmista ja seuraa niiden ratkaisun etenemistä.",
+            "community_events_meetups_collaborations_and_soci": "Yhteisön tapahtumat, tapaamiset, yhteistyöt ja sosiaaliset aloitteet."
         },
         "gdmetrics": {
             "key_metrics": "Avainmetriikat",

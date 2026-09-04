@@ -197,6 +197,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "af",
         "to": "til",
+        "proposals": "Forslag",
+        "discussion": "Diskussion",
+        "marketing": "Marketing",
+        "legal": "Juridisk",
+        "risks": "Risici",
+        "bug_reports": "Fejlrapporter",
+        "community": "Fællesskab"
     },
 
     components: {
@@ -1580,6 +1587,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "Udsend et nyt sæt chain-parametre som <strong>@{{currentAccount}}</strong>. Gebyr for kontooprettelse, maksimal blokstørrelse og PXS-rente er låst i denne udgivelse. Opdater din witness-URL nedenfor.",
             "you_can_vote_for_up_to_30": "Du kan stemme på op til 30 witnesses, mens kun 21 witnesses kræves for at lede blockchainen."
         },
+        "governance_dialog": {
+            "viability_management": "Levedygtighedsstyring",
+            "take_actions": "Tag handling",
+            "governs_the_system_attributes_through_proposals": "Styrer systemets attributter gennem forslag og witness-afstemninger. Det er governance-laget, der muliggør beslutningstagning i Pixagram-økosystemet.",
+            "attributes": "Attributter",
+            "documentation": "Dokumentation",
+            "enabled_by_viability_management_view_system_stat": "Muliggjort af levedygtighedsstyring. Se systemstatus, netværksendepunkter og blokproduktion i realtid.",
+            "methods": "Metoder",
+            "guides": "Vejledninger",
+            "associated_to_metrics_download_theory_documents": "Knyttet til metrikker. Download teoridokumenter, metodevejledninger og protokoller til effektiv brug af analysesystemet.",
+            "metrics": "Metrikker",
+            "analytics": "Analyse",
+            "measured_by_the_system_track_key_performance": "Målt af systemet. Følg nøgletal, overvåg mål og analysér økosystemets sundhed.",
+            "control_tower": "Kontroltårn",
+            "dashboard": "Dashboard",
+            "monitor_the_entire_ecosystem_from_a_centralized": "Overvåg hele økosystemet fra ét centralt dashboard. Indsigt i realtid og systemoverblik.",
+            "disruptions": "Forstyrrelser",
+            "reports": "Rapporter",
+            "affects_viability_management_track_and_report_is": "Påvirker levedygtighedsstyring. Følg og rapportér problemer på tværs af fællesskabets emner, herunder governance, jura, risici og marketing."
+        },
         "gdattributes": {
             "with_transactions": "med {{txCount}} transaktioner",
             "system_status": "Systemstatus",
@@ -1817,7 +1844,8 @@ export default {
             "signup": "Tilmeld",
             "the_portal_opens_soon": "Portalen {{title}} åbner snart.",
             "opens_soon": "{{title}} åbner snart.",
-            "banner_closed": "Banner lukket."
+            "banner_closed": "Banner lukket.",
+            "create_discuss_and_vote": "Opret, diskutér og stem"
         },
         "settings_panel": {
             "60_authors_40_curators": "60 % forfattere / 40 % kuratorer",
@@ -2201,7 +2229,17 @@ export default {
         "gddisruptions": {
             "urgent": "Haster",
             "report_categories": "Rapportkategorier",
-            "select_a_topic_to_view_reports_and": "Vælg et emne for at se rapporter og deltage i fællesskabsdiskussioner. Disse forstyrrelsesrapporter påvirker beslutninger om levedygtighedsstyring."
+            "select_a_topic_to_view_reports_and": "Vælg et emne for at se rapporter og deltage i fællesskabsdiskussioner. Disse forstyrrelsesrapporter påvirker beslutninger om levedygtighedsstyring.",
+            "subscribers": "abonnenter",
+            "turn_a_report_into_action_create_a": "Gør en rapport til handling: opret et forslag, diskutér det, og stem om dets finansiering fra skatkammeret.",
+            "general_discussions_about_the_pixagram_ecosystem": "Generelle diskussioner om Pixagram-økosystemet, funktionsønsker og feedback fra fællesskabet.",
+            "proposals_voting_discussions_and_decision_making": "Forslag, afstemningsdiskussioner og beslutningsprocesser for økosystemet.",
+            "marketing_initiatives_partnerships_and_promotion": "Marketinginitiativer, partnerskaber og promoveringskampagner for Pixagram.",
+            "legal_considerations_compliance_discussions_and": "Juridiske overvejelser, compliance-diskussioner og regulatoriske opdateringer, der påvirker økosystemet.",
+            "risk_assessment_threat_analysis_and_mitigation_s": "Risikovurdering, trusselsanalyse og afbødningsstrategier for økosystemets sikkerhed.",
+            "security_audits_vulnerability_reports_and_best_p": "Sikkerhedsrevisioner, sårbarhedsrapporter og bedste praksis for sikker brug.",
+            "report_bugs_technical_issues_and_track_their": "Rapportér fejl og tekniske problemer, og følg status på deres løsning.",
+            "community_events_meetups_collaborations_and_soci": "Fællesskabsarrangementer, meetups, samarbejder og sociale initiativer."
         },
         "gdmetrics": {
             "key_metrics": "Nøglemetrikker",

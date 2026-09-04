@@ -199,6 +199,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "লেখক:",
         "to": "উত্তর:",
+        "proposals": "প্রস্তাবসমূহ",
+        "discussion": "আলোচনা",
+        "marketing": "মার্কেটিং",
+        "legal": "আইনি",
+        "risks": "ঝুঁকি",
+        "bug_reports": "বাগ রিপোর্ট",
+        "community": "কমিউনিটি"
     },
 
     components: {
@@ -1582,6 +1589,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "<strong>@{{currentAccount}}</strong> হিসেবে চেইন-প্যারামিটারের নতুন সেট সম্প্রচার করুন। অ্যাকাউন্ট তৈরির ফি, সর্বোচ্চ ব্লক-আকার ও PXS সুদের হার এই রিলিজে লক করা। নিচে আপনার witness URL হালনাগাদ করুন।",
             "you_can_vote_for_up_to_30": "আপনি সর্বোচ্চ 30 জন witness-কে ভোট দিতে পারেন, যদিও ব্লকচেইন চালাতে দরকার মাত্র 21 জন witness।",
         },
+        "governance_dialog": {
+            "viability_management": "সচলতা ব্যবস্থাপনা",
+            "take_actions": "পদক্ষেপ নিন",
+            "governs_the_system_attributes_through_proposals": "প্রস্তাব ও witness ভোটের মাধ্যমে সিস্টেমের বৈশিষ্ট্যগুলো পরিচালনা করে। এটিই সেই গভর্ন্যান্স স্তর যা Pixagram ইকোসিস্টেমে সিদ্ধান্ত গ্রহণ সম্ভব করে।",
+            "attributes": "বৈশিষ্ট্য",
+            "documentation": "ডকুমেন্টেশন",
+            "enabled_by_viability_management_view_system_stat": "সচলতা ব্যবস্থাপনার মাধ্যমে সক্রিয়। সিস্টেম স্ট্যাটাস, নেটওয়ার্ক এন্ডপয়েন্ট এবং রিয়েল-টাইম ব্লক উৎপাদনের তথ্য দেখুন।",
+            "methods": "পদ্ধতি",
+            "guides": "গাইড",
+            "associated_to_metrics_download_theory_documents": "মেট্রিক্সের সাথে সংযুক্ত। বিশ্লেষণ ব্যবস্থা কার্যকরভাবে ব্যবহারের জন্য তত্ত্বের নথি, পদ্ধতিগত গাইড এবং প্রোটোকল ডাউনলোড করুন।",
+            "metrics": "মেট্রিক্স",
+            "analytics": "বিশ্লেষণ",
+            "measured_by_the_system_track_key_performance": "সিস্টেম দ্বারা পরিমাপকৃত। মূল কর্মক্ষমতা সূচক অনুসরণ করুন, লক্ষ্য পর্যবেক্ষণ করুন এবং ইকোসিস্টেমের স্বাস্থ্য বিশ্লেষণ করুন।",
+            "control_tower": "কন্ট্রোল টাওয়ার",
+            "dashboard": "ড্যাশবোর্ড",
+            "monitor_the_entire_ecosystem_from_a_centralized": "একটি কেন্দ্রীয় ড্যাশবোর্ড থেকে পুরো ইকোসিস্টেম পর্যবেক্ষণ করুন। রিয়েল-টাইম অন্তর্দৃষ্টি ও সিস্টেমের সারসংক্ষেপ।",
+            "disruptions": "বিঘ্ন",
+            "reports": "রিপোর্ট",
+            "affects_viability_management_track_and_report_is": "সচলতা ব্যবস্থাপনাকে প্রভাবিত করে। গভর্ন্যান্স, আইনি, ঝুঁকি ও মার্কেটিং-সহ কমিউনিটির বিভিন্ন বিষয়ে সমস্যা অনুসরণ ও রিপোর্ট করুন।"
+        },
         "gdattributes": {
             "with_transactions": "{{txCount}}টি লেনদেনসহ",
             "system_status": "সিস্টেম স্ট্যাটাস",
@@ -1820,6 +1847,7 @@ export default {
             "the_portal_opens_soon": "{{title}} পোর্টাল শিগগিরই খুলছে।",
             "opens_soon": "{{title}} শিগগিরই খুলছে।",
             "banner_closed": "ব্যানার বন্ধ হয়েছে।",
+            "create_discuss_and_vote": "তৈরি করুন, আলোচনা করুন, ভোট দিন"
         },
         "settings_panel": {
             "60_authors_40_curators": "60% লেখক / 40% কিউরেটর",
@@ -2204,6 +2232,16 @@ export default {
             "urgent": "জরুরি",
             "report_categories": "রিপোর্টের বিভাগ",
             "select_a_topic_to_view_reports_and": "রিপোর্ট দেখতে ও কমিউনিটির আলোচনায় যোগ দিতে একটি টপিক বাছুন। এই বিঘ্ন-রিপোর্টগুলো সচলতা-ব্যবস্থাপনার সিদ্ধান্তে প্রভাব ফেলে।",
+            "subscribers": "সাবস্ক্রাইবার",
+            "turn_a_report_into_action_create_a": "রিপোর্টকে পদক্ষেপে রূপ দিন: একটি প্রস্তাব তৈরি করুন, তা নিয়ে আলোচনা করুন এবং কোষাগার থেকে এর অর্থায়নে ভোট দিন।",
+            "general_discussions_about_the_pixagram_ecosystem": "Pixagram ইকোসিস্টেম নিয়ে সাধারণ আলোচনা, ফিচারের অনুরোধ এবং কমিউনিটির মতামত।",
+            "proposals_voting_discussions_and_decision_making": "ইকোসিস্টেমের জন্য প্রস্তাব, ভোট নিয়ে আলোচনা এবং সিদ্ধান্ত গ্রহণের প্রক্রিয়া।",
+            "marketing_initiatives_partnerships_and_promotion": "Pixagram-এর জন্য মার্কেটিং উদ্যোগ, অংশীদারিত্ব এবং প্রচারণা।",
+            "legal_considerations_compliance_discussions_and": "ইকোসিস্টেমকে প্রভাবিত করে এমন আইনি বিবেচনা, কমপ্লায়েন্স নিয়ে আলোচনা এবং নিয়ন্ত্রক হালনাগাদ।",
+            "risk_assessment_threat_analysis_and_mitigation_s": "ইকোসিস্টেমের নিরাপত্তার জন্য ঝুঁকি মূল্যায়ন, হুমকি বিশ্লেষণ এবং প্রশমন কৌশল।",
+            "security_audits_vulnerability_reports_and_best_p": "নিরাপত্তা অডিট, দুর্বলতার রিপোর্ট এবং নিরাপদ ব্যবহারের সেরা অনুশীলন।",
+            "report_bugs_technical_issues_and_track_their": "বাগ ও কারিগরি সমস্যা রিপোর্ট করুন এবং সেগুলোর সমাধানের অগ্রগতি অনুসরণ করুন।",
+            "community_events_meetups_collaborations_and_soci": "কমিউনিটি ইভেন্ট, মিটআপ, সহযোগিতা এবং সামাজিক উদ্যোগ।"
         },
         "gdmetrics": {
             "key_metrics": "মূল মেট্রিক্স",

@@ -198,6 +198,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "作者：",
         "to": "回复：",
+        "proposals": "提案",
+        "discussion": "讨论",
+        "marketing": "市场营销",
+        "legal": "法务",
+        "risks": "风险",
+        "bug_reports": "错误报告",
+        "community": "社区"
     },
 
     components: {
@@ -1582,6 +1589,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "以 <strong>@{{currentAccount}}</strong> 身份广播一组新的链参数。本次发布中账户创建费、最大区块大小和 PXS 利率均已锁定。请在下方更新你的 witness 网址。",
             "you_can_vote_for_up_to_30": "你最多可为 30 位 witness 投票，而领导区块链只需要 21 位。"
         },
+        "governance_dialog": {
+            "viability_management": "可行性管理",
+            "take_actions": "采取行动",
+            "governs_the_system_attributes_through_proposals": "通过提案和 witness 投票来治理系统属性。这是让 Pixagram 生态系统得以决策的治理层。",
+            "attributes": "属性",
+            "documentation": "文档",
+            "enabled_by_viability_management_view_system_stat": "由可行性管理启用。查看系统状态、网络端点和实时出块信息。",
+            "methods": "方法",
+            "guides": "指南",
+            "associated_to_metrics_download_theory_documents": "与指标相关联。下载理论文档、方法指南和协议，以有效使用分析系统。",
+            "metrics": "指标",
+            "analytics": "分析",
+            "measured_by_the_system_track_key_performance": "由系统测量。跟踪关键绩效指标，监控目标，并分析生态系统的健康状况。",
+            "control_tower": "控制塔",
+            "dashboard": "仪表盘",
+            "monitor_the_entire_ecosystem_from_a_centralized": "从一个集中的仪表盘监控整个生态系统。实时洞察与系统概览。",
+            "disruptions": "中断",
+            "reports": "报告",
+            "affects_viability_management_track_and_report_is": "影响可行性管理。跟踪并报告治理、法务、风险、市场营销等各社区主题中的问题。"
+        },
         "gdattributes": {
             "with_transactions": "包含 {{txCount}} 笔交易",
             "system_status": "系统状态",
@@ -1819,7 +1846,8 @@ export default {
             "signup": "注册",
             "the_portal_opens_soon": "{{title}} 门户即将开放。",
             "opens_soon": "{{title}} 即将开放。",
-            "banner_closed": "横幅已关闭。"
+            "banner_closed": "横幅已关闭。",
+            "create_discuss_and_vote": "创建、讨论、投票"
         },
         "settings_panel": {
             "60_authors_40_curators": "作者 60% / 策展人 40%",
@@ -2203,7 +2231,17 @@ export default {
         "gddisruptions": {
             "urgent": "紧急",
             "report_categories": "举报分类",
-            "select_a_topic_to_view_reports_and": "选择一个主题以查看报告并参与社区讨论。这些中断报告会影响可行性管理方面的决策。"
+            "select_a_topic_to_view_reports_and": "选择一个主题以查看报告并参与社区讨论。这些中断报告会影响可行性管理方面的决策。",
+            "subscribers": "位订阅者",
+            "turn_a_report_into_action_create_a": "把报告变成行动：创建提案，展开讨论，并就其由金库出资进行投票。",
+            "general_discussions_about_the_pixagram_ecosystem": "关于 Pixagram 生态系统的一般讨论、功能请求和社区反馈。",
+            "proposals_voting_discussions_and_decision_making": "生态系统的提案、投票讨论和决策流程。",
+            "marketing_initiatives_partnerships_and_promotion": "Pixagram 的市场营销举措、合作伙伴关系和推广活动。",
+            "legal_considerations_compliance_discussions_and": "影响生态系统的法律考量、合规讨论和监管动态。",
+            "risk_assessment_threat_analysis_and_mitigation_s": "面向生态系统安全的风险评估、威胁分析和缓解策略。",
+            "security_audits_vulnerability_reports_and_best_p": "安全审计、漏洞报告以及安全使用的最佳实践。",
+            "report_bugs_technical_issues_and_track_their": "报告错误和技术问题，并跟踪其解决状态。",
+            "community_events_meetups_collaborations_and_soci": "社区活动、线下聚会、协作和社会公益举措。"
         },
         "gdmetrics": {
             "key_metrics": "关键指标",

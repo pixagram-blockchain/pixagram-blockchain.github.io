@@ -197,6 +197,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "od",
         "to": "pro",
+        "proposals": "Návrhy",
+        "discussion": "Diskuze",
+        "marketing": "Marketing",
+        "legal": "Právní",
+        "risks": "Rizika",
+        "bug_reports": "Hlášení chyb",
+        "community": "Komunita"
     },
 
     components: {
@@ -1580,6 +1587,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "Odvysílejte novou sadu parametrů chainu jako <strong>@{{currentAccount}}</strong>. Poplatek za vytvoření účtu, maximální velikost bloku a úroková sazba PXS jsou pro toto vydání uzamčeny. Níže aktualizujte URL svého witnesse.",
             "you_can_vote_for_up_to_30": "Hlasovat můžete až pro 30 witnessů, přičemž k vedení blockchainu je potřeba jen 21 witnessů."
         },
+        "governance_dialog": {
+            "viability_management": "Řízení životaschopnosti",
+            "take_actions": "Jednejte",
+            "governs_the_system_attributes_through_proposals": "Řídí atributy systému pomocí návrhů a hlasování witnessů. Je to vrstva governance, která umožňuje rozhodování v ekosystému Pixagram.",
+            "attributes": "Atributy",
+            "documentation": "Dokumentace",
+            "enabled_by_viability_management_view_system_stat": "Umožněno řízením životaschopnosti. Zobrazte stav systému, síťové endpointy a informace o produkci bloků v reálném čase.",
+            "methods": "Metody",
+            "guides": "Průvodci",
+            "associated_to_metrics_download_theory_documents": "Vázáno na metriky. Stáhněte si teoretické dokumenty, metodické průvodce a protokoly pro efektivní používání analytického systému.",
+            "metrics": "Metriky",
+            "analytics": "Analytika",
+            "measured_by_the_system_track_key_performance": "Měřeno systémem. Sledujte klíčové ukazatele výkonnosti, hlídejte cíle a analyzujte zdraví ekosystému.",
+            "control_tower": "Řídicí věž",
+            "dashboard": "Přehled",
+            "monitor_the_entire_ecosystem_from_a_centralized": "Sledujte celý ekosystém z centrálního přehledu. Přehled systému a informace v reálném čase.",
+            "disruptions": "Narušení",
+            "reports": "Hlášení",
+            "affects_viability_management_track_and_report_is": "Ovlivňuje řízení životaschopnosti. Sledujte a hlaste problémy napříč komunitními tématy — governance, právo, rizika, marketing a další."
+        },
         "gdattributes": {
             "with_transactions": "s {{txCount}} transakcemi",
             "system_status": "Stav systému",
@@ -1817,7 +1844,8 @@ export default {
             "signup": "Registrace",
             "the_portal_opens_soon": "Portál {{title}} se brzy otevře.",
             "opens_soon": "{{title}} se brzy otevře.",
-            "banner_closed": "Banner zavřen."
+            "banner_closed": "Banner zavřen.",
+            "create_discuss_and_vote": "Vytvářejte, diskutujte a hlasujte"
         },
         "settings_panel": {
             "60_authors_40_curators": "60 % autoři / 40 % kurátoři",
@@ -2201,7 +2229,17 @@ export default {
         "gddisruptions": {
             "urgent": "Naléhavé",
             "report_categories": "Kategorie hlášení",
-            "select_a_topic_to_view_reports_and": "Vyberte téma, zobrazte hlášení a zapojte se do komunitních diskusí. Tato hlášení o narušeních ovlivňují rozhodnutí o řízení životaschopnosti."
+            "select_a_topic_to_view_reports_and": "Vyberte téma, zobrazte hlášení a zapojte se do komunitních diskusí. Tato hlášení o narušeních ovlivňují rozhodnutí o řízení životaschopnosti.",
+            "subscribers": "odběratelů",
+            "turn_a_report_into_action_create_a": "Proměňte hlášení v čin: vytvořte návrh, prodiskutujte ho a hlasujte o jeho financování z pokladny.",
+            "general_discussions_about_the_pixagram_ecosystem": "Obecné diskuze o ekosystému Pixagram, požadavky na funkce a zpětná vazba komunity.",
+            "proposals_voting_discussions_and_decision_making": "Návrhy, diskuze o hlasování a rozhodovací procesy ekosystému.",
+            "marketing_initiatives_partnerships_and_promotion": "Marketingové iniciativy, partnerství a propagační kampaně pro Pixagram.",
+            "legal_considerations_compliance_discussions_and": "Právní otázky, diskuze o compliance a regulační novinky ovlivňující ekosystém.",
+            "risk_assessment_threat_analysis_and_mitigation_s": "Hodnocení rizik, analýza hrozeb a strategie jejich zmírnění pro bezpečnost ekosystému.",
+            "security_audits_vulnerability_reports_and_best_p": "Bezpečnostní audity, hlášení zranitelností a osvědčené postupy pro bezpečné používání.",
+            "report_bugs_technical_issues_and_track_their": "Hlaste chyby a technické problémy a sledujte stav jejich řešení.",
+            "community_events_meetups_collaborations_and_soci": "Komunitní akce, setkání, spolupráce a společenské iniciativy."
         },
         "gdmetrics": {
             "key_metrics": "Klíčové metriky",

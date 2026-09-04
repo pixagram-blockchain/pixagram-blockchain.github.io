@@ -201,6 +201,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "paylaşan:",
         "to": "yanıt:",
+        "proposals": "Öneriler",
+        "discussion": "Tartışma",
+        "marketing": "Pazarlama",
+        "legal": "Hukuk",
+        "risks": "Riskler",
+        "bug_reports": "Hata Raporları",
+        "community": "Topluluk"
     },
 
     components: {
@@ -1584,6 +1591,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "<strong>@{{currentAccount}}</strong> olarak yeni bir zincir parametreleri seti yayınla. Hesap oluşturma ücreti, maksimum blok boyutu ve PXS faiz oranı bu sürümde kilitli. Aşağıda witness URL'ni güncelle.",
             "you_can_vote_for_up_to_30": "Blokzinciri yönetmek için yalnızca 21 witness gerekirken 30 witness'a kadar oy verebilirsin."
         },
+        "governance_dialog": {
+            "viability_management": "Yaşayabilirlik Yönetimi",
+            "take_actions": "Harekete Geç",
+            "governs_the_system_attributes_through_proposals": "Sistem özelliklerini öneriler ve witness oylamaları aracılığıyla yönetir. Pixagram ekosisteminde karar almayı mümkün kılan yönetişim katmanıdır.",
+            "attributes": "Özellikler",
+            "documentation": "Dokümantasyon",
+            "enabled_by_viability_management_view_system_stat": "Yaşayabilirlik Yönetimi tarafından etkinleştirilir. Sistem durumunu, ağ uç noktalarını ve gerçek zamanlı blok üretim bilgilerini görüntüle.",
+            "methods": "Yöntemler",
+            "guides": "Kılavuzlar",
+            "associated_to_metrics_download_theory_documents": "Metriklerle ilişkilidir. Analitik sistemini etkili kullanmak için teori belgelerini, yöntem kılavuzlarını ve protokolleri indir.",
+            "metrics": "Metrikler",
+            "analytics": "Analitik",
+            "measured_by_the_system_track_key_performance": "Sistem tarafından ölçülür. Temel performans göstergelerini takip et, hedefleri izle ve ekosistemin sağlığını analiz et.",
+            "control_tower": "Kontrol Kulesi",
+            "dashboard": "Gösterge Paneli",
+            "monitor_the_entire_ecosystem_from_a_centralized": "Tüm ekosistemi merkezi bir gösterge panelinden izle. Gerçek zamanlı içgörüler ve sistem genel görünümü.",
+            "disruptions": "Aksaklıklar",
+            "reports": "Raporlar",
+            "affects_viability_management_track_and_report_is": "Yaşayabilirlik Yönetimi'ni etkiler. Yönetişim, hukuk, riskler ve pazarlama dahil farklı topluluk konularındaki sorunları takip et ve bildir."
+        },
         "gdattributes": {
             "with_transactions": "{{txCount}} işlemle",
             "system_status": "Sistem Durumu",
@@ -1821,7 +1848,8 @@ export default {
             "signup": "Kaydol",
             "the_portal_opens_soon": "{{title}} portalı yakında açılıyor.",
             "opens_soon": "{{title}} yakında açılıyor.",
-            "banner_closed": "Banner kapatıldı."
+            "banner_closed": "Banner kapatıldı.",
+            "create_discuss_and_vote": "Oluştur, tartış ve oy ver"
         },
         "settings_panel": {
             "60_authors_40_curators": "%60 Yazarlar / %40 Küratörler",
@@ -2205,7 +2233,17 @@ export default {
         "gddisruptions": {
             "urgent": "Acil",
             "report_categories": "Rapor Kategorileri",
-            "select_a_topic_to_view_reports_and": "Raporları görmek ve topluluk tartışmalarına katılmak için bir konu seç. Bu aksaklık raporları, yaşayabilirlik yönetimi kararlarını etkiler."
+            "select_a_topic_to_view_reports_and": "Raporları görmek ve topluluk tartışmalarına katılmak için bir konu seç. Bu aksaklık raporları, yaşayabilirlik yönetimi kararlarını etkiler.",
+            "subscribers": "abone",
+            "turn_a_report_into_action_create_a": "Bir raporu eyleme dönüştür: bir öneri oluştur, tartış ve hazineden finanse edilmesi için oy ver.",
+            "general_discussions_about_the_pixagram_ecosystem": "Pixagram ekosistemi hakkında genel tartışmalar, özellik istekleri ve topluluk geri bildirimleri.",
+            "proposals_voting_discussions_and_decision_making": "Ekosistem için öneriler, oylama tartışmaları ve karar alma süreçleri.",
+            "marketing_initiatives_partnerships_and_promotion": "Pixagram için pazarlama girişimleri, iş birlikleri ve tanıtım kampanyaları.",
+            "legal_considerations_compliance_discussions_and": "Ekosistemi etkileyen hukuki değerlendirmeler, uyumluluk tartışmaları ve düzenleyici güncellemeler.",
+            "risk_assessment_threat_analysis_and_mitigation_s": "Ekosistem güvenliği için risk değerlendirmesi, tehdit analizi ve azaltma stratejileri.",
+            "security_audits_vulnerability_reports_and_best_p": "Güvenlik denetimleri, güvenlik açığı raporları ve güvenli kullanım için en iyi uygulamalar.",
+            "report_bugs_technical_issues_and_track_their": "Hataları ve teknik sorunları bildir, çözüm durumlarını takip et.",
+            "community_events_meetups_collaborations_and_soci": "Topluluk etkinlikleri, buluşmalar, iş birlikleri ve sosyal girişimler."
         },
         "gdmetrics": {
             "key_metrics": "Temel Metrikler",

@@ -198,6 +198,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "投稿者：",
         "to": "返信先：",
+        "proposals": "提案",
+        "discussion": "ディスカッション",
+        "marketing": "マーケティング",
+        "legal": "法務",
+        "risks": "リスク",
+        "bug_reports": "バグ報告",
+        "community": "コミュニティ"
     },
 
     components: {
@@ -1582,6 +1589,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "<strong>@{{currentAccount}}</strong> として新しいチェーンパラメーターをブロードキャストします。アカウント作成手数料、最大ブロックサイズ、PXS 金利は本リリースでは固定です。下で witness の URL を更新してください。",
             "you_can_vote_for_up_to_30": "ブロックチェーンの運営に必要なのは21人ですが、最大30人の witness に投票できます。"
         },
+        "governance_dialog": {
+            "viability_management": "存続性マネジメント",
+            "take_actions": "アクションを実行",
+            "governs_the_system_attributes_through_proposals": "提案と witness の投票を通じてシステムの属性を統治します。Pixagram エコシステムの意思決定を可能にするガバナンス層です。",
+            "attributes": "属性",
+            "documentation": "ドキュメント",
+            "enabled_by_viability_management_view_system_stat": "存続性マネジメントによって有効化されます。システム状態、ネットワークのエンドポイント、リアルタイムのブロック生成情報を確認できます。",
+            "methods": "手法",
+            "guides": "ガイド",
+            "associated_to_metrics_download_theory_documents": "指標に関連付けられています。分析システムを効果的に使うための理論文書、方法論ガイド、プロトコルをダウンロードできます。",
+            "metrics": "指標",
+            "analytics": "分析",
+            "measured_by_the_system_track_key_performance": "システムが測定します。主要業績指標を追跡し、目標を監視し、エコシステムの健全性を分析できます。",
+            "control_tower": "コントロールタワー",
+            "dashboard": "ダッシュボード",
+            "monitor_the_entire_ecosystem_from_a_centralized": "一元化されたダッシュボードからエコシステム全体を監視します。リアルタイムの洞察とシステムの概要。",
+            "disruptions": "障害",
+            "reports": "報告",
+            "affects_viability_management_track_and_report_is": "存続性マネジメントに影響します。ガバナンス、法務、リスク、マーケティングなど、コミュニティの各テーマにわたる問題を追跡・報告できます。"
+        },
         "gdattributes": {
             "with_transactions": "{{txCount}} 件のトランザクション",
             "system_status": "システム状態",
@@ -1819,7 +1846,8 @@ export default {
             "signup": "新規登録",
             "the_portal_opens_soon": "{{title}} ポータルはまもなく公開されます。",
             "opens_soon": "{{title}} はまもなく公開されます。",
-            "banner_closed": "バナーを閉じました。"
+            "banner_closed": "バナーを閉じました。",
+            "create_discuss_and_vote": "作成・議論・投票"
         },
         "settings_panel": {
             "60_authors_40_curators": "作者 60% / キュレーター 40%",
@@ -2203,7 +2231,17 @@ export default {
         "gddisruptions": {
             "urgent": "緊急",
             "report_categories": "報告カテゴリー",
-            "select_a_topic_to_view_reports_and": "トピックを選ぶと報告を閲覧し、コミュニティの議論に参加できます。これらの障害報告は存続性マネジメントの判断に影響します。"
+            "select_a_topic_to_view_reports_and": "トピックを選ぶと報告を閲覧し、コミュニティの議論に参加できます。これらの障害報告は存続性マネジメントの判断に影響します。",
+            "subscribers": "人の登録者",
+            "turn_a_report_into_action_create_a": "報告を行動に変えましょう。提案を作成し、議論し、国庫からの資金提供に投票してください。",
+            "general_discussions_about_the_pixagram_ecosystem": "Pixagram エコシステムに関する一般的な議論、機能リクエスト、コミュニティからのフィードバック。",
+            "proposals_voting_discussions_and_decision_making": "エコシステムの提案、投票に関する議論、意思決定プロセス。",
+            "marketing_initiatives_partnerships_and_promotion": "Pixagram のマーケティング施策、パートナーシップ、プロモーションキャンペーン。",
+            "legal_considerations_compliance_discussions_and": "エコシステムに影響する法的な検討事項、コンプライアンスに関する議論、規制の最新情報。",
+            "risk_assessment_threat_analysis_and_mitigation_s": "エコシステムの安全のためのリスク評価、脅威分析、緩和戦略。",
+            "security_audits_vulnerability_reports_and_best_p": "セキュリティ監査、脆弱性報告、安全な利用のためのベストプラクティス。",
+            "report_bugs_technical_issues_and_track_their": "バグや技術的な問題を報告し、その解決状況を追跡します。",
+            "community_events_meetups_collaborations_and_soci": "コミュニティのイベント、ミートアップ、コラボレーション、社会的な取り組み。"
         },
         "gdmetrics": {
             "key_metrics": "主要指標",

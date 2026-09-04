@@ -89,17 +89,17 @@ export const CURRENCY_COUNTRIES = {
 export const DEFAULT_NODES = [
     {
         id: "eu-central",
-        name: "EU - pre-mainnet",
+        name: "Pixa Rex (Frankfurt)",
         url: "https://api.pixagram.com",
         location: [50.1109, 8.6821],  // Frankfurt — central Europe (DE-CIX)
         network: "mainnet",
     },
     {
-        id: "eu-central-2",
-        name: "EU - Testnet",
-        url: "https://34.118.125.155",
-        location: [51.5322, 5.4857],  // Pays-Bas — central Europe (DE-CIX)
-        network: "testnet",
+        id: "sg-central",
+        name: "Merlion Surf (Singapore)",
+        url: "https://merlion.surf",
+        location: [1.3521, 103.81998],  // Pays-Bas — central Europe (DE-CIX)
+        network: "mainnet",
     },
 ];
 
@@ -558,6 +558,33 @@ export const UTC_OFFSET_PER_COUNTRIES = {
     "TC": -5,
     "UM": -11
 }
+
+// ── Official governance portals ────────────────────────────────────────
+// The on-chain communities that back the governance layer. `id` is the
+// community's account name on the chain — the URL segment (`/portal-000001`)
+// and the category a post carries — while `name` is the stable in-app key
+// the components use to attach their own icon, label and description (the
+// display copy is deliberately NOT here: it is per-view and gets
+// translated). The ids are canonical, reserved at genesis. Every place that
+// names a portal — the drawer menu (MenuContent), the governance dialog
+// (GDDisruptions, GDVMProposals) and the post editor
+// (LexicalTextEditorDialog) — reads from here, so a literal `portal-…` id
+// never lives in a component again and the files cannot drift apart.
+export const PROPOSALS_PORTAL = Object.freeze({ name: "proposals", id: "portal-000000" });
+
+// The eight topical portals, in display order: the drawer's governance grid
+// and the Disruptions grid render exactly this sequence, after the
+// proposals row.
+export const COMMUNITY_PORTALS = Object.freeze([
+    Object.freeze({ name: "discussions", id: "portal-000001" }),
+    Object.freeze({ name: "governance",  id: "portal-000002" }),
+    Object.freeze({ name: "marketing",   id: "portal-000003" }),
+    Object.freeze({ name: "legal",       id: "portal-000004" }),
+    Object.freeze({ name: "risks",       id: "portal-000005" }),
+    Object.freeze({ name: "security",    id: "portal-000006" }),
+    Object.freeze({ name: "bugs",        id: "portal-000007" }),
+    Object.freeze({ name: "community",   id: "portal-000008" }),
+]);
 
 // ── Post overlay URL helpers ──────────────────────────────────────────
 export const POST_URL_REGEX = /^\/([a-z0-9\-]+)\/@([a-z0-9\.\-]+)\/([a-z0-9\.\-]+)\/?$/;

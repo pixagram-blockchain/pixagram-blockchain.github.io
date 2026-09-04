@@ -198,6 +198,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "oleh",
         "to": "kepada",
+        "proposals": "Proposal",
+        "discussion": "Diskusi",
+        "marketing": "Pemasaran",
+        "legal": "Hukum",
+        "risks": "Risiko",
+        "bug_reports": "Laporan bug",
+        "community": "Komunitas"
     },
 
     components: {
@@ -1582,6 +1589,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "Siarkan sekumpulan parameter chain baru sebagai <strong>@{{currentAccount}}</strong>. Biaya pembuatan akun, ukuran blok maksimum, dan suku bunga PXS dikunci untuk rilis ini. Perbarui URL witness Anda di bawah.",
             "you_can_vote_for_up_to_30": "Anda dapat memilih hingga 30 witness, meski hanya 21 yang dibutuhkan untuk memimpin blockchain."
         },
+        "governance_dialog": {
+            "viability_management": "Pengelolaan kelayakan",
+            "take_actions": "Ambil tindakan",
+            "governs_the_system_attributes_through_proposals": "Mengatur atribut sistem melalui proposal dan pemungutan suara witness. Inilah lapisan tata kelola yang memungkinkan pengambilan keputusan di ekosistem Pixagram.",
+            "attributes": "Atribut",
+            "documentation": "Dokumentasi",
+            "enabled_by_viability_management_view_system_stat": "Diaktifkan oleh pengelolaan kelayakan. Lihat status sistem, endpoint jaringan, dan informasi produksi blok secara real-time.",
+            "methods": "Metode",
+            "guides": "Panduan",
+            "associated_to_metrics_download_theory_documents": "Terkait dengan metrik. Unduh dokumen teori, panduan metodologi, dan protokol untuk menggunakan sistem analitik secara efektif.",
+            "metrics": "Metrik",
+            "analytics": "Analitik",
+            "measured_by_the_system_track_key_performance": "Diukur oleh sistem. Pantau indikator kinerja utama, awasi target, dan analisis kesehatan ekosistem.",
+            "control_tower": "Menara kendali",
+            "dashboard": "Dasbor",
+            "monitor_the_entire_ecosystem_from_a_centralized": "Pantau seluruh ekosistem dari satu dasbor terpusat. Wawasan real-time dan gambaran umum sistem.",
+            "disruptions": "Gangguan",
+            "reports": "Laporan",
+            "affects_viability_management_track_and_report_is": "Memengaruhi pengelolaan kelayakan. Pantau dan laporkan masalah di berbagai topik komunitas, termasuk tata kelola, hukum, risiko, dan pemasaran."
+        },
         "gdattributes": {
             "with_transactions": "dengan {{txCount}} transaksi",
             "system_status": "Status sistem",
@@ -1819,7 +1846,8 @@ export default {
             "signup": "Daftar",
             "the_portal_opens_soon": "Portal {{title}} segera dibuka.",
             "opens_soon": "{{title}} segera dibuka.",
-            "banner_closed": "Spanduk ditutup."
+            "banner_closed": "Spanduk ditutup.",
+            "create_discuss_and_vote": "Buat, diskusikan, dan pilih"
         },
         "settings_panel": {
             "60_authors_40_curators": "60% penulis / 40% kurator",
@@ -2203,7 +2231,17 @@ export default {
         "gddisruptions": {
             "urgent": "Mendesak",
             "report_categories": "Kategori laporan",
-            "select_a_topic_to_view_reports_and": "Pilih topik untuk melihat laporan dan ikut berdiskusi bersama komunitas. Laporan gangguan ini memengaruhi keputusan pengelolaan kelayakan."
+            "select_a_topic_to_view_reports_and": "Pilih topik untuk melihat laporan dan ikut berdiskusi bersama komunitas. Laporan gangguan ini memengaruhi keputusan pengelolaan kelayakan.",
+            "subscribers": "pelanggan",
+            "turn_a_report_into_action_create_a": "Ubah laporan menjadi tindakan: buat proposal, diskusikan, dan pilih pendanaannya dari kas.",
+            "general_discussions_about_the_pixagram_ecosystem": "Diskusi umum tentang ekosistem Pixagram, permintaan fitur, dan masukan komunitas.",
+            "proposals_voting_discussions_and_decision_making": "Proposal, diskusi pemungutan suara, dan proses pengambilan keputusan untuk ekosistem.",
+            "marketing_initiatives_partnerships_and_promotion": "Inisiatif pemasaran, kemitraan, dan kampanye promosi untuk Pixagram.",
+            "legal_considerations_compliance_discussions_and": "Pertimbangan hukum, diskusi kepatuhan, dan pembaruan regulasi yang memengaruhi ekosistem.",
+            "risk_assessment_threat_analysis_and_mitigation_s": "Penilaian risiko, analisis ancaman, dan strategi mitigasi untuk keamanan ekosistem.",
+            "security_audits_vulnerability_reports_and_best_p": "Audit keamanan, laporan kerentanan, dan praktik terbaik untuk penggunaan yang aman.",
+            "report_bugs_technical_issues_and_track_their": "Laporkan bug dan masalah teknis, lalu pantau status penyelesaiannya.",
+            "community_events_meetups_collaborations_and_soci": "Acara komunitas, pertemuan, kolaborasi, dan inisiatif sosial."
         },
         "gdmetrics": {
             "key_metrics": "Metrik utama",

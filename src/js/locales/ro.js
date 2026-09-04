@@ -200,6 +200,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "de",
         "to": "către",
+        "proposals": "Propuneri",
+        "discussion": "Discuții",
+        "marketing": "Marketing",
+        "legal": "Juridic",
+        "risks": "Riscuri",
+        "bug_reports": "Rapoarte de erori",
+        "community": "Comunitate"
     },
 
     components: {
@@ -1583,6 +1590,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "Transmite un set nou de parametri ai lanțului ca <strong>@{{currentAccount}}</strong>. Taxa de creare a contului, dimensiunea maximă a blocului și rata dobânzii PXS sunt blocate pentru această versiune. Actualizează-ți URL-ul de witness mai jos.",
             "you_can_vote_for_up_to_30": "Poți vota până la 30 de witnesses, deși doar 21 de witnesses sunt necesari pentru a conduce blockchainul."
         },
+        "governance_dialog": {
+            "viability_management": "Gestionarea viabilității",
+            "take_actions": "Treci la acțiune",
+            "governs_the_system_attributes_through_proposals": "Guvernează atributele sistemului prin propuneri și votul witnesses. Este stratul de guvernanță care face posibilă luarea deciziilor în ecosistemul Pixagram.",
+            "attributes": "Atribute",
+            "documentation": "Documentație",
+            "enabled_by_viability_management_view_system_stat": "Activate de gestionarea viabilității. Vezi starea sistemului, punctele de acces ale rețelei și producția de blocuri în timp real.",
+            "methods": "Metode",
+            "guides": "Ghiduri",
+            "associated_to_metrics_download_theory_documents": "Asociate metricilor. Descarcă documente teoretice, ghiduri metodologice și protocoale pentru a folosi eficient sistemul de analiză.",
+            "metrics": "Metrici",
+            "analytics": "Analiză",
+            "measured_by_the_system_track_key_performance": "Măsurate de sistem. Urmărește indicatorii-cheie de performanță, monitorizează obiectivele și analizează sănătatea ecosistemului.",
+            "control_tower": "Turn de control",
+            "dashboard": "Panou de control",
+            "monitor_the_entire_ecosystem_from_a_centralized": "Monitorizează întregul ecosistem dintr-un panou centralizat. Informații în timp real și o privire de ansamblu asupra sistemului.",
+            "disruptions": "Perturbări",
+            "reports": "Rapoarte",
+            "affects_viability_management_track_and_report_is": "Afectează gestionarea viabilității. Urmărește și raportează probleme din diferitele subiecte ale comunității: guvernanță, juridic, riscuri, marketing și altele."
+        },
         "gdattributes": {
             "with_transactions": "cu {{txCount}} tranzacții",
             "system_status": "Starea sistemului",
@@ -1820,7 +1847,8 @@ export default {
             "signup": "Înregistrare",
             "the_portal_opens_soon": "Portalul {{title}} se deschide în curând.",
             "opens_soon": "{{title}} se deschide în curând.",
-            "banner_closed": "Banner închis."
+            "banner_closed": "Banner închis.",
+            "create_discuss_and_vote": "Creează, discută și votează"
         },
         "settings_panel": {
             "60_authors_40_curators": "60% autori / 40% curatori",
@@ -2204,7 +2232,17 @@ export default {
         "gddisruptions": {
             "urgent": "Urgent",
             "report_categories": "Categorii de rapoarte",
-            "select_a_topic_to_view_reports_and": "Selectează un subiect pentru a vedea rapoartele și a te alătura discuțiilor comunității. Aceste rapoarte de perturbări influențează deciziile de gestionare a viabilității."
+            "select_a_topic_to_view_reports_and": "Selectează un subiect pentru a vedea rapoartele și a te alătura discuțiilor comunității. Aceste rapoarte de perturbări influențează deciziile de gestionare a viabilității.",
+            "subscribers": "abonați",
+            "turn_a_report_into_action_create_a": "Transformă un raport în acțiune: creează o propunere, discut-o și votează finanțarea ei din trezorerie.",
+            "general_discussions_about_the_pixagram_ecosystem": "Discuții generale despre ecosistemul Pixagram, cereri de funcționalități și feedback din comunitate.",
+            "proposals_voting_discussions_and_decision_making": "Propuneri, discuții despre voturi și procese decizionale pentru ecosistem.",
+            "marketing_initiatives_partnerships_and_promotion": "Inițiative de marketing, parteneriate și campanii promoționale pentru Pixagram.",
+            "legal_considerations_compliance_discussions_and": "Considerații juridice, discuții despre conformitate și noutăți de reglementare care afectează ecosistemul.",
+            "risk_assessment_threat_analysis_and_mitigation_s": "Evaluarea riscurilor, analiza amenințărilor și strategii de atenuare pentru securitatea ecosistemului.",
+            "security_audits_vulnerability_reports_and_best_p": "Audituri de securitate, rapoarte de vulnerabilități și bune practici pentru o utilizare sigură.",
+            "report_bugs_technical_issues_and_track_their": "Raportează erori și probleme tehnice și urmărește stadiul rezolvării lor.",
+            "community_events_meetups_collaborations_and_soci": "Evenimente ale comunității, întâlniri, colaborări și inițiative sociale."
         },
         "gdmetrics": {
             "key_metrics": "Metrici-cheie",

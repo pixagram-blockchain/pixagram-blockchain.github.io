@@ -2474,7 +2474,7 @@ function NewPost(props) {
     // Process image with or without AI
     // style: "retroart" | "vga" — selects the AI LoRA; undefined when the
     // user declined AI (the pipeline ignores it without AI).
-    const processImage = useCallback(async (useAi, style) => {
+    const processImage = useCallback(async (useAi, style = "retroart") => {
         if (!mountedRef.current) return;
 
         try {

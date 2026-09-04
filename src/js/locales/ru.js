@@ -200,6 +200,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "от",
         "to": "в ответ",
+        "proposals": "Предложения",
+        "discussion": "Обсуждение",
+        "marketing": "Маркетинг",
+        "legal": "Юридические вопросы",
+        "risks": "Риски",
+        "bug_reports": "Сообщения об ошибках",
+        "community": "Сообщество"
     },
 
     components: {
@@ -1584,6 +1591,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "Отправьте новый набор параметров сети от имени <strong>@{{currentAccount}}</strong>. Плата за создание аккаунта, максимальный размер блока и ставка по PXS в этом релизе зафиксированы. Обновите ниже свой witness URL.",
             "you_can_vote_for_up_to_30": "Вы можете проголосовать не более чем за 30 witnesses, хотя для работы блокчейна требуется всего 21."
         },
+        "governance_dialog": {
+            "viability_management": "Управление жизнеспособностью",
+            "take_actions": "Действовать",
+            "governs_the_system_attributes_through_proposals": "Управляет атрибутами системы через предложения и голосование witnesses. Это уровень управления, который обеспечивает принятие решений в экосистеме Pixagram.",
+            "attributes": "Атрибуты",
+            "documentation": "Документация",
+            "enabled_by_viability_management_view_system_stat": "Обеспечивается управлением жизнеспособностью. Смотрите состояние системы, сетевые точки доступа и данные о производстве блоков в реальном времени.",
+            "methods": "Методы",
+            "guides": "Руководства",
+            "associated_to_metrics_download_theory_documents": "Связаны с метриками. Скачайте теоретические документы, методические руководства и протоколы для эффективной работы с аналитической системой.",
+            "metrics": "Метрики",
+            "analytics": "Аналитика",
+            "measured_by_the_system_track_key_performance": "Измеряются системой. Отслеживайте ключевые показатели эффективности, следите за целями и анализируйте состояние экосистемы.",
+            "control_tower": "Диспетчерская",
+            "dashboard": "Панель управления",
+            "monitor_the_entire_ecosystem_from_a_centralized": "Наблюдайте за всей экосистемой с единой панели. Аналитика в реальном времени и обзор системы.",
+            "disruptions": "Сбои",
+            "reports": "Отчёты",
+            "affects_viability_management_track_and_report_is": "Влияет на управление жизнеспособностью. Отслеживайте проблемы и сообщайте о них по темам сообщества: управление, юридические вопросы, риски, маркетинг и другие."
+        },
         "gdattributes": {
             "with_transactions": "с {{txCount}} транзакциями",
             "system_status": "Состояние системы",
@@ -1821,7 +1848,8 @@ export default {
             "signup": "Регистрация",
             "the_portal_opens_soon": "Портал {{title}} скоро откроется.",
             "opens_soon": "{{title}} скоро откроется.",
-            "banner_closed": "Баннер закрыт."
+            "banner_closed": "Баннер закрыт.",
+            "create_discuss_and_vote": "Создавайте, обсуждайте и голосуйте"
         },
         "settings_panel": {
             "60_authors_40_curators": "60% авторам / 40% кураторам",
@@ -2205,7 +2233,17 @@ export default {
         "gddisruptions": {
             "urgent": "Срочно",
             "report_categories": "Категории жалоб",
-            "select_a_topic_to_view_reports_and": "Выберите тему, чтобы посмотреть сообщения и присоединиться к обсуждениям сообщества. Эти сообщения о сбоях влияют на решения по управлению жизнеспособностью."
+            "select_a_topic_to_view_reports_and": "Выберите тему, чтобы посмотреть сообщения и присоединиться к обсуждениям сообщества. Эти сообщения о сбоях влияют на решения по управлению жизнеспособностью.",
+            "subscribers": "подписчиков",
+            "turn_a_report_into_action_create_a": "Превратите сообщение в действие: создайте предложение, обсудите его и проголосуйте за его финансирование из казны.",
+            "general_discussions_about_the_pixagram_ecosystem": "Общие обсуждения экосистемы Pixagram, запросы функций и отзывы сообщества.",
+            "proposals_voting_discussions_and_decision_making": "Предложения, обсуждения голосований и процессы принятия решений в экосистеме.",
+            "marketing_initiatives_partnerships_and_promotion": "Маркетинговые инициативы, партнёрства и рекламные кампании для Pixagram.",
+            "legal_considerations_compliance_discussions_and": "Юридические вопросы, обсуждения соответствия требованиям и регуляторные новости, затрагивающие экосистему.",
+            "risk_assessment_threat_analysis_and_mitigation_s": "Оценка рисков, анализ угроз и стратегии их снижения для безопасности экосистемы.",
+            "security_audits_vulnerability_reports_and_best_p": "Аудиты безопасности, сообщения об уязвимостях и рекомендации по безопасному использованию.",
+            "report_bugs_technical_issues_and_track_their": "Сообщайте об ошибках и технических проблемах и отслеживайте статус их решения.",
+            "community_events_meetups_collaborations_and_soci": "События сообщества, встречи, совместные проекты и социальные инициативы."
         },
         "gdmetrics": {
             "key_metrics": "Ключевые метрики",

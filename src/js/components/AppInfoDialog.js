@@ -11,6 +11,7 @@ import Tabs from "@material-ui/core/Tabs";
 import Typography from "@material-ui/core/Typography";
 import IntellectualProperty from "./IntellectualProperty";
 import TermsOfUse from "./TermsOfUse";
+import PrivacyPolicy from "./PrivacyPolicy";
 import SwipeableViews from "react-swipeable-views";
 import TeamAndCompany from "./TeamAndCompany";
 import FAQ from "./FAQ";
@@ -98,6 +99,7 @@ const styles = theme => ({
 const TAB_TITLE_KEYS = [
     "components.app_info_dialog.intellectual_property",
     "components.app_info_dialog.terms_of_use",
+    "components.app_info_dialog.privacy_policy",
     "components.app_info_dialog.team_and_contributors",
     "components.app_info_dialog.faq",
     "components.app_info_dialog.community_principles",
@@ -106,6 +108,7 @@ const TAB_TITLE_KEYS = [
 const TAB_LABEL_KEYS = [
     "components.app_info_dialog.tab_ip",
     "components.app_info_dialog.tab_terms",
+    "components.app_info_dialog.tab_privacy",
     "components.app_info_dialog.tab_team",
     "components.app_info_dialog.tab_faq",
     "components.app_info_dialog.tab_ethos",
@@ -162,6 +165,9 @@ class AppInfoDialog extends React.PureComponent {
                 <TermsOfUse/>
             </DialogContent>,
             <DialogContent scroll={"paper"} className={classes.dialogContent}>
+                <PrivacyPolicy/>
+            </DialogContent>,
+            <DialogContent scroll={"paper"} className={classes.dialogContent}>
                 <TeamAndCompany/>
             </DialogContent>,
             <DialogContent scroll={"paper"} className={classes.dialogContent}>
@@ -207,6 +213,7 @@ class AppInfoDialog extends React.PureComponent {
                     <Tab icon={t(TAB_LABEL_KEYS[2])} />
                     <Tab icon={t(TAB_LABEL_KEYS[3])} />
                     <Tab icon={t(TAB_LABEL_KEYS[4])} />
+                    <Tab icon={t(TAB_LABEL_KEYS[5])} />
                 </Tabs>
                 <SwipeableViews
                     ignoreNativeScroll={true}

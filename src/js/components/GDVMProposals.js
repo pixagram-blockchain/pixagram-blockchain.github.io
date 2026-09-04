@@ -17,7 +17,7 @@ import InfoIcon from "@material-ui/icons/Info";
 import AddIcon from "@material-ui/icons/Add";
 import InboxIcon from "@material-ui/icons/InboxOutlined";
 import { Pageview } from "@material-ui/icons";
-import { HISTORY } from "../utils/constants";
+import { HISTORY, PROPOSALS_PORTAL } from "../utils/constants";
 // usePrices is a Preact hook; it lives one level under src in hooks/.
 // Adjust this path if your layout differs (it imports ../utils/settings).
 import { usePrices } from "../hooks/usePrices";
@@ -56,11 +56,13 @@ function renderPostBody(api, body) {
 
 // ──────────────────────────────────────────────────────────────
 // Community routing — the official Pixagram community in which
-// proposal posts live. Update the slug here if the on-chain
-// community id changes; both the "View Proposal" link and the
-// "Create Proposal" button read from these constants.
+// proposal posts live. The id is canonical and owned by
+// utils/constants (PROPOSALS_PORTAL), shared with the drawer menu,
+// the Disruptions grid and the post editor; both the "View
+// Proposal" link and the "Create Proposal" button read it from
+// there through this alias.
 // ──────────────────────────────────────────────────────────────
-const PROPOSALS_COMMUNITY_URL = `portal-183616`;
+const PROPOSALS_COMMUNITY_URL = PROPOSALS_PORTAL.id;
 const PROPOSAL_CREATE_URL = `/${PROPOSALS_COMMUNITY_URL}/created/editor`;
 
 const styles = theme => ({

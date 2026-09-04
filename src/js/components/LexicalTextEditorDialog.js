@@ -70,7 +70,8 @@ import { previewDialogStyles } from './PreviewDialog';
 import { dialogStyles } from './Dialogs';
 import { formatMenuStyles } from './FormatMenus';
 
-import { t } from "../utils/text";
+import { t, subscribe as subscribe_language } from "../../utils/text";
+import { PROPOSALS_PORTAL } from "../../utils/constants";
 
 // Hoisted so SwipeableViews receives stable references across renders
 const SWIPE_SPRING_CONFIG = {tension: 450, friction: 60, duration: '120ms', easeFunction: 'cubic-bezier(0.280, 0.840, 0.420, 1)', delay: '5ms'};
@@ -94,9 +95,11 @@ const sanitizeUrl = (raw) => {
 // ── Proposals (ported from the retired TextEditorDialog) ─────────────────
 // The single community whose posts are DAO proposals. When the selected
 // community matches this id, the settings panel shows the "This is a
-// proposal" checkbox and the proposal-config fields.
-// Replace with the real on-chain community id once minted.
-const PROPOSAL_COMMUNITY_ID = "portal-183616";
+// proposal" checkbox and the proposal-config fields. The id itself is
+// canonical and owned by utils/constants (PROPOSALS_PORTAL) — shared with
+// GDVMProposals, the drawer menu and the Disruptions grid — and only
+// aliased here.
+const PROPOSAL_COMMUNITY_ID = PROPOSALS_PORTAL.id;
 
 // Default proposal timing: starts 3 days from now (giving the chain time
 // to confirm), runs for 30 days by default.
@@ -320,6 +323,23 @@ const APPBAR_TITLE_STYLE = { fontWeight: 500 };
 const APPBAR_CAPTION_STYLE = { color: "rgba(255,255,255,0.6)" };
 
 class LexicalTextEditorDialog extends PureComponent {
+
+    // PureComponent — useLanguage() is a hook and unavailable here, and nothing
+    // in props changes when the user switches language, so shouldComponentUpdate
+    // would block the repaint anyway. Subscribe directly and force it.
+    _unsubscribeLanguage = null;
+
+    _subscribeLanguage() {
+        if (this._unsubscribeLanguage) return;
+        this._unsubscribeLanguage = subscribe_language(() => this.forceUpdate());
+    }
+
+    _unsubscribeLanguageIfNeeded() {
+        if (this._unsubscribeLanguage) {
+            this._unsubscribeLanguage();
+            this._unsubscribeLanguage = null;
+        }
+    }
     constructor(props) {
         super(props);
 
@@ -426,6 +446,7 @@ class LexicalTextEditorDialog extends PureComponent {
     }
 
     async componentDidMount() {
+        this._subscribeLanguage();
         this.mediaQuery = window.matchMedia('(max-width: 960px)');
         if (this.mediaQuery.matches !== this.state.mobile) {
             this.setState({ mobile: this.mediaQuery.matches });
@@ -542,9 +563,7 @@ class LexicalTextEditorDialog extends PureComponent {
             if (!this.props.open || !this.props.editPost
                 || this.props.editPost.permlink !== editPost.permlink) return;
             if (!raw || !raw.author) {
-                actions.trigger_snackbar(t(
-                    "components.lexical_text_editor_dialog.could_not_load_the_post_for_editing"
-                ));
+                actions.trigger_snackbar(t("components.lexical_text_editor_dialog.could_not_load_the_post_for_editing"));
                 return;
             }
 
@@ -609,13 +628,12 @@ class LexicalTextEditorDialog extends PureComponent {
             }
         } catch (e) {
             console.warn('[Editor] edit load failed:', e?.message);
-            actions.trigger_snackbar(t(
-                "components.lexical_text_editor_dialog.could_not_load_the_post_for_editing"
-            ));
+            actions.trigger_snackbar(t("components.lexical_text_editor_dialog.could_not_load_the_post_for_editing"));
         }
     };
 
     componentWillUnmount() {
+        this._unsubscribeLanguageIfNeeded();
         if (this.autoSaveTimer) clearTimeout(this.autoSaveTimer);
         if (this.statsTimer) clearTimeout(this.statsTimer);
         Object.keys(this._menuCloseTimers).forEach((key) => {
@@ -714,7 +732,7 @@ class LexicalTextEditorDialog extends PureComponent {
         const wordCount = countWords(plainText);
 
         const draftId = await this.draftManager.save(currentDraftId, {
-            title: title || 'Untitled',
+            title: title || t("components.lexical_text_editor_dialog.untitled"),
             description,
             content,
             tags,
@@ -994,7 +1012,7 @@ class LexicalTextEditorDialog extends PureComponent {
         this.setState({
             deleteConfirmDialogOpen: true,
             deleteConfirmDraftId: draftId,
-            deleteConfirmDraftTitle: draftTitle || 'Untitled Draft'
+            deleteConfirmDraftTitle: draftTitle || t("components.lexical_text_editor_dialog.untitled_draft")
         });
     };
 
@@ -1275,18 +1293,13 @@ class LexicalTextEditorDialog extends PureComponent {
                 imageUrlDialogValue: ""
             });
             actions.trigger_snackbar(
-                t("components.lexical_text_editor_dialog.image_stored_on_arweave_kb", {
-                    max: Math.max(1, Math.round(stored.bytes / 1024)),
-                    value: stored.withinFreeBudget ? ', free tier' : ''
-                })
+                `Image stored on Arweave (${Math.max(1, Math.round(stored.bytes / 1024))} kB${stored.withinFreeBudget ? ', free tier' : ''})`
             );
         } catch (error) {
             console.error('Arweave image upload failed:', error);
             this.setState({ imageUploading: false });
             actions.trigger_snackbar(
-                t("components.lexical_text_editor_dialog.image_upload_failed", {
-                    message: (error && error.message ? error.message : 'unknown error')
-                })
+                'Image upload failed: ' + (error && error.message ? error.message : 'unknown error')
             );
         }
     };
@@ -1348,7 +1361,7 @@ class LexicalTextEditorDialog extends PureComponent {
     // validates, broadcasts the comment op, deletes the local draft, then —
     // for proposals — fires create_proposal referencing the fresh permlink.
     // The old stub here only saved a draft, which is why Publish used to
-    // answer with "Draft saved".
+    // answer with t("components.lexical_text_editor_dialog.draft_saved").
     handlePublish = async () => {
         const { api } = this.props;
         const {
@@ -1376,9 +1389,7 @@ class LexicalTextEditorDialog extends PureComponent {
             const { author, permlink: editPermlink } = this.props.editPost;
             const { editProposal } = this.state;
             if (activeAccount !== author) {
-                actions.trigger_snackbar(t("components.lexical_text_editor_dialog.only_can_edit_this_post", {
-                    author: author
-                }));
+                actions.trigger_snackbar(`Only @${author} can edit this post.`);
                 return;
             }
 
@@ -1398,26 +1409,17 @@ class LexicalTextEditorDialog extends PureComponent {
                     return;
                 }
                 if (start && end.getTime() <= start.getTime()) {
-                    actions.trigger_snackbar(t(
-                        "components.lexical_text_editor_dialog.proposal_end_date_must_be_after_the"
-                    ));
+                    actions.trigger_snackbar(t("components.lexical_text_editor_dialog.proposal_end_date_must_be_after_the"));
                     return;
                 }
                 if (!isFinite(daily) || daily <= 0) {
-                    actions.trigger_snackbar(t(
-                        "components.lexical_text_editor_dialog.daily_pay_must_be_greater_than_zero"
-                    ));
+                    actions.trigger_snackbar(t("components.lexical_text_editor_dialog.daily_pay_must_be_greater_than_zero"));
                     return;
                 }
                 // The chain rejects raising daily_pay; catch it here with a clear
                 // message instead of a cryptic broadcast failure.
                 if (isFinite(origDaily) && daily > origDaily + 1e-9) {
-                    actions.trigger_snackbar(t(
-                        "components.lexical_text_editor_dialog.daily_pay_can_only_be_lowered_currently",
-                        {
-                            origDaily: origDaily
-                        }
-                    ));
+                    actions.trigger_snackbar(`Daily pay can only be lowered (currently ${origDaily} PXS/day).`);
                     return;
                 }
                 proposalUpdate = {
@@ -1459,9 +1461,9 @@ class LexicalTextEditorDialog extends PureComponent {
                 this._published = true; // no draft resurrection on unmount
                 this.setState({ isPublishing: false });
                 this.closePreview();
-                actions.trigger_snackbar(proposalUpdate ? t(
-                    "components.lexical_text_editor_dialog.post_and_proposal_updated_successfully"
-                ) : t("components.lexical_text_editor_dialog.post_updated_successfully"));
+                actions.trigger_snackbar(proposalUpdate
+                    ? t("components.lexical_text_editor_dialog.post_and_proposal_updated_successfully")
+                    : t("components.lexical_text_editor_dialog.post_updated_successfully"));
                 this.props.onUpdated?.({ author, permlink: editPermlink, title: title.trim() });
                 setTimeout(() => {
                     if (this.props.onClose) this.props.onClose();
@@ -1476,16 +1478,11 @@ class LexicalTextEditorDialog extends PureComponent {
                     this._published = true;
                     this.closePreview();
                     this.props.onUpdated?.({ author, permlink: editPermlink, title: title.trim() });
-                    actions.trigger_snackbar(error.message ? t(
-                        "components.lexical_text_editor_dialog.post_updated_but_the_proposal_update_failed",
-                        {
-                            message: error.message
-                        }
-                    ) : t(
-                        "components.lexical_text_editor_dialog.post_updated_but_the_proposal_update_failed_2"
-                    ));
+                    actions.trigger_snackbar(error.message
+                        ? `Post updated, but the proposal update failed: ${error.message}`
+                        : t("components.lexical_text_editor_dialog.post_updated_but_the_proposal_update_failed_2"));
                 } else {
-                    actions.trigger_snackbar(error.message || 'Failed to update post.');
+                    actions.trigger_snackbar(error.message || t("components.lexical_text_editor_dialog.failed_to_update_post"));
                 }
             }
             return;
@@ -1506,29 +1503,21 @@ class LexicalTextEditorDialog extends PureComponent {
             const daily = Number(proposalDailyPay);
 
             if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-                actions.trigger_snackbar(t(
-                    "components.lexical_text_editor_dialog.proposal_start_and_end_dates_are_required"
-                ));
+                actions.trigger_snackbar(t("components.lexical_text_editor_dialog.proposal_start_and_end_dates_are_required"));
                 return;
             }
             if (end.getTime() <= start.getTime()) {
-                actions.trigger_snackbar(t(
-                    "components.lexical_text_editor_dialog.proposal_end_date_must_be_after_the"
-                ));
+                actions.trigger_snackbar(t("components.lexical_text_editor_dialog.proposal_end_date_must_be_after_the"));
                 return;
             }
             // Chain rejects start dates in the past (and allows ~now + a few
             // minutes). A 1-minute floor accounts for round-trip latency.
             if (start.getTime() < Date.now() - 60_000) {
-                actions.trigger_snackbar(t(
-                    "components.lexical_text_editor_dialog.proposal_start_date_cannot_be_in_the"
-                ));
+                actions.trigger_snackbar(t("components.lexical_text_editor_dialog.proposal_start_date_cannot_be_in_the"));
                 return;
             }
             if (!isFinite(daily) || daily <= 0) {
-                actions.trigger_snackbar(t(
-                    "components.lexical_text_editor_dialog.daily_pay_must_be_greater_than_zero"
-                ));
+                actions.trigger_snackbar(t("components.lexical_text_editor_dialog.daily_pay_must_be_greater_than_zero"));
                 return;
             }
         }
@@ -1589,7 +1578,7 @@ class LexicalTextEditorDialog extends PureComponent {
         } catch (error) {
             console.error('Error publishing post:', error);
             this.setState({ isPublishing: false });
-            actions.trigger_snackbar(error.message || 'Failed to publish post.');
+            actions.trigger_snackbar(error.message || t("components.lexical_text_editor_dialog.failed_to_publish_post"));
             return; // preview stays open so the user can retry
         }
 
@@ -1642,14 +1631,9 @@ class LexicalTextEditorDialog extends PureComponent {
                 // The post is already on-chain — surface a distinct message so
                 // the user knows the content survived the proposal failure.
                 actions.trigger_snackbar(
-                    (error && error.message) ? t(
-                        "components.lexical_text_editor_dialog.post_published_but_proposal_failed",
-                        {
-                            message: error.message
-                        }
-                    ) : t(
-                        "components.lexical_text_editor_dialog.post_published_but_the_proposal_submission_faile"
-                    )
+                    (error && error.message)
+                        ? `Post published, but proposal failed: ${error.message}`
+                        : t("components.lexical_text_editor_dialog.post_published_but_the_proposal_submission_faile")
                 );
                 return;
             }
@@ -1927,13 +1911,12 @@ class LexicalTextEditorDialog extends PureComponent {
                         <Toolbar>
                             <Box flexGrow={1} ml={2}>
                                 <Typography variant="h6" style={APPBAR_TITLE_STYLE}>
-                                    {editMode ? "Edit Blog Post" : "Write a New Blog Post"}
+                                    {editMode ? t("components.lexical_text_editor_dialog.edit_blog_post") : t("components.lexical_text_editor_dialog.write_a_new_blog_post")}
                                 </Typography>
-                                <Typography variant="caption" style={APPBAR_CAPTION_STYLE}>{t("components.lexical_text_editor_dialog.words_min_read", {
-                                        wordCount: wordCount,
-                                        readingTime: readingTime,
-                                        currentDraftId: currentDraftId && ' · Draft saved'
-                                    })}</Typography>
+                                <Typography variant="caption" style={APPBAR_CAPTION_STYLE}>
+                                    {wordCount} words · {readingTime} min read
+                                    {currentDraftId && ' · Draft saved'}
+                                </Typography>
                             </Box>
                             <IconButton color="inherit" onClick={onClose}>
                                 <CloseIcon />
@@ -1970,6 +1953,7 @@ class LexicalTextEditorDialog extends PureComponent {
                         onRedo={this.onRedo}
                     />
                 </Dialog>
+
                 <PreviewDialog
                     classes={classes}
                     open={previewDialogOpen}
@@ -1985,6 +1969,7 @@ class LexicalTextEditorDialog extends PureComponent {
                     onPublish={this.handlePublish}
                     renderMarkdown={this.renderMarkdown}
                 />
+
                 <DraftsDialog
                     classes={classes}
                     open={draftsDialogOpen}
@@ -1998,6 +1983,7 @@ class LexicalTextEditorDialog extends PureComponent {
                     onSearchChange={this.handleDraftsSearch}
                     formatDate={this.formatDate}
                 />
+
                 <ConfirmDialog
                     classes={classes}
                     open={confirmDialogOpen}
@@ -2006,17 +1992,17 @@ class LexicalTextEditorDialog extends PureComponent {
                     onClose={this.closeConfirmDialog}
                     onConfirm={this.handleConfirmAction}
                 />
+
                 {/* Delete Confirmation Dialog */}
                 <ConfirmDialog
                     classes={classes}
                     open={deleteConfirmDialogOpen}
                     title={t("components.lexical_text_editor_dialog.delete_draft")}
-                    message={t("components.lexical_text_editor_dialog.are_you_sure_you_want_to_delete", {
-                        deleteConfirmDraftTitle: deleteConfirmDraftTitle
-                    })}
+                    message={`Are you sure you want to delete "${deleteConfirmDraftTitle}"? This action cannot be undone.`}
                     onClose={this.closeDeleteConfirmDialog}
                     onConfirm={this.handleDeleteConfirm}
                 />
+
                 <PasswordDialog
                     classes={classes}
                     open={passwordDialogOpen}
@@ -2026,6 +2012,7 @@ class LexicalTextEditorDialog extends PureComponent {
                     onConfirm={this.handlePasswordAction}
                     onChange={this.onPasswordValueChange}
                 />
+
                 <ImageUrlDialog
                     classes={classes}
                     open={imageUrlDialogOpen}
@@ -2036,6 +2023,7 @@ class LexicalTextEditorDialog extends PureComponent {
                     onChange={this.onImageUrlValueChange}
                     onFileSelected={this.handleImageFileSelected}
                 />
+
                 <FormatMenus
                     classes={classes}
                     formatMenuAnchor={formatMenuAnchor}
@@ -2049,6 +2037,7 @@ class LexicalTextEditorDialog extends PureComponent {
                     onToggleInlineStyle={this.toggleInlineStyle}
                     onToggleBlockType={this.toggleBlockType}
                 />
+
                 <LinkDialog
                     classes={classes}
                     open={linkDialogOpen}
@@ -2058,6 +2047,7 @@ class LexicalTextEditorDialog extends PureComponent {
                     onInsert={this.insertLink}
                     onUrlChange={this.onLinkUrlChange}
                 />
+
                 <GradientEditorDialog
                     open={gradientEditorOpen}
                     onAccept={this.closeGradientEditor}

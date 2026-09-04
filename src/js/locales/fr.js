@@ -197,6 +197,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "par",
         "to": "à",
+        "proposals": "Propositions",
+        "discussion": "Discussion",
+        "marketing": "Marketing",
+        "legal": "Juridique",
+        "risks": "Risques",
+        "bug_reports": "Rapports de bugs",
+        "community": "Communauté"
     },
 
     components: {
@@ -1581,6 +1588,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "Diffusez un nouveau jeu de paramètres de chaîne en tant que <strong>@{{currentAccount}}</strong>. Les frais de création de compte, la taille maximale de bloc et le taux d’intérêt PXS sont verrouillés pour cette version. Mettez à jour votre URL de witness ci-dessous.",
             "you_can_vote_for_up_to_30": "Vous pouvez voter pour jusqu’à 30 witnesses, alors que 21 seulement sont nécessaires pour diriger la blockchain."
         },
+        "governance_dialog": {
+            "viability_management": "Gestion de viabilité",
+            "take_actions": "Passer à l’action",
+            "governs_the_system_attributes_through_proposals": "Gouverne les attributs du système par les propositions et le vote des witnesses. C’est la couche de gouvernance qui permet la prise de décision dans l’écosystème Pixagram.",
+            "attributes": "Attributs",
+            "documentation": "Documentation",
+            "enabled_by_viability_management_view_system_stat": "Rendus possibles par la gestion de viabilité. Consultez l’état du système, les points d’accès du réseau et la production des blocs en temps réel.",
+            "methods": "Méthodes",
+            "guides": "Guides",
+            "associated_to_metrics_download_theory_documents": "Associées aux métriques. Téléchargez les documents théoriques, les guides méthodologiques et les protocoles pour utiliser efficacement le système d’analyse.",
+            "metrics": "Métriques",
+            "analytics": "Analyse",
+            "measured_by_the_system_track_key_performance": "Mesurées par le système. Suivez les indicateurs clés, surveillez les objectifs et analysez la santé de l’écosystème.",
+            "control_tower": "Tour de contrôle",
+            "dashboard": "Tableau de bord",
+            "monitor_the_entire_ecosystem_from_a_centralized": "Surveillez tout l’écosystème depuis un tableau de bord centralisé. Aperçus en temps réel et vue d’ensemble du système.",
+            "disruptions": "Perturbations",
+            "reports": "Signalements",
+            "affects_viability_management_track_and_report_is": "Influence la gestion de viabilité. Suivez et signalez les problèmes par thème communautaire : gouvernance, juridique, risques, marketing…"
+        },
         "gdattributes": {
             "with_transactions": "avec {{txCount}} transactions",
             "system_status": "État du système",
@@ -1818,7 +1845,8 @@ export default {
             "signup": "Inscription",
             "the_portal_opens_soon": "Le portail {{title}} ouvre bientôt.",
             "opens_soon": "{{title}} ouvre bientôt.",
-            "banner_closed": "Bannière fermée."
+            "banner_closed": "Bannière fermée.",
+            "create_discuss_and_vote": "Créer, discuter et voter"
         },
         "settings_panel": {
             "60_authors_40_curators": "60 % auteurs / 40 % curateurs",
@@ -2202,7 +2230,17 @@ export default {
         "gddisruptions": {
             "urgent": "Urgent",
             "report_categories": "Catégories de signalement",
-            "select_a_topic_to_view_reports_and": "Choisissez un sujet pour consulter les signalements et participer aux discussions de la communauté. Ces signalements de perturbation nourrissent les décisions de gestion de viabilité."
+            "select_a_topic_to_view_reports_and": "Choisissez un sujet pour consulter les signalements et participer aux discussions de la communauté. Ces signalements de perturbation nourrissent les décisions de gestion de viabilité.",
+            "subscribers": "abonnés",
+            "turn_a_report_into_action_create_a": "Transformez un signalement en action : créez une proposition, discutez-en et votez son financement par la trésorerie.",
+            "general_discussions_about_the_pixagram_ecosystem": "Discussions générales sur l’écosystème Pixagram, demandes de fonctionnalités et retours de la communauté.",
+            "proposals_voting_discussions_and_decision_making": "Propositions, discussions de vote et processus de décision pour l’écosystème.",
+            "marketing_initiatives_partnerships_and_promotion": "Initiatives marketing, partenariats et campagnes promotionnelles pour Pixagram.",
+            "legal_considerations_compliance_discussions_and": "Considérations juridiques, discussions sur la conformité et actualités réglementaires touchant l’écosystème.",
+            "risk_assessment_threat_analysis_and_mitigation_s": "Évaluation des risques, analyse des menaces et stratégies d’atténuation pour la sécurité de l’écosystème.",
+            "security_audits_vulnerability_reports_and_best_p": "Audits de sécurité, rapports de vulnérabilités et bonnes pratiques pour un usage sûr.",
+            "report_bugs_technical_issues_and_track_their": "Signalez des bugs et des problèmes techniques, et suivez l’avancement de leur résolution.",
+            "community_events_meetups_collaborations_and_soci": "Événements communautaires, rencontres, collaborations et initiatives sociales."
         },
         "gdmetrics": {
             "key_metrics": "Indicateurs clés",

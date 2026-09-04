@@ -197,6 +197,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "பதிவிட்டவர்:",
         "to": "பதில்:",
+        "proposals": "முன்மொழிவுகள்",
+        "discussion": "விவாதம்",
+        "marketing": "சந்தைப்படுத்தல்",
+        "legal": "சட்டம்",
+        "risks": "இடர்கள்",
+        "bug_reports": "பிழை அறிக்கைகள்",
+        "community": "சமூகம்"
     },
 
     components: {
@@ -1580,6 +1587,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "<strong>@{{currentAccount}}</strong> ஆகப் புதிய செயின் அளபுருக்களைப் பரப்புங்கள். கணக்கு-உருவாக்கக் கட்டணம், அதிகபட்ச பிளாக் அளவு, PXS வட்டி விகிதம் இந்த வெளியீட்டில் பூட்டப்பட்டுள்ளன. கீழே உங்கள் witness URL ஐப் புதுப்பிக்கவும்.",
             "you_can_vote_for_up_to_30": "பிளாக்செயினை வழிநடத்த 21 witness-கள் மட்டுமே தேவை; ஆனால் 30 witness-கள் வரை வாக்களிக்கலாம்."
         },
+        "governance_dialog": {
+            "viability_management": "இயங்குநிலை மேலாண்மை",
+            "take_actions": "செயல்படுங்கள்",
+            "governs_the_system_attributes_through_proposals": "முன்மொழிவுகள் மற்றும் witness வாக்களிப்பு மூலம் அமைப்பின் பண்புகளை ஆளுகிறது. Pixagram சூழலில் முடிவெடுப்பதை சாத்தியமாக்கும் ஆளுகை அடுக்கு இதுவே.",
+            "attributes": "பண்புகள்",
+            "documentation": "ஆவணங்கள்",
+            "enabled_by_viability_management_view_system_stat": "இயங்குநிலை மேலாண்மையால் செயல்படுத்தப்படுகிறது. அமைப்பு நிலை, பிணைய முனைப்புள்ளிகள் மற்றும் நிகழ்நேர பிளாக் உருவாக்கத் தகவல்களைக் காணுங்கள்.",
+            "methods": "முறைகள்",
+            "guides": "வழிகாட்டிகள்",
+            "associated_to_metrics_download_theory_documents": "அளவீடுகளுடன் தொடர்புடையவை. பகுப்பாய்வு அமைப்பைத் திறம்படப் பயன்படுத்த கோட்பாட்டு ஆவணங்கள், முறையியல் வழிகாட்டிகள் மற்றும் நெறிமுறைகளைப் பதிவிறக்குங்கள்.",
+            "metrics": "அளவீடுகள்",
+            "analytics": "பகுப்பாய்வு",
+            "measured_by_the_system_track_key_performance": "அமைப்பால் அளவிடப்படுகின்றன. முக்கிய செயல்திறன் குறியீடுகளைக் கண்காணித்து, இலக்குகளை மேற்பார்வையிட்டு, சூழலின் நலனைப் பகுப்பாய்வு செய்யுங்கள்.",
+            "control_tower": "கட்டுப்பாட்டுக் கோபுரம்",
+            "dashboard": "டாஷ்போர்டு",
+            "monitor_the_entire_ecosystem_from_a_centralized": "ஒரு மையப்படுத்தப்பட்ட டாஷ்போர்டிலிருந்து முழு சூழலையும் கண்காணியுங்கள். நிகழ்நேர நுண்ணறிவுகள் மற்றும் அமைப்பின் மேலோட்டம்.",
+            "disruptions": "இடையூறுகள்",
+            "reports": "அறிக்கைகள்",
+            "affects_viability_management_track_and_report_is": "இயங்குநிலை மேலாண்மையைப் பாதிக்கிறது. ஆளுகை, சட்டம், இடர்கள், சந்தைப்படுத்தல் உள்ளிட்ட சமூகத் தலைப்புகளில் சிக்கல்களைக் கண்காணித்துப் புகாரளியுங்கள்."
+        },
         "gdattributes": {
             "with_transactions": "{{txCount}} பரிவர்த்தனைகளுடன்",
             "system_status": "அமைப்பு நிலை",
@@ -1817,7 +1844,8 @@ export default {
             "signup": "பதிவு செய்",
             "the_portal_opens_soon": "{{title}} portal விரைவில் திறக்கும்.",
             "opens_soon": "{{title}} விரைவில் திறக்கும்.",
-            "banner_closed": "பேனர் மூடப்பட்டது."
+            "banner_closed": "பேனர் மூடப்பட்டது.",
+            "create_discuss_and_vote": "உருவாக்குங்கள், விவாதியுங்கள், வாக்களியுங்கள்"
         },
         "settings_panel": {
             "60_authors_40_curators": "60% ஆசிரியர்கள் / 40% தொகுப்பாளர்கள்",
@@ -2201,7 +2229,17 @@ export default {
         "gddisruptions": {
             "urgent": "அவசரம்",
             "report_categories": "புகார் பிரிவுகள்",
-            "select_a_topic_to_view_reports_and": "புகார்களைக் காணவும் சமூக விவாதங்களில் இணையவும் ஒரு தலைப்பைத் தேர்ந்தெடுக்கவும். இந்த இடையூறு அறிக்கைகள் இயங்குநிலை மேலாண்மை முடிவுகளைப் பாதிக்கின்றன."
+            "select_a_topic_to_view_reports_and": "புகார்களைக் காணவும் சமூக விவாதங்களில் இணையவும் ஒரு தலைப்பைத் தேர்ந்தெடுக்கவும். இந்த இடையூறு அறிக்கைகள் இயங்குநிலை மேலாண்மை முடிவுகளைப் பாதிக்கின்றன.",
+            "subscribers": "சந்தாதாரர்கள்",
+            "turn_a_report_into_action_create_a": "அறிக்கையைச் செயலாக மாற்றுங்கள்: ஒரு முன்மொழிவை உருவாக்கி, அதை விவாதித்து, கருவூலத்திலிருந்து அதற்கான நிதியளிப்புக்கு வாக்களியுங்கள்.",
+            "general_discussions_about_the_pixagram_ecosystem": "Pixagram சூழல் பற்றிய பொது விவாதங்கள், அம்சக் கோரிக்கைகள் மற்றும் சமூகக் கருத்துகள்.",
+            "proposals_voting_discussions_and_decision_making": "சூழலுக்கான முன்மொழிவுகள், வாக்களிப்பு விவாதங்கள் மற்றும் முடிவெடுக்கும் செயல்முறைகள்.",
+            "marketing_initiatives_partnerships_and_promotion": "Pixagram-க்கான சந்தைப்படுத்தல் முயற்சிகள், கூட்டாண்மைகள் மற்றும் விளம்பரப் பிரச்சாரங்கள்.",
+            "legal_considerations_compliance_discussions_and": "சூழலைப் பாதிக்கும் சட்டக் கருத்துகள், இணக்க விவாதங்கள் மற்றும் ஒழுங்குமுறை புதுப்பிப்புகள்.",
+            "risk_assessment_threat_analysis_and_mitigation_s": "சூழலின் பாதுகாப்புக்கான இடர் மதிப்பீடு, அச்சுறுத்தல் பகுப்பாய்வு மற்றும் தணிப்பு உத்திகள்.",
+            "security_audits_vulnerability_reports_and_best_p": "பாதுகாப்புத் தணிக்கைகள், பாதிப்பு அறிக்கைகள் மற்றும் பாதுகாப்பான பயன்பாட்டுக்கான சிறந்த நடைமுறைகள்.",
+            "report_bugs_technical_issues_and_track_their": "பிழைகள் மற்றும் தொழில்நுட்பச் சிக்கல்களைப் புகாரளித்து, அவற்றின் தீர்வு நிலையைக் கண்காணியுங்கள்.",
+            "community_events_meetups_collaborations_and_soci": "சமூக நிகழ்வுகள், சந்திப்புகள், கூட்டுப் பணிகள் மற்றும் சமூக முயற்சிகள்."
         },
         "gdmetrics": {
             "key_metrics": "முக்கிய அளவீடுகள்",

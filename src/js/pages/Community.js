@@ -284,9 +284,13 @@ const styles = (theme) => ({
             },
         },
     },
+    // Anchor box for the write FAB: a stretched flex item whose box spans
+    // exactly the portal image's height (the image wrapper has margin
+    // 16px -75px 0 0, so no bottom margin here either). The FAB is positioned
+    // against it — see menuButton.
     writeButtons: {
-        float: "left", margin: "16px 0px 16px 16px",
-        width: "42px", display: "flow", flexFlow: "column", alignContent: "center",
+        position: "relative", flex: "0 0 42px",
+        width: 42, margin: "16px 0px 0px 16px",
     },
     writeMobileButtons: {
         height: 0, padding: "0px 16px", backgroundColor: "transparent",
@@ -303,9 +307,14 @@ const styles = (theme) => ({
         },
         "& .MuiTouchRipple-child": { backgroundImage: RAINBOW_RIPPLE },
     },
+    // Explicitly anchored: centred on the image's outer edge (17px past the
+    // anchor's right edge) and half-way down the image. It used to be
+    // position:fixed with no offsets, i.e. placed by its static position, which
+    // Chrome centred (align-content on the anchor) and WebKit put at the top.
     menuButton: {
-        display: "block", position: "fixed", zIndex: 1, width: 80, height: 80,
-        transform: "translate(calc(50% - 21px), calc(-50% + 8px))",
+        display: "block", position: "absolute", top: "50%", left: "100%",
+        zIndex: 1, width: 80, height: 80,
+        transform: "translate(calc(-50% + 17px), -50%)",
         transition: `color ${TRANSITION_FAST}, background-color ${TRANSITION_FAST}`,
         color: "#101010", backgroundColor: "#c7c7c7",
         boxShadow: "0 0 8px #c7c7c788, 0 0 16px #c7c7c7cc",

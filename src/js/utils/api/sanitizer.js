@@ -1563,21 +1563,6 @@ export function summarizeContent(body, sentenceCount) {
 }
 
 /**
- * Last-guard HTML sanitizer for dangerouslySetInnerHTML boundaries.
- *
- * Assumes the input is already-rendered HTML (markdown conversion, mention
- * processing, etc. have already happened).  This function does NOT perform
- * any markdown rendering — it only strips tags, attributes, and URI schemes
- * that are not on the post-tier allowlist.
- *
- * Use this as the final call before passing a string to dangerouslySetInnerHTML
- * to ensure defense-in-depth even if upstream sanitization was skipped or
- * the data was mutated after initial sanitization.
- *
- * @param {string} html — Pre-rendered HTML to sanitize
- * @returns {string} Sanitized HTML safe for innerHTML injection
- */
-/**
  * Inspect a base64 image data URI before rendering it.
  *
  * For any component that puts attacker-controlled bytes in an <img src>:
@@ -1617,8 +1602,168 @@ export function safeProfileImage(value) {
     return ImageUtils.isValidUrl(trimmed) ? trimmed : null;
 }
 
-export function safeHTML(html) {
+// ═══════════════════════════════════════════════════════════
+// safeHTML — last guard at every dangerouslySetInnerHTML boundary
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Tags no option can ever re-enable, whatever the caller passes. Each one is
+ * an execution or embedding vector; the post allowlist has none of them and
+ * a widening API must not be able to add them back.
+ */
+const SAFE_HTML_FORBIDDEN_TAGS = Object.freeze(new Set([
+    'script', 'style', 'iframe', 'frame', 'frameset', 'object', 'embed',
+    'applet', 'link', 'meta', 'base', 'form', 'input', 'button', 'textarea',
+    'select', 'option', 'template', 'slot', 'portal', 'noscript',
+    'svg', 'math', 'foreignobject', 'audio', 'video', 'source', 'track',
+]));
+
+/**
+ * Attributes no option can ever re-enable: event handlers, inline CSS (a
+ * standing attack surface — see the SVG analyzer), the embedding/URL
+ * attributes sanitize-html does not scheme-check, and `id`, which is only
+ * ever admitted through `allowedIds` so it is always pattern-checked.
+ */
+const SAFE_HTML_FORBIDDEN_ATTR_RE = /^(on[a-z]+|style|id|srcdoc|srcset|formaction|action|xlink:href|href|src|data|codebase|ping|target)$/;
+
+/** What an id may look like at all, before the caller's own pattern applies. */
+const SAFE_HTML_ID_VALUE_RE = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
+
+const SAFE_HTML_DEFAULT_ID_TAGS = Object.freeze(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+
+/** Compiled sanitize-html config per options object (identity-keyed). */
+const SAFE_HTML_CONFIGS = new WeakMap();
+
+/**
+ * Turn `allowedIds` into a whole-value matcher, or null when ids stay off.
+ * A RegExp is re-created without the `g`/`y` flags: `.test()` on a sticky or
+ * global regex is stateful, and a stale lastIndex would let one id in and
+ * reject the next.
+ */
+function compileIdMatcher(allowedIds) {
+    if (allowedIds instanceof RegExp) {
+        const re = new RegExp(allowedIds.source, allowedIds.flags.replace(/[gy]/g, ''));
+        return (v) => SAFE_HTML_ID_VALUE_RE.test(v) && re.test(v);
+    }
+    if (typeof allowedIds === 'string' && allowedIds) {
+        return (v) => SAFE_HTML_ID_VALUE_RE.test(v) && v.startsWith(allowedIds);
+    }
+    return null;
+}
+
+function buildSafeHtmlConfig(options) {
+    const base = SanitizeConfigs.post;
+
+    // ── Tags: additive, never past the forbidden set ──
+    const allowedTags = [...base.allowedTags];
+    for (const raw of options.allowedTags || []) {
+        const tag = String(raw).toLowerCase();
+        if (SAFE_HTML_FORBIDDEN_TAGS.has(tag) || allowedTags.includes(tag)) continue;
+        allowedTags.push(tag);
+    }
+
+    // ── Attributes: additive per tag, never a forbidden name ──
+    const allowedAttributes = {};
+    for (const [tag, attrs] of Object.entries(base.allowedAttributes)) {
+        allowedAttributes[tag] = [...attrs];
+    }
+    for (const [rawTag, attrs] of Object.entries(options.allowedAttributes || {})) {
+        const tag = rawTag === '*' ? '*' : String(rawTag).toLowerCase();
+        const list = allowedAttributes[tag] || (allowedAttributes[tag] = []);
+        for (const raw of attrs || []) {
+            const attr = String(raw).toLowerCase();
+            if (SAFE_HTML_FORBIDDEN_ATTR_RE.test(attr) || list.includes(attr)) continue;
+            list.push(attr);
+        }
+    }
+
+    // ── Classes: additive patterns ──
+    const allowedClasses = {
+        '*': [...base.allowedClasses['*'], ...(options.allowedClasses || []).filter(p => p instanceof RegExp)],
+    };
+
+    // ── Ids: pattern-checked, on the id-carrying tags only ──
+    // The check runs INSIDE sanitize-html as a transform. transformTags runs
+    // before attribute filtering, so a rejected id is deleted from `attribs`
+    // and never reaches the allowlist stage; an accepted one then passes it
+    // because `id` is admitted for exactly these tags.
+    const transformTags = { ...base.transformTags };
+    const matchId = compileIdMatcher(options.allowedIds);
+    if (matchId) {
+        const idTags = (options.idTags || SAFE_HTML_DEFAULT_ID_TAGS).map(t => String(t).toLowerCase());
+        for (const tag of idTags) {
+            if (!allowedTags.includes(tag)) continue;
+            const list = allowedAttributes[tag] || (allowedAttributes[tag] = []);
+            if (!list.includes('id')) list.push('id');
+            const inner = transformTags[tag];
+            transformTags[tag] = (tagName, attribs) => {
+                const t = inner ? inner(tagName, attribs) : { tagName, attribs };
+                const out = { ...t.attribs };
+                if (out.id !== undefined && !matchId(String(out.id))) delete out.id;
+                return { ...t, attribs: out };
+            };
+        }
+    }
+
+    return { ...base, allowedTags, allowedAttributes, allowedClasses, transformTags };
+}
+
+/**
+ * Last-guard HTML sanitizer for dangerouslySetInnerHTML boundaries.
+ *
+ * Assumes the input is already-rendered HTML (markdown conversion, mention
+ * processing, etc. have already happened). This function does NOT perform
+ * any markdown rendering — it only strips tags, attributes, and URI schemes
+ * that are not on the post-tier allowlist. Idempotent over its own output.
+ *
+ * Call it as the LAST thing before a string reaches dangerouslySetInnerHTML,
+ * so the DOM only ever sees what the sanitizer returned — even if upstream
+ * sanitisation was skipped, or the string was processed after it.
+ *
+ * With no `options` it is exactly the post allowlist. `options` can WIDEN it
+ * for a specific boundary, in controlled ways only:
+ *
+ *   allowedIds   RegExp | string   Keep `id` attributes whose whole value
+ *                                  matches the RegExp, or starts with the
+ *                                  string prefix. Ids are stripped by default
+ *                                  because an author-chosen id can shadow an
+ *                                  application element id, hijack `#hash`
+ *                                  navigation and clobber `window.<id>` DOM
+ *                                  properties. A pattern the application
+ *                                  owns (its own prefix + restricted alphabet)
+ *                                  closes all three — e.g. BlogPostDialog's
+ *                                  TOC ids, /^bp-[a-z0-9-]+$/. Values must
+ *                                  also satisfy [A-Za-z][A-Za-z0-9_-]{0,127}.
+ *   idTags       string[]          Tags allowed to carry a matching id.
+ *                                  Default: h1–h6.
+ *   allowedTags  string[]          Extra tags. Execution and embedding tags
+ *                                  (script, style, iframe, object, form,
+ *                                  svg, …) are refused whatever is passed.
+ *   allowedAttributes  {tag: [attr]}  Extra attributes per tag ('*' for all).
+ *                                  Event handlers, style, id (use allowedIds),
+ *                                  href/src/srcset/srcdoc/action/target and
+ *                                  friends are refused whatever is passed.
+ *   allowedClasses  RegExp[]       Extra class-name patterns.
+ *
+ * Pass the same options OBJECT on every call from a given site (a module
+ * constant): the compiled sanitize-html config is cached per object, so a
+ * fresh literal per render would rebuild it each time.
+ *
+ * @param {string} html — Pre-rendered HTML to sanitize
+ * @param {{ allowedIds?: RegExp|string, idTags?: string[], allowedTags?: string[],
+ *           allowedAttributes?: Object<string, string[]>, allowedClasses?: RegExp[] }} [options]
+ * @returns {string} Sanitized HTML safe for innerHTML injection
+ */
+export function safeHTML(html, options) {
     if (!html) return '';
     if (typeof html !== 'string') return '';
-    return sanitizeHtmlLib(html, SanitizeConfigs.post);
+    if (!options || typeof options !== 'object') {
+        return sanitizeHtmlLib(html, SanitizeConfigs.post);
+    }
+    let config = SAFE_HTML_CONFIGS.get(options);
+    if (!config) {
+        config = buildSafeHtmlConfig(options);
+        SAFE_HTML_CONFIGS.set(options, config);
+    }
+    return sanitizeHtmlLib(html, config);
 }

@@ -197,6 +197,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "door",
         "to": "aan",
+        "proposals": "Voorstellen",
+        "discussion": "Discussie",
+        "marketing": "Marketing",
+        "legal": "Juridisch",
+        "risks": "Risico's",
+        "bug_reports": "Bugmeldingen",
+        "community": "Community"
     },
 
     components: {
@@ -1580,6 +1587,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "Zend een nieuwe set chain-parameters uit als <strong>@{{currentAccount}}</strong>. De kosten voor accountaanmaak, de maximale blokgrootte en het PXS-rentetarief liggen voor deze release vast. Werk hieronder je witness-URL bij.",
             "you_can_vote_for_up_to_30": "Je kunt op maximaal 30 witnesses stemmen, terwijl er maar 21 witnesses nodig zijn om de blockchain te leiden."
         },
+        "governance_dialog": {
+            "viability_management": "Levensvatbaarheidsbeheer",
+            "take_actions": "Kom in actie",
+            "governs_the_system_attributes_through_proposals": "Bestuurt de systeemattributen via voorstellen en witness-stemmingen. Dit is de governancelaag die besluitvorming in het Pixagram-ecosysteem mogelijk maakt.",
+            "attributes": "Attributen",
+            "documentation": "Documentatie",
+            "enabled_by_viability_management_view_system_stat": "Mogelijk gemaakt door levensvatbaarheidsbeheer. Bekijk de systeemstatus, netwerk-endpoints en realtime informatie over blokproductie.",
+            "methods": "Methoden",
+            "guides": "Gidsen",
+            "associated_to_metrics_download_theory_documents": "Gekoppeld aan de statistieken. Download theoriedocumenten, methodologische gidsen en protocollen om het analysesysteem effectief te gebruiken.",
+            "metrics": "Statistieken",
+            "analytics": "Analyse",
+            "measured_by_the_system_track_key_performance": "Gemeten door het systeem. Volg de belangrijkste prestatie-indicatoren, bewaak doelen en analyseer de gezondheid van het ecosysteem.",
+            "control_tower": "Controletoren",
+            "dashboard": "Dashboard",
+            "monitor_the_entire_ecosystem_from_a_centralized": "Bewaak het hele ecosysteem vanuit één centraal dashboard. Realtime inzichten en systeemoverzicht.",
+            "disruptions": "Verstoringen",
+            "reports": "Meldingen",
+            "affects_viability_management_track_and_report_is": "Beïnvloedt het levensvatbaarheidsbeheer. Volg en meld problemen in de verschillende community-onderwerpen, waaronder governance, juridisch, risico's en marketing."
+        },
         "gdattributes": {
             "with_transactions": "met {{txCount}} transacties",
             "system_status": "Systeemstatus",
@@ -1817,7 +1844,8 @@ export default {
             "signup": "Registreren",
             "the_portal_opens_soon": "Het portaal {{title}} opent binnenkort.",
             "opens_soon": "{{title}} opent binnenkort.",
-            "banner_closed": "Banner gesloten."
+            "banner_closed": "Banner gesloten.",
+            "create_discuss_and_vote": "Maak, bespreek en stem"
         },
         "settings_panel": {
             "60_authors_40_curators": "60% auteurs / 40% curatoren",
@@ -2201,7 +2229,17 @@ export default {
         "gddisruptions": {
             "urgent": "Urgent",
             "report_categories": "Meldingscategorieën",
-            "select_a_topic_to_view_reports_and": "Kies een onderwerp om meldingen te bekijken en mee te praten in de community. Deze verstoringsmeldingen voeden de beslissingen over levensvatbaarheidsbeheer."
+            "select_a_topic_to_view_reports_and": "Kies een onderwerp om meldingen te bekijken en mee te praten in de community. Deze verstoringsmeldingen voeden de beslissingen over levensvatbaarheidsbeheer.",
+            "subscribers": "abonnees",
+            "turn_a_report_into_action_create_a": "Maak van een melding actie: dien een voorstel in, bespreek het en stem over de financiering ervan uit de schatkist.",
+            "general_discussions_about_the_pixagram_ecosystem": "Algemene discussies over het Pixagram-ecosysteem, functieverzoeken en feedback van de community.",
+            "proposals_voting_discussions_and_decision_making": "Voorstellen, stemdiscussies en besluitvormingsprocessen voor het ecosysteem.",
+            "marketing_initiatives_partnerships_and_promotion": "Marketinginitiatieven, partnerschappen en promotiecampagnes voor Pixagram.",
+            "legal_considerations_compliance_discussions_and": "Juridische overwegingen, compliancediscussies en regelgevingsupdates die het ecosysteem raken.",
+            "risk_assessment_threat_analysis_and_mitigation_s": "Risicobeoordeling, dreigingsanalyse en mitigatiestrategieën voor de veiligheid van het ecosysteem.",
+            "security_audits_vulnerability_reports_and_best_p": "Beveiligingsaudits, kwetsbaarheidsmeldingen en best practices voor veilig gebruik.",
+            "report_bugs_technical_issues_and_track_their": "Meld bugs en technische problemen en volg de status van hun oplossing.",
+            "community_events_meetups_collaborations_and_soci": "Community-evenementen, meetups, samenwerkingen en sociale initiatieven."
         },
         "gdmetrics": {
             "key_metrics": "Kernstatistieken",

@@ -7,18 +7,13 @@ var either_ends_with = function (possibilities, onto) {
     return false;
 };
 
-var either_starts_with = function (possibilities, onto) {
-    for (var i = 0; i < possibilities.length; i++) {
-        if (onto.startsWith(possibilities[i])) return true;
-    }
-    return false;
-};
-
 // Helper functions
 var F_IMG = function (n) { return "/src/images/" + n; };
 var F_CNK = function (n, i) { return "/client/chunk_" + (typeof n == "undefined" ? (i | 0) : (n | 0)) + ".min.js"; };
 var F_SND = function (n) { return "/src/sounds/" + n + ".mp3"; };
 var F_VID = function (n) { return "/src/videos/" + n + ".mp4"; };
+
+var ENTRY_BUNDLE = "/client/chunk_norris.min.js";
 
 var INSTALL_FILES_USEFUL = [
     "/src/images/favicon.ico",
@@ -34,29 +29,53 @@ var INSTALL_FILES_USEFUL = [
 // which is safe under the existing deploy rule: V bumps on every deploy.
 var INSTALL_FILES_REQUIRED = [
     "/",
-    "/client/chunk_norris.min.js"
+    ENTRY_BUNDLE
 ];
-var LOAD_FILES_REQUIRED = [];
-var LOAD_FILES_USEFUL = [];
-var LOAD_FILES_STATIC = [];
 
 // Cache names
-var V = "v233";
+var V = "v1";
 var REQUIRED_CACHE = "unless-update-cache-"+V+"-required";
 var USEFUL_CACHE = "unless-update-cache-"+V+"-useful";
 var STATIC_CACHE = "unless-update-cache-"+V+"-static";
 var OTHER_CACHE = "unless-update-cache-"+V+"-other";
 var ALL_CACHES = [REQUIRED_CACHE, STATIC_CACHE, USEFUL_CACHE, OTHER_CACHE];
 
-// Regular expressions for chunk matching
-var MAIN_CHILD_CHUNK_REGEX = /chunk_(main_[a-zA-Z0-9_-]+)\.min\.js$/i;
-var CHILD_CHUNK_REGEX = /chunk_([a-zA-Z0-9_-]+)\.min\.js$/i;
+// Extension routing is decided on the URL *path* (query string ignored), the
+// cache key stays the full URL.
+var USEFUL_EXTENSIONS = [".wasm", ".png", ".webp", ".avif", ".json", ".webmanifest", ".svg", ".jpg", ".jpeg", ".gif", ".ico", ".onnx", ".woff2", ".woff", ".ttf", ".otf", ".css", ".bin", ".pdf"];
+var MEDIA_EXTENSIONS = [".wav", ".mp3", ".mp4"];
+
+// Regular expressions for chunk matching. The id group also accepts dots so
+// a future `chunk_[id].[contenthash].min.js` output pattern routes unchanged.
+var MAIN_CHILD_CHUNK_REGEX = /chunk_(main_[a-zA-Z0-9_.-]+)\.min\.js$/i;
+var CHILD_CHUNK_REGEX = /chunk_([a-zA-Z0-9_.-]+)\.min\.js$/i;
 
 // Lazy-opened cache handles (promises)
 var required_cache = caches.open(REQUIRED_CACHE);
 var useful_cache = caches.open(USEFUL_CACHE);
 var static_cache = caches.open(STATIC_CACHE);
 var other_cache = caches.open(OTHER_CACHE);
+
+// ─── Network access for the worker's OWN cache fills ───
+// `cache: "no-cache"` makes the browser revalidate against the origin (If-None-
+// Match / If-Modified-Since) instead of handing back whatever its HTTP cache
+// holds. This host serves everything with `Cache-Control: max-age=600` and the
+// build reuses the same chunk file names on every deploy, so a plain fetch()
+// could fill a freshly versioned cache with the PREVIOUS build's bundle or
+// chunks straight out of the HTTP cache — and cache-first then served that mix
+// until the next V bump. Unchanged files come back as 304 and cost one round
+// trip; fetch() still resolves them as a normal 200.
+function network(url) {
+    return fetch(url, { cache: "no-cache" });
+}
+
+// A network-error Response (what the page would have received with no worker
+// at all). Returned instead of letting the respondWith() promise reject: a
+// rejection fails the load exactly the same way, but is additionally reported
+// here as "Uncaught (in promise) TypeError: Failed to fetch".
+function network_error() {
+    return Response.error();
+}
 
 // ─── Serve from cache, falling back to network ───
 function serve_cache(cachePromise, url) {
@@ -78,13 +97,13 @@ function serve_cache(cachePromise, url) {
             return fetchAndCache(url, cache);
         });
     }).catch(function () {
-        return fetch(url);
+        return network(url).catch(network_error);
     });
 }
 
 // ─── Fetch from network and store in given cache ───
 function fetchAndCache(url, cache) {
-    return fetch(url).then(function (response) {
+    return network(url).then(function (response) {
         if (response.status === 200 || url === "/") {
             try { cache.put(url, response.clone()); } catch (e) { /* quota */ }
         }
@@ -100,7 +119,7 @@ function serveSPAFallback() {
             return fetchAndCache("/", cache);
         });
     }).catch(function () {
-        return fetch("/");
+        return network("/").catch(network_error);
     });
 }
 
@@ -112,24 +131,21 @@ self.addEventListener("install", function (event) {
     // waiting for every tab running the previous worker to close.
     self.skipWaiting();
 
-    // Cache useful static assets individually so one missing file never
-    // fails the whole install.
+    // Cache static assets individually so one missing file never fails the
+    // whole install. Each add() revalidates against the origin (see network()).
+    var precache = function (cachePromise, urls) {
+        return cachePromise.then(function (cache) {
+            return Promise.allSettled(
+                urls.map(function (u) {
+                    return cache.add(new Request(u, { cache: "no-cache" }));
+                })
+            );
+        });
+    };
     event.waitUntil(
         Promise.all([
-            useful_cache.then(function (cache) {
-                return Promise.allSettled(
-                    INSTALL_FILES_USEFUL.map(function (u) {
-                        return cache.add(u);
-                    })
-                );
-            }),
-            required_cache.then(function (cache) {
-                return Promise.allSettled(
-                    INSTALL_FILES_REQUIRED.map(function (u) {
-                        return cache.add(u);
-                    })
-                );
-            })
+            precache(useful_cache, INSTALL_FILES_USEFUL),
+            precache(required_cache, INSTALL_FILES_REQUIRED)
         ])
     );
 });
@@ -144,86 +160,88 @@ self.addEventListener("fetch", function (event) {
     // ── Skip non-GET (POST, etc.) ──
     if (request.method !== "GET") return;
 
+    // ── Anything that is not http(s) is not ours ──
+    // chrome-extension:// and moz-extension:// resources that extensions inject
+    // into the page, data:, blob:, file: … The browser handles all of these
+    // natively; a fetch() on an extension URL from here throws "Failed to
+    // fetch" and fails the resource that would otherwise have loaded.
+    if (url.indexOf("https://") !== 0 && url.indexOf("http://") !== 0) return;
+
+    var parsed;
+    try {
+        parsed = new URL(url);
+    } catch (e) {
+        return;
+    }
+
+    // ── Cross-origin: never intercepted ──
+    // Decided on the request's ORIGIN, not on `request.referrer`. The referrer
+    // is empty or opaque for many legitimate same-origin requests — a
+    // Referrer-Policy: no-referrer page, workers spawned from blob:/data: URLs
+    // (local schemes carry no referrer), prefetches, favicon and manifest
+    // fetches — and the old check routed all of those to the uncached
+    // catch-all. It also treated api.pixagram.com as "internal" (the hostname
+    // is a substring), proxying its GETs through the worker for no benefit.
+    if (parsed.origin !== self.location.origin) return;
+
+    var path = parsed.pathname;
+
     // ── Range requests (video seeking etc.) – always network ──
-    if (request.headers.get("range") && url.indexOf("http") === 0) {
-        event.respondWith(fetch(request));
+    if (request.headers.get("range")) {
+        event.respondWith(fetch(request).catch(network_error));
         return;
     }
 
-    // ── Data / blob URIs – pass through ──
-    if (either_starts_with(["data:image", "blob:http", "data:application"], url)) {
-        return; // browser handles these natively
-    }
-
-    // ── Bulk pre-cache trigger ──
-    if (either_starts_with(["data:,all"], url)) {
-        event.respondWith(
-            Promise.all([
-                useful_cache.then(function (c) { return c.addAll(LOAD_FILES_USEFUL); }),
-                required_cache.then(function (c) { return c.addAll(LOAD_FILES_REQUIRED); }),
-                static_cache.then(function (c) { return c.addAll(LOAD_FILES_STATIC); })
-            ])
-                .then(function () { return new Response("all", { status: 200 }); })
-                .catch(function () { return new Response("all", { status: 500 }); })
-        );
+    // Static assets → useful cache
+    if (either_ends_with(USEFUL_EXTENSIONS, path)) {
+        event.respondWith(serve_cache(useful_cache, url));
         return;
     }
 
-    // ── Same-site detection ──
-    var referrer = request.referrer || "";
-    var same_site = referrer && new URL(url).origin === new URL(referrer).origin;
+    // Media → static cache
+    if (either_ends_with(MEDIA_EXTENSIONS, path)) {
+        event.respondWith(serve_cache(static_cache, url));
+        return;
+    }
 
-    if (same_site) {
-        // Static assets → useful cache
-        if (either_ends_with([".wasm", ".png", ".json", ".svg", ".jpg", ".jpeg", ".gif", ".ico", ".onnx", ".woff2", ".ttf", ".css", ".bin"], url)) {
-            event.respondWith(serve_cache(useful_cache, url));
-            return;
-        }
+    // Entry bundle → required cache (canonical path whatever the page asked)
+    if (path.endsWith("chunk_norris.min.js")) {
+        event.respondWith(serve_cache(required_cache, ENTRY_BUNDLE));
+        return;
+    }
 
-        // Media → static cache
-        if (either_ends_with([".wav", ".mp3", ".mp4"], url)) {
-            event.respondWith(serve_cache(static_cache, url));
-            return;
-        }
+    // Lazy chunks → required cache
+    var mainMatch = path.match(MAIN_CHILD_CHUNK_REGEX);
+    if (mainMatch) {
+        event.respondWith(serve_cache(required_cache, "/client/chunk_" + mainMatch[1] + ".min.js"));
+        return;
+    }
 
-        // Named chunks → required cache
-        if (url.endsWith("chunk_norris.min.js")) {
-            event.respondWith(serve_cache(required_cache, "/client/chunk_norris.min.js"));
-            return;
-        }
-
-        var mainMatch = url.match(MAIN_CHILD_CHUNK_REGEX);
-        if (mainMatch) {
-            event.respondWith(serve_cache(required_cache, "/client/chunk_" + mainMatch[1] + ".min.js"));
-            return;
-        }
-
-        var childMatch = url.match(CHILD_CHUNK_REGEX);
-        if (childMatch) {
-            event.respondWith(serve_cache(required_cache, "/client/chunk_" + childMatch[1] + ".min.js"));
-            return;
-        }
+    var childMatch = path.match(CHILD_CHUNK_REGEX);
+    if (childMatch) {
+        event.respondWith(serve_cache(required_cache, "/client/chunk_" + childMatch[1] + ".min.js"));
+        return;
     }
 
     // ══════════════════════════════════════════════
-    // FIX: SPA fallback – serve "/" for ALL navigation requests
-    // This is the key fix: /created/hype, /@user, /trending/art
-    // all get the same index.html, and client-side routing takes over.
+    // SPA fallback – serve "/" for ALL navigation requests:
+    // /created/hype, /@user, /trending/art all get the same index.html
+    // (the host answers them with its 404 page) and client-side routing
+    // takes over.
     // ══════════════════════════════════════════════
     if (request.mode === "navigate") {
         event.respondWith(serveSPAFallback());
         return;
     }
 
-    // ── Extension / external – let the browser handle it ──
-    if (url.startsWith("https://") && url.indexOf(self.location.hostname) === -1) {
-        return;
-    }
-
-    // ── Any remaining GET: race all caches then network ──
+    // ── Any remaining same-origin GET: any cache, then network ──
+    // Never rejects: an offline miss becomes a network-error Response, the
+    // same outcome the page would have had without a worker.
     event.respondWith(
         caches.match(url).then(function (cached) {
-            return cached || fetch(request);
+            return cached || fetch(request).catch(network_error);
+        }).catch(function () {
+            return fetch(request).catch(network_error);
         })
     );
 });

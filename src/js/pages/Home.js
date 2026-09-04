@@ -540,6 +540,10 @@ class Home extends React.PureComponent {
         // settings change re-render this page TWICE for a value nothing here
         // consumed.
         this.state = {
+            _y: 0,
+            _firstTimeRevealImage: 100,
+            _intervalTimeRevealImage: 2000,
+            _intervalTimeRevealImageMultipier: 0.8,
             _learn_more_opened: false,
             // Stays true after the first open, so the lazily-loaded dialog
             // keeps its exit transition instead of unmounting abruptly.
@@ -679,6 +683,9 @@ class Home extends React.PureComponent {
             cancelAnimationFrame(this._stripRafId);
             this._stripRafId = 0;
         }
+        if(this._imageAppearsTimeout) {
+            clearTimeout(this._imageAppearsTimeout)
+        }
         if (this._stripMeasureRaf) {
             cancelAnimationFrame(this._stripMeasureRaf);
             this._stripMeasureRaf = 0;
@@ -766,7 +773,23 @@ class Home extends React.PureComponent {
     // Debounced through rAF: every img onLoad calls this (the base64 chunk
     // decodes the whole strip in a burst) and one layout read per frame is
     // plenty. The velocity model self-adapts — no reset needed on re-measure.
+    _showNextImage = () => {
+        return setTimeout(() => {
+            const newY = this.state._y + 1 | 0;
+            const newIntervalTimeRevealImage = this.state._intervalTimeRevealImage * this.state._intervalTimeRevealImageMultipier;
+
+            if(this.state._artworks_url.length >= newY){
+               this.setState({_y: newY, _intervalTimeRevealImage: newIntervalTimeRevealImage}, () => {
+                   this._imageAppearsTimeout = this._showNextImage();
+                });
+            }
+        }, this.state._intervalTimeRevealImage);
+    }
+    
     _scheduleStripMeasure = () => {
+        setTimeout(() => {
+            this._imageAppearsTimeout = this._showNextImage();
+        }, this.state._firstTimeRevealImage);
         if (this._stripMeasureRaf) return;
         this._stripMeasureRaf = requestAnimationFrame(() => {
             this._stripMeasureRaf = 0;
@@ -1456,7 +1479,7 @@ class Home extends React.PureComponent {
 
     render() {
         const { classes } = this.props;
-        const { _artworks_url, _learn_more_opened, _learn_more_mounted, _svg_logo } = this.state;
+        const { _y, _intervalTimeRevealImage, _artworks_url, _learn_more_opened, _learn_more_mounted, _svg_logo } = this.state;
         return (
             <div className={classes.homeRoot}>
                 {/* Single WebGL background: greyscale stars + blue lightning, screen-blended */}
@@ -1494,15 +1517,13 @@ class Home extends React.PureComponent {
                         >
                             {_artworks_url.map((url, i) => (
                                 <div key={`img1-${i}`}>
-                                    <img
-                                        loading="lazy"
-                                        decoding="async"
+                                    <Fade key={`img1a-${i}-${Boolean(i <= _y-1)}`} in={Boolean(i <= _y-1)} timeout={{appear: _intervalTimeRevealImage, enter: _intervalTimeRevealImage, exit: _intervalTimeRevealImage}}><img
                                         className="pixelated"
                                         src={url}
                                         draggable={false}
                                         onLoad={this._scheduleStripMeasure}
                                         alt={`Artwork ${i + 1}`}
-                                    />
+                                    /></Fade>
                                 </div>
                             ))}
                             {_artworks_url.map((url, i) => (

@@ -6,6 +6,7 @@ import Typography from "@material-ui/core/Typography";
 import ButtonBase from "@material-ui/core/ButtonBase";
 import ForumIcon from "@material-ui/icons/Forum";
 import GavelIcon from "@material-ui/icons/Gavel";
+import BallotIcon from "@material-ui/icons/Ballot";
 import CampaignIcon from "../icons/Campaign";
 import AccountBalanceIcon from "@material-ui/icons/AccountBalance";
 import WarningIcon from "@material-ui/icons/Warning";
@@ -13,6 +14,7 @@ import SecurityIcon from "@material-ui/icons/Security";
 import BugReportIcon from "@material-ui/icons/BugReport";
 import GroupIcon from "@material-ui/icons/Group";
 
+import { HISTORY, PROPOSALS_PORTAL, COMMUNITY_PORTALS } from "../utils/constants";
 import { t } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
@@ -58,6 +60,16 @@ const styles = theme => ({
             backgroundColor: "#171717"
         }
     },
+    // The proposals row: same tile anatomy, stretched across every column of
+    // the grid so it leads the eight portals as the one "take action" entry.
+    proposalsTile: {
+        gridColumn: "1 / -1"
+    },
+    // Keeps the full-width description at a readable measure instead of one
+    // long line across a 1200px dialog.
+    proposalsDescription: {
+        maxWidth: "640px"
+    },
     topicBackgroundIcon: {
         position: "absolute",
         top: "-10px",
@@ -90,7 +102,11 @@ const styles = theme => ({
         display: "flex",
         alignItems: "center",
         gap: "16px",
-        width: "100%"
+        width: "100%",
+        // The subscriber stat only mounts once its count has arrived, so the
+        // row reserves its height up front — otherwise every tile would grow
+        // by a line as the nine answers land and the grid would reflow.
+        minHeight: "18px"
     },
     topicStat: {
         display: "flex",
@@ -123,98 +139,193 @@ const styles = theme => ({
     }
 });
 
-const TOPICS = [
-    {
-        id: "discussion",
-        title: "Discussion",
-        description: "General discussions about the Pixagram ecosystem, feature requests, and community feedback.",
-        icon: ForumIcon,
-        posts: 1247,
-        active: 89,
-        link: "/c/discussion"
+// ── Portal presentation ──────────────────────────────────────────────────
+// Ids and order come from utils/constants: the grid renders PROPOSALS_PORTAL
+// as a full-width row, then the eight COMMUNITY_PORTALS in their order. This
+// map only attaches, per portal `name`, what this view adds on top of
+// `{ name, id }`: an icon and the copy. The copy is resolved at render time
+// (thunks over t()) so the withLanguage repaint picks up the new language;
+// portal names live in `words` because the drawer menu prints the same
+// ones. The one figure a tile shows — its subscriber count — is not
+// presentation: it is fetched live per portal on mount (see
+// _loadSubscribers) and lives in component state.
+const PORTAL_PRESENTATION = {
+    proposals: {
+        title: () => t("words.proposals"),
+        description: () => t("components.gddisruptions.turn_a_report_into_action_create_a"),
+        icon: BallotIcon
     },
-    {
-        id: "governance",
-        title: "Governance",
-        description: "Proposals, voting discussions, and decision-making processes for the ecosystem.",
-        icon: GavelIcon,
-        posts: 456,
-        active: 34,
-        link: "/c/governance"
+    discussions: {
+        title: () => t("words.discussion"),
+        description: () => t("components.gddisruptions.general_discussions_about_the_pixagram_ecosystem"),
+        icon: ForumIcon
     },
-    {
-        id: "marketing",
-        title: "Marketing",
-        description: "Marketing initiatives, partnerships, and promotional campaigns for Pixagram.",
-        icon: CampaignIcon,
-        posts: 324,
-        active: 18,
-        link: "/c/marketing"
+    governance: {
+        title: () => t("words.governance"),
+        description: () => t("components.gddisruptions.proposals_voting_discussions_and_decision_making"),
+        icon: GavelIcon
     },
-    {
-        id: "legal",
-        title: "Legal",
-        description: "Legal considerations, compliance discussions, and regulatory updates affecting the ecosystem.",
-        icon: AccountBalanceIcon,
-        posts: 89,
-        active: 5,
-        link: "/c/legal"
+    marketing: {
+        title: () => t("words.marketing"),
+        description: () => t("components.gddisruptions.marketing_initiatives_partnerships_and_promotion"),
+        icon: CampaignIcon
     },
-    {
-        id: "risks",
-        title: "Risks",
-        description: "Risk assessment, threat analysis, and mitigation strategies for ecosystem security.",
+    legal: {
+        title: () => t("words.legal"),
+        description: () => t("components.gddisruptions.legal_considerations_compliance_discussions_and"),
+        icon: AccountBalanceIcon
+    },
+    risks: {
+        title: () => t("words.risks"),
+        description: () => t("components.gddisruptions.risk_assessment_threat_analysis_and_mitigation_s"),
         icon: WarningIcon,
-        posts: 167,
-        active: 12,
-        urgent: true,
-        link: "/c/risks"
+        urgent: true
     },
-    {
-        id: "security",
-        title: "Security",
-        description: "Security audits, vulnerability reports, and best practices for safe usage.",
-        icon: SecurityIcon,
-        posts: 234,
-        active: 21,
-        link: "/c/security"
+    security: {
+        title: () => t("words.security"),
+        description: () => t("components.gddisruptions.security_audits_vulnerability_reports_and_best_p"),
+        icon: SecurityIcon
     },
-    {
-        id: "bugs",
-        title: "Bug Reports",
-        description: "Report bugs, technical issues, and track their resolution status.",
-        icon: BugReportIcon,
-        posts: 567,
-        active: 43,
-        link: "/c/bugs"
+    bugs: {
+        title: () => t("words.bug_reports"),
+        description: () => t("components.gddisruptions.report_bugs_technical_issues_and_track_their"),
+        icon: BugReportIcon
     },
-    {
-        id: "community",
-        title: "Community",
-        description: "Community events, meetups, collaborations, and social initiatives.",
-        icon: GroupIcon,
-        posts: 892,
-        active: 67,
-        link: "/c/community"
+    community: {
+        title: () => t("words.community"),
+        description: () => t("components.gddisruptions.community_events_meetups_collaborations_and_soci"),
+        icon: GroupIcon
     }
-];
+};
+
+// `{ name, id }` from the constants merged with the presentation above. An
+// unknown `name` (a portal added to the constants before this map) still
+// renders — as a bare tile carrying its id — rather than crashing the grid.
+const toTopic = (portal) => ({ ...portal, ...(PORTAL_PRESENTATION[portal.name] || {}) });
+const PROPOSALS_TOPIC = toTopic(PROPOSALS_PORTAL);
+const TOPICS = COMMUNITY_PORTALS.map(toTopic);
+// Every tile that gets a subscriber count: the proposals row is a community
+// like the other eight, so it is counted the same way.
+const ALL_TOPICS = [PROPOSALS_TOPIC, ...TOPICS];
 
 class GDDisruptions extends React.PureComponent {
-    _handleTopicClick = (topic) => {
-        console.log("Opening topic:", topic.title, topic.link);
-        // In production, this would navigate to the community
-        // window.location.href = topic.link;
+    // Live subscriber count per portal id (`community.subscribers` from
+    // bridge.get_community). A portal is absent from the map until its
+    // answer lands, and stays absent when the call fails — the tile then
+    // shows no figure rather than a fake 0.
+    state = {
+        subscribers: {}
+    };
+
+    // GovernanceDialog mounts every view when it opens (disableLazyLoading)
+    // and drops them when it closes (keepMounted={false}), so the nine calls
+    // can still be in flight when this unmounts; the flag keeps their
+    // answers from touching a dead component.
+    _mounted = false;
+
+    componentDidMount() {
+        this._mounted = true;
+        this._loadSubscribers();
+    }
+
+    componentWillUnmount() {
+        this._mounted = false;
+    }
+
+    // One bridge.get_community per portal, fired in parallel. There is no
+    // multi-name variant: list_communities only filters by title/about, so it
+    // cannot select the nine portals by name. Each tile fills in as its own
+    // answer arrives instead of waiting for the slowest one. The wrapper
+    // sanitizes the payload (subscribers is a validated number or 0) and
+    // resolves null on any failure, so a failed portal just stays blank.
+    // GovernanceDialog never re-renders (hard shouldComponentUpdate false),
+    // so `api` is read once here; if it isn't initialized yet the counts
+    // simply stay blank for this opening.
+    _loadSubscribers = () => {
+        const { api } = this.props;
+        const communities = api && api.communities;
+        if (!communities || typeof communities.getCommunity !== "function") return;
+
+        ALL_TOPICS.forEach((topic) => {
+            Promise.resolve(communities.getCommunity(topic.id))
+                .then((community) => {
+                    if (!this._mounted || !community) return;
+                    const count = community.subscribers;
+                    if (typeof count !== "number" || !Number.isFinite(count)) return;
+                    this.setState((prev) => ({
+                        subscribers: { ...prev.subscribers, [topic.id]: count }
+                    }));
+                })
+                .catch(() => {});
+        });
+    }
+
+    // Every tile links to its portal's community page. The dialog is modal,
+    // so it closes itself on the way out — otherwise the page would change
+    // underneath a dialog that stays open. GovernanceDialog threads its
+    // onClose down for exactly this.
+    _openPortal = (portal) => {
+        if (typeof this.props.onClose === "function") this.props.onClose();
+        HISTORY.push("/" + portal.id);
+    }
+
+    // The tile's only figure. Rendered once the count is known; until then
+    // (and after a failed call) the meta row stays empty at its reserved
+    // height.
+    _renderSubscribers = (topic) => {
+        const { classes } = this.props;
+        const count = this.state.subscribers[topic.id];
+        if (typeof count !== "number") return null;
+
+        return (
+            <span className={classes.topicStat}>
+                <GroupIcon className={classes.topicStatIcon} />
+                <span className={classes.topicStatValue}>{count}</span> {t("components.gddisruptions.subscribers")}
+            </span>
+        );
+    }
+
+    _renderProposalsTile = () => {
+        const { classes } = this.props;
+        const topic = PROPOSALS_TOPIC;
+        const IconComponent = topic.icon || BallotIcon;
+        const title = topic.title ? topic.title() : topic.name;
+        const description = topic.description ? topic.description() : "";
+
+        return (
+            <ButtonBase
+                className={classes.topicTile + " " + classes.proposalsTile}
+                onClick={() => this._openPortal(topic)}
+            >
+                <IconComponent className={classes.topicBackgroundIcon} />
+                <div className={classes.topicContent}>
+                    <Typography className={classes.topicTitle}>
+                        {title}
+                    </Typography>
+                    {description && (
+                        <Typography className={classes.topicDescription + " " + classes.proposalsDescription}>
+                            {description}
+                        </Typography>
+                    )}
+                    <div className={classes.topicMeta}>
+                        {this._renderSubscribers(topic)}
+                    </div>
+                </div>
+            </ButtonBase>
+        );
     }
 
     _renderTopicTile = (topic) => {
         const { classes } = this.props;
-        const IconComponent = topic.icon;
-        
+        const IconComponent = topic.icon || ForumIcon;
+        const title = topic.title ? topic.title() : topic.name;
+        const description = topic.description ? topic.description() : "";
+
         return (
             <ButtonBase
-                key={topic.id}
+                key={topic.name}
                 className={classes.topicTile}
-                onClick={() => this._handleTopicClick(topic)}
+                onClick={() => this._openPortal(topic)}
             >
                 {topic.urgent && (
                     <span className={classes.urgentBadge}>{t("components.gddisruptions.urgent")}</span>
@@ -222,20 +333,15 @@ class GDDisruptions extends React.PureComponent {
                 <IconComponent className={classes.topicBackgroundIcon} />
                 <div className={classes.topicContent}>
                     <Typography className={classes.topicTitle}>
-                        {topic.title}
+                        {title}
                     </Typography>
-                    <Typography className={classes.topicDescription}>
-                        {topic.description}
-                    </Typography>
+                    {description && (
+                        <Typography className={classes.topicDescription}>
+                            {description}
+                        </Typography>
+                    )}
                     <div className={classes.topicMeta}>
-                        <span className={classes.topicStat}>
-                            <ForumIcon className={classes.topicStatIcon} />
-                            <span className={classes.topicStatValue}>{topic.posts}</span> posts
-                        </span>
-                        <span className={classes.topicStat}>
-                            <GroupIcon className={classes.topicStatIcon} />
-                            <span className={classes.topicStatValue}>{topic.active}</span> active
-                        </span>
+                        {this._renderSubscribers(topic)}
                     </div>
                 </div>
             </ButtonBase>
@@ -252,6 +358,7 @@ class GDDisruptions extends React.PureComponent {
                     {t("components.gddisruptions.select_a_topic_to_view_reports_and")}
                 </Typography>
                 <div className={classes.topicsGrid}>
+                    {this._renderProposalsTile()}
                     {TOPICS.map(topic => this._renderTopicTile(topic))}
                 </div>
             </DialogContent>

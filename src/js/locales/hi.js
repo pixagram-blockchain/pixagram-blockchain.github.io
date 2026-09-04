@@ -198,6 +198,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "लेखक:",
         "to": "जवाब:",
+        "proposals": "प्रस्ताव",
+        "discussion": "चर्चा",
+        "marketing": "मार्केटिंग",
+        "legal": "कानूनी",
+        "risks": "जोखिम",
+        "bug_reports": "बग रिपोर्ट",
+        "community": "समुदाय"
     },
 
     components: {
@@ -1582,6 +1589,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "<strong>@{{currentAccount}}</strong> के रूप में चेन मापदंडों का नया समुच्चय प्रसारित करें। इस रिलीज़ में खाता-निर्माण शुल्क, अधिकतम ब्लॉक आकार और PXS ब्याज दर स्थिर हैं। नीचे अपना witness URL अपडेट करें।",
             "you_can_vote_for_up_to_30": "आप 30 तक witnesses को वोट दे सकते हैं, जबकि ब्लॉकचेन चलाने के लिए केवल 21 आवश्यक हैं।"
         },
+        "governance_dialog": {
+            "viability_management": "व्यवहार्यता प्रबंधन",
+            "take_actions": "कार्रवाई करें",
+            "governs_the_system_attributes_through_proposals": "प्रस्तावों और witness मतदान के ज़रिये सिस्टम की विशेषताओं का संचालन करता है। यही वह अभिशासन परत है जो Pixagram इकोसिस्टम में निर्णय लेना संभव बनाती है।",
+            "attributes": "विशेषताएँ",
+            "documentation": "दस्तावेज़ीकरण",
+            "enabled_by_viability_management_view_system_stat": "व्यवहार्यता प्रबंधन द्वारा सक्षम। सिस्टम की स्थिति, नेटवर्क एंडपॉइंट और रीयल-टाइम ब्लॉक उत्पादन की जानकारी देखें।",
+            "methods": "पद्धतियाँ",
+            "guides": "मार्गदर्शिकाएँ",
+            "associated_to_metrics_download_theory_documents": "मापदंडों से संबद्ध। विश्लेषण प्रणाली के प्रभावी उपयोग के लिए सैद्धांतिक दस्तावेज़, पद्धतिगत मार्गदर्शिकाएँ और प्रोटोकॉल डाउनलोड करें।",
+            "metrics": "मापदंड",
+            "analytics": "विश्लेषण",
+            "measured_by_the_system_track_key_performance": "सिस्टम द्वारा मापे गए। प्रमुख प्रदर्शन संकेतकों पर नज़र रखें, लक्ष्यों की निगरानी करें और इकोसिस्टम की सेहत का विश्लेषण करें।",
+            "control_tower": "नियंत्रण कक्ष",
+            "dashboard": "डैशबोर्ड",
+            "monitor_the_entire_ecosystem_from_a_centralized": "एक केंद्रीकृत डैशबोर्ड से पूरे इकोसिस्टम की निगरानी करें। रीयल-टाइम जानकारी और सिस्टम का अवलोकन।",
+            "disruptions": "व्यवधान",
+            "reports": "रिपोर्ट",
+            "affects_viability_management_track_and_report_is": "व्यवहार्यता प्रबंधन को प्रभावित करता है। अभिशासन, कानूनी, जोखिम और मार्केटिंग सहित समुदाय के विभिन्न विषयों में समस्याओं पर नज़र रखें और उन्हें रिपोर्ट करें।"
+        },
         "gdattributes": {
             "with_transactions": "{{txCount}} लेनदेन के साथ",
             "system_status": "तंत्र स्थिति",
@@ -1819,7 +1846,8 @@ export default {
             "signup": "साइन अप",
             "the_portal_opens_soon": "{{title}} पोर्टल जल्द खुलेगा।",
             "opens_soon": "{{title}} जल्द खुलेगा।",
-            "banner_closed": "बैनर बंद किया गया।"
+            "banner_closed": "बैनर बंद किया गया।",
+            "create_discuss_and_vote": "बनाएँ, चर्चा करें और वोट करें"
         },
         "settings_panel": {
             "60_authors_40_curators": "60% लेखक / 40% क्यूरेटर",
@@ -2203,7 +2231,17 @@ export default {
         "gddisruptions": {
             "urgent": "तत्काल",
             "report_categories": "रिपोर्ट श्रेणियाँ",
-            "select_a_topic_to_view_reports_and": "रिपोर्ट देखने और समुदाय चर्चाओं में शामिल होने के लिए कोई विषय चुनें। ये व्यवधान रिपोर्टें व्यवहार्यता प्रबंधन निर्णयों को प्रभावित करती हैं।"
+            "select_a_topic_to_view_reports_and": "रिपोर्ट देखने और समुदाय चर्चाओं में शामिल होने के लिए कोई विषय चुनें। ये व्यवधान रिपोर्टें व्यवहार्यता प्रबंधन निर्णयों को प्रभावित करती हैं।",
+            "subscribers": "सब्सक्राइबर",
+            "turn_a_report_into_action_create_a": "रिपोर्ट को कार्रवाई में बदलें: एक प्रस्ताव बनाएँ, उस पर चर्चा करें और कोष से उसके वित्तपोषण पर वोट करें।",
+            "general_discussions_about_the_pixagram_ecosystem": "Pixagram इकोसिस्टम पर सामान्य चर्चा, फ़ीचर अनुरोध और समुदाय की प्रतिक्रिया।",
+            "proposals_voting_discussions_and_decision_making": "इकोसिस्टम के लिए प्रस्ताव, मतदान पर चर्चा और निर्णय लेने की प्रक्रियाएँ।",
+            "marketing_initiatives_partnerships_and_promotion": "Pixagram के लिए मार्केटिंग पहल, साझेदारियाँ और प्रचार अभियान।",
+            "legal_considerations_compliance_discussions_and": "इकोसिस्टम को प्रभावित करने वाले कानूनी विचार, अनुपालन पर चर्चा और नियामक अपडेट।",
+            "risk_assessment_threat_analysis_and_mitigation_s": "इकोसिस्टम की सुरक्षा के लिए जोखिम आकलन, ख़तरों का विश्लेषण और शमन रणनीतियाँ।",
+            "security_audits_vulnerability_reports_and_best_p": "सुरक्षा ऑडिट, कमज़ोरियों की रिपोर्ट और सुरक्षित उपयोग के सर्वोत्तम तरीक़े।",
+            "report_bugs_technical_issues_and_track_their": "बग और तकनीकी समस्याएँ रिपोर्ट करें और उनके समाधान की स्थिति पर नज़र रखें।",
+            "community_events_meetups_collaborations_and_soci": "समुदाय के कार्यक्रम, मीटअप, सहयोग और सामाजिक पहल।"
         },
         "gdmetrics": {
             "key_metrics": "प्रमुख मापदंड",

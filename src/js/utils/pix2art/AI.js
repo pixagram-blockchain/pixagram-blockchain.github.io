@@ -66,19 +66,19 @@ const PRESETS_TRANSFORM = {
     img2img_strength: 0.75,
     seed: -1,
     identity_preserve: true,
-    lora_style: "vga",
+    lora_style: "retroart",
     identitynet_strength: 0.95,
     ip_adapter_scale: 0.95,
     resolution: 1600,
     aspect_ratio: "1:1",
-    use_tiled: true,
+    use_tiled: false,
     tile_size: 786,
     tile_overlap: 256,
 };
 const PRESET_GENERATE = {
     negative_prompt: "Ugly, real, artifacts, blurry, disformed, photo-realistic, photo, photography, realistic, low-quality, text, white edges, border.",
-    cfg_scale: 1.2,
-    steps: 10,
+    cfg_scale: 1.0,
+    steps: 8,
     seed: -1,
 };
 export const transform = async (file, step_n, fidelity, callback = () => {}, callback2 = () => {}, description = "", style = "retroart") => {
@@ -91,13 +91,14 @@ export const transform = async (file, step_n, fidelity, callback = () => {}, cal
             step_n
         })
         var input_image = (file.size > 1000000) ? await resizeImageTo2MP(file) : file;
-        var num_inference_steps = step_n;
-        var lora_intensity = (step_n / 10 * 100|0)/100;
+        var num_inference_steps = step_n+2;
+        var lora_intensity = (step_n / 12 * 100|0)/100;
         var img2img_strength = (0.8 - Math.min(0.4, Math.max(0, fidelity)));
-        var guidance_scale = Math.max(1, (step_n|0)/10);
+        var guidance_scale = Math.max(1, (step_n|0)/8);
 
         var dynamic_config = {
             ...PRESETS_TRANSFORM,
+            lora_style: style,
             lora_intensity,
             num_inference_steps,
             img2img_strength,

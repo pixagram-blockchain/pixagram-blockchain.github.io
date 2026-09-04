@@ -16,61 +16,69 @@ import Tooltip from "@material-ui/core/Tooltip";
 import SettingsIcon from "@material-ui/icons/Settings";
 import DescriptionIcon from "@material-ui/icons/Description";
 import MenuBookIcon from "@material-ui/icons/MenuBook";
-import BarChartIcon from "@material-ui/icons/BarChart";
-import DashboardIcon from "@material-ui/icons/Dashboard";
+// import BarChartIcon from "@material-ui/icons/BarChart";   // Metrics tab (disabled, see TAB_CONFIG)
+// import DashboardIcon from "@material-ui/icons/Dashboard"; // Control Tower tab (disabled, see TAB_CONFIG)
 import WarningIcon from "@material-ui/icons/Warning";
 
-// Import view components
+// Import view components — the SwipeableViews children below MUST stay in
+// lockstep with TAB_CONFIG: the tab index doubles as the view index, so a
+// view mounted for a tab that isn't listed shifts every later tab onto the
+// wrong content.
 import GDViabilityManagement from "./GDViabilityManagement";
 import GDAttributes from "./GDAttributes";
 import GDMethods from "./GDMethods";
-import GDMetrics from "./GDMetrics";
-import GDControlTower from "./GDControlTower";
+// import GDMetrics from "./GDMetrics";           // Metrics tab (disabled, see TAB_CONFIG)
+// import GDControlTower from "./GDControlTower"; // Control Tower tab (disabled, see TAB_CONFIG)
 import GDDisruptions from "./GDDisruptions";
 
+import { t, subscribe as subscribe_language } from "../utils/text";
+
+// Copy is resolved at render time (thunks), so a language switch repaints
+// the header; the dialog subscribes to language changes itself because its
+// shouldComponentUpdate is a hard `false`.
 const TAB_CONFIG = [
     {
         id: "viability",
-        title: "Viability Management",
-        subtitle: "Take Actions",
-        description: "Governs the system attributes through proposals and witness voting. This is the governance layer that enables decision-making for the Pixagram ecosystem.",
+        title: () => t("components.governance_dialog.viability_management"),
+        subtitle: () => t("components.governance_dialog.take_actions"),
+        description: () => t("components.governance_dialog.governs_the_system_attributes_through_proposals"),
         icon: SettingsIcon
     },
     {
         id: "attributes",
-        title: "Attributes",
-        subtitle: "Documentation",
-        description: "Enabled by Viability Management. View system status, network endpoints, and real-time block production information.",
+        title: () => t("components.governance_dialog.attributes"),
+        subtitle: () => t("components.governance_dialog.documentation"),
+        description: () => t("components.governance_dialog.enabled_by_viability_management_view_system_stat"),
         icon: DescriptionIcon
     },
     {
         id: "methods",
-        title: "Methods",
-        subtitle: "Guides",
-        description: "Associated to Metrics. Download theory documents, methodological guides, and protocols for using the analytics system effectively.",
+        title: () => t("components.governance_dialog.methods"),
+        subtitle: () => t("components.governance_dialog.guides"),
+        description: () => t("components.governance_dialog.associated_to_metrics_download_theory_documents"),
         icon: MenuBookIcon
     },
     /*{
         id: "metrics",
-        title: "Metrics",
-        subtitle: "Analytics",
-        description: "Measured by the system. Track key performance indicators, monitor goals, and analyze ecosystem health.",
+        title: () => t("components.governance_dialog.metrics"),
+        subtitle: () => t("components.governance_dialog.analytics"),
+        description: () => t("components.governance_dialog.measured_by_the_system_track_key_performance"),
         icon: BarChartIcon
     },
     {
         id: "control-tower",
-        title: "Control Tower",
-        subtitle: "Dashboard",
-        description: "Monitor the entire ecosystem from a centralized dashboard. Real-time insights and system overview.",
+        title: () => t("components.governance_dialog.control_tower"),
+        subtitle: () => t("components.governance_dialog.dashboard"),
+        description: () => t("components.governance_dialog.monitor_the_entire_ecosystem_from_a_centralized"),
         icon: DashboardIcon
-    },
+    },*/
     {
         id: "disruptions",
-        title: "Disruptions",
-        subtitle: "Reports",
-        description: "Affects Viability Management. Track and report issues across different community topics including governance, legal, risks, and marketing.",
+        title: () => t("components.governance_dialog.disruptions"),
+        subtitle: () => t("components.governance_dialog.reports"),
+        description: () => t("components.governance_dialog.affects_viability_management_track_and_report_is"),
         icon: WarningIcon
-    }*/
+    }
 ];
 
 const styles = theme => ({
@@ -218,6 +226,22 @@ class GovernanceDialog extends React.PureComponent {
         return false;
     }
 
+    // PureComponent with a hard `false` above — nothing in props changes when
+    // the user switches language, so subscribe directly and force the repaint
+    // (same pattern as LexicalTextEditorDialog).
+    _unsubscribeLanguage = null;
+
+    componentDidMount() {
+        this._unsubscribeLanguage = subscribe_language(() => this.forceUpdate());
+    }
+
+    componentWillUnmount() {
+        if (this._unsubscribeLanguage) {
+            this._unsubscribeLanguage();
+            this._unsubscribeLanguage = null;
+        }
+    }
+
     componentWillReceiveProps(nextProps, nextContext) {
         if (this.state.open !== nextProps.open) {
             this.setState({ open: nextProps.open }, () => {
@@ -265,14 +289,14 @@ class GovernanceDialog extends React.PureComponent {
                     <div className={classes.titleWrapper}>
                         <div className={classes.titleRow}>
                             <Typography component="h1" className={classes.mainTitle}>
-                                {currentTab.title}
+                                {currentTab.title()}
                             </Typography>
                             <Tooltip
                                 arrow
                                 interactive
                                 title={
                                     <div className={classes.tooltip}>
-                                        {currentTab.description}
+                                        {currentTab.description()}
                                     </div>
                                 }
                             >
@@ -282,13 +306,13 @@ class GovernanceDialog extends React.PureComponent {
                             </Tooltip>
                         </div>
                         <Typography component="span" className={classes.subtitle}>
-                            {currentTab.subtitle}
+                            {currentTab.subtitle()}
                         </Typography>
                     </div>
                     <IconButton
                         className={classes.closeButton}
                         onClick={this.props.onClose}
-                        aria-label="close"
+                        aria-label={t("words.close")}
                     >
                         <CloseIcon />
                     </IconButton>
@@ -328,9 +352,11 @@ class GovernanceDialog extends React.PureComponent {
                     <GDViabilityManagement api={api} />
                     <GDAttributes api={api} />
                     <GDMethods api={api} />
-                    <GDMetrics api={api} />
-                    <GDControlTower api={api} />
-                    <GDDisruptions api={api} />
+                    {/* <GDMetrics api={api} /> */}
+                    {/* <GDControlTower api={api} /> */}
+                    {/* The portal tiles navigate to a community page, so the
+                        view closes this (modal) dialog on the way out. */}
+                    <GDDisruptions api={api} onClose={this.props.onClose} />
                 </SwipeableViews>
             </Dialog>
         );

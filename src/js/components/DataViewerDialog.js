@@ -589,13 +589,13 @@ const Base64Detail = ({ value, subtype }) => {
                 {isDataUri && declared && (
                     <div style={metaCard}>
                         <div style={metaLabel}>{mismatched ? "MIME (declared)" : "MIME"}</div>
-                        <div style={{ ...metaValue, color: mismatched ? "#e5a13c" : metaValue.color }}>{declared}</div>
+                        <div style={{ ...metaValue, color: mismatched ? "#d8d8d8" : metaValue.color }}>{declared}</div>
                     </div>
                 )}
                 {mismatched && (
                     <div style={metaCard}>
                         <div style={metaLabel}>MIME (actual)</div>
-                        <div style={{ ...metaValue, color: "#e5a13c" }}>{sniffed}</div>
+                        <div style={{ ...metaValue, color: "#D8D8D8FF" }}>{sniffed}</div>
                     </div>
                 )}
                 <div style={metaCard}>
@@ -632,17 +632,17 @@ const Base64Detail = ({ value, subtype }) => {
                     background: "#1a1210", border: "1px solid #4a2b20",
                     borderRadius: 12, padding: 12,
                 }}>
-                    <div style={{ ...metaLabel, color: "#e5a13c" }}>
+                    <div style={{ ...metaLabel, color: "#D8D8D8FF" }}>
                         {t("components.data_viewer_dialog.preview_blocked")}
                     </div>
                     <div style={{
-                        fontSize: 11, color: "#c98f4a", fontFamily: mono, marginTop: 6,
+                        fontSize: 11, color: "#D8D8D8FF", fontFamily: mono, marginTop: 6,
                         wordBreak: "break-all",
                     }}>
                         {verdict.reason}
                     </div>
                     <div style={{
-                        fontSize: 10, color: "#7a5f45", fontFamily: sansFont,
+                        fontSize: 10, color: "#8f8f8f", fontFamily: sansFont,
                         fontStyle: "italic", marginTop: 6,
                     }}>
                         {t("components.data_viewer_dialog.preview_blocked_hint")}
@@ -816,7 +816,7 @@ const UrlBar = React.memo(({ url }) => {
                 {url}
             </span>
             {copied && (
-                <span style={{ color: "#6c6", fontSize: 10, fontFamily: sansFont }}>
+                <span style={{ color: "#ffffff", fontSize: 10, fontFamily: sansFont }}>
                     copied
                 </span>
             )}

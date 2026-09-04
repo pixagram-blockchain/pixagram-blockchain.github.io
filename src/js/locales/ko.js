@@ -198,6 +198,13 @@ export default {
         // PaperCardComment, PaperCardReply subheaders.
         "by": "작성자:",
         "to": "답장 대상:",
+        "proposals": "제안",
+        "discussion": "토론",
+        "marketing": "마케팅",
+        "legal": "법률",
+        "risks": "리스크",
+        "bug_reports": "버그 신고",
+        "community": "커뮤니티"
     },
 
     components: {
@@ -1582,6 +1589,26 @@ export default {
             "broadcast_a_new_set_of_chain_parameters": "<strong>@{{currentAccount}}</strong> 명의로 새 체인 매개변수를 브로드캐스트합니다. 계정 생성 수수료, 최대 블록 크기, PXS 이자율은 이번 릴리스에서 고정되어 있습니다. 아래에서 witness URL을 갱신하세요.",
             "you_can_vote_for_up_to_30": "블록체인 운영에는 21명이면 충분하지만, 최대 30명의 witness에게 투표할 수 있습니다."
         },
+        "governance_dialog": {
+            "viability_management": "지속가능성 관리",
+            "take_actions": "행동하기",
+            "governs_the_system_attributes_through_proposals": "제안과 witness 투표를 통해 시스템 속성을 관리합니다. Pixagram 생태계의 의사결정을 가능하게 하는 거버넌스 계층입니다.",
+            "attributes": "속성",
+            "documentation": "문서",
+            "enabled_by_viability_management_view_system_stat": "지속가능성 관리로 활성화됩니다. 시스템 상태, 네트워크 엔드포인트, 실시간 블록 생성 정보를 확인하세요.",
+            "methods": "방법론",
+            "guides": "가이드",
+            "associated_to_metrics_download_theory_documents": "지표와 연결되어 있습니다. 분석 시스템을 효과적으로 사용하기 위한 이론 문서, 방법론 가이드, 프로토콜을 다운로드하세요.",
+            "metrics": "지표",
+            "analytics": "분석",
+            "measured_by_the_system_track_key_performance": "시스템이 측정합니다. 핵심 성과 지표를 추적하고, 목표를 모니터링하고, 생태계의 건전성을 분석하세요.",
+            "control_tower": "관제탑",
+            "dashboard": "대시보드",
+            "monitor_the_entire_ecosystem_from_a_centralized": "중앙 대시보드에서 생태계 전체를 모니터링하세요. 실시간 인사이트와 시스템 개요.",
+            "disruptions": "장애",
+            "reports": "보고",
+            "affects_viability_management_track_and_report_is": "지속가능성 관리에 영향을 줍니다. 거버넌스, 법률, 리스크, 마케팅 등 커뮤니티의 여러 주제에 걸친 문제를 추적하고 보고하세요."
+        },
         "gdattributes": {
             "with_transactions": "{{txCount}}건의 트랜잭션 포함",
             "system_status": "시스템 상태",
@@ -1819,7 +1846,8 @@ export default {
             "signup": "가입",
             "the_portal_opens_soon": "{{title}} 포털이 곧 열립니다.",
             "opens_soon": "{{title}}이(가) 곧 열립니다.",
-            "banner_closed": "배너를 닫았습니다."
+            "banner_closed": "배너를 닫았습니다.",
+            "create_discuss_and_vote": "만들고, 토론하고, 투표하세요"
         },
         "settings_panel": {
             "60_authors_40_curators": "작성자 60% / 큐레이터 40%",
@@ -2203,7 +2231,17 @@ export default {
         "gddisruptions": {
             "urgent": "긴급",
             "report_categories": "신고 분류",
-            "select_a_topic_to_view_reports_and": "주제를 선택하면 보고를 확인하고 커뮤니티 논의에 참여할 수 있습니다. 이러한 장애 보고는 지속가능성 관리 결정에 영향을 줍니다."
+            "select_a_topic_to_view_reports_and": "주제를 선택하면 보고를 확인하고 커뮤니티 논의에 참여할 수 있습니다. 이러한 장애 보고는 지속가능성 관리 결정에 영향을 줍니다.",
+            "subscribers": "명 구독자",
+            "turn_a_report_into_action_create_a": "신고를 행동으로 바꾸세요: 제안을 만들고, 토론하고, 금고에서의 자금 지원에 투표하세요.",
+            "general_discussions_about_the_pixagram_ecosystem": "Pixagram 생태계에 대한 일반 토론, 기능 요청, 커뮤니티 피드백.",
+            "proposals_voting_discussions_and_decision_making": "생태계를 위한 제안, 투표 논의, 의사결정 절차.",
+            "marketing_initiatives_partnerships_and_promotion": "Pixagram의 마케팅 활동, 파트너십, 홍보 캠페인.",
+            "legal_considerations_compliance_discussions_and": "생태계에 영향을 미치는 법적 고려사항, 규정 준수 논의, 규제 업데이트.",
+            "risk_assessment_threat_analysis_and_mitigation_s": "생태계 보안을 위한 리스크 평가, 위협 분석, 완화 전략.",
+            "security_audits_vulnerability_reports_and_best_p": "보안 감사, 취약점 보고, 안전한 사용을 위한 모범 사례.",
+            "report_bugs_technical_issues_and_track_their": "버그와 기술적 문제를 신고하고 해결 상태를 추적하세요.",
+            "community_events_meetups_collaborations_and_soci": "커뮤니티 행사, 밋업, 협업, 사회적 활동."
         },
         "gdmetrics": {
             "key_metrics": "주요 지표",
