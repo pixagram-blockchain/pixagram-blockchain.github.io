@@ -9,6 +9,8 @@ import * as actions from "../actions/utils";
 import { CellMeasurer, CellMeasurerCache, createMasonryCellPositioner } from "@pixagram/virtualized/dist/es/index";
 import MasonryExtended from "../components/MasonryExtended";
 import useWindowDimensions from "../hooks/useWindowDimensions";
+import useVoteSync from "../hooks/useVoteSync";
+import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto } from "../utils/voteSync";
 import { idle, cancelIdle } from "../utils/idle";
 import {
     EASE as E, TRANSITION_FAST as TF, TRANSITION_MEDIUM as TM,
@@ -450,7 +452,8 @@ const enrichPostForCard = (post, account, voterProfiles) => {
         date: post.created ? new Date(post.created).getTime() : Date.now(), payout: `$${payout.toFixed(2)}`,
         upVotesNumber: Math.max(0, post.net_votes || activeVotes.filter(v => v?.weight >= 0).length || 0),
         downVotesNumber: Math.max(0, activeVotes.filter(v => v?.weight < 0).length || 0),
-        active_votes: activeVotes, _voter_profiles: voterProfiles || {}, nsfw: isNsfwPost(post), deleted: isDeletedPost(post), tags,
+        active_votes: activeVotes, net_rshares: post.net_rshares != null ? String(post.net_rshares) : '0',
+        _voter_profiles: voterProfiles || {}, nsfw: isNsfwPost(post), deleted: isDeletedPost(post), tags,
         permlink: post.permlink || '', category: resolveRootCategory(post), _content_type: post._content_type || resolveContentType(post) || 'pixel_art',
         _description_html: post._description_html || '', _summary: post._summary || '', json_metadata: post.json_metadata || '',
         children: post.children ?? 0, commentsNumber: post.children ?? 0,
@@ -469,7 +472,7 @@ const enrichCommentForCard = (comment, account, index, voterProfiles) => {
         payout: `$${payout.toFixed(2)}`,
         upVotesNumber: Math.max(0, comment.net_votes || activeVotes.filter(v => v?.weight >= 0).length || 0),
         downVotesNumber: Math.max(0, activeVotes.filter(v => v?.weight < 0).length || 0),
-        active_votes: activeVotes, _voter_profiles: voterProfiles || {},
+        active_votes: activeVotes, net_rshares: comment.net_rshares != null ? String(comment.net_rshares) : '0', _voter_profiles: voterProfiles || {},
         permlink: comment.permlink || '', parent_author: comment.parent_author || '', parent_permlink: comment.parent_permlink || '',
         root_author: comment.root_author || '', root_permlink: comment.root_permlink || '', category: resolveRootCategory(comment),
         // Type of the ROOT this comment hangs under — what the title links to,
@@ -497,7 +500,7 @@ const transformRepliesToCardFormat = (rawReplies, profileOwnerAccount, voterProf
             payout: `$${payout.toFixed(2)}`,
             upVotesNumber: Math.max(0, r.net_votes || activeVotes.filter(v => v?.weight >= 0).length || 0),
             downVotesNumber: Math.max(0, activeVotes.filter(v => v?.weight < 0).length || 0),
-            active_votes: activeVotes, _voter_profiles: voterProfiles || {}, originalComment: '',
+            active_votes: activeVotes, net_rshares: r.net_rshares != null ? String(r.net_rshares) : '0', _voter_profiles: voterProfiles || {}, originalComment: '',
             permlink: r.permlink || '', parent_author: r.parent_author || '', parent_permlink: r.parent_permlink || '',
             root_author: r.root_author || '', root_permlink: r.root_permlink || '', category: resolveRootCategory(r),
             _content_type: resolveContentType(r),
@@ -621,12 +624,11 @@ const fetchVoterProfiles = async (items, account, api) => {
     return profiles;
 };
 
-const applyVoteToPost = (post, permlink, voter, weight) => {
-    if (!post || post.permlink !== permlink) return post;
-    let nv = (post.active_votes||[]).filter(v => v?.voter !== voter);
-    if (weight !== 0) nv.push({ voter, weight, rshares: '0', time: new Date().toISOString() });
-    return { ...post, active_votes: nv, upVotesNumber: Math.max(0, nv.filter(v => v?.weight >= 0).length), downVotesNumber: Math.max(0, nv.filter(v => v?.weight < 0).length) };
-};
+// Shared with Feed / FeedPersonal / Community (utils/voteSync): patches the
+// card AND registers the vote as pending, so the tab-switch refetch — which
+// hits hivemind before it has indexed the vote's block — re-applies it instead
+// of dropping it. See Feed.js for the full story.
+const applyVoteToPost = (post, permlink, voter, weight) => applyOptimisticVote(post, permlink, voter, weight);
 
 // ── Content hydration for comments ─────────────────────────────────────
 const hydrateContent = (content) => {
@@ -713,7 +715,7 @@ const fetchOrphanPost = async (api, author, permlink) => {
         }
 
         hydrateContent(content);
-        return enrichPostForCard(content, authorAccount, {});
+        return overlayPendingVote(enrichPostForCard(content, authorAccount, {}));
     } catch (e) {
         console.warn('[Profile] fetchOrphanPost failed:', e && e.message);
         return null;
@@ -1065,9 +1067,12 @@ const useTabData = (api, account, category) => {
                     // voter-list profile images (shown when a vote list is opened)
                     // need the extra account fetch, so defer it and patch in place
                     // with no remeasure (avatar swaps don't change card height).
-                    setPosts(p.map(x => enrichPostForCard(x, account, {})));
+                    // Both phases pass through overlayPendingVotes: a vote cast
+                    // a moment ago isn't in the fetched rows yet (indexer lag);
+                    // the pending registry keeps it until the chain shows it.
+                    setPosts(overlayPendingVotes(p.map(x => enrichPostForCard(x, account, {}))));
                     fetchVoterProfiles(p, account, api)
-                        .then(vp => { if (stillCurrent()) setPosts(p.map(x => enrichPostForCard(x, account, vp))); })
+                        .then(vp => { if (stillCurrent()) setPosts(overlayPendingVotes(p.map(x => enrichPostForCard(x, account, vp)))); })
                         .catch(() => {});
                     break;
                 }
@@ -1085,7 +1090,7 @@ const useTabData = (api, account, category) => {
                     // and both phases map/sort the same `c`, so membership and
                     // order are identical.
                     const ownOnly = {}; if (account?.name) ownOnly[account.name] = account.image;
-                    const buildComments = (vp) => c.map((x,i)=>enrichCommentForCard(x,account,i,vp)).sort((a,b)=>b.date-a.date);
+                    const buildComments = (vp) => overlayPendingVotes(c.map((x,i)=>enrichCommentForCard(x,account,i,vp)).sort((a,b)=>b.date-a.date));
                     setComments(buildComments(ownOnly));
                     fetchVoterProfiles(c, account, api)
                         .then(vp => { if (stillCurrent()) setComments(buildComments(vp)); })
@@ -1104,7 +1109,7 @@ const useTabData = (api, account, category) => {
                     // phases map/sort the same `rr` and differ only in avatars
                     // and display names.
                     const ownOnly = {}; if (account.name) ownOnly[account.name] = account.image;
-                    setReplies(transformRepliesToCardFormat(rr, account, ownOnly, []));
+                    setReplies(overlayPendingVotes(transformRepliesToCardFormat(rr, account, ownOnly, [])));
                     const relAccs = rr.flatMap(r=>[r.author,r.parent_author].filter(Boolean));
                     const allVotes = rr.flatMap(r=>r.active_votes||[]);
                     const allToFetch = [...new Set([...allVotes.map(v=>v?.voter).filter(Boolean),...relAccs])];
@@ -1114,7 +1119,7 @@ const useTabData = (api, account, category) => {
                             const vp = {}; if (account.name) vp[account.name] = account.image;
                             const fa = a.filter(Boolean);
                             fa.forEach(x => { const n=x.name||x._entity_id; if(n) vp[n]=x._profile?.profile_image||''; });
-                            setReplies(transformRepliesToCardFormat(rr, account, vp, fa));
+                            setReplies(overlayPendingVotes(transformRepliesToCardFormat(rr, account, vp, fa)));
                         }).catch(() => {});
                     }
                     break;
@@ -1271,7 +1276,7 @@ const useTabData = (api, account, category) => {
                 }).then(r => Array.isArray(r) ? r : []).catch(() => []);
             }
             if (p.length > 1) {
-                const np = p.slice(1).map(x => enrichPostForCard(x, account));
+                const np = overlayPendingVotes(p.slice(1).map(x => enrichPostForCard(x, account)));
                 setPosts(prev => [...prev, ...np]);
             } else {
                 // No new rows past the cursor — we've reached the end.
@@ -1287,7 +1292,7 @@ const useTabData = (api, account, category) => {
         try {
             const c = await api.content.getDiscussionsByComments({tag:account.name,start_author:account.name,start_permlink:last.permlink,limit:20});
             if (Array.isArray(c) && c.length > 1) {
-                const nc = c.slice(1).map((x,i)=>enrichCommentForCard(x,account,comments.length+i));
+                const nc = overlayPendingVotes(c.slice(1).map((x,i)=>enrichCommentForCard(x,account,comments.length+i)));
                 setComments(prev=>[...prev,...nc]);
             } else {
                 setHasMoreComments(false);
@@ -1351,6 +1356,17 @@ const useTabData = (api, account, category) => {
     const handleVoteChange = useCallback((permlink, voter, weight) => {
         setPosts(prev => prev.map(p => applyVoteToPost(p, permlink, voter, weight)));
     }, []);
+
+    // 6 s chain refresh after a vote (useVoteSync): the re-read content's real
+    // rshares and pending_payout_value replace the optimistic placeholder and
+    // the estimated payout wherever that author/permlink is listed — posts,
+    // comments and replies share the card shape, so one merge covers all three.
+    const onVoteSynced = useCallback(({ content }) => {
+        setPosts(prev => mergeFreshVoteDataInto(prev, content));
+        setComments(prev => mergeFreshVoteDataInto(prev, content));
+        setReplies(prev => mergeFreshVoteDataInto(prev, content));
+    }, []);
+    useVoteSync(api, onVoteSynced);
 
     // Stable return identity (same rationale as useProfileData above):
     // this object was a fresh literal every render, so every downstream
@@ -1543,6 +1559,22 @@ const usePostNavigation = ({ api, posts, masonryRefs, scrollToIndex, setSelected
     useEffect(() => { postsRef.current = posts; }, [posts]);
     const currentPostRef = useRef(currentPost);
     useEffect(() => { currentPostRef.current = currentPost; }, [currentPost]);
+
+    // Keep the OPEN post in step with the live list. Its card object is
+    // replaced when a vote is applied (applyVoteToPost → placeholder row) and
+    // again when the 6 s chain refresh lands (mergeFreshVoteDataInto → real
+    // rshares + payout). PostDialog reads votes and payout from props.data, so
+    // without this it kept showing the snapshot taken at open time — payout
+    // frozen, voter list without the new vote. Identity check only: the
+    // dialog keys its heavy work on the post id and treats a same-id data
+    // swap as a vote resync.
+    useEffect(() => {
+        if (!artworkOpen) return;
+        const cur = currentPostRef.current;
+        if (!cur || !cur.permlink) return;
+        const live = (posts || []).find(p => isSamePost(p, cur));
+        if (live && live !== cur) setCurrentPost(live);
+    }, [posts, artworkOpen]);
     const apiRef = useRef(api);
     useEffect(() => { apiRef.current = api; }, [api]);
     const orphanFetchTokenRef = useRef(0);
@@ -1832,7 +1864,7 @@ const usePostNavigation = ({ api, posts, masonryRefs, scrollToIndex, setSelected
                 }
                 let ca = account; if (needsAccount && accs?.[0]) { ca = accs[0]; ca.image = ca.image||ca._profile?.profile_image||''; }
                 hydrateContent(content);
-                const enriched = enrichPostForCard(content, ca, {});
+                const enriched = overlayPendingVote(enrichPostForCard(content, ca, {}));
                 // Last-ditch category: a comment inherits its root's category,
                 // so the CARD knows the segment even when the fetched root came
                 // back without one. Without this the URL degrades to

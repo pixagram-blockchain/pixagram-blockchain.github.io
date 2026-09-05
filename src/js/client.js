@@ -27,14 +27,19 @@
 //      through a plain prop update when the I/O resolves (Index's memo
 //      comparator keys on `settings`, so the update always lands).
 //
-// Boot hints (localStorage, written here on every successful settings
-// resolution, read synchronously on the next boot):
-//   pixa_locale_hint              → raw `locales` code ("fr-FR", …)
-//   pixa_api_node_hint            → raw `api_node` id
-//   pixa_api_node_custom_url_hint → raw `api_node_custom_url`
-// The node hints are consumed by Index.js's apiNodeUrl memo so the very
-// first PixaProxyAPI init targets the user's chosen node pre-hydration,
-// instead of connecting to the default and re-connecting when settings land.
+// Boot hints (localStorage, read synchronously on the next boot):
+//   pixa_locale_hint       → raw `locales` code ("fr-FR", …) — written HERE on
+//                            every successful settings resolution.
+//   pixa_api_node_url_hint → the API endpoint URL — written by utils/settings
+//                            itself on every emitted settings bag (init / get /
+//                            set, including the boot race's automatic pick), so
+//                            it can never lag the document. Index.js reads it
+//                            so the very first PixaProxyAPI init targets the
+//                            saved node pre-hydration, instead of connecting to
+//                            the default and re-connecting when settings land.
+// The former id-shaped pair (pixa_api_node_hint / pixa_api_node_custom_url_hint)
+// is no longer written; it is cleared below so the fallback path in Index.js
+// that still understands it goes quiet after one boot.
 
 import * as api from "./utils/settings";
 
@@ -81,15 +86,15 @@ let _notifySettings = null;
 api.init((response) => {
     _resolvedSettings = response;
 
-    // Refresh the boot hints for the NEXT cold start. Cleared when the value
+    // Refresh the locale hint for the NEXT cold start. Cleared when the value
     // is absent so reverting to defaults doesn't leave a stale hint behind.
+    // The node hint is utils/settings' job now (see the header); the legacy
+    // id-shaped pair is removed so nothing reads a stale id again.
     try {
         if (response && response.locales) localStorage.setItem("pixa_locale_hint", response.locales);
         else localStorage.removeItem("pixa_locale_hint");
-        if (response && response.api_node) localStorage.setItem("pixa_api_node_hint", response.api_node);
-        else localStorage.removeItem("pixa_api_node_hint");
-        if (response && response.api_node_custom_url) localStorage.setItem("pixa_api_node_custom_url_hint", response.api_node_custom_url);
-        else localStorage.removeItem("pixa_api_node_custom_url_hint");
+        localStorage.removeItem("pixa_api_node_hint");
+        localStorage.removeItem("pixa_api_node_custom_url_hint");
     } catch (e) { /* non-fatal */ }
 
     if (_notifySettings) _notifySettings(response);

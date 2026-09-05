@@ -81,6 +81,8 @@ import PrintRounded from "@material-ui/icons/PrintRounded";
 import SecurityRounded from "@material-ui/icons/SecurityRounded";
 import ShareRounded from "@material-ui/icons/ShareRounded";
 import PaperCardActions from "./PaperCardActions";
+import { voteSign, countUpvotes, countDownvotes } from "../utils/voteValue";
+import { votesWithLocalVote } from "../utils/voteSync";
 import FavoriteRounded from "@material-ui/icons/FavoriteRounded";
 import FavoriteBorderRounded from "@material-ui/icons/FavoriteBorderRounded";
 import * as favorites from "../utils/favorites";
@@ -181,8 +183,10 @@ function buildReplyComments(rawReplies, accounts, localAuthors) {
         try { body = rawSanitizeComment(body).html || body; } catch(e) {}
         return {
             username: u, body, date: r.created || Date.now(),
-            upVotesNumber: (r.active_votes || []).filter(v => v.weight >= 0).length,
-            downVotesNumber: (r.active_votes || []).filter(v => v.weight < 0).length,
+            // Direction from rshares (bridge rows omit `weight`, condenser rows
+            // may carry the curation weight) — see voteSign in utils/voteValue.
+            upVotesNumber: countUpvotes(r.active_votes),
+            downVotesNumber: countDownvotes(r.active_votes),
             permlink: r.permlink || "", children: r.children || 0,
             active_votes: r.active_votes || [],
             author: profileMap[u] || locals[u] || { username: u, name: u, image: "" }
@@ -3867,15 +3871,20 @@ function PostDialog(props) {
     const resolveInitialVoted = useCallback((data, account) => {
         if (!account || !data || !Array.isArray(data.active_votes)) return 0;
         const v = data.active_votes.find(v => v && v.voter === account);
-        if (!v) return 0; return v.weight < 0 ? -1 : 1;
+        // voteSign reads rshares before weight (bridge rows omit weight, condenser
+        // rows may carry the never-negative curation weight); a zeroed row with
+        // percent 0 — hivemind's trace of an unvote — reads as NOT voted.
+        return v ? voteSign(v) : 0;
     }, []);
 
+    // Rows for the voting list. Once the host page has applied the vote to
+    // `data` (placeholder row carrying the real weight + `_optimistic`), the
+    // rows pass through untouched so VotingListModal can price the pending
+    // vote; only the brief window where `_voted` is ahead of `data` still
+    // synthesizes a row.
     const getCurrentActiveVotes = useCallback(() => {
         const st = stateRef.current;
-        const base = (st.data.active_votes || []).filter(v => v && v.voter !== props.account);
-        if (st._voted === 1 && props.account) base.push({ voter: props.account, weight: 10000, rshares: '0', time: null });
-        else if (st._voted === -1 && props.account) base.push({ voter: props.account, weight: -10000, rshares: '0', time: null });
-        return base;
+        return votesWithLocalVote(st.data.active_votes, props.account, st._voted);
     }, [props.account]);
 
     const triggerPositiveVotes = useCallback(() => { actions.trigger_votes({ sign: '+', votes: getCurrentActiveVotes(), voter_profiles: stateRef.current.data._voter_profiles || {} }); }, [getCurrentActiveVotes]);

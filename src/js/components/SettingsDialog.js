@@ -23,7 +23,7 @@ import RadioGroup from "@material-ui/core/RadioGroup";
 import Autocomplete from "@material-ui/lab/Autocomplete";
 import Slider from "@material-ui/core/Slider";
 
-import { CURRENCIES, DEFAULT_NODES, CUSTOM_API_NODE_ID } from "../utils/constants";
+import { CURRENCIES, DEFAULT_NODES } from "../utils/constants";
 import { describe as describe_locale, STATUS } from "../utils/locale-status";
 import LOCALES from "../utils/constant_locales";
 import get_svg_in_b64 from "../utils/svgToBase64";
@@ -137,6 +137,12 @@ const fuzzyFilterLocales = (list, input_value) => {
     return fuzzy.filter(input_value.inputValue, list, options);
 };
 
+// A node is its URL. Anything the picker lists is "listed"; any other valid URL
+// is a custom endpoint. Comparison goes through the settings module's
+// normalizer so "https://api.pixagram.com/" and "https://api.pixagram.com"
+// are the same node.
+const isListedNodeUrl = (url) => !!url && DEFAULT_NODES.some((node) => api.same_node_url(node.url, url));
+
 // Match on either the ISO code or the currency name, so "CHF" and "Swiss"
 // both find the Swiss Franc. Mirrors fuzzyFilterLocales' wrapping contract
 // (returns { string, original, ... } objects).
@@ -179,8 +185,12 @@ const SettingsDialog = (props) => {
 
     // Draft text for the custom-endpoint field. Kept separate from `settings`
     // so typing doesn't persist on every keystroke — it's only saved on blur
-    // or Enter (see _handle_custom_url_commit).
-    const [customUrlDraft, setCustomUrlDraft] = useState(() => props.settings.api_node_custom_url || "");
+    // or Enter (see _handle_custom_url_commit). The settings carry one node
+    // fact — `_api_node_url` — so "custom" simply means "not one of
+    // DEFAULT_NODES"; the field starts out showing that URL, else empty.
+    const [customUrlDraft, setCustomUrlDraft] = useState(() =>
+        isListedNodeUrl(props.settings._api_node_url) ? "" : (props.settings._api_node_url || "")
+    );
     const [customUrlError, setCustomUrlError] = useState(false);
 
     // Mount-only side effects (was componentWillMount). Runs after first paint,
@@ -317,11 +327,21 @@ const SettingsDialog = (props) => {
         api.set_settings({ pdf_page_size: v }, _on_settings_changed);
     }, [_on_settings_changed]);
 
-    const _handle_api_node_change = useCallback((nodeId) => {
+    // The one node write. Persisting `api_node_url` is what swaps the live
+    // connection: utils/settings emits the new bag, Index re-derives the
+    // endpoint from it and usePixaAPI tears the old PixaProxyAPI down and
+    // brings a new one up on this URL — every consumer is remounted onto it.
+    const _apply_api_node_url = useCallback((url) => {
         actions.trigger_sfx("ui_lock");
-        setSettings(prev => ({ ...prev, _api_node: nodeId }));
-        api.set_settings({ api_node: nodeId }, _on_settings_changed);
+        setSettings(prev => ({ ...prev, _api_node_url: url }));
+        api.set_settings({ api_node_url: url }, _on_settings_changed);
     }, [_on_settings_changed]);
+
+    // Globe / node-list pick — `url` arrives already normalized.
+    const _handle_api_node_change = useCallback((url) => {
+        if (!url) return;
+        _apply_api_node_url(url);
+    }, [_apply_api_node_url]);
 
     const _handle_custom_url_change = useCallback((event) => {
         setCustomUrlDraft(event.target.value);
@@ -329,19 +349,22 @@ const SettingsDialog = (props) => {
     }, [customUrlError]);
 
     const _handle_custom_url_commit = useCallback(() => {
-        const url = (customUrlDraft || "").trim();
-        if (!url) return;
-        try {
-            // eslint-disable-next-line no-new
-            new URL(url);
-        } catch (e) {
+        const draft = (customUrlDraft || "").trim();
+        if (!draft) return;
+        // Same normalizer the store applies on write, so what the field
+        // accepts is exactly what gets persisted (and rejected URLs — no
+        // scheme, unsupported scheme, garbage — never reach the store).
+        const url = api.normalize_node_url(draft);
+        if (!url) {
             setCustomUrlError(true);
             return;
         }
-        actions.trigger_sfx("ui_lock");
-        setSettings(prev => ({ ...prev, _api_node: CUSTOM_API_NODE_ID, _api_node_custom_url: url }));
-        api.set_settings({ api_node: CUSTOM_API_NODE_ID, api_node_custom_url: url }, _on_settings_changed);
-    }, [customUrlDraft, _on_settings_changed]);
+        // Already the active endpoint → nothing to write. Matters on blur:
+        // clicking a node in the picker blurs this field first, and a
+        // re-commit of the still-active custom URL here would race the pick.
+        if (api.same_node_url(url, settings._api_node_url || api.DEFAULT_API_NODE_URL)) return;
+        _apply_api_node_url(url);
+    }, [customUrlDraft, settings._api_node_url, _apply_api_node_url]);
 
     const _handle_custom_url_key_down = useCallback((event) => {
         if (event.key === "Enter") {
@@ -351,14 +374,13 @@ const SettingsDialog = (props) => {
         }
     }, [_handle_custom_url_commit]);
 
+    // Back to the default endpoint (api.pixagram.com), the same URL a fresh
+    // install starts on.
     const _handle_custom_url_reset = useCallback(() => {
-        actions.trigger_sfx("ui_lock");
         setCustomUrlDraft("");
         setCustomUrlError(false);
-        const fallbackNodeId = DEFAULT_NODES[0].id;
-        setSettings(prev => ({ ...prev, _api_node: fallbackNodeId, _api_node_custom_url: "" }));
-        api.set_settings({ api_node: fallbackNodeId, api_node_custom_url: "" }, _on_settings_changed);
-    }, [_on_settings_changed]);
+        _apply_api_node_url(api.DEFAULT_API_NODE_URL);
+    }, [_apply_api_node_url]);
 
     const _on18_close = useCallback(() => set_18_open(false), []);
 
@@ -374,9 +396,13 @@ const SettingsDialog = (props) => {
         _mode,
         _pdf_page_size,
         _selected_locales_code,
-        _api_node,
-        _api_node_custom_url
+        _api_node_url
     } = settings;
+
+    // Active endpoint — always a URL; falls back to the default so the picker
+    // never renders "nothing selected" during the pre-hydration window.
+    const activeNodeUrl = _api_node_url || api.DEFAULT_API_NODE_URL;
+    const isCustomNodeActive = !isListedNodeUrl(activeNodeUrl);
 
     const locales = useMemo(
         () => LOCALES.find(l => l.code === _selected_locales_code) || LOCALES[0],
@@ -639,9 +665,8 @@ const SettingsDialog = (props) => {
                     <Typography component={"h2"} variant={"h6"} className={classes.subTitle}>{t("words.endpoint")}</Typography>
                     <Globe
                         nodes={DEFAULT_NODES}
-                        selectedNodeId={_api_node || DEFAULT_NODES[0].id}
+                        selectedUrl={activeNodeUrl}
                         onNodeSelect={_handle_api_node_change}
-                        customUrl={_api_node_custom_url}
                         size={280}
                     />
                     <TextField
@@ -655,7 +680,7 @@ const SettingsDialog = (props) => {
                         helperText={
                             customUrlError
                                 ? t("components.settings_dialog.enter_a_valid_url_e_g_https")
-                                : _api_node === CUSTOM_API_NODE_ID
+                                : isCustomNodeActive
                                     ? t("components.settings_dialog.currently_active_edit_and_press_enter_to")
                                     : t("components.settings_dialog.type_a_url_then_press_enter_or")
                         }
@@ -665,7 +690,7 @@ const SettingsDialog = (props) => {
                         InputProps={{
                             endAdornment: (
                                 <InputAdornment position="end">
-                                    {_api_node === CUSTOM_API_NODE_ID ? (
+                                    {isCustomNodeActive ? (
                                         <IconButton
                                             size="small"
                                             aria-label={t("components.settings_dialog.reset_custom_endpoint")}

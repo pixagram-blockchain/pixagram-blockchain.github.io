@@ -73,7 +73,7 @@ function truncate(str, maxW, fontSize) {
     return str.slice(0, maxChars - 1) + '\u2026';
 }
 
-function PayoutSankey({ classes, payout, data, pxsUsdPrice, pxaUsdPrice, currency, fiatRate }) {
+function PayoutSankey({ classes, payout, isEstimate = false, data, pxsUsdPrice, pxaUsdPrice, currency, fiatRate }) {
     const [tip, setTip] = useState(null);
 
     const info = useMemo(() => {
@@ -214,8 +214,12 @@ function PayoutSankey({ classes, payout, data, pxsUsdPrice, pxaUsdPrice, currenc
     // (not symbol) keeps "$"/"kr"/"¥" unambiguous across currencies.
     const fiatMul = Number.isFinite(fiatRate) && fiatRate > 0 ? fiatRate : 1;
     const fiatCur = currency || 'USD';
-    const fmt = usd => `${(usd * fiatMul).toFixed(2)} ${fiatCur}`;
-    const fmtP = v => v.toFixed(2);
+    // `payout` may already carry the estimated value of the viewer's own
+    // pending vote (PaperCardActions → useVotePayoutEstimate); `isEstimate`
+    // then prefixes every figure with "≈" until the chain refresh replaces it.
+    const approx = isEstimate ? '≈ ' : '';
+    const fmt = usd => `${approx}${(usd * fiatMul).toFixed(2)} ${fiatCur}`;
+    const fmtP = v => `${approx}${v.toFixed(2)}`;
 
     return (
         <div className={classes.sankeyRoot}>

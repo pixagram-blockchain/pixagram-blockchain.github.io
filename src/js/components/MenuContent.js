@@ -285,13 +285,25 @@ const portalTitle = (portal) => portal.title || (portal.label ? portal.label() :
 // Entries behind the grid ("Apps") button in the logged-in header — the old
 // standalone create-account button now lives here as the first row. Adding a
 // tool = adding a row: it renders automatically, in this order. Entries
-// flagged `comingSoon` stay visible (secondary text "Coming soon") but answer
-// clicks with the same "opens soon" snackbar the unlinked governance tiles
-// use; when a tool goes live, drop the flag and give it a real case in
-// handleAppSelect.
+// flagged `comingSoon` stay visible (secondary text words.coming_soon) but
+// answer clicks with the same "opens soon" snackbar the unlinked governance
+// tiles use; when a tool goes live, drop the flag and give it a real case in
+// handleAppSelect. Title and description are thunks over t(), like
+// PORTAL_PRESENTATION, resolved by AppsMenuEntry at render time so a language
+// switch re-labels the rows.
 const MENU_APPS = [
-    { id: "create-account", title: "Create Account", description: "Use your credits", icon: AccountPlus },
-    { id: "bookmarks",      title: "Favorites",      description: "Your saved posts", icon: FavoriteRounded },
+    {
+        id: "create-account",
+        title:       () => t("components.menu_content.create_account"),
+        description: () => t("components.menu_content.use_your_credits"),
+        icon: AccountPlus,
+    },
+    {
+        id: "bookmarks",
+        title:       () => t("components.menu_content.favorites"),
+        description: () => t("components.menu_content.your_saved_posts"),
+        icon: FavoriteRounded,
+    },
 ];
 // Popover geometry hoisted so the <Menu> props keep a stable identity.
 const APPS_MENU_ANCHOR_ORIGIN = { vertical: "bottom", horizontal: "right" };
@@ -757,6 +769,7 @@ LoginView.displayName = "LoginView";
 // returns stable children. Default shallow memo compare — every prop is
 // stable module data or a stable callback.
 const AppsMenuEntry = React.memo(React.forwardRef(({ classes, app, onSelect, ...other }, ref) => {
+    useLanguage();
     const handleClick = useCallback(() => onSelect(app), [app, onSelect]);
     const Icon = app.icon;
     return (
@@ -764,8 +777,8 @@ const AppsMenuEntry = React.memo(React.forwardRef(({ classes, app, onSelect, ...
             <ListItemIcon><Icon /></ListItemIcon>
             <ListItemText
                 disableTypography
-                primary={<span className={classes.appsMenuTitle}>{app.title}</span>}
-                secondary={<span className={classes.appsMenuSub}>{app.comingSoon ? "Coming soon" : app.description}</span>}
+                primary={<span className={classes.appsMenuTitle}>{app.title()}</span>}
+                secondary={<span className={classes.appsMenuSub}>{app.comingSoon ? t("words.coming_soon") : app.description()}</span>}
             />
         </MenuItem>
     );
@@ -1256,7 +1269,7 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
         setAppsOpen(false);
         if (app.comingSoon) {
             actions.trigger_snackbar(t("components.menu_content.opens_soon", {
-                title: (app.title || "This tool")
+                title: (app.title ? app.title() : t("components.menu_content.this_tool"))
             }));
             return;
         }

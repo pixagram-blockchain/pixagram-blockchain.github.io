@@ -11,6 +11,8 @@ import { CellMeasurer } from "@pixagram/virtualized/dist/es/index";
 import MasonryExtended from "../components/MasonryExtended";
 import useWindowDimensions from "../hooks/useWindowDimensions";
 import useMasonryGrid from "../hooks/useMasonryGrid";
+import useVoteSync from "../hooks/useVoteSync";
+import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto } from "../utils/voteSync";
 import { idle, cancelIdle } from "../utils/idle";
 import {
     EASE as EASE_STANDARD, TRANSITION_FAST, TRANSITION_MEDIUM, TRANSITION_ENTRY,
@@ -499,6 +501,9 @@ const enrichPostForBlogCard = (post, account, voterProfiles) => {
         downVotesNumber: Math.max(0, activeVotes.filter(v => v?.weight < 0).length || 0),
         commentsNumber: post.children || 0,
         active_votes: activeVotes,
+        // Post-level rshares as the chain saw them — lets the card price its
+        // own pending vote on the fund's reward curve (useVotePayoutEstimate).
+        net_rshares: post.net_rshares != null ? String(post.net_rshares) : '0',
         _voter_profiles: voterProfiles || {},
         nsfw: tags.includes('nsfw'),
         // Soft-deleted content (`deleted` tag / meta.deleted from the edit
@@ -648,7 +653,7 @@ const fetchOrphanPost = async (api, author, permlink) => {
         }
 
         hydrateContent(content);
-        return enrichPostForBlogCard(content, authorAccount, {});
+        return overlayPendingVote(enrichPostForBlogCard(content, authorAccount, {}));
     } catch (e) {
         console.warn('[Community] fetchOrphanPost failed:', e && e.message);
         return null;
@@ -706,15 +711,11 @@ const enrichPostsList = async (posts, api, onAvatars) => {
     } catch (e) { console.warn('[Community] Post enrichment failed:', e.message); return safePosts; }
 };
 
-const applyVoteToPost = (post, voter, weight) => {
-    const filteredVotes = (post.active_votes || []).filter(v => v?.voter !== voter);
-    if (weight !== 0) filteredVotes.push({ voter, weight, rshares: '0', time: null });
-    return {
-        ...post, active_votes: filteredVotes,
-        upVotesNumber: Math.max(0, filteredVotes.filter(v => v?.weight >= 0).length),
-        downVotesNumber: Math.max(0, filteredVotes.filter(v => v?.weight < 0).length),
-    };
-};
+// Shared with Feed / FeedPersonal / Profile (utils/voteSync): patches the
+// card with a placeholder row AND registers the vote as pending, so the
+// sort-change refetch — which hits hivemind before it has indexed the vote's
+// block — re-applies it instead of dropping it. See Feed.js for the story.
+const applyVoteToPost = (post, voter, weight) => applyOptimisticVote(post, post && post.permlink, voter, weight);
 
 
 // ╔══════════════════════════════════════════════════════════════════════╗
@@ -783,6 +784,22 @@ const usePostNavigation = ({ api, posts, scrollToIndex, setSelectedPostIndex, fa
     useEffect(() => { postsRef.current = posts; }, [posts]);
     const currentPostRef = useRef(currentPost);
     useEffect(() => { currentPostRef.current = currentPost; }, [currentPost]);
+
+    // Keep the OPEN post in step with the live list. Its card object is
+    // replaced when a vote is applied (applyVoteToPost → placeholder row) and
+    // again when the 6 s chain refresh lands (mergeFreshVoteDataInto → real
+    // rshares + payout). BlogPostDialog reads votes and payout from props.data, so
+    // without this it kept showing the snapshot taken at open time — payout
+    // frozen, voter list without the new vote. Identity check only: the
+    // dialog keys its heavy work on the post id and treats a same-id data
+    // swap as a vote resync.
+    useEffect(() => {
+        if (!artworkOpen) return;
+        const cur = currentPostRef.current;
+        if (!cur || !cur.permlink) return;
+        const live = (posts || []).find(p => !!p && p.permlink === cur.permlink && (p.author?.username || p.author) === (cur.author?.username || cur.author));
+        if (live && live !== cur) setCurrentPost(live);
+    }, [posts, artworkOpen]);
     const apiRef = useRef(api);
     useEffect(() => { apiRef.current = api; }, [api]);
     const orphanFetchTokenRef = useRef(0);
@@ -1268,13 +1285,16 @@ const useCommunityData = (api, pathname) => {
             //    WITHOUT a dataVersion bump (avatar swaps don't change card
             //    height, so the masonry geometry is preserved). Both commits are
             //    token-guarded so a stale community's avatar fetch can't land.
+            //    Both commits pass through overlayPendingVotes: a vote cast a
+            //    moment ago isn't in the bridge rows yet (indexer lag) and the
+            //    pending registry puts it back until the chain shows it.
             const postsBranch = enrichPostsList(rawPosts, api, (withAvatars) => {
                 if (loadTokenRef.current !== myToken) return;
-                setPosts(withAvatars);
+                setPosts(overlayPendingVotes(withAvatars));
             }).then(enriched => {
                 if (loadTokenRef.current !== myToken) return;
                 batch(() => {
-                    setPosts(enriched);
+                    setPosts(overlayPendingVotes(enriched));
                     setDataVersion(v => v + 1);
                     setLoading(false);
                 });
@@ -1308,7 +1328,7 @@ const useCommunityData = (api, pathname) => {
         if (!api?.communities || !name) return;
         try {
             const rawPosts = await api.communities.getRankedPosts({ sort: SORT_METHODS[sortIndex] || 'trending', tag: name, limit: 20 });
-            setPosts(await enrichPostsList(rawPosts, api));
+            setPosts(overlayPendingVotes(await enrichPostsList(rawPosts, api)));
             setDataVersion(v => v + 1);
         } catch (e) { console.error('[Community] Failed to refetch posts:', e); }
     }, [api]);
@@ -1369,6 +1389,15 @@ const useCommunityData = (api, pathname) => {
     const handleVoteChange = useCallback((permlink, voter, weight) => {
         setPosts(prev => prev.map(p => p.permlink === permlink ? applyVoteToPost(p, voter, weight) : p));
     }, []);
+
+    // 6 s chain refresh after a vote (useVoteSync): the re-read post's real
+    // rshares and pending_payout_value replace the optimistic placeholder and
+    // the estimated payout on the card. Community keeps no view cache, so the
+    // state merge is all that's needed here.
+    const onVoteSynced = useCallback(({ content }) => {
+        setPosts(prev => mergeFreshVoteDataInto(prev, content));
+    }, []);
+    useVoteSync(api, onVoteSynced);
 
     // Patch a single post's stats in-place. Used for optimistic UI after
     // mutePost/unmutePost/pinPost/unpinPost broadcasts — the bridge won't

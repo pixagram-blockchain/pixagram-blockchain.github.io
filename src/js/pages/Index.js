@@ -26,7 +26,7 @@ import dispatcher from "../dispatcher";
 import * as actions from "../actions/utils";
 import * as api from "../utils/settings";
 import { update_meta_title } from "../utils/meta-tags";
-import { PAGE_ROUTES, isPostUrl, hostPageForPostUrl, DEFAULT_NODES, CUSTOM_API_NODE_ID } from "../utils/constants";
+import { PAGE_ROUTES, isPostUrl, hostPageForPostUrl } from "../utils/constants";
 
 import LogoutModal from "../components/LogoutModal";
 import MenuContent from "../components/MenuContent";
@@ -69,20 +69,29 @@ import { t, setLanguage, subscribe as subscribe_language, useLanguage } from "..
 
 const pixaLogoWhite = getIT();
 
-// ── Boot hints (written by client.js from the last resolved settings) ─────────
-// The app now renders BEFORE the async settings load completes, which means
-// usePixaAPI kicks off its first connection while `_api_node` is still
+// ── Boot hint (written by utils/settings on every emitted settings bag) ──────
+// The app renders BEFORE the async settings load completes, which means
+// usePixaAPI kicks off its first connection while `_api_node_url` is still
 // unknown. Without a hint that first init would always target the default
 // node, then tear down and reconnect the moment settings land for anyone who
-// picked a different one. These synchronous localStorage reads let the very
-// first init aim at the right node. Post-hydration, normalizeSettings always
-// yields a truthy `_api_node`, so the hints only ever apply pre-hydration.
-// Absent/unreadable storage falls through silently to the old behavior.
-let BOOT_API_NODE_HINT = null;
-let BOOT_API_NODE_CUSTOM_URL_HINT = "";
+// picked a different one. This synchronous localStorage read lets the very
+// first init aim at the saved endpoint. Post-hydration, normalizeSettings
+// always yields a truthy `_api_node_url`, so the hint only ever applies
+// pre-hydration. The legacy id-shaped pair older client.js builds wrote is
+// still understood as a fallback (resolved exactly like a legacy settings
+// document); absent/unreadable storage falls through to the default.
+let BOOT_API_NODE_URL_HINT = null;
 try {
-    BOOT_API_NODE_HINT = localStorage.getItem("pixa_api_node_hint") || null;
-    BOOT_API_NODE_CUSTOM_URL_HINT = localStorage.getItem("pixa_api_node_custom_url_hint") || "";
+    BOOT_API_NODE_URL_HINT = api.normalize_node_url(localStorage.getItem("pixa_api_node_url_hint"));
+    if (!BOOT_API_NODE_URL_HINT) {
+        const legacyId = localStorage.getItem("pixa_api_node_hint");
+        if (legacyId) {
+            BOOT_API_NODE_URL_HINT = api.resolve_api_node_url({
+                api_node: legacyId,
+                api_node_custom_url: localStorage.getItem("pixa_api_node_custom_url_hint") || "",
+            });
+        }
+    }
 } catch (e) { /* private mode / storage disabled */ }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -144,17 +153,10 @@ const SETTINGS_DEFAULTS = {
     toxicity_enabled: true,
     locales: "en-US",
     pdf_page_size: "A4",
-    api_node: "eu-central",
-    api_node_custom_url: "",
+    // The node is stored as its URL plus who chose it — see utils/settings.js.
+    api_node_url: api.DEFAULT_API_NODE_URL,
+    api_node_source: api.API_NODE_SOURCE.DEFAULT,
 };
-
-// Derived from DEFAULT_NODES (utils/constants) so this can never drift out of
-// sync with the node list the Globe/SettingsDialog picker shows — this used
-// to be a hand-maintained literal that was missing "eu-central-2".
-const API_NODES = DEFAULT_NODES.reduce((acc, node) => {
-    acc[node.id] = node.url;
-    return acc;
-}, {});
 
 // Which already-mounted page is allowed to host a post URL as an overlay
 // without being unmounted. Feed/FeedPersonal/Profile render <PostDialog>;
@@ -404,6 +406,12 @@ function normalizeSettings(raw) {
     s._selected_locales_code = s._locales;
     s._language = s._selected_locales_code.split("-")[0];
     delete s._locales;
+    // A raw bag can still arrive in the legacy id shape (api_node +
+    // api_node_custom_url, from a store that hasn't been rewritten yet).
+    // The shared resolver prefers a valid api_node_url, then maps the legacy
+    // id through DEFAULT_NODES, then falls back to the default — so the
+    // backstop above never overrides a node the user actually picked.
+    s._api_node_url = api.resolve_api_node_url(raw);
     s._know_the_settings = true;
     return s;
 }
@@ -1157,6 +1165,17 @@ function usePageRouter(history, settingsRef, apiRef) {
 
 function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl) {
     const [apiReady, setApiReady] = useState(false);
+    // apiGeneration counts successful connections AFTER the first: 0 for the
+    // whole boot, +1 for every node switch that came up. The render tree keys
+    // the api consumers on it (page content, menu, drawer), so a switch
+    // REMOUNTS them onto the new instance once it is ready. Passing a new
+    // `api` prop alone was not enough: pages fetch with `this.props.api` on
+    // mount and the menu caches the account, so they kept talking to the
+    // retired instance until the next navigation. Bumping only after
+    // initialize() resolves means the remount never sees a null api, and
+    // not bumping on the first connection keeps boot at a single mount.
+    const [apiGeneration, setApiGeneration] = useState(0);
+    const connectionsRef = useRef(0);
     const handlersRef = useRef([]); // tracks { event, fn } for cleanup
 
     useEffect(() => {
@@ -1181,7 +1200,9 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl) {
                 try {
                     await pixaAPI.initialize({ nodes: [nodeUrl] });
                     if (cancelled) return;
+                    connectionsRef.current += 1;
                     setApiReady(true);
+                    if (connectionsRef.current > 1) setApiGeneration((g) => g + 1);
 
                     pixaAPI.askVote = settingsRef.current?._askvote !== false;
                     pixaAPI.defaultVotingPower = parseInt(settingsRef.current?._voting, 10) || 100;
@@ -1239,6 +1260,10 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl) {
                         const { voter, author, permlink, weight, defaultVotingPower, broadcast, cancel } = eventData;
                         openDialog("vote_weight", {
                             _resolvedProps: {
+                                // `api` + `voter` drive the dialog's live value
+                                // estimate (reward fund / dgp / feed reads and the
+                                // voter's vesting shares + mana — utils/voteValue).
+                                api: pixaAPI,
                                 voter,
                                 author,
                                 permlink,
@@ -1307,11 +1332,16 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl) {
         return () => {
             cancelled = true;
             setApiReady(false);
-            // Detach all registered event listeners from the outgoing instance.
-            // This cleanup runs both on unmount AND right before a re-init when
-            // `nodeUrl` changes below — that's what makes switching the API
-            // node in Settings actually swap the live connection, instead of
-            // only taking effect on the next full page load.
+            // Detach all registered event listeners from the outgoing instance,
+            // then retire it. This cleanup runs both on unmount AND right
+            // before a re-init when `nodeUrl` changes below — that's what makes
+            // switching the API node in Settings actually swap the live
+            // connection, instead of only taking effect on the next full page
+            // load. release() stops the instance's background work
+            // (connectivity heartbeat, offline broadcast drain, key cache)
+            // WITHOUT ending the user's session — disconnect() would, it is
+            // the logout path — and keeps the client object so a consumer
+            // that hasn't been remounted onto the replacement yet fails soft.
             const api = apiRef.current;
             if (api?.eventEmitter) {
                 for (const { event, fn } of handlersRef.current) {
@@ -1320,10 +1350,13 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl) {
             }
             handlersRef.current = [];
             apiRef.current = null;
+            if (api && typeof api.release === "function") {
+                try { api.release(); } catch (e) { /* retired instance — nothing to recover */ }
+            }
         };
     }, [nodeUrl]); // Re-instantiate whenever the resolved node URL changes
 
-    return apiReady;
+    return { apiReady, apiGeneration };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1677,8 +1710,14 @@ const MenuLeftComponent = React.memo(
 // every settings/language update so React.memo()'s shallow compare cannot swallow the
 // re-render — `settings` keeps a stable identity by design, so without this a
 // settings change could leave the page painted with the previous values.
+// `apiGeneration` is the key of the content wrapper. It only moves when a
+// node switch has connected (see usePixaAPI), and a new key remounts the
+// page: Feed/Profile/Community fetch through `this.props.api` when they
+// mount, so this is what makes the freshly-chosen endpoint the one every
+// request actually goes to — a changed `api` prop on an already-mounted page
+// would leave its loaded data and pending pagination on the retired instance.
 const ContentComponent = React.memo(
-    ({ classes, pageElement, settings, pathname, apiRef, apiReady, renderNonce }) => {
+    ({ classes, pageElement, settings, pathname, apiRef, apiReady, apiGeneration, renderNonce }) => {
         useLanguage();
         if (!pageElement) {
             return <div className={classes.content} style={{ background: "#1a1a1a" }} />;
@@ -1697,13 +1736,13 @@ const ContentComponent = React.memo(
                 ? React.cloneElement(inner, overrides)
                 : inner;
             return (
-                <div className={classes.content} style={{ background: "#1a1a1a" }}>
+                <div key={apiGeneration} className={classes.content} style={{ background: "#1a1a1a" }}>
                     {React.cloneElement(pageElement, null, updated)}
                 </div>
             );
         }
         return (
-            <div className={classes.content} style={{ background: "#1a1a1a" }}>
+            <div key={apiGeneration} className={classes.content} style={{ background: "#1a1a1a" }}>
                 {pageElement}
             </div>
         );
@@ -1714,7 +1753,8 @@ const ContentComponent = React.memo(
         prev.settings === next.settings &&
         prev.pathname === next.pathname &&
         prev.apiRef === next.apiRef &&
-        prev.apiReady === next.apiReady,
+        prev.apiReady === next.apiReady &&
+        prev.apiGeneration === next.apiGeneration,
 );
 
 // ── DialogSlot: renders exactly one dialog (or nothing) ──────────────────────
@@ -2181,17 +2221,29 @@ function Index({ classes, history, settings: rawSettings }) {
     // ref read inside usePixaAPI on mount only — is what lets picking a
     // different node or custom URL in Settings actually swap the live API
     // connection, instead of only taking effect on the next full page load.
-    const apiNodeUrl = useMemo(() => {
-        // Boot hints only matter while `_api_node` is still undefined (settings
-        // not yet hydrated); once normalizeSettings has run it is always set.
-        const nodeId = processedSettings._api_node || BOOT_API_NODE_HINT || "eu-central";
-        return nodeId === CUSTOM_API_NODE_ID
-            ? (processedSettings._api_node_custom_url || BOOT_API_NODE_CUSTOM_URL_HINT || API_NODES["eu-central"])
-            : (API_NODES[nodeId] || API_NODES["eu-central"]);
-    }, [processedSettings._api_node, processedSettings._api_node_custom_url]);
+    // The setting IS the URL (normalized by utils/settings on every write and
+    // read), so there is nothing to map here anymore: the boot hint only
+    // matters while `_api_node_url` is still undefined (settings not yet
+    // hydrated); once normalizeSettings has run it is always set.
+    const apiNodeUrl = processedSettings._api_node_url || BOOT_API_NODE_URL_HINT || api.DEFAULT_API_NODE_URL;
 
     // ── API lifecycle (populates apiRef) ─────────────────────────────────
-    const apiReady = usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, apiNodeUrl);
+    const { apiReady, apiGeneration } = usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, apiNodeUrl);
+
+    // ── Live settings stream ─────────────────────────────────────────────
+    // utils/settings emits every resolved bag (init / get / set). Feeding it
+    // into the same slot the SETTINGS_UPDATE re-read fills means a change made
+    // anywhere — the Settings dialog, a migration, another module — reaches
+    // processedSettings (and from there apiNodeUrl → usePixaAPI) without
+    // depending on the parent handing us a new `settings` prop, and it fixes
+    // the old staleness where, once the dispatcher path had filled
+    // dispatcherRawRef, later prop-based bags were ignored for good.
+    // processedSettings dedupes by value, so an unchanged bag is a no-op.
+    useEffect(() => api.subscribe((bag) => {
+        if (!bag) return;
+        dispatcherRawRef.current = bag;
+        setSettingsVersion((v) => v + 1);
+    }), []);
 
     // ── Sync settings → API when settings change ─────────────────────────
     useEffect(() => {
@@ -2622,9 +2674,6 @@ function Index({ classes, history, settings: rawSettings }) {
     // Boot-up (once)
     useEffect(() => {
         document.body.setAttribute("class", "loaded");
-        idle(() => {
-            setTimeout(() => showSnackbar(t("components.index.hey_its_a_demo_only_follow_us"), 7000), 666);
-        });
     }, []);
 
     // ── Pre-load inner Feed page from Home ────────────────────────────────
@@ -2785,6 +2834,7 @@ function Index({ classes, history, settings: rawSettings }) {
                             onToolbarMenu={openToolbarMenu}
                         />
                         <MenuLeftComponent
+                            key={apiGeneration}
                             classes={classes}
                             closedMenuAds={processedSettings._closed_menu_ads}
                             pixaAPI={apiRef.current}
@@ -2796,6 +2846,7 @@ function Index({ classes, history, settings: rawSettings }) {
                             pathname={livePathname}
                             apiRef={apiRef}
                             apiReady={apiReady}
+                            apiGeneration={apiGeneration}
                             renderNonce={renderNonce}
                         />
                         <Backdrop className={classes.backdrop} open={search.isOpen} />
@@ -2811,6 +2862,7 @@ function Index({ classes, history, settings: rawSettings }) {
                     />
 
                     <DrawerSlot
+                        key={apiGeneration}
                         compact={compact}
                         classes={classes}
                         wordmark={wordmark}

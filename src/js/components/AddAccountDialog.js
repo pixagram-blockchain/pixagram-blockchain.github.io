@@ -3,16 +3,23 @@
 //
 // "Create an account with your credits" — a one-step dialog styled to match
 // the wallet's Send / Delegate / Power dialogs. An already-logged-in user
-// spends their own balance to mint a fresh on-chain account for someone else,
-// in a single atomic multi-op transaction:
+// mints a fresh on-chain account for someone else, in a single atomic
+// multi-op transaction. Two creation methods are offered:
 //
-//   account_create + (optional) delegate_vesting_shares
-//                  + (optional) transfer PXA
-//                  + (optional) transfer PXS
+//   Resource Credits (default when usable — no PXA leaves the wallet):
+//       [claim_account (fee 0)]      ← skipped when the creator already holds
+//                                      a claimed-account token
+//       + create_claimed_account
+//       + (optional) delegate_vesting_shares
+//       + (optional) transfer PXA
+//       + (optional) transfer PXS
+//
+//   PXA fee (the original path):
+//       account_create + the same optional gifts
 //
 // There is intentionally no seed-recovery branch and no phone verification:
-// the user pays the on-chain creation fee, so the chain itself is the
-// anti-spam mechanism.
+// the creator either pays the chain fee or spends Resource Credits, so the
+// chain itself is the anti-spam mechanism.
 //
 // Visual contract
 // ---------------
@@ -21,7 +28,9 @@
 //   - Filled TextField for username; one filled TextField for each of the
 //     three gift amounts. NumericFormat input formatting matches the
 //     wallet dialogs (space thousand separator, dot decimal).
-//   - Strict greyscale — no theme accents.
+//   - Strict greyscale — no theme accents. The method selector is a
+//     two-cell segmented control in the same #101010 / #262626 idiom as the
+//     wallet summary block.
 //
 // Behaviour
 // ---------
@@ -31,15 +40,33 @@
 //     when the user clicks CREATE, so the button's enabled-state never
 //     depends on async background success. If derivation fails, the error
 //     panel surfaces the actual exception.
-//   - All chain reads use `api.globals.getChainProperties()` and
-//     `api.accounts.getAccounts(...)`. The account_creation_fee comes back
-//     either as an asset string ("3.000 PIXA") or as a modern NAI object
-//     ({ amount, precision, nai }) — both are handled.
+//   - Chain reads: `api.globals.getChainProperties()`,
+//     `api.globals.getDynamicGlobalProperties()` (raw pass-through — carries
+//     total_vesting_shares and available_account_subsidies) and
+//     `api.accounts.getAccounts(...)` (sanitized; carries
+//     pending_claimed_accounts since pixaproxyapi v4.4.x).
+//   - Resource Credits come from pixaproxyapi's `api.rc` group, which wraps
+//     the dpixa client.rc API documented in @pixagram/dpixa's README:
+//     getRCMana (manabar), getResourceParams / getResourcePool (RC pricing)
+//     and getRcStats (rc_api.get_rc_stats, HF26+ regen shares). RC reads
+//     never block the wallet summary; when they are unavailable the RC
+//     method stays selectable and the chain has the final word.
+//   - The on-screen RC cost is computed with the chain's own formula
+//     (resource_credits::compute_cost) from the live pool state, so it is an
+//     estimate only in the sense that pools move between blocks. It never
+//     hard-blocks the CREATE button: the chain's rejection message states
+//     the exact RC needed, so an optimistic attempt is always informative.
+//     The only hard block is chain-exact: no claimed token AND the chain's
+//     subsidized-account pool is empty (claim_account with fee 0 cannot pass).
 //   - PXP is presented as PXA-equivalent Power (VESTS × the vesting-fund ratio
 //     from dynamic global properties) but always delegated on-chain as VESTS.
+//   - All user-facing strings are keyed under components.add_account_dialog
+//     (plus words.amount); the memo "Welcome to Pixagram" goes on-chain and
+//     stays English on purpose.
 //   - Broadcast is one call to `api.broadcast.sendOperations(ops, key)`
-//     after `keyManager.requestKey(currentAccount, "active")`. If the vault
-//     is locked, the existing UnlockKeyDialog stacks on top.
+//     after `keyManager.requestKey(currentAccount, "active")` — both
+//     claim_account and create_claimed_account are active-key operations.
+//     If the vault is locked, the existing UnlockKeyDialog stacks on top.
 // =============================================================================
 
 import * as React from "preact/compat";
@@ -52,6 +79,7 @@ import DialogActions from "@material-ui/core/DialogActions";
 import Typography from "@material-ui/core/Typography";
 import TextField from "@material-ui/core/TextField";
 import Button from "@material-ui/core/Button";
+import ButtonBase from "@material-ui/core/ButtonBase";
 import InputAdornment from "@material-ui/core/InputAdornment";
 import Tooltip from "@material-ui/core/Tooltip";
 import CircularProgress from "@material-ui/core/CircularProgress";
@@ -67,6 +95,7 @@ import PixaLiquid from "../icons/PixaLiquid";
 import PixaSupra from "../icons/PixaSupra";
 import PixaPower from "../icons/PixaPower";
 import CheckCircleOutlineIcon from "@material-ui/icons/CheckCircleOutline";
+import FlashOnIcon from "@material-ui/icons/FlashOn";
 import { validateUsername, generateMnemonic, generateMasterKey, generatePDF } from "../utils/BackUpWallet2";
 import * as actions from "../actions/utils";
 
@@ -89,6 +118,60 @@ const SYM_PXP = "PXP";
 const PREC      = { [SYM_PXA]: 3, [SYM_PXS]: 3, [SYM_PXP]: 3 };
 const CHAIN_SYM = { [SYM_PXA]: "PIXA", [SYM_PXS]: "PXS", [SYM_PXP]: "VESTS" };
 const VESTS_PRECISION = 6;
+
+// Creation methods.
+const METHOD_RC  = "rc";   // claim_account (fee 0) + create_claimed_account
+const METHOD_FEE = "fee";  // account_create, fee paid in PXA
+
+// ── Chain constants (Hive protocol, inherited by the Pixa fork) ─────────────
+const RC_REGEN_TIME_SEC         = 60 * 60 * 24 * 5;               // HIVE_RC_REGEN_TIME: empty → full in 5 days
+const BLOCK_INTERVAL_SEC        = 3;                              // HIVE_BLOCK_INTERVAL
+const RC_REGEN_BLOCKS           = RC_REGEN_TIME_SEC / BLOCK_INTERVAL_SEC; // 144 000
+const HIVE_100_PERCENT          = 10000;                          // basis points
+const ACCOUNT_SUBSIDY_PRECISION = HIVE_100_PERCENT;               // one subsidized account in available_account_subsidies
+
+// rc_resource_types, in chain index order. get_resource_params /
+// get_resource_pool key their maps by these names; get_rc_stats().share is
+// an array indexed the same way.
+const RC_RESOURCE_KEYS = [
+    "resource_history_bytes",
+    "resource_new_accounts",
+    "resource_market_bytes",
+    "resource_state_bytes",
+    "resource_execution_time",
+];
+
+// Resource usage the chain books for our transaction — constants lifted from
+// libraries/chain/rc/resource_sizes.cpp + resource_count.cpp (Hive master).
+// They only matter for the on-screen estimate; the node computes the real
+// bill with its own copies.
+const PERSISTENT_STATE_BYTE = 5 * 365 * 24;   // a state byte kept ~5 years
+const LASTING_STATE_BYTE    = 5 * 365 * 12;   // ~2.5 years
+const RC_STATE_BYTES = {
+    account_create_base:     (616 + 144 + 312) * PERSISTENT_STATE_BYTE, // account + account_authority objects
+    authority_key_member:    36 * PERSISTENT_STATE_BYTE,                // per key in an authority
+    transaction_base:        128,                                       // × expiry hours (1 for our 1-min expiry)
+    delegate_vesting_shares: 88 * LASTING_STATE_BYTE,                   // vesting_delegation_object
+};
+const RC_EXEC_TIME = {
+    transaction:      2821 + 386 + 3415,
+    verify_authority: 94165,                        // per signature
+    claim_account:    336 + 8028 + 267 + 150,
+    create_claimed:   964 + 46331 + 342 + 10778,
+    transfer:         638 + 5023 + 204 + 134,
+    delegate:         411 + 11998 + 3110 + 1208,
+};
+// Serialized transaction size (history / market bytes) — header + one
+// signature, then per-op sizes for the shapes this dialog builds.
+const TX_BYTES = {
+    base:           12 + 66,
+    claim:          32,
+    create_claimed: 290,    // three single-key authorities + memo key + json_metadata
+    transfer:       60,
+    delegate:       40,
+};
+
+const HAS_BIGINT = typeof BigInt === "function";
 
 // =============================================================================
 // HELPERS
@@ -135,6 +218,32 @@ const roundToPrec = (n, sym) => {
     return Math.floor((Number(n) || 0) * f) / f;
 };
 
+/** 1234567 → "1 234 567" (space separator, like the NumericFormat inputs). */
+function formatInt(n) {
+    const v = Math.floor(Number(n) || 0);
+    return String(v).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
+
+/** Compact RC figure: 1.24 T RC / 812.5 M RC / 42 k RC. */
+function formatRc(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "—";
+    const abs = Math.abs(v);
+    if (abs >= 1e12) return `${(v / 1e12).toFixed(2)} T RC`;
+    if (abs >= 1e9)  return `${(v / 1e9).toFixed(2)} B RC`;
+    if (abs >= 1e6)  return `${(v / 1e6).toFixed(1)} M RC`;
+    if (abs >= 1e3)  return `${(v / 1e3).toFixed(0)} k RC`;
+    return `${Math.round(v)} RC`;
+}
+
+/** Regeneration delay for the RC shortfall warning — locale-keyed. */
+function formatRegenTime(h) {
+    if (!(h > 0)) return "";
+    if (h < 1)  return t("components.add_account_dialog.regen_under_an_hour");
+    if (h < 48) return t("components.add_account_dialog.regen_hours", { hours: Math.ceil(h) });
+    return t("components.add_account_dialog.regen_days", { days: (h / 24).toFixed(1) });
+}
+
 // Hoisted static styles + static adornment elements — were literals re-created
 // on every render (this dialog re-renders per keystroke of the username and
 // amount fields). Static JSX elements are immutable, so reusing one instance
@@ -145,6 +254,9 @@ const AMOUNT_ICON_STYLE = { margin: "0px 8px -12px 0px", fontSize: "1em" };
 const PXA_FIELD_ICON = <PixaLiquid style={AMOUNT_ICON_STYLE} />;
 const PXS_FIELD_ICON = <PixaSupra style={AMOUNT_ICON_STYLE} />;
 const PXP_FIELD_ICON = <PixaPower style={AMOUNT_ICON_STYLE} />;
+const METHOD_ICON_STYLE = { fontSize: 18 };
+const RC_OPTION_ICON  = <FlashOnIcon style={METHOD_ICON_STYLE} />;
+const FEE_OPTION_ICON = <PixaLiquid  style={METHOD_ICON_STYLE} />;
 const USERNAME_INPUT_PROPS = {
     autoCapitalize: "none",
     autoCorrect: "off",
@@ -163,10 +275,15 @@ const WORKING_SPINNER_STYLE = { color: "#cccccc" };
 const SUCCESS_NAME_STYLE = { color: "#f0f0f0" };
 const SUCCESS_SUB_STYLE = { fontSize: 13 };
 const AUTO_CLOSE_STYLE = { color: "#666", fontSize: 12, marginTop: 8 };
+const ERROR_HINT_STYLE = { color: "#9b9b9b", fontSize: 13, maxWidth: 480 };
 const ACTIONS_STYLE = { textAlign: "right" };
 const ICON_GREY_STYLE = { color: "#777" };
 const ICON_MID_STYLE = { color: "#a0a0a0" };
 const ICON_LIGHT_STYLE = { color: "#e0e0e0" };
+
+// Resource-Credits read state. `supported` is false when the api wrapper has
+// no rc group; `loading` covers the four parallel RC calls.
+const RC_INITIAL = { loading: false, supported: false, mana: null, params: null, pool: null, stats: null };
 
 /**
  * PXA-per-VESTS ratio = total_vesting_fund_pixa / total_vesting_shares, read
@@ -200,6 +317,150 @@ function powerToVestsAsset(power, ratio, availableVests) {
     const f = Math.pow(10, VESTS_PRECISION);
     vests = Math.floor(vests * f) / f;          // never round up past the cap
     return `${vests.toFixed(VESTS_PRECISION)} VESTS`;
+}
+
+/**
+ * total_vesting_shares as an exact integer in the asset's smallest unit
+ * (satoshi-VESTS, 6 dp) — the value the chain feeds into RC regen:
+ * rc_regen = total_vesting_shares.amount / (HIVE_RC_REGEN_TIME / HIVE_BLOCK_INTERVAL).
+ * Accepts the legacy "123.456789 VESTS" string or a NAI object. Null when
+ * unparseable or when BigInt is unavailable.
+ */
+function vestingUnitsFromDGP(dgp) {
+    if (!HAS_BIGINT || !dgp) return null;
+    const raw = dgp.total_vesting_shares;
+    try {
+        if (typeof raw === "string") {
+            const m = raw.trim().match(/^(\d+)(?:\.(\d*))?\s+[A-Z]+$/);
+            if (!m) return null;
+            const frac = ((m[2] || "") + "0".repeat(VESTS_PRECISION)).slice(0, VESTS_PRECISION);
+            return BigInt(m[1] + frac);
+        }
+        if (raw && typeof raw === "object" && raw.amount !== undefined) {
+            const precision = Number.isFinite(raw.precision) ? raw.precision : VESTS_PRECISION;
+            let units = BigInt(String(raw.amount));
+            if (precision < VESTS_PRECISION) units *= BigInt(Math.pow(10, VESTS_PRECISION - precision));
+            return units;
+        }
+    } catch (_) { /* fall through */ }
+    return null;
+}
+
+/** Lenient BigInt coercion for chain numbers that arrive as number or string. */
+function toBig(v) {
+    if (!HAS_BIGINT || v === null || v === undefined) return null;
+    try {
+        if (typeof v === "bigint") return v;
+        if (typeof v === "number") return Number.isFinite(v) ? BigInt(Math.trunc(v)) : null;
+        if (typeof v === "string") {
+            const s = v.trim();
+            return /^-?\d+$/.test(s) ? BigInt(s) : null;
+        }
+    } catch (_) { /* fall through */ }
+    return null;
+}
+
+/**
+ * resource_credits::compute_cost — the chain's RC price of `count` units of
+ * one resource against its current pool:
+ *
+ *     cost = ((regen × coeff_a) >> shift + 1) × count / (coeff_b + max(pool, 0)) + 1
+ *
+ * Everything is 128-bit on the node, hence BigInt here.
+ */
+function rcCostOfResource(curve, poolUnits, count, regenShare) {
+    const ZERO = BigInt(0);
+    if (count <= ZERO) return ZERO;
+    const a = toBig(curve.coeff_a);
+    const b = toBig(curve.coeff_b);
+    const shift = toBig(curve.shift);
+    if (a === null || b === null || shift === null) return null;
+    let num = regenShare * a;
+    num >>= shift;
+    num += BigInt(1);
+    num *= count;
+    let denom = b;
+    if (poolUnits > ZERO) denom += poolUnits;
+    if (denom <= ZERO) return null;
+    return num / denom + BigInt(1);
+}
+
+/**
+ * RC bill of the creation transaction this dialog is about to broadcast.
+ *
+ *   params / pool  — rc_api.get_resource_params / get_resource_pool
+ *   stats          — rc_api.get_rc_stats (HF26+): `share[i]` is the basis-point
+ *                    slice of the global regen assigned to pool i. Without it
+ *                    (pre-HF26 nodes) every pool is priced against the full
+ *                    regen, which is what those nodes do.
+ *   claim          — true when a claim_account op is included
+ *   transfers      — number of transfer ops (each is a "market" op)
+ *   delegation     — whether a delegate_vesting_shares op is included
+ *
+ * Returns a Number (RC) or null when the inputs can't be trusted.
+ */
+function estimateCreationRc({ params, pool, stats, totalVestingUnits, claim, transfers, delegation }) {
+    if (!HAS_BIGINT || !params || !pool || totalVestingUnits === null) return null;
+    const ZERO = BigInt(0);
+    const regen = totalVestingUnits / BigInt(RC_REGEN_BLOCKS);
+    if (regen <= ZERO) return 0; // the node makes everything free when regen is 0
+
+    const txBytes =
+        TX_BYTES.base + (claim ? TX_BYTES.claim : 0) + TX_BYTES.create_claimed +
+        transfers * TX_BYTES.transfer + (delegation ? TX_BYTES.delegate : 0);
+    const stateBytes =
+        RC_STATE_BYTES.transaction_base + RC_STATE_BYTES.account_create_base +
+        3 * RC_STATE_BYTES.authority_key_member +
+        (delegation ? RC_STATE_BYTES.delegate_vesting_shares : 0);
+    const execTime =
+        RC_EXEC_TIME.transaction + RC_EXEC_TIME.verify_authority +
+        (claim ? RC_EXEC_TIME.claim_account : 0) + RC_EXEC_TIME.create_claimed +
+        transfers * RC_EXEC_TIME.transfer + (delegation ? RC_EXEC_TIME.delegate : 0);
+
+    // Same index order as RC_RESOURCE_KEYS.
+    const usage = [txBytes, claim ? 1 : 0, transfers > 0 ? txBytes : 0, stateBytes, execTime];
+    const share = stats && Array.isArray(stats.share) && stats.share.length === RC_RESOURCE_KEYS.length
+        ? stats.share
+        : null;
+
+    let total = ZERO;
+    for (let i = 0; i < RC_RESOURCE_KEYS.length; i++) {
+        const key = RC_RESOURCE_KEYS[i];
+        const p = params[key];
+        const q = pool[key];
+        if (!p || !p.price_curve_params || !q) return null;
+        const poolUnits = toBig(q.pool);
+        if (poolUnits === null) return null;
+        // Usage is booked in pool units (new accounts: 10 000 units per account).
+        const unitRaw = toBig(p.resource_dynamics_params && p.resource_dynamics_params.resource_unit);
+        const unit = unitRaw !== null && unitRaw > ZERO ? unitRaw : BigInt(1);
+        let regenShare = regen;
+        if (share) {
+            const bps = toBig(share[i]);
+            if (bps === null) return null;
+            regenShare = (regen * bps) / BigInt(HIVE_100_PERCENT);
+        }
+        if (regenShare <= ZERO) continue; // pools with no regen share are free on-chain
+        const cost = rcCostOfResource(p.price_curve_params, poolUnits, BigInt(usage[i]) * unit, regenShare);
+        if (cost === null) return null;
+        total += cost;
+    }
+    return Number(total);
+}
+
+/**
+ * dpixa's Manabar → { current, max, pct }. dpixa reports `percentage` in
+ * basis points (despite its README example), so the percentage is derived
+ * here from current / max instead. Current is clamped to max for display.
+ */
+function normalizeManabar(m) {
+    if (!m) return null;
+    const max = Number(m.max_mana);
+    let current = Number(m.current_mana);
+    if (!Number.isFinite(max) || !Number.isFinite(current)) return null;
+    current = Math.max(0, Math.min(current, max));
+    const pct = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0;
+    return { current, max, pct };
 }
 
 /**
@@ -239,7 +500,7 @@ function normalizeFee(raw, fallback = "3.000 " + SYM_PXA) {
 }
 
 function extractErrorMessage(error) {
-    if (!error) return "Unknown error";
+    if (!error) return "";
     return (
         (error.jse_info && error.jse_info.stack && error.jse_info.stack[0] && error.jse_info.stack[0].format) ||
         (error.data && error.data.stack && error.data.stack[0] && error.data.stack[0].format) ||
@@ -247,9 +508,13 @@ function extractErrorMessage(error) {
         (error.payload && error.payload.error && error.payload.error.data && error.payload.error.data.stack && error.payload.error.data.stack[0] && error.payload.error.data.stack[0].format) ||
         error.message ||
         (typeof error === "string" ? error : null) ||
-        "Unknown error"
+        ""
     );
 }
+
+// Chain-side rejections specific to the RC path (not_enough_rc_exception
+// "Account: X has N RC, needs M RC", the empty subsidy pool, a spent token).
+const RC_ERROR_RE = /\bRC\b|resource credit|subsidized account|claimed account/i;
 
 // =============================================================================
 // NumberFormatCustom — same shape used by wallet dialogs
@@ -276,6 +541,25 @@ function NumberFormatCustom(props) {
         />
     );
 }
+
+// =============================================================================
+// MethodOption — one cell of the creation-method selector
+// =============================================================================
+
+const MethodOption = memo(function MethodOption({ classes, selected, icon, title, subtitle, onSelect }) {
+    return (
+        <ButtonBase
+            focusRipple
+            role="radio"
+            aria-checked={selected}
+            className={selected ? `${classes.methodOption} ${classes.methodOptionSelected}` : classes.methodOption}
+            onClick={onSelect}
+        >
+            <span className={classes.methodTitle}>{icon}{title}</span>
+            <span className={classes.methodSub}>{subtitle}</span>
+        </ButtonBase>
+    );
+});
 
 // =============================================================================
 // STYLES — wallet-dialog idiom (#181818 paper, filled inputs, greyscale)
@@ -309,6 +593,56 @@ const styles = (theme) => ({
         borderRadius: 12,
         padding: "8px 16px",
         marginTop: 4,
+    },
+    rcBar: {
+        height: 4,
+        borderRadius: 2,
+        margin: "0 0 6px 0",
+        "&.MuiLinearProgress-colorPrimary":   { backgroundColor: "#1f1f1f" },
+        "& .MuiLinearProgress-barColorPrimary": { backgroundColor: "#8a8a8a", borderRadius: 2 },
+    },
+    methodRow: {
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+        gap: 8,
+        marginTop: 4,
+    },
+    methodOption: {
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "flex-start",
+        textAlign: "left",
+        padding: "10px 14px",
+        borderRadius: 12,
+        backgroundColor: "#101010",
+        color: "#bdbdbd",
+        transition: "background-color 120ms ease, color 120ms ease",
+        "&:hover":            { backgroundColor: "#161616" },
+        "&.Mui-focusVisible": {  },
+    },
+    methodOptionSelected: {
+        backgroundColor: "#2a2a2a",
+        color: "#f0f0f0",
+        "&:hover": { backgroundColor: "#2e2e2e", },
+    },
+    methodTitle: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        fontSize: 13,
+        fontWeight: 600,
+        lineHeight: "20px",
+    },
+    methodSub: {
+        fontSize: 12,
+        color: "#8d8d8d",
+        marginTop: 2,
+        lineHeight: "16px",
+    },
+    methodNote: {
+        fontSize: 13,
+        color: "#9b9b9b",
+        margin: "8px 2px 0 2px",
     },
     helperRow: {
         fontSize: 13,
@@ -377,6 +711,12 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
     const [accountInfoLoading, setAccountInfoLoading] = useState(true);
     const [creationFee,        setCreationFee]        = useState(null);
     const [vestRatio,          setVestRatio]          = useState(0); // PXA per VESTS
+    const [dgp,                setDgp]                = useState(null); // raw dynamic global properties
+
+    // ── Creation method + Resource Credits ───────────────────────────────────
+    const [method, setMethod] = useState(METHOD_RC);
+    const methodTouched       = useRef(false); // once the user picks, stop auto-selecting
+    const [rc, setRc]         = useState(RC_INITIAL);
 
     // ── Username state ───────────────────────────────────────────────────────
     const [username,            setUsername]            = useState("");
@@ -400,11 +740,44 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
     const lastUsername     = useRef("");
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Load: current account + balances + creation fee
+    // Load: current account + balances + creation fee, then Resource Credits
+    // (RC reads run alongside and never hold the wallet summary back)
     // ─────────────────────────────────────────────────────────────────────────
     useEffect(() => {
         if (!open || !api) return;
         let cancelled = false;
+
+        const loadResourceCredits = async (acct) => {
+            const rcApi = api.rc;
+            if (!rcApi || typeof rcApi.getRCMana !== "function") {
+                console.warn("[AddAccountDialog] api.rc is not available — RC readout disabled");
+                if (!cancelled && isMounted.current) setRc({ ...RC_INITIAL, supported: false });
+                return;
+            }
+            if (!cancelled && isMounted.current) setRc((prev) => ({ ...prev, loading: true, supported: true }));
+
+            const warn = (label) => (err) => {
+                console.warn(`[AddAccountDialog] rc.${label} failed:`, err && err.message ? err.message : err);
+                return null;
+            };
+            const [mana, params, pool, stats] = await Promise.all([
+                rcApi.getRCMana(acct).catch(warn("getRCMana")),
+                (typeof rcApi.getResourceParams === "function"
+                    ? rcApi.getResourceParams().catch(warn("getResourceParams"))
+                    : Promise.resolve(null)),
+                (typeof rcApi.getResourcePool === "function"
+                    ? rcApi.getResourcePool().catch(warn("getResourcePool"))
+                    : Promise.resolve(null)),
+                (typeof rcApi.getRcStats === "function"
+                    ? rcApi.getRcStats().catch(warn("getRcStats"))
+                    : Promise.resolve(null)),
+            ]);
+            if (cancelled || !isMounted.current) return;
+
+            const manabar = normalizeManabar(mana);
+            console.log("[AddAccountDialog] RC manabar:", manabar, "| stats shares:", stats && stats.share);
+            setRc({ loading: false, supported: true, mana: manabar, params, pool, stats });
+        };
 
         (async () => {
             setAccountInfoLoading(true);
@@ -417,7 +790,7 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
                 if (!acct) {
                     if (!cancelled && isMounted.current) {
                         setStatus("error");
-                        setErrorMessage("You must be logged in to create an account from your credits.");
+                        setErrorMessage(t("components.add_account_dialog.you_must_be_logged_in"));
                         setAccountInfoLoading(false);
                     }
                     return;
@@ -425,12 +798,20 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
                 if (cancelled || !isMounted.current) return;
                 setCurrentAccount(acct);
 
-                const [infoArr, props, dgp] = await Promise.all([
+                // Fire-and-forget: the wallet block renders as soon as the
+                // three core reads land; the RC lines fill in when theirs do.
+                loadResourceCredits(acct).catch((err) => {
+                    console.warn("[AddAccountDialog] RC load failed:", err);
+                    if (!cancelled && isMounted.current) setRc((prev) => ({ ...prev, loading: false }));
+                });
+
+                const [infoArr, props, dgpRaw] = await Promise.all([
                     api.accounts.getAccounts([acct], true).catch(() => []),
                     api.globals.getChainProperties().catch(() => null),
                     // Dynamic global properties carry total_vesting_fund_pixa and
-                    // total_vesting_shares (the VESTS↔PXA ratio). Adjust this
-                    // method path if your `api` wrapper exposes it elsewhere.
+                    // total_vesting_shares (the VESTS↔PXA ratio and the RC regen
+                    // base) plus available_account_subsidies (the zero-fee
+                    // claim_account gate).
                     (api.globals.getDynamicGlobalProperties
                         ? api.globals.getDynamicGlobalProperties().catch(() => null)
                         : Promise.resolve(null)),
@@ -439,6 +820,7 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
 
                 const info = (infoArr && infoArr[0]) || null;
                 setAccountInfo(info);
+                console.log("[AddAccountDialog] pending_claimed_accounts:", info && info.pending_claimed_accounts);
 
                 const raw = props && props.account_creation_fee;
                 try { console.log("[AddAccountDialog] raw account_creation_fee:", raw); } catch (_) {}
@@ -446,16 +828,20 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
                 console.log("[AddAccountDialog] resolved creation fee:", feeDisplay);
                 setCreationFee(feeDisplay);
 
-                const ratio = vestRatioFromDGP(dgp);
-                console.log("[AddAccountDialog] vesting ratio (PXA per VESTS):", ratio);
+                const ratio = vestRatioFromDGP(dgpRaw);
+                console.log("[AddAccountDialog] vesting ratio (PXA per VESTS):", ratio,
+                    "| available_account_subsidies:", dgpRaw && dgpRaw.available_account_subsidies);
                 setVestRatio(ratio);
+                setDgp(dgpRaw || null);
 
                 setAccountInfoLoading(false);
             } catch (err) {
                 console.error("[AddAccountDialog] account/fee load failed:", err);
                 if (!cancelled && isMounted.current) {
                     setStatus("error");
-                    setErrorMessage("Could not read your wallet. " + (err && err.message ? err.message : ""));
+                    setErrorMessage(t("components.add_account_dialog.could_not_read_your_wallet", {
+                        error: err && err.message ? err.message : ""
+                    }));
                     setAccountInfoLoading(false);
                 }
             }
@@ -497,13 +883,101 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
         [creationFee]
     );
 
-    // PXA available to gift = balance - creation fee. Negative ⇒ can't afford.
+    const isRc = method === METHOD_RC;
+
+    // PXA available to gift: the whole balance on the RC path, balance − fee
+    // when the fee is paid in PXA. Negative ⇒ can't afford the fee.
     const pxaGiftCap = useMemo(
-        () => Math.max(0, pxaBalance - creationFeeAmount),
-        [pxaBalance, creationFeeAmount]
+        () => (isRc ? pxaBalance : Math.max(0, pxaBalance - creationFeeAmount)),
+        [isRc, pxaBalance, creationFeeAmount]
     );
 
     const canAffordFee = pxaBalance >= creationFeeAmount && creationFee !== null;
+
+    // A method switch can shrink the PXA cap under the current gift amount.
+    useEffect(() => {
+        setPxaAmount((a) => (a > pxaGiftCap ? roundToPrec(pxaGiftCap, SYM_PXA) : a));
+    }, [pxaGiftCap]);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Resource-Credits derivations
+    // ─────────────────────────────────────────────────────────────────────────
+    // Claimed-account tokens already held by the creator (chain counter
+    // pending_claimed_accounts). With a token in hand, no claim_account op is
+    // needed and the creation is nearly free in RC.
+    const pendingClaimed = useMemo(() => {
+        const n = Number(accountInfo?.pending_claimed_accounts);
+        return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+    }, [accountInfo]);
+    const useToken = pendingClaimed > 0;
+
+    // Whole subsidized accounts left in the chain's pool. claim_account with a
+    // zero fee is rejected on-chain when this is 0 — a hard, chain-exact gate.
+    // Null when the property is missing (older node / unknown shape).
+    const subsidizedAvailable = useMemo(() => {
+        const v = dgp ? Number(dgp.available_account_subsidies) : NaN;
+        return Number.isFinite(v) ? Math.max(0, Math.floor(v / ACCOUNT_SUBSIDY_PRECISION)) : null;
+    }, [dgp]);
+
+    const totalVestingUnits = useMemo(() => vestingUnitsFromDGP(dgp), [dgp]);
+
+    const hasPxaGift = pxaAmount > 0;
+    const hasPxsGift = pxsAmount > 0;
+    const hasPxpGift = pxpAmount > 0;
+
+    const rcEstimate = useMemo(() => {
+        if (!rc.params || !rc.pool) return null;
+        try {
+            return estimateCreationRc({
+                params: rc.params,
+                pool: rc.pool,
+                stats: rc.stats,
+                totalVestingUnits,
+                claim: !useToken,
+                transfers: (hasPxaGift ? 1 : 0) + (hasPxsGift ? 1 : 0),
+                delegation: hasPxpGift,
+            });
+        } catch (err) {
+            console.warn("[AddAccountDialog] RC estimate failed:", err);
+            return null;
+        }
+    }, [rc.params, rc.pool, rc.stats, totalVestingUnits, useToken, hasPxaGift, hasPxsGift, hasPxpGift]);
+
+    // Soft signal: RC below the estimate. Never blocks (the chain's own error
+    // message states the exact RC needed), but drives the warning copy and
+    // the default-method choice.
+    const rcShortfall = useMemo(() => {
+        if (useToken || !rc.mana || rcEstimate === null) return 0;
+        return Math.max(0, rcEstimate - rc.mana.current);
+    }, [useToken, rc.mana, rcEstimate]);
+
+    // RC regenerate linearly, empty → full in RC_REGEN_TIME_SEC.
+    const rcRegenHours = (rc.mana && rc.mana.max > 0 && rcShortfall > 0)
+        ? (rcShortfall / rc.mana.max) * (RC_REGEN_TIME_SEC / 3600)
+        : 0;
+    const rcNeedsMorePower = Boolean(rc.mana && rcEstimate !== null && !useToken && rcEstimate > rc.mana.max);
+
+    // Hard, chain-exact block: a fresh claim is required and the chain has
+    // nothing left to subsidize it with.
+    const rcBlocked = !useToken && subsidizedAvailable === 0;
+
+    // Default method once the wallet and RC reads are in: Resource Credits
+    // unless they are knowably short and the fee is affordable. A manual pick
+    // is never overridden.
+    useEffect(() => {
+        if (accountInfoLoading || rc.loading || methodTouched.current) return;
+        const preferFee = (rcBlocked || rcShortfall > 0) && canAffordFee;
+        setMethod(preferFee ? METHOD_FEE : METHOD_RC);
+    }, [accountInfoLoading, rc.loading, rcBlocked, rcShortfall, canAffordFee]);
+
+    const selectRcMethod = useCallback(() => {
+        methodTouched.current = true;
+        setMethod(METHOD_RC);
+    }, []);
+    const selectFeeMethod = useCallback(() => {
+        methodTouched.current = true;
+        setMethod(METHOD_FEE);
+    }, []);
 
     // ─────────────────────────────────────────────────────────────────────────
     // Username handler
@@ -626,9 +1100,13 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
         if (!currentAccount)      return false;
         if (!usernameAvailable)   return false;
         if (usernamePending)      return false;
-        if (!canAffordFee)        return false;
+        if (isRc) {
+            if (rcBlocked)        return false;
+        } else {
+            if (!canAffordFee)    return false;
+        }
         return true;
-    }, [status, currentAccount, usernameAvailable, usernamePending, canAffordFee]);
+    }, [status, currentAccount, usernameAvailable, usernamePending, isRc, rcBlocked, canAffordFee]);
 
     const handleSubmit = useCallback(async () => {
         if (!canSubmit) return;
@@ -648,38 +1126,73 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
             const [pdfBlob, keys] = await generatePDF(username, seed, "", masterKey);
             const pub = keys && keys.pub;
             if (!pub || !pub.owner || !pub.active || !pub.posting || !pub.memo) {
-                throw new Error("Key derivation returned an incomplete authority set.");
+                throw new Error(t("components.add_account_dialog.incomplete_authority_set"));
             }
             lastPdfBlob.current  = pdfBlob;
             lastUsername.current = username;
 
-            // 2. Re-fetch the fee just before signing (validators reject
-            //    account_create with a stale fee on fee-bump blocks).
-            let feeForOp = creationFee;
-            try {
-                const props = await api.globals.getChainProperties();
-                feeForOp = normalizeFee(props && props.account_creation_fee, creationFee);
-            } catch (_) { /* fall back to dialog-load fee */ }
-            console.log("[AddAccountDialog] fee for op:", feeForOp);
+            const jsonMetadata = JSON.stringify({
+                created_by: "pixagram-credit-gift",
+                created_at: new Date().toISOString(),
+                gifter: currentAccount,
+                creation: isRc ? "resource_credits" : "creation_fee",
+            });
 
-            // 3. Build the op array (display → chain symbols at this boundary).
-            const feeParsed = parseAsset(feeForOp) || { amount: 0, symbol: SYM_PXA };
+            // 2. Build the op array (display → chain symbols at this boundary).
             const ops = [];
 
-            ops.push(["account_create", {
-                fee: toChainAsset(feeParsed.amount, feeParsed.symbol),
-                creator: currentAccount,
-                new_account_name: username,
-                owner:   buildAuth(pub.owner),
-                active:  buildAuth(pub.active),
-                posting: buildAuth(pub.posting),
-                memo_key: pub.memo,
-                json_metadata: JSON.stringify({
-                    created_by: "pixagram-credit-gift",
-                    created_at: new Date().toISOString(),
-                    gifter: currentAccount,
-                }),
-            }]);
+            if (isRc) {
+                // Re-read the token count right before signing: a token may
+                // have been spent (or claimed) elsewhere since the dialog opened.
+                let tokens = pendingClaimed;
+                try {
+                    const fresh = await api.accounts.getAccounts([currentAccount], true);
+                    const n = Number(fresh && fresh[0] && fresh[0].pending_claimed_accounts);
+                    if (Number.isFinite(n)) tokens = Math.max(0, Math.floor(n));
+                } catch (_) { /* keep the dialog-load count */ }
+                console.log("[AddAccountDialog] claimed-account tokens at signing:", tokens);
+
+                if (!(tokens > 0)) {
+                    // Zero fee ⇒ the chain bills the claim to the creator's RC
+                    // and takes one subsidized account from its pool.
+                    ops.push(["claim_account", {
+                        creator: currentAccount,
+                        fee: toChainAsset(0, SYM_PXA),
+                        extensions: [],
+                    }]);
+                }
+                ops.push(["create_claimed_account", {
+                    creator: currentAccount,
+                    new_account_name: username,
+                    owner:   buildAuth(pub.owner),
+                    active:  buildAuth(pub.active),
+                    posting: buildAuth(pub.posting),
+                    memo_key: pub.memo,
+                    json_metadata: jsonMetadata,
+                    extensions: [],
+                }]);
+            } else {
+                // Re-fetch the fee just before signing (validators reject
+                // account_create with a stale fee on fee-bump blocks).
+                let feeForOp = creationFee;
+                try {
+                    const props = await api.globals.getChainProperties();
+                    feeForOp = normalizeFee(props && props.account_creation_fee, creationFee);
+                } catch (_) { /* fall back to dialog-load fee */ }
+                console.log("[AddAccountDialog] fee for op:", feeForOp);
+
+                const feeParsed = parseAsset(feeForOp) || { amount: 0, symbol: SYM_PXA };
+                ops.push(["account_create", {
+                    fee: toChainAsset(feeParsed.amount, feeParsed.symbol),
+                    creator: currentAccount,
+                    new_account_name: username,
+                    owner:   buildAuth(pub.owner),
+                    active:  buildAuth(pub.active),
+                    posting: buildAuth(pub.posting),
+                    memo_key: pub.memo,
+                    json_metadata: jsonMetadata,
+                }]);
+            }
 
             if (pxpAmount > 0) {
                 // pxpAmount is PXP (PXA-equivalent Power). The chain only knows
@@ -710,18 +1223,20 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
 
             console.log("[AddAccountDialog] ops:", JSON.stringify(ops, null, 2));
 
-            // 4. Active key (UnlockKeyDialog stacks if the vault is locked).
+            // 3. Active key (UnlockKeyDialog stacks if the vault is locked).
+            //    claim_account / create_claimed_account / account_create are all
+            //    active-authority operations.
             console.log("[AddAccountDialog] requesting active key for", currentAccount);
             const key = await api.keyManager.requestKey(currentAccount, "active");
 
-            // 5. Atomic broadcast.
+            // 4. Atomic broadcast.
             console.log("[AddAccountDialog] broadcasting…");
             const result = await api.broadcast.sendOperations(ops, key);
             console.log("[AddAccountDialog] broadcast result:", result);
 
             if (!isMounted.current) return;
 
-            // 6. Force-download the recipient's backup PDF and show success.
+            // 5. Force-download the recipient's backup PDF and show success.
             triggerPdfDownload();
             if (actions && actions.trigger_snackbar) {
                 actions.trigger_snackbar(t("components.add_account_dialog.account_created", {
@@ -736,10 +1251,10 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
             console.error("[AddAccountDialog] account creation failed:", err);
             if (!isMounted.current) return;
             setStatus("error");
-            setErrorMessage(extractErrorMessage(err) || "The transaction was rejected. Please try again.");
+            setErrorMessage(extractErrorMessage(err) || t("components.add_account_dialog.the_transaction_was_rejected"));
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [canSubmit, api, currentAccount, username, creationFee, pxaAmount, pxsAmount, pxpAmount, vestRatio, pxpAvailableVests, triggerPdfDownload, startAutoClose]);
+    }, [canSubmit, api, currentAccount, username, isRc, pendingClaimed, creationFee, pxaAmount, pxsAmount, pxpAmount, vestRatio, pxpAvailableVests, triggerPdfDownload, startAutoClose]);
 
     const handleRetry = useCallback(() => {
         setStatus("form");
@@ -761,11 +1276,53 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
     const usernameHelper = useMemo(() => {
         if (username.length === 0)                              return "";
         if (usernameSyntaxError && usernameSyntaxError.length)  return usernameSyntaxError;
-        if (usernamePending)                                    return "Checking availability…";
-        if (usernameTaken)                                      return "That username is already taken.";
-        if (usernameAvailable)                                  return "Available.";
+        if (usernamePending)                                    return t("components.add_account_dialog.checking_availability");
+        if (usernameTaken)                                      return t("components.add_account_dialog.that_username_is_already_taken");
+        if (usernameAvailable)                                  return t("components.add_account_dialog.available");
         return "";
     }, [username, usernameSyntaxError, usernamePending, usernameTaken, usernameAvailable]);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Method selector copy + RC readout copy
+    // ─────────────────────────────────────────────────────────────────────────
+    const methodNote = isRc
+        ? (useToken
+            ? t("components.add_account_dialog.note_rc_token", { n: pendingClaimed })
+            : t("components.add_account_dialog.note_rc_claim"))
+        : t("components.add_account_dialog.note_fee", { fee: creationFee || ("3.000 " + SYM_PXA) });
+
+    const rcManaText = rc.loading
+        ? "…"
+        : (rc.supported && rc.mana
+            ? `${rc.mana.pct.toFixed(0)} % (${formatRc(rc.mana.current)})`
+            : t("components.add_account_dialog.unavailable"));
+
+    const rcCostText = rc.loading
+        ? "…"
+        : (rcEstimate !== null ? `≈ ${formatRc(rcEstimate)}` : t("components.add_account_dialog.unknown"));
+
+    // Warning under the wallet block for the selected method. Only the
+    // subsidy-pool case also disables CREATE; the RC shortfalls are advisory.
+    const walletWarning = useMemo(() => {
+        if (accountInfoLoading) return "";
+        if (!isRc) {
+            return canAffordFee ? "" : t("components.add_account_dialog.your_pxa_balance_does_not_cover_the", {
+                creationFee: creationFee
+            });
+        }
+        if (rcBlocked)        return t("components.add_account_dialog.warn_no_subsidized_accounts");
+        if (!rc.mana || rc.loading) return "";
+        if (rcNeedsMorePower) return t("components.add_account_dialog.warn_rc_needs_more_power", {
+            cost: formatRc(rcEstimate),
+            max:  formatRc(rc.mana.max),
+        });
+        if (rcShortfall > 0)  return t("components.add_account_dialog.warn_rc_shortfall", {
+            current: formatRc(rc.mana.current),
+            cost:    formatRc(rcEstimate),
+            when:    formatRegenTime(rcRegenHours),
+        });
+        return "";
+    }, [accountInfoLoading, isRc, canAffordFee, creationFee, rcBlocked, rc.mana, rc.loading, rcNeedsMorePower, rcShortfall, rcEstimate, rcRegenHours]);
 
     // ─────────────────────────────────────────────────────────────────────────
     // Render helper — one filled text field per gift amount
@@ -822,6 +1379,30 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
                     <Typography className={classes.helperRow}>{usernameHelper}</Typography>
                 </Collapse>
 
+                {/* ── Creation method ── */}
+                <div className={classes.sectionLabel}>{t("components.add_account_dialog.creation_method")}</div>
+                <div className={classes.methodRow} role="radiogroup" aria-label={t("components.add_account_dialog.creation_method")}>
+                    <MethodOption
+                        classes={classes}
+                        selected={isRc}
+                        icon={RC_OPTION_ICON}
+                        title={t("components.add_account_dialog.resource_credits")}
+                        subtitle={t("components.add_account_dialog.claim_an_account_with_rc_no_fee")}
+                        onSelect={selectRcMethod}
+                    />
+                    <MethodOption
+                        classes={classes}
+                        selected={!isRc}
+                        icon={FEE_OPTION_ICON}
+                        title={t("components.add_account_dialog.pxa_fee")}
+                        subtitle={creationFee
+                            ? t("components.add_account_dialog.pay_fee", { fee: creationFee })
+                            : t("components.add_account_dialog.pay_the_chain_fee")}
+                        onSelect={selectFeeMethod}
+                    />
+                </div>
+                <Typography className={classes.methodNote}>{methodNote}</Typography>
+
                 {/* ── Wallet summary ── */}
                 <div className={classes.sectionLabel}>{t("components.add_account_dialog.your_wallet")}</div>
                 {accountInfoLoading ? (
@@ -842,37 +1423,72 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
                             <span>{t("components.add_account_dialog.pxp_available_to_delegate")}</span>
                             <span className={classes.balanceLineValue}>{formatAsset(pxpAvailable, SYM_PXP)}</span>
                         </div>
-                        <div className={classes.balanceLine}>
-                            <span>{t("components.add_account_dialog.account_creation_fee")}</span>
-                            <span className={classes.balanceLineValue}>− {creationFee || ("3.000 " + SYM_PXA)}</span>
-                        </div>
+                        {isRc ? (
+                            <>
+                                <div className={classes.balanceLine}>
+                                    <span>{t("components.add_account_dialog.resource_credits")}</span>
+                                    <span className={classes.balanceLineValue}>{rcManaText}</span>
+                                </div>
+                                {rc.mana && (
+                                    <LinearProgress
+                                        variant="determinate"
+                                        value={rc.mana.pct}
+                                        className={classes.rcBar}
+                                        aria-label={t("components.add_account_dialog.resource_credits")}
+                                    />
+                                )}
+                                {useToken && (
+                                    <div className={classes.balanceLine}>
+                                        <span>{t("components.add_account_dialog.claimed_account_tokens")}</span>
+                                        <span className={classes.balanceLineValue}>{formatInt(pendingClaimed)}</span>
+                                    </div>
+                                )}
+                                <div className={classes.balanceLine}>
+                                    <span>{t("components.add_account_dialog.estimated_rc_cost")}</span>
+                                    <span className={classes.balanceLineValue}>{rcCostText}</span>
+                                </div>
+                                {!useToken && subsidizedAvailable !== null && (
+                                    <div className={classes.balanceLine}>
+                                        <span>{t("components.add_account_dialog.subsidized_accounts_left_on_chain")}</span>
+                                        <span className={classes.balanceLineValue}>{formatInt(subsidizedAvailable)}</span>
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            <div className={classes.balanceLine}>
+                                <span>{t("components.add_account_dialog.account_creation_fee")}</span>
+                                <span className={classes.balanceLineValue}>− {creationFee || ("3.000 " + SYM_PXA)}</span>
+                            </div>
+                        )}
                     </div>
                 )}
-                {!accountInfoLoading && !canAffordFee && (
-                    <Typography style={CANT_AFFORD_STYLE}>{t("components.add_account_dialog.your_pxa_balance_does_not_cover_the", {
-                            creationFee: creationFee
-                        })}</Typography>
+                {walletWarning.length > 0 && (
+                    <Typography style={CANT_AFFORD_STYLE}>{walletWarning}</Typography>
                 )}
 
                 {/* ── PXA gift ── */}
                 <div className={classes.sectionLabel}>{t("components.add_account_dialog.send_pxa")}</div>
                 {renderAmountField({
-                    label: "Amount",
+                    label: t("words.amount"),
                     currency: "PXA",
                     decimals: 3,
                     icon: PXA_FIELD_ICON,
                     value: pxaAmount,
                     max: pxaGiftCap,
                     onAmountChange: setPxaFromAmount,
-                    helperText: t("components.add_account_dialog.max_pxa_after_fee", {
-                        pxaGiftCap: pxaGiftCap.toFixed(PREC[SYM_PXA])
-                    }),
+                    helperText: isRc
+                        ? t("components.add_account_dialog.max_pxa_no_fee", {
+                            pxaGiftCap: pxaGiftCap.toFixed(PREC[SYM_PXA])
+                        })
+                        : t("components.add_account_dialog.max_pxa_after_fee", {
+                            pxaGiftCap: pxaGiftCap.toFixed(PREC[SYM_PXA])
+                        }),
                 })}
 
                 {/* ── PXS gift ── */}
                 <div className={classes.sectionLabel}>{t("components.add_account_dialog.send_pxs")}</div>
                 {renderAmountField({
-                    label: "Amount",
+                    label: t("words.amount"),
                     currency: "PXS",
                     decimals: 3,
                     icon: PXS_FIELD_ICON,
@@ -887,7 +1503,7 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
                 {/* ── PXP delegation (shown as PXA-equivalent Power; sent as VESTS) ── */}
                 <div className={classes.sectionLabel}>{t("components.add_account_dialog.delegate_pxp")}</div>
                 {renderAmountField({
-                    label: "Amount",
+                    label: t("words.amount"),
                     currency: "PXP",
                     decimals: 3,
                     icon: PXP_FIELD_ICON,
@@ -901,7 +1517,7 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
                             pxpAvailable: pxpAvailable.toFixed(PREC[SYM_PXP])
                         }
                     )
-                        : "Vesting rate unavailable — PXP delegation is temporarily disabled.",
+                        : t("components.add_account_dialog.vesting_rate_unavailable"),
                 })}
             </div>
         </Fade>
@@ -927,7 +1543,7 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
             <Typography className={classes.statusMessage} style={SUCCESS_SUB_STYLE}>{t(
                     "components.add_account_dialog.the_recipients_keys_backup_pdf_was_downloaded",
                     {
-                        text: pdfDownloaded ? " — please hand it over securely." : "."
+                        text: pdfDownloaded ? " " + t("components.add_account_dialog.please_hand_it_over_securely") : "."
                     }
                 )}</Typography>
             {!pdfDownloaded && (
@@ -949,7 +1565,10 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
             <Typography className={classes.statusMessage}>
                 {t("components.add_account_dialog.the_account_could_not_be_created")}
             </Typography>
-            <div className={classes.errorMessage}>{errorMessage || "Unknown error."}</div>
+            <div className={classes.errorMessage}>{errorMessage || t("components.add_account_dialog.unknown_error")}</div>
+            {isRc && RC_ERROR_RE.test(errorMessage || "") && (
+                <Typography style={ERROR_HINT_STYLE}>{t("components.add_account_dialog.hint_rc_error")}</Typography>
+            )}
         </div>
     );
 
@@ -957,19 +1576,20 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
     // tooltip so the user isn't left wondering.
     const disabledHint = useMemo(() => {
         if (canSubmit) return "";
-        if (!currentAccount)                  return "Resolving your active account…";
-        if (accountInfoLoading)               return "Loading your wallet…";
-        if (!username.length)                 return "Choose a username for the new account.";
-        if (usernamePending)                  return "Checking that username on-chain…";
+        if (!currentAccount)                  return t("components.add_account_dialog.resolving_your_active_account");
+        if (accountInfoLoading)               return t("components.add_account_dialog.loading_your_wallet");
+        if (!username.length)                 return t("components.add_account_dialog.choose_a_username_for_the_new_account");
+        if (usernamePending)                  return t("components.add_account_dialog.checking_that_username_on_chain");
         if (usernameSyntaxError &&
             usernameSyntaxError.length)       return usernameSyntaxError;
-        if (usernameTaken)                    return "That username is already taken.";
-        if (!usernameAvailable)               return "Pick a valid, available username.";
-        if (!canAffordFee)                    return t("components.add_account_dialog.your_pxa_balance_does_not_cover_the", {
+        if (usernameTaken)                    return t("components.add_account_dialog.that_username_is_already_taken");
+        if (!usernameAvailable)               return t("components.add_account_dialog.pick_a_valid_available_username");
+        if (isRc && rcBlocked)                return t("components.add_account_dialog.hint_no_subsidized_accounts");
+        if (!isRc && !canAffordFee)           return t("components.add_account_dialog.your_pxa_balance_does_not_cover_the", {
             creationFee: creationFee || ""
         });
         return "";
-    }, [canSubmit, currentAccount, accountInfoLoading, username, usernamePending, usernameSyntaxError, usernameTaken, usernameAvailable, canAffordFee, creationFee]);
+    }, [canSubmit, currentAccount, accountInfoLoading, username, usernamePending, usernameSyntaxError, usernameTaken, usernameAvailable, isRc, rcBlocked, canAffordFee, creationFee]);
 
     return (
         <Dialog

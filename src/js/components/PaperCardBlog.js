@@ -16,6 +16,8 @@ import MoreVert from '@material-ui/icons/MoreVert';
 import useLiveTimeAgo from '../hooks/useLiveTimeAgo';
 import { HISTORY } from '../utils/constants';
 import * as actions from '../actions/utils';
+import { voteSign } from '../utils/voteValue';
+import { votesWithLocalVote } from '../utils/voteSync';
 import PaperCardActions from './PaperCardActions';
 import ProfileHoverAnchor from './ProfileHoverCard';
 
@@ -285,9 +287,10 @@ function PaperCardBlog({
     const initialVoted = useMemo(() => {
         if (!voter || !Array.isArray(data.active_votes)) return 0;
         const myVote = data.active_votes.find(v => v && v.voter === voter);
-        if (!myVote) return 0;
-        if (myVote.weight < 0) return -1;
-        return 1; // present in active_votes with weight >= 0 (or undefined) means upvoted
+        // voteSign reads rshares before weight: bridge rows omit `weight`,
+        // condenser rows may carry the (never negative) curation weight, and a
+        // zeroed row — what hivemind keeps after an unvote — means NOT voted.
+        return myVote ? voteSign(myVote) : 0;
     }, [voter, data.active_votes]);
 
     // Identity of the post this instance is currently pointed at. A sort change
@@ -398,16 +401,15 @@ function PaperCardBlog({
         }
     }, [voted, api, voter, data, applyVote, onVoteChange]);
 
-    // Compute active_votes reflecting current local vote state
-    const currentActiveVotes = useMemo(() => {
-        const base = (data.active_votes || []).filter(v => v && v.voter !== voter);
-        if (voted === 1 && voter) {
-            base.push({ voter, weight: 10000, rshares: '0', time: null });
-        } else if (voted === -1 && voter) {
-            base.push({ voter, weight: -10000, rshares: '0', time: null });
-        }
-        return base;
-    }, [data.active_votes, voted, voter]);
+    // active_votes reflecting the current local vote state. Once the page has
+    // applied the vote to `data` (applyOptimisticVote → placeholder row with
+    // the real weight, `_optimistic` and `_prev_rshares`), the rows are passed
+    // through untouched so VotingListModal can price the pending vote. Only
+    // the brief window where `local` is ahead of `data` synthesizes a row.
+    const currentActiveVotes = useMemo(
+        () => votesWithLocalVote(data.active_votes, voter, voted),
+        [data.active_votes, voted, voter],
+    );
 
     const triggerPositiveVotes = useCallback(() => actions.trigger_votes({sign: '+', votes: currentActiveVotes, voter_profiles: data._voter_profiles || {}}), [currentActiveVotes, data._voter_profiles]);
     const triggerNegativeVotes = useCallback(() => actions.trigger_votes({sign: '-', votes: currentActiveVotes, voter_profiles: data._voter_profiles || {}}), [currentActiveVotes, data._voter_profiles]);

@@ -33,7 +33,7 @@ var INSTALL_FILES_REQUIRED = [
 ];
 
 // Cache names
-var V = "v2";
+var V = "v3";
 var REQUIRED_CACHE = "unless-update-cache-"+V+"-required";
 var USEFUL_CACHE = "unless-update-cache-"+V+"-useful";
 var STATIC_CACHE = "unless-update-cache-"+V+"-static";

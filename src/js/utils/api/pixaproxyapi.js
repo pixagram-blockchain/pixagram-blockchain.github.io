@@ -104,6 +104,15 @@
  *   - getConversionRequests(account)
  *   - getCollateralizedConversionRequests(account)
  *
+ * prices (PricesAPI):
+ *   - get({forceRefresh})
+ *   - getSync()
+ *   - setExchangeEnabled(on)
+ *   - getPXAUSDPrice({forceRefresh})
+ *   - pxaToUsd(pxa) / pxsToUsd(pxs) / payoutToUsd(payout)
+ *   - getFiatRate(quote, base) / getFiatRates(quotes, base)
+ *   - usdToFiat(usd, currency, base) / pxsToFiat(pxs, currency) / pxaToFiat(pxa, currency)
+ *
  * accounts (AccountsAPI):
  *   - getAccounts(accounts, forceRefresh)
  *   - lookupAccounts(lowerBound, limit)
@@ -271,6 +280,7 @@
  *   - listRcDirectDelegations({start, limit})
  *   - getRCMana(account)
  *   - getVPMana(account)
+ *   - getRcStats()
  *   - calculateRCMana(rcAccount)
  *   - calculateVPMana(account)
  *   - calculateRCCost(operationType, operationData)
@@ -802,7 +812,7 @@ const VALIDATORS = {
     },
     /**
      * Validate a single active_vote entry.
-     * { voter, weight, rshares, time } — voter is a username, rest are numbers/strings.
+     * { voter, weight, percent, rshares, time } — voter is a username, rest are numbers/strings.
      */
     safe_active_vote: (v, sanitizeUsername) => {
         if (!v || typeof v !== 'object') return null;
@@ -811,6 +821,12 @@ const VALIDATORS = {
         return {
             voter,
             weight:  VALIDATORS.safe_number(v.weight) ?? 0,
+            // Vote percent (−10 000…10 000) when the row carries it — condenser
+            // rows do (as a string), bridge rows don't → null. With rshares at 0
+            // it is the only field telling a withdrawn vote (0 %) from the
+            // upvote of an account below the dust threshold; the frontend's
+            // voteSign() (utils/voteValue) reads it.
+            percent: VALIDATORS.safe_number(typeof v.percent === 'string' ? Number(v.percent) : v.percent),
             rshares: VALIDATORS.safe_numeric_string(String(v.rshares || '0')) || '0',
             time:    VALIDATORS.safe_timestamp(v.time),
         };
@@ -2142,6 +2158,41 @@ export class PixaProxyAPI {
     }
 
     /**
+     * Retire this instance because it is being REPLACED (API node switch),
+     * without ending the user's session — that is disconnect()/logout()
+     * territory. The persisted session belongs to the user, not to this
+     * connection; the replacement instance restores it on its own
+     * initialize()/restoreSession().
+     *
+     * What is stopped here is everything that would otherwise keep running
+     * in the background on an object nobody references anymore:
+     *   - the connectivity heartbeat and its window listeners;
+     *   - the offline broadcast outbox drain — two live queues over the same
+     *     `broadcast_queue` collection could drain the same queued operation
+     *     twice, so the old one stops the instant it is superseded;
+     *   - the key manager's in-memory key cache and its pagehide/beforeunload
+     *     listeners (lock(): the keys live encrypted in the session record,
+     *     the replacement instance reloads them);
+     *   - the RPC client's connection, when the transport holds one.
+     * The client OBJECT is kept: a consumer that has not been remounted onto
+     * the replacement yet fails with a network error, not a TypeError.
+     * Idempotent.
+     */
+    release() {
+        if (this._released) return;
+        this._released = true;
+        this.initialized = false;
+        try { this.connectivity?.destroy(); } catch (_) {}
+        try { this.broadcastQueue?.destroy(); } catch (_) {}
+        try { Promise.resolve(this.keyManager?.lock()).catch(() => {}); } catch (_) {}
+        // SessionManager is deliberately NOT touched here: its only teardown
+        // in this class is endSession(), and ending the session is the one
+        // thing a node switch must not do.
+        try { if (this.client && typeof this.client.disconnect === 'function') this.client.disconnect(); } catch (_) {}
+        try { this.eventEmitter.removeAllListeners(); } catch (_) {}
+    }
+
+    /**
      * Ensure all settings-DB collections exist. Idempotent — safe to call
      * outside the initialize() cold path (e.g. from a tab that joined an
      * already-warm-started peer's DB).
@@ -3306,32 +3357,48 @@ class GlobalsAPI {
  *
  * Economic model
  * --------------
- * Pixagram fixes canonical USD values by design:
- *   - 1 PXS = $5.69  (Big Mac Index anchor — PXS is the stable "dollar" token
- *                     with purchasing power pegged to a global basket)
- *   - 1 PXA = $0.06  (design ratio ≈1:95 to PXS)
- *   - 1 PXP = PXA/USD  (PXP is PXA-denominated staked influence)
+ * There is no fiat on chain. Witnesses publish a median price feed via
+ * feed_publish ops, shaped
+ *   { base: "X PXS", quote: "Y PIXA" }
+ * and expressing ONLY the PXS↔PXA ratio:
  *
- * Witnesses publish a median price feed via feed_publish ops. The feed is shaped
- *   { base: "X PXS", quote: "Y PXA" }
- * and expresses ONLY the PXS↔PXA ratio — there is no fiat on chain. PXA is the
- * market anchor: its USD price comes from the exchange it lists on (today a
- * static placeholder, see getPXAUSDPrice). PXS is then derived from the feed,
- * the reverse of the old design-PXS direction:
+ *   ratio = quote_PIXA / base_PXS              // PXA per 1 PXS (the chain "base/quote")
  *
- *   feedRatio = quote_PXA / base_PXS          // PXA per PXS
- *   PXS/USD   = PXA/USD × feedRatio            // when feedRatio is plausible
+ * Plausible means MIN_PLAUSIBLE_RATIO–MAX_PLAUSIBLE_RATIO PXA per PXS. Outside
+ * that window — including the bootstrap placeholder `{0.001 PXS, 0.001 PIXA}`,
+ * which reads as 1:1 — the feed is treated as unset and DESIGN_RATIO is used.
  *
- * Plausible means 10:1–1000:1 PXA per PXS. Outside that range — including the
- * bootstrap placeholder `{0.001 PXS, 0.001 PXA}` which reads as 1:1 — we treat
- * the feed as unset and fall back to PXA/USD × DESIGN_RATIO so PXS still tracks
- * the live PXA price rather than a frozen dollar value.
+ * Exactly ONE of the two tokens is anchored in USD; the other is derived
+ * through that ratio. Which one depends on the exchange switch:
+ *
+ *   EXCHANGE_ENABLED = true    (target — once PXA is listed)
+ *     PXA/USD = exchange spot          (getPXAUSDPrice)
+ *     PXS/USD = PXA/USD × ratio
+ *
+ *   EXCHANGE_ENABLED = false   (today — no market for PXA yet)
+ *     PXS/USD = PXS_USD_ANCHOR         (6.12)
+ *     PXA/USD = PXS/USD ÷ ratio
+ *
+ * The exchange reader is fully in place (endpoint config, JSON path, quote
+ * conversion, timeout, RAM cache, stale-on-error). Its data source is not:
+ * with EXCHANGE.url unset it returns EXCHANGE_PXA_USD_PLACEHOLDER (0.12) and
+ * never touches the network. Going live is two edits in this class — point
+ * EXCHANGE at the ticker and flip EXCHANGE_ENABLED — with no call site touched.
+ *
+ * PXP is PXA-denominated staked influence, so it follows PXA/USD.
  *
  * Consumer API
  * ------------
- *   const { pxaUsd, pxsUsd, source, feedRatio, isReal } = await api.prices.get();
+ *   const { pxaUsd, pxsUsd, anchor, source, ratio, feedRatio, exchange, isReal }
+ *       = await api.prices.get();
  *
- * Or sync (returns design values until first fetch, then last known):
+ *   anchor     'pxs' | 'exchange'                        which side is fixed in USD
+ *   source     'design' | 'feed'                         where the ratio came from
+ *   ratio      effective PXA-per-PXS used                (feedRatio when plausible, else DESIGN_RATIO)
+ *   feedRatio  raw chain ratio, even when rejected       (null when the feed could not be read)
+ *   exchange   'off' | 'placeholder' | 'live' | 'stale'  state of the exchange leg
+ *
+ * Or sync (returns anchor/design values until first fetch, then last known):
  *   const { pxaUsd, pxsUsd } = api.prices.getSync();
  *
  * Reactive consumers:
@@ -3341,10 +3408,36 @@ class GlobalsAPI {
  * written to LacertaDB.
  */
 class PricesAPI {
-    static DESIGN_PXS_USD = 6.12;
-    static DESIGN_PXA_USD = 0.12;
+    // ── Anchors ─────────────────────────────────────────────────────────────
+
+    /**
+     * Master switch for the exchange anchor.
+     *   false → PXS is fixed at PXS_USD_ANCHOR, PXA = PXS ÷ ratio   (today)
+     *   true  → PXA is read from the exchange, PXS = PXA × ratio    (once listed)
+     * Per-instance runtime override: api.prices.setExchangeEnabled(bool).
+     */
+    static EXCHANGE_ENABLED = false;
+
+    /** USD value of 1 PXS while the exchange anchor is disabled. */
+    static PXS_USD_ANCHOR = 6.12;
+
+    /**
+     * USD value of 1 PXA the exchange reader returns while PXA is not listed
+     * (EXCHANGE.url unset), or when a configured ticker cannot be read and no
+     * earlier live read exists to fall back on.
+     */
+    static EXCHANGE_PXA_USD_PLACEHOLDER = 0.12;
+
+    /**
+     * Design PXS/PXA ratio (PXA per PXS), used ONLY when the witness feed is
+     * unset/bootstrap. Derived from the two anchors so both derivation
+     * directions agree on the placeholder numbers (6.12 ÷ 51 = 0.12).
+     */
+    static DESIGN_RATIO = this.PXS_USD_ANCHOR / this.EXCHANGE_PXA_USD_PLACEHOLDER; // = 51
+
     static MIN_PLAUSIBLE_RATIO = 10;    // PXA per PXS
     static MAX_PLAUSIBLE_RATIO = 1000;
+
     /**
      * In-memory freshness window for price values. After this many ms,
      * the next get() will refresh from chain instead of returning the
@@ -3352,18 +3445,35 @@ class PricesAPI {
      */
     static FRESHNESS_MS = 60_000;
 
+    // ── Exchange ticker ─────────────────────────────────────────────────────
+
     /**
-     * Spot price of 1 PXA in USD, as it would be read from the exchange PXA
-     * trades on. PXA is not listed yet, so this is a fixed placeholder — see
-     * getPXAUSDPrice() for the rationale and the one-line swap-in point.
+     * Where getPXAUSDPrice() reads the PXA spot price once PXA is listed.
+     * `url: null` means "not listed": the reader short-circuits to
+     * EXCHANGE_PXA_USD_PLACEHOLDER without a network call.
+     *
+     *   url          ticker endpoint returning JSON, e.g.
+     *                'https://api.example-exchange.com/v1/ticker?symbol=PXAUSDT'
+     *   path         dot-path to the price inside the response — 'last',
+     *                'data.0.close', 'result.PXAUSD.c.0' … (array indices are
+     *                plain numbers in the path)
+     *   quote        currency the pair is quoted in. USD/USDT/USDC are taken as
+     *                1:1 to USD; any other ISO 4217 code is converted through the
+     *                Frankfurter cache, fail-closed (no rate → the read fails and
+     *                the stale/placeholder policy applies). A crypto quote (BTC,
+     *                ETH) is NOT handled — see _readExchangeTicker().
+     *   timeoutMs    abort the read after this long
+     *   freshnessMs  RAM cache window for a successful read
      */
-    static EXCHANGE_PXA_USD = 0.06;
-    /**
-     * Design PXS/PXA ratio (PXA per PXS). Used ONLY as the fallback when the
-     * witness feed is unset/bootstrap, so PXS still derives from the live PXA
-     * price (PXS_USD = PXA_USD × DESIGN_RATIO) instead of a hard-coded dollar.
-     */
-    static DESIGN_RATIO = this.DESIGN_PXS_USD / this.DESIGN_PXA_USD; // ≈102
+    static EXCHANGE = {
+        url: null,
+        path: 'last',
+        quote: 'USD',
+        timeoutMs: 6_000,
+        freshnessMs: 60_000,
+    };
+
+    // ── FIAT ────────────────────────────────────────────────────────────────
 
     /** Frankfurter v2 — ECB-sourced FIAT reference rates, no API key. */
     static FRANKFURTER_BASE = 'https://api.frankfurter.dev/v2';
@@ -3372,15 +3482,28 @@ class PricesAPI {
 
     constructor(proxy) {
         this.proxy = proxy;
+        this.exchangeEnabled = PricesAPI.EXCHANGE_ENABLED;
+        // Seed with the anchor/design numbers. They are the same in both modes
+        // by construction (6.12 ÷ 51 = 0.12 and 0.12 × 51 = 6.12), so the first
+        // paint is right whichever side ends up anchored.
         this._current = {
-            pxaUsd: PricesAPI.DESIGN_PXA_USD,
-            pxsUsd: PricesAPI.DESIGN_PXS_USD,
-            source: 'design',   // 'design' | 'feed'
-            feedRatio: null,    // raw PXA-per-PXS from feed, even when rejected
-            isReal: false,      // true once we've successfully read chain state at least once
+            pxaUsd: PricesAPI.PXS_USD_ANCHOR / PricesAPI.DESIGN_RATIO,   // 0.12
+            pxsUsd: PricesAPI.PXS_USD_ANCHOR,                            // 6.12
+            anchor: this.exchangeEnabled ? 'exchange' : 'pxs',
+            source: 'design',     // 'design' | 'feed' — where the ratio came from
+            ratio: PricesAPI.DESIGN_RATIO,
+            feedRatio: null,      // raw PXA-per-PXS from feed, even when rejected
+            exchange: 'off',      // 'off' | 'placeholder' | 'live' | 'stale'
+            isReal: false,        // true once we've successfully read chain state at least once
             lastUpdated: 0,
         };
         this._inFlight = null;  // shared promise for concurrent get() calls
+        // Last exchange read: { price, ts, state }. RAM only.
+        this._exchange = {
+            price: PricesAPI.EXCHANGE_PXA_USD_PLACEHOLDER,
+            ts: 0,
+            state: 'placeholder',
+        };
         // FIAT rate cache: `${BASE}>${QUOTE}` -> { rate, ts }. RAM only.
         this._fiatCache = new Map();
     }
@@ -3405,18 +3528,39 @@ class PricesAPI {
     }
 
     /**
-     * Synchronous read of last-known prices. Returns design values before the
-     * first successful fetch. Use this in hot paths (renders) where waiting on
-     * a promise would cause jank; the async get() should be called separately
-     * to keep values fresh.
+     * Synchronous read of last-known prices. Returns anchor/design values
+     * before the first successful fetch. Use this in hot paths (renders) where
+     * waiting on a promise would cause jank; the async get() should be called
+     * separately to keep values fresh.
      */
     getSync() {
         return { ...this._current };
     }
 
     /**
-     * Spot price of 1 PXA in USD — the single market-defined anchor the rest
-     * of the token economy hangs off of.
+     * Runtime override of EXCHANGE_ENABLED for this instance. Flipping it
+     * forces a refresh, so 'prices_updated' fires with the other derivation
+     * direction. Useful from the console to exercise the exchange wiring
+     * before changing the static default:
+     *     await api.prices.setExchangeEnabled(true)
+     *
+     * @param {boolean} on
+     * @returns {Promise<object>} the refreshed snapshot (same shape as get()).
+     */
+    setExchangeEnabled(on) {
+        const next = !!on;
+        if (next === this.exchangeEnabled) return this.get();
+        this.exchangeEnabled = next;
+        // Let a refresh that may already be running with the old mode settle,
+        // then force a fresh one.
+        const pending = this._inFlight ? this._inFlight.catch(() => {}) : Promise.resolve();
+        return pending.then(() => this.get({ forceRefresh: true }));
+    }
+
+    /**
+     * Spot price of 1 PXA in USD, as read from the exchange PXA trades on —
+     * the single market-defined anchor the token economy hangs off once
+     * EXCHANGE_ENABLED is true.
      *
      * There is NO fiat on chain. Witnesses publish only the PXS/PXA ratio via
      * feed_publish. To peg that ratio to real purchasing power, each witness
@@ -3426,19 +3570,110 @@ class PricesAPI {
      * dollar — but that computation needs exactly ONE external input: the
      * exchange price of PXA. This method is that input.
      *
-     * PXA is not listed on any exchange yet, so this returns a fixed
-     * 0.06 USD. Once a market exists, replace the body with a cached exchange
-     * read (e.g. PXA/USDT spot, or PXA/BTC × BTC/USD) and every downstream
-     * value — PXS via the chain ratio, and every FIAT display — updates for
-     * free, with no other call site touched.
+     * Resolution order:
+     *   1. fresh RAM cache (EXCHANGE.freshnessMs, unless forceRefresh) → 'live'
+     *   2. EXCHANGE.url unset (PXA not listed)                        → 'placeholder'
+     *   3. network read via _readExchangeTicker()                     → 'live'
+     *   4. read failed, an earlier live read exists                   → 'stale'
+     *   5. read failed, nothing earlier                               → 'placeholder'
+     * Never throws. The state is surfaced as `exchange` in the next
+     * _refresh() snapshot; the raw read lives in this._exchange.
      *
-     * @returns {Promise<number>} USD per 1 PXA.
+     * @param {{forceRefresh?: boolean}} [opts]
+     * @returns {Promise<number>} USD per 1 PXA (finite, > 0).
      */
-    async getPXAUSDPrice() {
-        return PricesAPI.EXCHANGE_PXA_USD;
+    async getPXAUSDPrice({ forceRefresh = false } = {}) {
+        const cfg = PricesAPI.EXCHANGE || {};
+        const last = this._exchange;
+        const fresh = Number(cfg.freshnessMs) > 0 ? Number(cfg.freshnessMs) : 60_000;
+
+        if (!forceRefresh && last.state === 'live' && Date.now() - last.ts < fresh) {
+            return last.price;
+        }
+
+        if (!cfg.url) {
+            // Mechanism in place, market not yet: fixed placeholder, no network.
+            this._exchange = {
+                price: PricesAPI.EXCHANGE_PXA_USD_PLACEHOLDER,
+                ts: Date.now(),
+                state: 'placeholder',
+            };
+            return this._exchange.price;
+        }
+
+        try {
+            const price = await this._readExchangeTicker(cfg);
+            this._exchange = { price, ts: Date.now(), state: 'live' };
+            return price;
+        } catch (e) {
+            console.warn('[PricesAPI] exchange read failed:', e.message);
+            if (last.state === 'live' || last.state === 'stale') {
+                this._exchange = { ...last, state: 'stale' };   // stale-on-error
+                return last.price;
+            }
+            this._exchange = {
+                price: PricesAPI.EXCHANGE_PXA_USD_PLACEHOLDER,
+                ts: Date.now(),
+                state: 'placeholder',
+            };
+            return this._exchange.price;
+        }
+    }
+
+    /**
+     * One network read of the configured ticker → USD per 1 PXA. Throws on any
+     * problem (HTTP error, timeout, missing/invalid price, unavailable quote
+     * conversion); getPXAUSDPrice() owns the fallback policy.
+     *
+     * Quote leg: USD/USDT/USDC pass through; another fiat (EUR, CHF, …) is
+     * divided by the Frankfurter USD→quote rate. A crypto-quoted pair (PXA/BTC,
+     * PXA/ETH) is deliberately not handled — Frankfurter has no such rate, so
+     * the read fails closed. Add a BTC/USD leg here (or pick a dollar-quoted
+     * pair) before pointing EXCHANGE at such a ticker.
+     *
+     * @param {typeof PricesAPI.EXCHANGE} cfg
+     * @returns {Promise<number>}
+     */
+    async _readExchangeTicker(cfg) {
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        const timeoutMs = Number(cfg.timeoutMs) > 0 ? Number(cfg.timeoutMs) : 6_000;
+        const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+        try {
+            const res = await fetch(cfg.url, {
+                headers: { accept: 'application/json' },
+                signal: controller ? controller.signal : undefined,
+            });
+            if (!res.ok) throw new Error(`exchange ${res.status}`);
+            const body = await res.json();
+
+            // Walk the dot-path ('data.0.last' → body.data[0].last).
+            const raw = String(cfg.path || '')
+                .split('.')
+                .filter(Boolean)
+                .reduce((node, key) => (node == null ? undefined : node[key]), body);
+            const price = Number(raw);
+            if (!Number.isFinite(price) || price <= 0) {
+                throw new Error(`no usable price at "${cfg.path}"`);
+            }
+
+            const q = String(cfg.quote || 'USD').toUpperCase();
+            if (q === 'USD' || q === 'USDT' || q === 'USDC') return price;   // dollar-quoted
+
+            // getFiatRate() degrades to 1 on failure, which would silently read
+            // a CHF price as USD — so check the cache it fills instead.
+            await this.getFiatRate(q);
+            const hit = this._fiatCache.get(`USD>${q}`);
+            if (!hit || !(hit.rate > 0)) {
+                throw new Error(`no USD>${q} rate to convert the ${q}-quoted price`);
+            }
+            return price / hit.rate;   // hit.rate = units of q per 1 USD
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
     }
 
     async _refresh() {
+        // 1. Chain ratio (PXA per PXS) from the witness median feed.
         let feed = null;
         try {
             feed = await this.proxy.globals.getCurrentMedianHistoryPrice();
@@ -3446,45 +3681,61 @@ class PricesAPI {
             console.warn('[PricesAPI] feed read failed:', e.message);
         }
 
-        // PXA is the market anchor: its USD price comes from the exchange
-        // (static placeholder until listed — see getPXAUSDPrice). PXS is then
-        // DERIVED from the on-chain PXS/PXA ratio:
-        //     PXS_USD = PXA_USD × (PXA per PXS)
-        let pxaUsd;
-        try { pxaUsd = await this.getPXAUSDPrice(); }
-        catch (e) { pxaUsd = PricesAPI.EXCHANGE_PXA_USD; }
-
-        let pxsUsd = pxaUsd * PricesAPI.DESIGN_RATIO;  // fallback until feed is plausible
+        let feedRatio = null;                    // raw, even when rejected
+        let ratio = PricesAPI.DESIGN_RATIO;      // effective
         let source = 'design';
-        let feedRatio = null;
 
         if (feed && feed.base && feed.quote) {
             const baseAmount  = parseFloat(feed.base)  || 0;  // PXS side
-            const quoteAmount = parseFloat(feed.quote) || 0;  // PXA side
+            const quoteAmount = parseFloat(feed.quote) || 0;  // PIXA side
             if (baseAmount > 0 && quoteAmount > 0) {
                 feedRatio = quoteAmount / baseAmount;  // PXA per PXS
                 if (feedRatio >= PricesAPI.MIN_PLAUSIBLE_RATIO &&
                     feedRatio <= PricesAPI.MAX_PLAUSIBLE_RATIO) {
-                    pxsUsd = pxaUsd * feedRatio;  // derive PXS from exchange PXA + chain ratio
+                    ratio = feedRatio;
                     source = 'feed';
                 }
-                // else: bootstrap/unset feed — keep design fallback
+                // else: bootstrap/unset feed — keep DESIGN_RATIO
             }
+        }
+
+        // 2. USD anchor — exactly one side is fixed, the other derived.
+        let pxaUsd, pxsUsd, anchor, exchange;
+        if (this.exchangeEnabled) {
+            // PXA from the exchange; PXS follows:  PXS_USD = PXA_USD × ratio.
+            // get() already rate-limits _refresh() to FRESHNESS_MS, so read the
+            // ticker fresh here — the exchange-level cache is for direct callers.
+            try { pxaUsd = await this.getPXAUSDPrice({ forceRefresh: true }); }
+            catch (e) { pxaUsd = PricesAPI.EXCHANGE_PXA_USD_PLACEHOLDER; }
+            pxsUsd = pxaUsd * ratio;
+            anchor = 'exchange';
+            exchange = this._exchange.state;
+        } else {
+            // No market for PXA yet: PXS fixed; PXA follows:  PXA_USD = PXS_USD ÷ ratio
+            pxsUsd = PricesAPI.PXS_USD_ANCHOR;
+            pxaUsd = pxsUsd / ratio;
+            anchor = 'pxs';
+            exchange = 'off';
         }
 
         const next = {
             pxaUsd,
             pxsUsd,
+            anchor,
             source,
+            ratio,
             feedRatio,
+            exchange,
             isReal: feed !== null,  // we talked to chain, even if feed is unset
             lastUpdated: Date.now(),
         };
 
-        const changed = next.pxaUsd     !== this._current.pxaUsd
-            || next.pxsUsd     !== this._current.pxsUsd
-            || next.source     !== this._current.source
-            || next.feedRatio  !== this._current.feedRatio;
+        const changed = next.pxaUsd    !== this._current.pxaUsd
+            || next.pxsUsd    !== this._current.pxsUsd
+            || next.anchor    !== this._current.anchor
+            || next.source    !== this._current.source
+            || next.feedRatio !== this._current.feedRatio
+            || next.exchange  !== this._current.exchange;
 
         this._current = next;
 
@@ -7266,6 +7517,29 @@ class ResourceCreditsAPI {
     }
 
     /**
+     * Daily RC statistics report (rc_api.get_rc_stats, HF26+ nodes).
+     *
+     * The report carries, per resource type (history_bytes, new_accounts,
+     * market_bytes, state_bytes, execution_time — in that index order):
+     * `budget`, `pool` and `share` (basis points of the global RC regen
+     * assigned to each pool), plus per-operation `ops.<name>.{count,avg_cost}`
+     * observed over the previous day. Clients use `share` to reproduce the
+     * chain's post-HF26 RC pricing; `null` on nodes without the method
+     * (pre-HF26 forks price every pool against the full regen instead).
+     *
+     * @returns {Promise<object|null>}
+     */
+    async getRcStats() {
+        try {
+            const result = await this.proxy.client.call('rc_api', 'get_rc_stats', {});
+            return result?.rc_stats || null;
+        } catch (e) {
+            console.warn('[ResourceCreditsAPI] get_rc_stats unavailable:', e.message);
+        }
+        return null;
+    }
+
+    /**
      * Calculate current RC mana from a raw RC account object.
      * Regenerates mana to current time.
      * @param {object} rcAccount - RC account object from findRcAccounts()
@@ -8442,6 +8716,15 @@ class SanitizationPipeline {
             voting_manabar:  VALIDATORS.safe_manabar(raw.voting_manabar),
             downvote_manabar: VALIDATORS.safe_manabar(raw.downvote_manabar),
             can_vote:        VALIDATORS.safe_bool(raw.can_vote) ?? true,
+
+            // Account-creation tokens (claim_account / create_claimed_account).
+            // Plain integer counter from the chain; AddAccountDialog reads it
+            // to decide whether an RC-based creation needs a fresh claim.
+            pending_claimed_accounts: VALIDATORS.safe_number(
+                typeof raw.pending_claimed_accounts === 'string'
+                    ? Number(raw.pending_claimed_accounts)
+                    : raw.pending_claimed_accounts
+            ) ?? 0,
 
             // Activity counts
             post_count:          VALIDATORS.safe_number(raw.post_count) ?? 0,

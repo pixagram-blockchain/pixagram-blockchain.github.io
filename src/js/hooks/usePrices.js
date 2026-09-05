@@ -1,12 +1,16 @@
+import { h } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import { get_cached_settings, subscribe as subscribe_settings } from '../utils/settings';
 
 /**
  * Live token prices + the user's display currency, in one hook.
  *
- * Token values are anchored in USD (PXA from the exchange — a static
- * placeholder until listed — and PXS derived from it via the on-chain PXS/PXA
- * ratio; see PricesAPI in pixaproxyapi). The *display* currency is a pure
+ * Token values are anchored in USD by PricesAPI (pixaproxyapi): exactly one
+ * token is fixed and the other derived through the on-chain PXS/PXA ratio.
+ * While PXA has no exchange listing (PricesAPI.EXCHANGE_ENABLED = false) PXS
+ * is the fixed side and PXA = PXS ÷ ratio; once the exchange anchor is
+ * switched on, PXA comes from the exchange and PXS = PXA × ratio. Either way
+ * this hook only sees pxaUsd / pxsUsd. The *display* currency is a pure
  * front-end concern: we read the user's selected currency from settings and a
  * USD→currency rate from Frankfurter (cached on api.prices), then expose
  * helpers to convert/format any USD figure.
@@ -96,6 +100,18 @@ export function usePrices(api) {
     );
 
     return { pxsUsdPrice, pxaUsdPrice, currency: cur, fiatRate: rate, toFiat, formatFiat };
+}
+
+/**
+ * Class-component bridge: injects the live usePrices() result as a `prices`
+ * prop ({ pxsUsdPrice, pxaUsdPrice, currency, fiatRate, toFiat, formatFiat }),
+ * reading the api from `props.api`. Used by VotingListModal and
+ * VoteWeightDialog, which are class components and can't call the hook.
+ */
+export function withPrices(Component) {
+    const WithPrices = (props) => h(Component, { ...props, prices: usePrices(props.api) });
+    WithPrices.displayName = `withPrices(${Component.displayName || Component.name || 'Component'})`;
+    return WithPrices;
 }
 
 export default usePrices;

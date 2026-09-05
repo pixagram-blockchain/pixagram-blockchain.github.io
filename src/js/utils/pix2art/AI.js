@@ -91,15 +91,13 @@ export const transform = async (file, step_n, fidelity, callback = () => {}, cal
             step_n
         })
         var input_image = (file.size > 1000000) ? await resizeImageTo2MP(file) : file;
-        var num_inference_steps = step_n+2;
-        var lora_intensity = (step_n / 12 * 100|0)/100;
-        var img2img_strength = (0.8 - Math.min(0.4, Math.max(0, fidelity)));
-        var guidance_scale = Math.max(1, (step_n|0)/8);
+        var num_inference_steps = step_n;
+        var img2img_strength = (0.7 - Math.min(0.4, Math.max(0, fidelity)));
+        var guidance_scale = Math.max(1, (step_n|0)/10);
 
         var dynamic_config = {
             ...PRESETS_TRANSFORM,
             lora_style: style,
-            lora_intensity,
             num_inference_steps,
             img2img_strength,
             input_image,

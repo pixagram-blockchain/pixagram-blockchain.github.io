@@ -9,6 +9,12 @@ import CircularProgress from "@material-ui/core/CircularProgress";
 import CloseIcon from "@material-ui/icons/Close";
 import IconButton from "@material-ui/core/IconButton";
 import {DoneRounded} from "@material-ui/icons";
+import { withPrices } from "../hooks/usePrices";
+import {
+    estimateVotePxs, formatPxs,
+    getRewardSnapshot, getRewardSnapshotSync,
+    getVoterAccount, getVoterAccountSync,
+} from "../utils/voteValue";
 
 // ─── Arc Geometry ────────────────────────────────────────────────────────────
 // Single fixed viewBox — the SVG scales responsively via CSS width + viewBox.
@@ -117,6 +123,33 @@ const styles = () => ({
         padding: "4px 16px 16px",
         gap: 12,
     },
+    // Live estimate of what the vote at the selected weight is worth (HIVE
+    // estimate_upvote recipe, utils/voteValue). Sits under the confirm
+    // button: the button itself is pulled 56px up into the arc, so the
+    // bottom-centre of the SVG is not available for text.
+    estimateWrap: {
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        marginTop: -6,
+        padding: "0 24px 18px",
+        minHeight: 20,
+        lineHeight: 1.25,
+        fontVariantNumeric: "tabular-nums",
+        userSelect: "none",
+    },
+    estimatePxs: {
+        color: "#000",
+        fontFamily: "'Geist Mono', monospace",
+        fontSize: 15,
+        fontWeight: 500,
+    },
+    estimateFiat: {
+        color: "#666",
+        fontFamily: "'Geist Mono', monospace",
+        fontSize: 12,
+        marginTop: 2,
+    },
     closeIcon: {
         color: "#000000",
         position: "absolute",
@@ -164,10 +197,25 @@ class VoteWeightDialog extends React.PureComponent {
             weight: initialWeight(props.weight, props.defaultVotingPower, isUpvote),
             broadcasting: false,
             error: null,
+            // Reward-fund snapshot + the voter's account (vesting shares,
+            // manabar) behind the live value estimate. Seeded from the RAM
+            // caches so a re-opened dialog shows a figure on its first paint.
+            snapshot: getRewardSnapshotSync(props.api),
+            account: getVoterAccountSync(props.api, props.voter),
         };
         this._svgRef = null;
         this._dragging = false;
         this._closed = false;
+        this._unmounted = false;
+        this._pricingToken = 0;
+    }
+
+    componentDidMount() {
+        if (this.props.open) this._loadPricing();
+    }
+
+    componentWillUnmount() {
+        this._unmounted = true;
     }
 
     componentDidUpdate(prevProps) {
@@ -179,8 +227,63 @@ class VoteWeightDialog extends React.PureComponent {
                 broadcasting: false,
                 error: null,
             });
+            this._loadPricing();
+        } else if (this.props.open && (prevProps.api !== this.props.api || prevProps.voter !== this.props.voter)) {
+            this._loadPricing();
         }
     }
+
+    // ── Vote value estimate ──────────────────────────────────────────────
+    // Needs `api` (reward fund / dgp / feed reads) and `voter` (the account
+    // whose vesting shares and mana decide the rshares) — both optional props;
+    // without them the dialog renders exactly as before. Fetches are RAM-
+    // cached and deduped in utils/voteValue, so re-opening is instant.
+
+    _loadPricing = () => {
+        const { api, voter } = this.props;
+        if (!api) return;
+        const token = ++this._pricingToken;
+        const live = () => !this._unmounted && token === this._pricingToken;
+        getRewardSnapshot(api)
+            .then((snap) => { if (live() && snap) this.setState({ snapshot: snap }); })
+            .catch(() => {});
+        if (voter) {
+            getVoterAccount(api, voter)
+                .then((acc) => { if (live() && acc) this.setState({ account: acc }); })
+                .catch(() => {});
+        }
+    };
+
+    /**
+     * What a vote at `weight` would be worth right now → { pxs, fiat,
+     * currency, ready }. Pure math over the cached snapshot + account
+     * (HF20 vote evaluator → rshares → reward fund → PXS via the median
+     * feed), so it tracks the thumb live while dragging.
+     */
+    _estimate = (weight) => {
+        const { snapshot, account } = this.state;
+        const prices = this.props.prices || {};
+        const ready = !!(snapshot && snapshot.ok && account);
+        const pxs = ready ? estimateVotePxs(account, weight, snapshot) : 0;
+        const fiat = pxs * (Number(prices.pxsUsdPrice) || 0) * (Number(prices.fiatRate) || 1);
+        return { pxs, fiat, currency: prices.currency || "USD", ready };
+    };
+
+    _renderEstimate = () => {
+        const { classes, api, voter } = this.props;
+        if (!api || !voter) return null;
+        const est = this._estimate(this.state.weight);
+        if (!est.ready) {
+            return <div className={classes.estimateWrap}><span className={classes.estimateFiat}>…</span></div>;
+        }
+        const sign = est.pxs > 0 ? "+" : est.pxs < 0 ? "−" : "";
+        return (
+            <div className={classes.estimateWrap}>
+                <span className={classes.estimatePxs}>≈ {sign}{formatPxs(Math.abs(est.pxs))} PXS</span>
+                <span className={classes.estimateFiat}>{Math.abs(est.fiat).toFixed(2)} {est.currency}</span>
+            </div>
+        );
+    };
 
     // ── Pointer handling ─────────────────────────────────────────────────
 
@@ -449,9 +552,10 @@ class VoteWeightDialog extends React.PureComponent {
                         )}
                     </IconButton>
                 </DialogActions>
+                {this._renderEstimate()}
             </Dialog>
         );
     }
 }
 
-export default withStyles(styles)(VoteWeightDialog);
+export default withStyles(styles)(withPrices(VoteWeightDialog));

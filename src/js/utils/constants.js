@@ -88,17 +88,45 @@ export const CURRENCY_COUNTRIES = {
 // silently auto-picked onto the testnet just because it answered faster.
 export const DEFAULT_NODES = [
     {
-        id: "eu-central",
-        name: "Pixa Rex (Frankfurt)",
+        id: "eu-east",
+        name: "Pixagram (Poland)",
         url: "https://api.pixagram.com",
-        location: [50.1109, 8.6821],  // Frankfurt — central Europe (DE-CIX)
+        location: [52.2297, 21.0122], // Warsaw, Poland
         network: "mainnet",
     },
     {
-        id: "sg-central",
-        name: "Merlion Surf (Singapore)",
+        id: "us-central",
+        name: "Rex (USA)",
+        url: "https://pixarex.net",
+        location: [41.2619, -95.8608], // Council Bluffs, Iowa, USA
+        network: "mainnet",
+    },
+    {
+        id: "asia-southeast",
+        name: "Merlion (Singapore)",
         url: "https://merlion.surf",
-        location: [1.3521, 103.81998],  // Pays-Bas — central Europe (DE-CIX)
+        location: [1.3521, 103.8198], // Singapore
+        network: "mainnet",
+    },
+    {
+        id: "eu-central",
+        name: "Blockforge (France)",
+        url: "https://blockforge.lol",
+        location: [48.9747, 8.1742], // Lauterbourg, France
+        network: "mainnet",
+    },
+    {
+        id: "sa-east",
+        name: "Boitata (Sao Paulo)",
+        url: "https://boitata.quest",
+        location: [-23.5505, -46.6333], // São Paulo, Brazil
+        network: "mainnet",
+    },
+    {
+        id: "me-central",
+        name: "Matus (Dubai)",
+        url: "https://pixa-dubai.xyz",
+        location: [25.2048, 55.2708], // Dubai, UAE
         network: "mainnet",
     },
 ];

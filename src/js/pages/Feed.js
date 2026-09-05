@@ -13,6 +13,8 @@ import useWindowDimensions from "../hooks/useWindowDimensions";
 import useMasonryGrid from "../hooks/useMasonryGrid";
 import { idle, cancelIdle } from "../utils/idle";
 import viewCache, { postsSignature } from "../utils/viewCache";
+import useVoteSync from "../hooks/useVoteSync";
+import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto, votesSignature } from "../utils/voteSync";
 import { EASE, RAINBOW_RIPPLE } from "../theme/motion";
 import ImageMeasurer from "../components/ImageMeasurer";
 
@@ -328,6 +330,9 @@ const enrichPostForCard = (post, account, voterProfiles) => {
         upVotesNumber: Math.max(0, post.net_votes || activeVotes.filter(v => v?.weight >= 0).length || 0),
         downVotesNumber: Math.max(0, activeVotes.filter(v => v?.weight < 0).length || 0),
         active_votes: activeVotes,
+        // Post-level rshares as the chain saw them — lets the card price its
+        // own pending vote on the fund's reward curve (useVotePayoutEstimate).
+        net_rshares: post.net_rshares != null ? String(post.net_rshares) : '0',
         _voter_profiles: voterProfiles || {},
         nsfw: isNsfwPost(post),
         deleted: isDeletedPost(post),
@@ -410,7 +415,7 @@ const fetchOrphanPost = async (api, author, permlink) => {
         }
 
         hydrateContent(content);
-        return enrichPostForCard(content, authorAccount, {});
+        return overlayPendingVote(enrichPostForCard(content, authorAccount, {}));
     } catch (e) {
         console.warn('[Feed] fetchOrphanPost failed:', e && e.message);
         return null;
@@ -539,16 +544,13 @@ const fetchAndEnrichPosts = async (api, sort, tag, existingPosts, pagination, on
     return buildEnriched(accountsMap, voterProfiles);
 };
 
-const applyVoteToPost = (post, permlink, voter, weight) => {
-    if (!post || post.permlink !== permlink) return post;
-    let newVotes = (post.active_votes || []).filter(v => v?.voter !== voter);
-    if (weight !== 0) newVotes.push({ voter, weight, rshares: '0', time: new Date().toISOString() });
-    return {
-        ...post, active_votes: newVotes,
-        upVotesNumber: Math.max(0, newVotes.filter(v => v?.weight >= 0).length),
-        downVotesNumber: Math.max(0, newVotes.filter(v => v?.weight < 0).length),
-    };
-};
+// Optimistic vote application lives in utils/voteSync now (one copy for
+// Feed / FeedPersonal / Community / Profile). Besides patching the card with a
+// placeholder row it registers the vote as PENDING, so every later hydration
+// of this post — cache-served return visit, revalidation, sort switch, the
+// 6 s chain refresh — re-applies it until the chain actually shows it. That
+// is what kept "disappearing" before: the vote lived only in React state.
+const applyVoteToPost = (post, permlink, voter, weight) => applyOptimisticVote(post, permlink, voter, weight);
 
 
 // ╔══════════════════════════════════════════════════════════════════════╗
@@ -601,6 +603,11 @@ const useFeedData = (api, pathname) => {
     const pendingScrollRef = useRef(0);
     const cacheKeyFor = (sortIndex, path) =>
         `feed|${SORT_METHODS[sortIndex] || 'created'}|${parseTagFromPathname(path) || ''}`;
+    // Cache key the CURRENT `posts` list was loaded for. During a sort/tag
+    // switch without a cache hit, cacheKeyRef already points at the new key
+    // while `posts` still holds the old list; the mirror effect below uses
+    // this to avoid writing that old list under the new key.
+    const postsKeyRef = useRef("");
 
     // Pathname changes
     useEffect(() => {
@@ -668,7 +675,10 @@ const useFeedData = (api, pathname) => {
             if (cached?.posts?.length) {
                 servedFromCache = true;
                 pendingScrollRef.current = cached.scrollTop || 0;
-                setPosts(cached.posts);
+                // A vote cast since this list was cached is re-applied from
+                // the pending registry — the cached rows predate it.
+                postsKeyRef.current = cacheKey;
+                setPosts(overlayPendingVotes(cached.posts));
                 setLoggedInUser(cached.loggedInUser ?? null);
                 setDataVersion(v => v + 1);
             }
@@ -693,10 +703,14 @@ const useFeedData = (api, pathname) => {
             // of a names-only first pass followed by an avatar patch. Cost is
             // one extra round-trip on a COLD load only; viewCache serves return
             // visits instantly.
-            const [user, enriched] = await Promise.all([
+            const [user, fetched] = await Promise.all([
                 api.getActiveAccount().catch(() => null),
                 fetchAndEnrichPosts(api, sort, tag, null, null, null),
             ]);
+            // hivemind lags the head block by a block or two: a vote cast a
+            // moment ago is not in `fetched` yet. The pending registry puts it
+            // back (and drops the record once the chain does show it).
+            const enriched = overlayPendingVotes(fetched);
             const replaced = postsSignature(enriched) !== postsSignature(postsRef.current);
             batch(() => {
                 setLoggedInUser(user || null);
@@ -706,9 +720,20 @@ const useFeedData = (api, pathname) => {
                 // already on screen with avatars, so keep it rather than
                 // repainting an identical list.
                 if (!servedFromCache || replaced) {
+                    postsKeyRef.current = cacheKey;
                     setPosts(enriched);
                     viewCache.set(cacheKey, { posts: enriched, loggedInUser: user || null });
                     setDataVersion(v => v + 1);
+                } else if (votesSignature(enriched) !== votesSignature(postsRef.current)) {
+                    // Same membership, fresher vote/payout data — a vote (ours
+                    // or anyone's) landed since the cached list was stored.
+                    // Commit it WITHOUT the Masonry reset: card heights don't
+                    // depend on votes. Previously this branch kept the stale
+                    // cached rows, so a vote shown optimistically vanished on
+                    // the next sort round-trip and never came back.
+                    postsKeyRef.current = cacheKey;
+                    setPosts(enriched);
+                    viewCache.patch(cacheKey, { posts: enriched, loggedInUser: user || null });
                 } else {
                     viewCache.patch(cacheKey, { loggedInUser: user || null });
                 }
@@ -721,6 +746,31 @@ const useFeedData = (api, pathname) => {
             return [];
         }
     }, [api]);
+
+    // ── Keep the view cache in step with vote patches ───────────────────
+    // handleVoteChange (optimistic) and onVoteSynced (chain refresh) only
+    // touch React state; without this the SWR entry kept the pre-vote rows
+    // and served them straight back on the next sort round-trip. Guarded by
+    // postsKeyRef so a list still belonging to the previous key is never
+    // written under the key being switched to.
+    useEffect(() => {
+        if (!posts.length) return;
+        const key = cacheKeyRef.current;
+        if (!key || postsKeyRef.current !== key) return;
+        viewCache.patch(key, { posts });
+    }, [posts]);
+
+    // ── Chain refresh after a vote ─────────────────────────────────────
+    // useVoteSync listens for `vote_done` (any surface — card, PostDialog),
+    // registers the vote as pending and, VOTE_REFRESH_DELAY_MS (6 s: the
+    // vote's block plus one for the indexer) later, re-reads the post with
+    // getContent. The refreshed rows carry the REAL rshares and
+    // pending_payout_value, replacing the optimistic placeholder and the
+    // estimated payout on the card. Retries while the vote isn't visible yet.
+    const onVoteSynced = useCallback(({ content }) => {
+        setPosts(prev => mergeFreshVoteDataInto(prev, content));
+    }, []);
+    useVoteSync(api, onVoteSynced);
 
     // Glue for the component: hand over a cached scroll offset exactly
     // once, and let unmount / sort-switch persist the live offset back.
@@ -879,9 +929,9 @@ const useFeedData = (api, pathname) => {
         try {
             const sort = SORT_METHODS[sorting] || 'created';
             const tag = parseTagFromPathname(pathname);
-            const newPosts = await fetchAndEnrichPosts(api, sort, tag, currentPosts, {
+            const newPosts = overlayPendingVotes(await fetchAndEnrichPosts(api, sort, tag, currentPosts, {
                 start_author: startAuthor, start_permlink: startPermlink,
-            });
+            }));
             if (newPosts.length > 0) {
                 setPosts(prev => [...prev, ...newPosts]);
                 // Mirror the append into the view cache (patch keeps the
@@ -984,6 +1034,22 @@ const usePostNavigation = ({ api, posts, masonryRef, scrollToIndex, scrollTo, se
     useEffect(() => { postsRef.current = posts; }, [posts]);
     const currentPostRef = useRef(currentPost);
     useEffect(() => { currentPostRef.current = currentPost; }, [currentPost]);
+
+    // Keep the OPEN post in step with the live list. Its card object is
+    // replaced when a vote is applied (applyVoteToPost → placeholder row) and
+    // again when the 6 s chain refresh lands (mergeFreshVoteDataInto → real
+    // rshares + payout). PostDialog reads votes and payout from props.data, so
+    // without this it kept showing the snapshot taken at open time — payout
+    // frozen, voter list without the new vote. Identity check only: the
+    // dialog keys its heavy work on the post id and treats a same-id data
+    // swap as a vote resync.
+    useEffect(() => {
+        if (!artworkOpen) return;
+        const cur = currentPostRef.current;
+        if (!cur || !cur.permlink) return;
+        const live = (posts || []).find(p => isSamePost(p, cur));
+        if (live && live !== cur) setCurrentPost(live);
+    }, [posts, artworkOpen]);
     const apiRef = useRef(api);
     useEffect(() => { apiRef.current = api; }, [api]);
     // Track the in-flight orphan fetch so a newer URL change can invalidate

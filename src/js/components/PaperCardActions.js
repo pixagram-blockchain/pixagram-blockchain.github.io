@@ -15,6 +15,7 @@ import ArrowDownDropCircleOutline from '../icons/ArrowDownDropCircleOutline';
 import PixaSupra from '../icons/PixaSupra';
 import PayoutSankey from './PayoutSankey';
 import { usePrices } from '../hooks/usePrices';
+import useVotePayoutEstimate from '../hooks/useVotePayoutEstimate';
 
 import { t } from "../utils/text";
 
@@ -331,9 +332,13 @@ function Comments({ classes, commentsNumber, onCommentsClick }) {
 }
 
 // Payout Component — uses PayoutSankey inside the tooltip
-function Payout({ classes, payout, data, pxsUsdPrice, pxaUsdPrice, currency, fiatRate }) {
+function Payout({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPrice, currency, fiatRate }) {
     // The headline figure is the pending payout in PXS. Underneath we show the
     // same value in the user's display currency: payout(PXS) × USD/PXS × rate.
+    // While the card's own vote is still waiting for the chain refresh,
+    // `payout` already includes the estimated value of that vote (see
+    // useVotePayoutEstimate in VoteButtons) and `isEstimate` marks the
+    // headline with "≈" until the chain figure replaces it.
     // NOTE: a local component named `Number` shadows the global in this module,
     // so `Number.isFinite`/`Number(...)` are unavailable here — use the global
     // `isFinite` and plain coercion-free guards instead.
@@ -353,6 +358,7 @@ function Payout({ classes, payout, data, pxsUsdPrice, pxaUsdPrice, currency, fia
             title={
                 <PayoutSankey
                     payout={payout}
+                    isEstimate={isEstimate}
                     data={data}
                     pxsUsdPrice={pxsUsdPrice}
                     pxaUsdPrice={pxaUsdPrice}
@@ -363,6 +369,7 @@ function Payout({ classes, payout, data, pxsUsdPrice, pxaUsdPrice, currency, fia
         >
             <span className={classes.payoutWrap}>
                 <span className={classes.payout + " monospace"}>
+                    {isEstimate && <span style={{ opacity: 0.666, marginRight: 2 }}>≈</span>}
                     {payout.toFixed(1)} <PixaSupra style={{ width: '24px', height: '24px', verticalAlign: 'bottom' }} />
                 </span>
                 <span className={classes.payoutFiat + " monospace"}>
@@ -400,6 +407,12 @@ function VoteButtons({
     // also surfaces the user's display currency and the USD→currency rate so the
     // payout can be shown in local money.
     const { pxsUsdPrice, pxaUsdPrice, currency, fiatRate } = usePrices(api);
+
+    // The chain's pending payout plus the estimated value of THIS viewer's
+    // still-unconfirmed vote (placeholder row in data.active_votes), so the
+    // figure and the Sankey move the moment the vote is cast instead of
+    // sitting at 0.0 until the ~6 s chain refresh lands (utils/voteSync).
+    const payoutEstimate = useVotePayoutEstimate(api, voter, data, payout);
 
     const loggedOut = !voter;
 
@@ -456,7 +469,8 @@ function VoteButtons({
             )}
             <Payout
                 classes={classes}
-                payout={payout}
+                payout={payoutEstimate.payout}
+                isEstimate={payoutEstimate.isEstimate}
                 data={data}
                 pxsUsdPrice={pxsUsdPrice}
                 pxaUsdPrice={pxaUsdPrice}

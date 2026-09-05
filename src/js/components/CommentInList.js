@@ -23,6 +23,8 @@ import ArrowDownDropCircleOutline from '../icons/ArrowDownDropCircleOutline';
 import useLiveTimeAgo from "../hooks/useLiveTimeAgo";
 import { HISTORY } from "../utils/constants";
 import * as actions from "../actions/utils";
+import { voteSign } from "../utils/voteValue";
+import { votesWithLocalVote } from "../utils/voteSync";
 import { safeHTML } from "../utils/api/sanitizer";
 
 import { t } from "../utils/text";
@@ -876,9 +878,8 @@ class CommentInList extends React.PureComponent {
     _resolve_initial_voted = (data, account) => {
         if (!account || !data || !Array.isArray(data.active_votes)) return 0;
         const myVote = data.active_votes.find(v => v && v.voter === account);
-        if (!myVote) return 0;
-        if (myVote.weight < 0) return -1;
-        return 1;
+        // rshares first, then percent/weight — see voteSign in utils/voteValue.
+        return myVote ? voteSign(myVote) : 0;
     }
 
     _resolveVoter = () => {
@@ -973,15 +974,21 @@ class CommentInList extends React.PureComponent {
             });
     };
 
-    _triggerPositiveVotes = () => {
-        // Show list of users who upvoted
-        console.log("Show upvoters");
+    // Voter lists for a comment — the same VotingListModal the post cards
+    // open (Index.js → openVotingList), so each vote shows what it is worth.
+    // The viewer's own fresh vote rides along as a priced placeholder row.
+    _open_votes_list = (sign) => {
+        const data = this.st4te.data || {};
+        actions.trigger_votes({
+            sign,
+            votes: votesWithLocalVote(data.active_votes, this._resolveVoter(), this.st4te.voted),
+            voter_profiles: data._voter_profiles || {},
+        });
     };
 
-    _triggerNegativeVotes = () => {
-        // Show list of users who downvoted
-        console.log("Show downvoters");
-    };
+    _triggerPositiveVotes = () => { this._open_votes_list('+'); };
+
+    _triggerNegativeVotes = () => { this._open_votes_list('-'); };
 
     render() {
         const {

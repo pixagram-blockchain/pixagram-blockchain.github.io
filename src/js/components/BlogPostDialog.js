@@ -48,6 +48,8 @@ import CommentInList from "./CommentInList";
 import { ToxicityWatcher } from "./ToxicityHint";
 import * as toxicity from "../utils/toxicity";
 import PaperCardActions from "./PaperCardActions";
+import { voteSign, countUpvotes, countDownvotes } from "../utils/voteValue";
+import { votesWithLocalVote } from "../utils/voteSync";
 import EditPostDialog, { DeletePostDialog } from "./EditPostDialog";
 import DeleteCommentModal from "./DeleteCommentModal";
 import * as clipboard from "clipboard-polyfill";
@@ -1156,8 +1158,10 @@ function buildReplyComments(rawReplies, accounts, localAuthors, parentAuthor, pa
         try { body = rawSanitizeComment(body).html || body; } catch(e) {}
         return {
             username: u, body, date: r.created || Date.now(),
-            upVotesNumber: (r.active_votes || []).filter(v => v.weight >= 0).length,
-            downVotesNumber: (r.active_votes || []).filter(v => v.weight < 0).length,
+            // Direction from rshares (bridge rows omit `weight`, condenser rows
+            // may carry the curation weight) — see voteSign in utils/voteValue.
+            upVotesNumber: countUpvotes(r.active_votes),
+            downVotesNumber: countDownvotes(r.active_votes),
             permlink: r.permlink || "", children: r.children || 0,
             active_votes: r.active_votes || [],
             parent_author: r.parent_author || parentAuthor,
@@ -1373,7 +1377,8 @@ class BlogPostDialog extends React.PureComponent {
         let initialVoted = 0;
         if (account && data.active_votes) {
             const myVote = data.active_votes.find(v => v && v.voter === account);
-            if (myVote) initialVoted = myVote.weight < 0 ? -1 : 1;
+            // rshares first, then percent/weight — see voteSign in utils/voteValue.
+            if (myVote) initialVoted = voteSign(myVote);
         }
 
         this.setSt4te({
@@ -2581,24 +2586,26 @@ class BlogPostDialog extends React.PureComponent {
         }
     }
 
+    // Rows for the voting list: once the host page applied the vote to
+    // `data` (placeholder row with the real weight + `_optimistic`) they pass
+    // through untouched so VotingListModal can price the pending vote; only
+    // the brief window where `_voted` is ahead of `data` synthesizes a row.
     _trigger_positive_votes = () => {
         const data = this.st4te.data || {};
-        const voter = this.st4te.account;
-        const voted = this.st4te._voted;
-        const base = (data.active_votes || []).filter(v => v && v.voter !== voter);
-        if (voted === 1 && voter) base.push({ voter, weight: 10000, rshares: '0', time: null });
-        else if (voted === -1 && voter) base.push({ voter, weight: -10000, rshares: '0', time: null });
-        actions.trigger_votes({sign: '+', votes: base, voter_profiles: data._voter_profiles || {}});
+        actions.trigger_votes({
+            sign: '+',
+            votes: votesWithLocalVote(data.active_votes, this.st4te.account, this.st4te._voted),
+            voter_profiles: data._voter_profiles || {},
+        });
     }
 
     _trigger_negative_votes = () => {
         const data = this.st4te.data || {};
-        const voter = this.st4te.account;
-        const voted = this.st4te._voted;
-        const base = (data.active_votes || []).filter(v => v && v.voter !== voter);
-        if (voted === 1 && voter) base.push({ voter, weight: 10000, rshares: '0', time: null });
-        else if (voted === -1 && voter) base.push({ voter, weight: -10000, rshares: '0', time: null });
-        actions.trigger_votes({sign: '-', votes: base, voter_profiles: data._voter_profiles || {}});
+        actions.trigger_votes({
+            sign: '-',
+            votes: votesWithLocalVote(data.active_votes, this.st4te.account, this.st4te._voted),
+            voter_profiles: data._voter_profiles || {},
+        });
     }
 
     /* ================================================================
