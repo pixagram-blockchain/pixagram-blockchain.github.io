@@ -9,11 +9,13 @@ import Button from "@material-ui/core/Button";
 import Dialog from "@material-ui/core/Dialog";
 import Tooltip from "@material-ui/core/Tooltip";
 import Slider from "@material-ui/core/Slider";
+import Collapse from "@material-ui/core/Collapse";
 import PixaLiquid from "../icons/PixaLiquid";
 import PixaPower from "../icons/PixaPower";
-import PixaSupra from "../icons/PixaSupra";
 
 import { t } from "../utils/text";
+import { formatAmount, formatNumber, formatFiatFromUsd, formatDate, numericInputProps, resolveLocale } from "../utils/numberFormat";
+import { previewPowerDown } from "../utils/powerDown";
 
 import { withLanguage } from "../utils/withLanguage";
 const styles = (theme) => ({
@@ -33,6 +35,19 @@ const styles = (theme) => ({
             opacity: 0.35,
         }
     },
+    // The payout plan under the amount field: what the power-down will pay,
+    // when, and what that is worth in the user's reference currency. Quiet
+    // block, no hover — it is information, not a control.
+    schedule: {
+        backgroundColor: "#111111",
+        borderRadius: "16px",
+        padding: "12px 16px",
+        margin: "0px 0px 16px 0px",
+        "& > p": { margin: "3px 0px" },
+    },
+    scheduleLead: { color: "#e0e0e0" },
+    scheduleLine: { color: "#a5a5a5" },
+    scheduleNote: { color: "#666666", display: "block", marginTop: "6px" },
 });
 
 // Fewer marks = better performance
@@ -44,10 +59,12 @@ const SLIDER_MARKS = [
     { value: 100, label: "100%" },
 ];
 
-// MUI TextField inputComponent must forward ref:
+// MUI TextField inputComponent must forward ref. The grouping and decimal
+// characters follow the Settings locale (numericInputProps); the value the
+// wallet receives stays a "." decimal string whatever is displayed.
 const NumberFormatCustom = React.memo(
     React.forwardRef(function NumberFormatCustom(props, ref) {
-        const { onChange, currency, name, ...other } = props;
+        const { onChange, currency, locale, name, ...other } = props;
         return (
             <NumericFormat
                 {...other}
@@ -57,9 +74,7 @@ const NumberFormatCustom = React.memo(
                         target: { name, value: values.value },
                     });
                 }}
-                thousandSeparator={" "}
-                decimalSeparator={"."}
-                allowedDecimalSeparators={[",", "."]}
+                {...numericInputProps(locale)}
                 thousandsGroupStyle="thousand"
                 decimalScale={2}
                 fixedDecimalScale={false}
@@ -117,20 +132,17 @@ class PixaWalletPowerDialog extends React.PureComponent {
 
     _clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
+    _isPowerDown = () => (this.state.type || "").toUpperCase() === "POWER-DOWN";
+
     _currentMax = () => {
-        const { _maxPXP, _maxPXA, type } = this.state;
-        const t = (type || "").toUpperCase();
-        return t === "POWER-DOWN" ? _maxPXP : _maxPXA;
+        const { _maxPXP, _maxPXA } = this.state;
+        return this._isPowerDown() ? _maxPXP : _maxPXA;
     };
 
-    _currency = () => {
-        const kind = (this.state.type || "").toUpperCase();
-        return kind === "POWER-DOWN" ? "PXP" : "PXA";
-    };
+    _currency = () => (this._isPowerDown() ? "PXP" : "PXA");
 
     _description = () => {
-        const kind = (this.state.type || "").toUpperCase();
-        if (kind === "POWER-DOWN") {
+        if (this._isPowerDown()) {
             return t("components.pixa_wallet_power_dialog.if_you_change_the_power_down");
         }
         return t("components.pixa_wallet_power_dialog.pixa_power_pxp_is_non_transferable");
@@ -176,12 +188,78 @@ class PixaWalletPowerDialog extends React.PureComponent {
         return true;
     }
 
+    // Fiat value of a PXA-denominated amount in the user's reference currency
+    // (PXP is PXA-denominated too). Null while the price is unknown, so the
+    // fiat parenthesis is simply not printed rather than printing "0.00".
+    _fiat = (pxaAmount) => {
+        const { pixaUsdPrice, fiatRate, fiatCurrency } = this.props;
+        const price = Number(pixaUsdPrice);
+        if (!Number.isFinite(price) || price <= 0) return null;
+        return formatFiatFromUsd(pxaAmount * price, fiatRate, fiatCurrency || "USD", 2);
+    };
+
+    /**
+     * The payout plan for the amount being chosen — shown live under the
+     * field for a power-down, and worth-about line for a power-up.
+     */
+    _renderPlan = (amount) => {
+        const { classes, powerDownIntervals, powerDownIntervalSeconds } = this.props;
+        const fiatOf = this._fiat;
+
+        if (!this._isPowerDown()) {
+            const fiat = fiatOf(amount);
+            if (!fiat) return null;
+            return (
+                <Typography variant="body2" component="p" className={classes.scheduleLine} style={{ margin: "0px 0px 16px 0px" }}>
+                    {t("components.pixa_wallet_dialog.worth_about", { fiat })}
+                </Typography>
+            );
+        }
+
+        const plan = previewPowerDown({ amountPxa: amount, intervals: powerDownIntervals, intervalSeconds: powerDownIntervalSeconds });
+        const instalmentFiat = fiatOf(plan.instalmentPxa);
+        const totalFiat = fiatOf(plan.totalPxa);
+        // Once the schedule is known these are whole days; a non-integer
+        // interval (custom chain config) is shown with one decimal.
+        const days = formatNumber(plan.intervalDays, { min: 0, max: 1 });
+
+        return (
+            <div className={classes.schedule}>
+                <Typography variant="body2" component="p" className={classes.scheduleLead}>
+                    {t("components.pixa_wallet_power_dialog.paid_out_in_instalments", { count: formatNumber(plan.instalments, 0), days })}
+                </Typography>
+                <Typography variant="body2" component="p" className={classes.scheduleLine}>
+                    {t("components.pixa_wallet_power_dialog.each_instalment", {
+                        amount: formatAmount(plan.instalmentPxa, "PXA", 3),
+                        fiat: instalmentFiat || "—",
+                    })}
+                </Typography>
+                <Typography variant="body2" component="p" className={classes.scheduleLine}>
+                    {t("components.pixa_wallet_power_dialog.first_payment", { date: formatDate(plan.firstDate) })}
+                </Typography>
+                <Typography variant="body2" component="p" className={classes.scheduleLine}>
+                    {t("components.pixa_wallet_power_dialog.last_payment", { date: formatDate(plan.lastDate) })}
+                </Typography>
+                <Typography variant="body2" component="p" className={classes.scheduleLead}>
+                    {t("components.pixa_wallet_power_dialog.total_at_todays_price", {
+                        amount: formatAmount(plan.totalPxa, "PXA", 3),
+                        fiat: totalFiat || "—",
+                    })}
+                </Typography>
+                <Typography variant="caption" component="span" className={classes.scheduleNote}>
+                    {t("components.pixa_wallet_power_dialog.estimate_note")}
+                </Typography>
+            </div>
+        );
+    };
+
     render() {
         const { classes, open, onClose, onConfirm, keepMounted = false } = this.props;
-        const { _username, _amount, _amount_percent, _isDragging, _tempPercent, type } = this.state;
+        const { _username, _amount, _amount_percent, _isDragging, _tempPercent } = this.state;
 
-        const title = (type || "").toUpperCase() === "POWER-DOWN" ? t("components.pixa_wallet_dialog.power_down_2") : t("components.pixa_wallet_dialog.power_up");
-        const startAdornment = (type || "").toUpperCase() === "POWER-DOWN" ? <PixaPower style={{marginBottom:-12}}/> : <PixaLiquid style={{marginBottom:-12}}/>;
+        const isPowerDown = this._isPowerDown();
+        const title = isPowerDown ? t("components.pixa_wallet_dialog.power_down_2") : t("components.pixa_wallet_dialog.power_up");
+        const startAdornment = isPowerDown ? <PixaPower style={{marginBottom:-12}}/> : <PixaLiquid style={{marginBottom:-12}}/>;
         const currency = this._currency();
         const description = this._description();
         const max = this._currentMax();
@@ -230,7 +308,7 @@ class PixaWalletPowerDialog extends React.PureComponent {
                         />
 
                         <TextField
-                            style={{ margin: "32px 0 24px" }}
+                            style={{ margin: "32px 0 16px" }}
                             fullWidth
                             onChange={this._onTextChange}
                             label={t("words.amount")}
@@ -239,12 +317,18 @@ class PixaWalletPowerDialog extends React.PureComponent {
                             InputLabelProps={{ shrink: true }}
                             InputProps={{
                                 inputComponent: NumberFormatCustom,
-                                inputProps: { currency },
+                                // `locale` doubles as the memo-buster: a language switch
+                                // re-formats the field even though its value did not move.
+                                inputProps: { currency, locale: resolveLocale() },
                                 startAdornment: startAdornment
                             }}
-                            helperText={t("components.pixa_wallet_power_dialog.max", { max, currency })}
+                            helperText={t("components.pixa_wallet_power_dialog.max", { max: formatNumber(max, { min: 0, max: 2 }), currency })}
                         />
                     </form>
+
+                    <Collapse in={displayAmount > 0}>
+                        {this._renderPlan(displayAmount)}
+                    </Collapse>
                 </DialogContent>
                 <DialogActions style={{ textAlign: "right" }} className={classes.darkGreyActions}>
                     <Button variant="text" color="primary" onClick={onClose}>{t("words.cancel", {TUC: true})} </Button>

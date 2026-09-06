@@ -6,6 +6,7 @@ import Collapse from "@material-ui/core/Collapse";
 import Fade from "@material-ui/core/Fade";
 import Grow from "@material-ui/core/Grow";
 import IconButton from "@material-ui/core/IconButton";
+import ButtonBase from "@material-ui/core/ButtonBase";
 import ArrowDropDown from "@material-ui/icons/ArrowDropDown";
 import EditIcon from "@material-ui/icons/Edit";
 import Pen from "../icons/Pen";
@@ -34,6 +35,15 @@ const ST_POS_RELATIVE = { position: "relative" };
 const ST_M_0PX = { margin: "0px" };
 const ST_TOP_8__RIGHT_8__LEFT_AUTO = { top: 8, right: 8, left: "auto" };
 const ST_FS_18 = { fontSize: 18 };
+// Picture ButtonBases carry the SAME corner radii as the picture classes they
+// wrap (communityImageMobile / communityImageMobileOpened /
+// communityImageMobileBig), so the viewer's hero measures the exact shape on
+// screen and the ripple clips to it. The big one is block-level flex: an
+// inline-flex button inside its block wrapper would sit on the text baseline
+// and add a few px under the image.
+const ST_PICTURE_BUTTON_COLLAPSED = { borderRadius: "0px 12px 12px 0px" };
+const ST_PICTURE_BUTTON_OPENED = { borderRadius: "8px" };
+const ST_PICTURE_BUTTON_BIG = { display: "flex", borderRadius: "24px" };
 
 
 const CommunityHeader = React.memo(({
@@ -56,6 +66,7 @@ const CommunityHeader = React.memo(({
                                         onTabChange,
                                         onTextEditor,
                                         onEditCommunity,
+                                        onOpenPicture,
                                         classes
                                     }) => {
     useLanguage();
@@ -83,12 +94,16 @@ const CommunityHeader = React.memo(({
                         onClick={onToggleMobileCard}
                         data-tour="community-card-toggle"
                         avatar={
-                            <CommunityImage
-                                image={community.image}
-                                name={community.name}
-                                className={mobileCardExpanded ? classes.communityImageMobileOpened : classes.communityImageMobile}
-                                style={EMPTY_STYLE}
-                            />
+                            /* Tap → PictureDialog. usePictureDialog stops the click
+                               here so the CardHeader's expand toggle doesn't fire too. */
+                            <ButtonBase onClick={onOpenPicture} style={mobileCardExpanded ? ST_PICTURE_BUTTON_OPENED : ST_PICTURE_BUTTON_COLLAPSED}>
+                                <CommunityImage
+                                    image={community.image}
+                                    name={community.name}
+                                    className={mobileCardExpanded ? classes.communityImageMobileOpened : classes.communityImageMobile}
+                                    style={EMPTY_STYLE}
+                                />
+                            </ButtonBase>
                         }
                         action={
                             <IconButton aria-label="settings">
@@ -108,12 +123,14 @@ const CommunityHeader = React.memo(({
                             <div style={ST_D_FLEX}>
                                 <Fade in={mobileCardExpanded} timeout={450}>
                                     <div style={ST_POS_RELATIVE}>
-                                        <CommunityImage
-                                            image={community.image}
-                                            name={community.name}
-                                            className={classes.communityImageMobileBig}
-                                            style={ST_M_0PX}
-                                        />
+                                        <ButtonBase onClick={onOpenPicture} style={ST_PICTURE_BUTTON_BIG}>
+                                            <CommunityImage
+                                                image={community.image}
+                                                name={community.name}
+                                                className={classes.communityImageMobileBig}
+                                                style={ST_M_0PX}
+                                            />
+                                        </ButtonBase>
                                         {isAdmin && onEditCommunity && (
                                             <IconButton
                                                 className={classes.menuButtonEdit}
@@ -181,7 +198,8 @@ const CommunityHeader = React.memo(({
         prevProps.members === nextProps.members &&
         prevProps.rules === nextProps.rules &&
         prevProps.postsCount === nextProps.postsCount &&
-        prevProps.isAdmin === nextProps.isAdmin;
+        prevProps.isAdmin === nextProps.isAdmin &&
+        prevProps.onOpenPicture === nextProps.onOpenPicture;
 });
 
 export default CommunityHeader;

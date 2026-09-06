@@ -16,6 +16,7 @@ import PixaSupra from "../icons/PixaSupra";
 import PixaLiquid from "../icons/PixaLiquid";
 
 import { t } from "../utils/text";
+import { formatAmount, formatFiatFromUsd, numericInputProps, resolveLocale } from "../utils/numberFormat";
 
 import { withLanguage } from "../utils/withLanguage";
 const styles = (theme) => ({
@@ -56,7 +57,7 @@ const SLIDER_MARKS = [
 
 const NumberFormatCustom = React.memo(
     React.forwardRef(function NumberFormatCustom(props, ref) {
-        const { onChange, currency, name, ...other } = props;
+        const { onChange, currency, locale, name, ...other } = props;
         return (
             <NumericFormat
                 {...other}
@@ -66,9 +67,7 @@ const NumberFormatCustom = React.memo(
                         target: { name, value: values.value },
                     });
                 }}
-                thousandSeparator={" "}
-                decimalSeparator={"."}
-                allowedDecimalSeparators={[",", "."]}
+                {...numericInputProps(locale)}
                 thousandsGroupStyle="thousand"
                 decimalScale={2}
                 fixedDecimalScale={false}
@@ -256,10 +255,15 @@ class PixaWalletSwapDialog extends React.PureComponent {
         const displayOtherAmount = Number.isFinite(otherAmount)
             ? Number(otherAmount.toFixed(2))
             : 0;
-        const usdValue =
-            currency === "PXA"
-                ? displayAmount * 0.1
-                : displayAmount * 5.69;
+        // Worth of the amount being swapped, in the user's reference currency.
+        // Prices come from the wallet (api.prices) — nothing is hard-coded —
+        // and the line is simply not shown while they are unknown.
+        const { pixaUsdPrice, pxsUsdPrice, fiatRate, fiatCurrency } = this.props;
+        const unitUsd = Number(currency === "PXA" ? pixaUsdPrice : pxsUsdPrice);
+        const fiatValue = Number.isFinite(unitUsd) && unitUsd > 0
+            ? formatFiatFromUsd(displayAmount * unitUsd, fiatRate, fiatCurrency || "USD", 2)
+            : null;
+        const locale = resolveLocale();
         const noBalance = max <= 0;
         const amountInvalid = displayAmount <= 0 || displayAmount > max;
 
@@ -325,7 +329,7 @@ class PixaWalletSwapDialog extends React.PureComponent {
                                 InputLabelProps={{ shrink: true }}
                                 InputProps={{
                                     inputComponent: NumberFormatCustom,
-                                    inputProps: { currency },
+                                    inputProps: { currency, locale },
                                     endAdornment: (
                                         <Tooltip
                                             title={t("components.pixa_wallet_swap_dialog.swap_instead_of", {
@@ -375,7 +379,7 @@ class PixaWalletSwapDialog extends React.PureComponent {
                                         cursor: "pointer",
                                         textDecoration: "underline",
                                     }}
-                                >{`${max} ${currency}`}</span>
+                                >{formatAmount(max, currency, { min: 0, max: 3 })}</span>
                             </Typography>
                         </div>
                         <div style={{ flex: 1 }}>
@@ -389,7 +393,7 @@ class PixaWalletSwapDialog extends React.PureComponent {
                                 InputLabelProps={{ shrink: true }}
                                 InputProps={{
                                     inputComponent: NumberFormatCustom,
-                                    inputProps: { currency: otherCurrency },
+                                    inputProps: { currency: otherCurrency, locale },
                                     startAdornment:
                                         otherCurrency !== "PXA" ? (
                                             <PixaSupra
@@ -416,7 +420,7 @@ class PixaWalletSwapDialog extends React.PureComponent {
                                     margin: "0px 21px 24px 21px",
                                     textAlign: "right",
                                 }}
-                            >{`= $${usdValue.toFixed(2)}`}</Typography>
+                            >{fiatValue ? t("components.pixa_wallet_dialog.worth_about", { fiat: fiatValue }) : ""}</Typography>
                         </div>
                     </div>
                 </DialogContent>

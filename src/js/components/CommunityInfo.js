@@ -2,6 +2,7 @@ import * as React from "preact/compat";
 import Card from "@material-ui/core/Card";
 import Typography from "@material-ui/core/Typography";
 import IconButton from "@material-ui/core/IconButton";
+import ButtonBase from "@material-ui/core/ButtonBase";
 import EditIcon from "@material-ui/icons/Edit";
 import Pen from "../icons/Pen";
 import CommunityImage from "./CommunityImage";
@@ -23,6 +24,11 @@ const ST_FS_32PX = { fontSize: "32px" };
 const ST_W_100 = { width: "100%" };
 const ST_D_FLEX__POS_RELATIVE = { display: "flex", position: "relative" };
 const ST_M_16PX_75PX_0PX___POS_RELATIVE = { margin: "16px -75px 0px 0px", position: "relative" };
+// Picture ButtonBase: block-level flex (an inline-flex button inside the
+// block wrapper above would sit on the text baseline and add a few px under
+// the image) and the SAME corners as classes.communityImage, so the viewer's
+// hero measures the exact shape on screen and the ripple clips to it.
+const ST_PICTURE_BUTTON = { display: "flex", borderRadius: "0px 56px 56px 0px" };
 
 
 const CommunityInfo = React.memo(({
@@ -40,6 +46,7 @@ const CommunityInfo = React.memo(({
                                       onTextEditor,
                                       onEditCommunity,
                                       onAddSomeone,
+                                      onOpenPicture,
                                       classes
                                   }) => {
     useLanguage();
@@ -60,12 +67,17 @@ const CommunityInfo = React.memo(({
                     <div style={ST_W_100}>
                         <div style={ST_D_FLEX__POS_RELATIVE}>
                             <div style={ST_M_16PX_75PX_0PX___POS_RELATIVE}>
-                                <CommunityImage
-                                    image={community.image}
-                                    name={community.name}
-                                    className={classes.communityImage}
-                                    style={imageStyle}
-                                />
+                                {/* Click → PictureDialog (Community's usePictureDialog
+                                    measures this button: same box and corners as the
+                                    picture). The admin Edit button stays a sibling. */}
+                                <ButtonBase onClick={onOpenPicture} style={ST_PICTURE_BUTTON}>
+                                    <CommunityImage
+                                        image={community.image}
+                                        name={community.name}
+                                        className={classes.communityImage}
+                                        style={imageStyle}
+                                    />
+                                </ButtonBase>
                                 {isAdmin && onEditCommunity && (
                                     <IconButton
                                         className={classes.menuButtonEdit}
@@ -127,7 +139,8 @@ const CommunityInfo = React.memo(({
         prevProps.members === nextProps.members &&
         prevProps.rules === nextProps.rules &&
         prevProps.postsCount === nextProps.postsCount &&
-        prevProps.isAdmin === nextProps.isAdmin;
+        prevProps.isAdmin === nextProps.isAdmin &&
+        prevProps.onOpenPicture === nextProps.onOpenPicture;
 });
 
 export default CommunityInfo;

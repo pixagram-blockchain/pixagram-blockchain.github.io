@@ -16,6 +16,7 @@ import PixaSupra from "../icons/PixaSupra";
 import PixaLiquid from "../icons/PixaLiquid";
 
 import { t } from "../utils/text";
+import { formatAmount, numericInputProps, resolveLocale } from "../utils/numberFormat";
 import { withLanguage } from "../utils/withLanguage";
 
 const styles = (theme) => ({
@@ -56,7 +57,7 @@ const SLIDER_MARKS = [
 
 const NumberFormatCustom = React.memo(
     React.forwardRef(function NumberFormatCustom(props, ref) {
-        const { onChange, currency, name, ...other } = props;
+        const { onChange, currency, locale, name, ...other } = props;
         return (
             <NumericFormat
                 {...other}
@@ -66,9 +67,7 @@ const NumberFormatCustom = React.memo(
                         target: { name, value: values.value },
                     });
                 }}
-                thousandSeparator={" "}
-                decimalSeparator={"."}
-                allowedDecimalSeparators={[",", "."]}
+                {...numericInputProps(locale)}
                 thousandsGroupStyle="thousand"
                 decimalScale={3}
                 fixedDecimalScale={false}
@@ -295,7 +294,7 @@ class PixaWalletSavingsDialog extends React.PureComponent {
                         InputLabelProps={{ shrink: true }}
                         InputProps={{
                             inputComponent: NumberFormatCustom,
-                            inputProps: { currency },
+                            inputProps: { currency, locale: resolveLocale() },
                             startAdornment: (
                                 <CurrencyIcon
                                     style={{ margin: "0px 8px -12px 0px", fontSize: "1em" }}
@@ -313,7 +312,7 @@ class PixaWalletSavingsDialog extends React.PureComponent {
                         <span
                             onClick={this._onMaxClick}
                             style={{ cursor: "pointer", textDecoration: "underline" }}
-                        >{`${Number(max.toFixed(3))} ${currency}`}</span>
+                        >{formatAmount(max, currency, { min: 0, max: 3 })}</span>
                     </Typography>
                 </DialogContent>
 

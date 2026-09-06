@@ -23,6 +23,7 @@ import Checkbox from "@material-ui/core/Checkbox";
 import FormControlLabel from "@material-ui/core/FormControlLabel";
 
 import { t } from "../utils/text";
+import { formatAmount, formatInteger, formatFiatFromUsd, numericInputProps, resolveLocale } from "../utils/numberFormat";
 
 import { withLanguage } from "../utils/withLanguage";
 const styles = theme => ({
@@ -89,13 +90,15 @@ const styles = theme => ({
     }
 });
 
+// Grouping and decimal characters follow the Settings locale
+// (numericInputProps); the value handed back stays a "." decimal string.
 function NumberFormatCustom(props) {
-    const { inputRef, onChange, currency, ...other } = props;
+    const { inputRef, onChange, currency, locale, ...other } = props;
 
     return (
         <NumericFormat
             {...other}
-            ref={inputRef}
+            getInputRef={inputRef}
             onValueChange={(values) => {
                 onChange({
                     target: {
@@ -104,11 +107,9 @@ function NumberFormatCustom(props) {
                     },
                 });
             }}
-            thousandSeparator={" "}
-            decimalSeparator={"."}
-            allowedDecimalSeparators={[",", "."]}
+            {...numericInputProps(locale)}
             thousandsGroupStyle={'thousand'}
-            decimalScale={"2"}
+            decimalScale={3}
             fixedDecimalScale={false}
             allowNegative={false}
             allowLeadingZeros={true}
@@ -491,6 +492,14 @@ class PixaWalletSendDialog extends React.PureComponent {
                 max = _maxPXS;
         }
 
+        // Worth of the amount in the user's reference currency, from the
+        // wallet's live prices (api.prices) — hidden while they are unknown.
+        const { pixaUsdPrice, pxsUsdPrice, fiatRate, fiatCurrency } = this.props;
+        const unitUsd = Number(currency === "PXA" ? pixaUsdPrice : pxsUsdPrice);
+        const fiatValue = Number.isFinite(unitUsd) && unitUsd > 0
+            ? formatFiatFromUsd((parseFloat(_amount) || 0) * unitUsd, fiatRate, fiatCurrency || "USD", 2)
+            : null;
+
         return (
             <React.Fragment>
                 <Dialog open={open}
@@ -574,7 +583,7 @@ class PixaWalletSendDialog extends React.PureComponent {
                                 value={_amount}
                                 InputProps={{
                                     inputComponent: NumberFormatCustom,
-                                    inputProps: {currency: currency},
+                                    inputProps: {currency: currency, locale: resolveLocale()},
                                     endAdornment: (
                                         <Button onClick={this.toggleCurrency}>
                                             <SwapHorizRounded style={{marginRight: "4px"}}/> {type === "PIXA" ? "PXS": "PXA"}
@@ -636,14 +645,12 @@ class PixaWalletSendDialog extends React.PureComponent {
                                     />
                                 </div>
                                 <Typography variant="body2" color="textSecondary" component="p" style={{margin: "8px 21px 0px 21px"}}>{t("components.pixa_wallet_send_dialog.the_first_payment_is_sent_now_then", {
-                                        Number: Number(_recurrence) || 24,
-                                        Number_2: Number(_executions) || 0
+                                        Number: formatInteger(Number(_recurrence) || 24),
+                                        Number_2: formatInteger(Number(_executions) || 0)
                                     })}</Typography>
                             </Collapse>
                         </div>
-                        <Typography variant="body2" color="textSecondary" component="p" style={{margin: "16px 0px 24px 0px"}}>{t("components.pixa_wallet_send_dialog.this_is_equivalent_to", {
-                            _amount: (currency === "PXA" ? _amount * 0.1: _amount * 5.69).toFixed(2)
-                        })}</Typography>
+                        <Typography variant="body2" color="textSecondary" component="p" style={{margin: "16px 0px 24px 0px"}}>{fiatValue ? t("components.pixa_wallet_dialog.worth_about", { fiat: fiatValue }) : ""}</Typography>
                     </DialogContent>
                     <DialogActions style={{textAlign: "right"}} className={classes.darkGreyActions}>
                         <Fade in={_confirm_success === 0} timeout={300}><Button variant="text" color="primary" onClick={this.props.onClose}>{t("words.cancel", {TUC: true})}</Button></Fade>
@@ -665,8 +672,8 @@ class PixaWalletSendDialog extends React.PureComponent {
                     <DialogContent>
                         <Fade in timeout={0}><Typography style={{marginTop: 8, marginBottom: 24}} component={"h2"} variant={"h6"}>{t("components.pixa_wallet_send_dialog.confirm_your_transaction")}</Typography></Fade>
                         <div style={{textAlign: "center"}}>
-                            <Fade in timeout={150}><Typography className={"monospace"} variant="body2" color="textSecondary" component="span" style={{display: "block", fontSize: "36px", fontWeight: "bold", color: "#111"}}>{`${parseFloat(_amount).toFixed(3)} ${currency} `}</Typography></Fade>
-                            <Fade in timeout={300}><Typography className={"monospace"} variant="body2" color="textSecondary" component="span" style={{fontSize: "21px", color: "#272727"}}>{`${(currency === "PXA" ? _amount * 0.1: _amount * 5.69).toFixed(2)}`}</Typography></Fade>
+                            <Fade in timeout={150}><Typography className={"monospace"} variant="body2" color="textSecondary" component="span" style={{display: "block", fontSize: "36px", fontWeight: "bold", color: "#111"}}>{formatAmount(parseFloat(_amount) || 0, currency, 3)}</Typography></Fade>
+                            {fiatValue && <Fade in timeout={300}><Typography className={"monospace"} variant="body2" color="textSecondary" component="span" style={{fontSize: "21px", color: "#272727"}}>{fiatValue}</Typography></Fade>}
                         </div><br/>
                         <div style={{textAlign: "center"}}>
                             <Grow in timeout={450}>
@@ -696,8 +703,8 @@ class PixaWalletSendDialog extends React.PureComponent {
                             {_recurrent && <Fade in timeout={850}>
                                 <Typography variant="body2" color="textSecondary" component="div" style={{fontSize: "14px", color: "#444", marginTop: 8}}>
                                     {t("components.pixa_wallet_send_dialog.repeats_every_h_payments", {
-                                        max: Math.max(24, Math.floor(Number(_recurrence) || 0)),
-                                        max_2: Math.max(2, Math.floor(Number(_executions) || 0))
+                                        max: formatInteger(Math.max(24, Math.floor(Number(_recurrence) || 0))),
+                                        max_2: formatInteger(Math.max(2, Math.floor(Number(_executions) || 0)))
                                     })}
                                 </Typography>
                             </Fade>}

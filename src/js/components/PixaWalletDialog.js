@@ -119,6 +119,14 @@ import { cssBackgroundImage } from "../utils/safeUrl";
 
 import { T } from "../utils/T";
 import { t } from "../utils/text";
+import {
+    formatNumber, formatInteger, formatAmount, formatFiatFromUsd, formatPercent,
+    formatDate, formatRelativeDays, resolveLocale,
+} from "../utils/numberFormat";
+import {
+    loadPowerDownConfig, powerDownStatus, previewPowerDown,
+    DEFAULT_POWER_DOWN_INTERVALS, DEFAULT_POWER_DOWN_INTERVAL_SECONDS,
+} from "../utils/powerDown";
 
 import { withLanguage } from "../utils/withLanguage";
 const styles = theme => ({
@@ -592,6 +600,43 @@ const styles = theme => ({
             }
         }
     },
+    // PXA price-history chart while no exchange data exists yet (see
+    // PRICE_HISTORY_AVAILABLE): the chart keeps its place in the layout, blurred
+    // and inert, with the notice centred over it through `centerRechart`.
+    priceChartWrapper: {
+        position: "relative",
+        width: "100%",
+    },
+    priceChartWrapperLocked: {
+        overflow: "hidden",   // clips the blur bleed at the chart edges
+    },
+    priceChartBlurred: {
+        filter: "blur(5px)",
+        opacity: 1,
+        pointerEvents: "none",
+        userSelect: "none",
+    },
+    priceChartNotice: {
+        color: "#ffffff",
+        fontWeight: "bold",
+        fontSize: "16px",
+        lineHeight: "22px",
+        padding: "0px 24px",
+        [theme.breakpoints.down("sm")]: {
+            fontSize: "14px",
+            lineHeight: "20px",
+        }
+    },
+    priceChartNoticeDetail: {
+        color: "#a5a5a5",
+        fontSize: "14px",
+        lineHeight: "20px",
+        padding: "6px 24px 0px 24px",
+        [theme.breakpoints.down("sm")]: {
+            fontSize: "13px",
+            lineHeight: "18px",
+        }
+    },
     transactionListItem: {
         backgroundColor: "transparent",
         borderRadius: "0px",
@@ -810,15 +855,36 @@ const styles = theme => ({
             backgroundColor: "#212121",
             transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms"
         }
-    }
+    },
+    // Live power-down schedule under the "Powering down" title of the PXP view.
+    // Same surface as portfolioCard but static (no hover): it is a statement,
+    // not a control. One line per fact, the lead line brighter.
+    powerDownSchedule: {
+        backgroundColor: "#151515",
+        borderRadius: "18px",
+        padding: "16px 20px",
+        margin: "8px 0px 16px 0px",
+        "& > p": {
+            margin: "3px 0px",
+            color: "#a5a5a5",
+        },
+        "& > p.lead": {
+            color: "#e0e0e0",
+        },
+        "& > span.note": {
+            display: "block",
+            marginTop: "8px",
+            color: "#666666",
+        },
+    },
 });
 
 export function formatPriceChartData(prices, dateType = "D"){
     const options = dateType === "D" ? {hour: "numeric", minute: "numeric"}: dateType === "W" ? {day: "numeric", hour: "numeric"}: dateType === "M" ? {day: 'numeric'}: dateType === "Y" ? { day: 'numeric', month: 'numeric' }: { day: 'numeric', month: 'numeric', year: "numeric" };
     return prices.map(([timestamp, price]) => {
         const dateObj = new Date(timestamp);
-        const name = dateObj.toLocaleDateString('en-GB', options); // X-axis
-        const date = dateObj.toLocaleDateString('en-GB'); // Tooltip detail
+        const name = formatDate(dateObj, options); // X-axis, Settings locale
+        const date = formatDate(dateObj);          // Tooltip detail
 
         return {
             name,
@@ -841,7 +907,7 @@ const CustomTooltip = ({ active, payload, label, fiatRate = 1, currency = 'USD' 
             fontSize: 13
         }}>
             <div><strong>{t("components.pixa_wallet_dialog.date")}</strong> {date}</div>
-            <div><strong>{t("components.pixa_wallet_dialog.price")}</strong> {(price * (Number.isFinite(fiatRate) && fiatRate > 0 ? fiatRate : 1)).toFixed(3)} {currency || 'USD'}</div>
+            <div><strong>{t("components.pixa_wallet_dialog.price")}</strong> {formatFiatFromUsd(price, fiatRate, currency || 'USD', 3)}</div>
         </div>
     );
 };
@@ -850,6 +916,45 @@ const COLORS = ['#ffffff', '#c7c7c7', '#888888'];
 
 // Scroll threshold in pixels for edge detection
 const SCROLL_EDGE_THRESHOLD = 10;
+
+/**
+ * PXA price-history chart availability.
+ *
+ * The chart used to be fed with HIVE's CoinGecko series as a stand-in. That is
+ * not our price: PXA gets its exchange listing shortly, and until real PXA
+ * market data exists the chart is rendered blurred and inert behind a
+ * "not available yet" notice, the range buttons are disabled and CoinGecko is
+ * never called. Flip this to true once trading has started — AND point
+ * _recompute_chart at the PXA market source at the same time: enabling it
+ * alone would put the HIVE stand-in back on screen.
+ */
+const PRICE_HISTORY_AVAILABLE = false;
+
+/** X-axis label granularity for a price range expressed in days. */
+const priceChartDateType = (days) => {
+    const n = Number(days) || 0;
+    return n <= 1 ? "D" : n <= 7 ? "W" : n <= 31 ? "M" : n <= 365 ? "Y" : "C";
+};
+
+/**
+ * Neutral, deterministic series drawn (blurred) while PRICE_HISTORY_AVAILABLE
+ * is false, so the chart keeps its exact footprint without tracing any real
+ * market's curve. Purely synthetic: two overlaid sine waves around 1.0 that are
+ * never legible behind the blur.
+ */
+const PLACEHOLDER_PRICE_POINTS = 48;
+function buildPlaceholderPriceSeries(days) {
+    const n = Math.max(1, Number(days) || 7);
+    const span = n * 24 * 60 * 60 * 1000;
+    const end = Date.now();
+    const raw = new Array(PLACEHOLDER_PRICE_POINTS);
+    for (let i = 0; i < PLACEHOLDER_PRICE_POINTS; i++) {
+        const x = i / (PLACEHOLDER_PRICE_POINTS - 1);
+        const y = 1 + 0.12 * Math.sin(x * Math.PI * 3) + 0.05 * Math.sin(x * Math.PI * 7 + 1);
+        raw[i] = [end - (1 - x) * span, y];
+    }
+    return formatPriceChartData(raw, priceChartDateType(n));
+}
 
 /**
  * Translate a raw chain asset into its display string.
@@ -980,7 +1085,7 @@ class PixaWalletDialog extends React.PureComponent {
             _taxes_dialog_opened: false,
             _history: HISTORY,
             _selectedRange: 7,
-            _data: [],
+            _data: PRICE_HISTORY_AVAILABLE ? [] : buildPlaceholderPriceSeries(7),
             _chartLoading: false,
             _views: Array.of(<div className={props.classes.flexColumn}/>, <div className={props.classes.flexColumn}/>, <div className={props.classes.flexColumn}/>, <div className={props.classes.flexColumn}/>),
             _bigmac: formatPriceChartData([
@@ -1034,6 +1139,15 @@ class PixaWalletDialog extends React.PureComponent {
             _nextWithdrawalDate: null,
             _toWithdraw: 0,
             _withdrawn: 0,
+            _withdrawRateVests: 0,       // vesting_withdraw_rate, VESTS per instalment
+            // Power-down schedule (instalments × interval) — chain config when the
+            // node exposes get_config, Hive's 13 × 7 days otherwise.
+            _powerDownIntervals: DEFAULT_POWER_DOWN_INTERVALS,
+            _powerDownIntervalSeconds: DEFAULT_POWER_DOWN_INTERVAL_SECONDS,
+            // Settings locale, kept in state so a region-only switch (fr-FR →
+            // fr-CH, same catalogue) still re-renders this PureComponent and
+            // the sub-dialogs it hands it to.
+            _locale: resolveLocale(),
             _pixaUsdPrice: 0.06,
             _pxsUsdPrice: 5.69,
             _fiatRate: 1,
@@ -1134,6 +1248,8 @@ class PixaWalletDialog extends React.PureComponent {
         const api = this.state.api || this.props.api;
         const prices = api && api.prices;
         if (this.state._currency !== cur) this.setState({ _currency: cur });
+        const loc = resolveLocale();
+        if (this.state._locale !== loc) this.setState({ _locale: loc });
         if (!prices || typeof prices.getFiatRate !== 'function' || cur === 'USD') {
             if (this.state._fiatRate !== 1) this.setState({ _fiatRate: 1 });
             return;
@@ -1251,6 +1367,16 @@ class PixaWalletDialog extends React.PureComponent {
     _fetch_wallet_data = async () => {
         const { api, account } = this.state;
         if (!api || !account || !account.username) return;
+
+        // Instalment count / interval from the chain config (cached per
+        // session in utils/powerDown). Never blocks the balances.
+        if (!this._pdConfigRequested) {
+            this._pdConfigRequested = true;
+            loadPowerDownConfig(api).then((cfg) => {
+                if (!cfg) return;
+                this.setState({ _powerDownIntervals: cfg.intervals, _powerDownIntervalSeconds: cfg.intervalSeconds }, () => this.forceUpdate());
+            }).catch(() => {});
+        }
 
         try {
             // Fetch in parallel for speed
@@ -1406,6 +1532,7 @@ class PixaWalletDialog extends React.PureComponent {
                 _nextWithdrawalDate: nextWithdrawalDate,
                 _toWithdraw: toWithdraw,
                 _withdrawn: withdrawn,
+                _withdrawRateVests: withdrawRate,
                 _pixaUsdPrice: pixaUsdPrice,
                 _pxsUsdPrice: pxsUsdPrice,
                 _pxpUsd: earlyPxpUsd,
@@ -1874,6 +2001,7 @@ class PixaWalletDialog extends React.PureComponent {
                 _nextWithdrawalDate: nextWithdrawalDate,
                 _toWithdraw: toWithdraw,
                 _withdrawn: withdrawn,
+                _withdrawRateVests: withdrawRate,
                 _pixaUsdPrice: pixaUsdPrice,
                 _pxsUsdPrice: pxsUsdPrice,
                 _pxpUsd: livePxpUsd,
@@ -1938,8 +2066,10 @@ class PixaWalletDialog extends React.PureComponent {
                     this.setState({
                         _isPoweringDown: false,
                         _nextPowerDown: 0,
+                        _nextWithdrawalDate: null,
                         _toWithdraw: 0,
                         _withdrawn: 0,
+                        _withdrawRateVests: 0,
                     }, () => this.forceUpdate());
                     this._refresh_after_tx();
                 } catch (err) {
@@ -2016,21 +2146,56 @@ class PixaWalletDialog extends React.PureComponent {
     };
 
     /**
+     * Fiat value of a PXA-denominated amount (PXP is PXA-denominated too) in
+     * the user's reference currency, or null while the price is unknown so a
+     * "≈ 0.00" is never printed.
+     */
+    _fiat_of_pxa = (pxaAmount, decimals = 2) => {
+        const price = Number(this.state._pixaUsdPrice);
+        if (!Number.isFinite(price) || price <= 0) return null;
+        return formatFiatFromUsd((Number(pxaAmount) || 0) * price, this.state._fiatRate, this.state._currency || 'USD', decimals);
+    };
+
+    /**
      * Handle confirmed power-up or power-down from PixaWalletPowerDialog
      */
     _handle_power_confirm = async (username, amount) => {
-        const { api, account, _power_dialog_opened, _LIQUID_SYMBOL, _VESTS_SYMBOL, _pixaToVest } = this.state;
+        const { api, account, _power_dialog_opened, _LIQUID_SYMBOL, _VESTS_SYMBOL, _pixaToVest, _powerDownIntervals, _powerDownIntervalSeconds } = this.state;
         if (!api || !account) return;
 
         const type = (_power_dialog_opened || '').toUpperCase();
         const title = type === 'POWER-UP' ? t("words.power_up") : t("words.power_down");
+        // The plan the chain will follow for this amount — shown in the white
+        // confirm modal (before) and echoed in the snackbar (after).
+        const plan = previewPowerDown({ amountPxa: amount, intervals: _powerDownIntervals, intervalSeconds: _powerDownIntervalSeconds });
+        const worth = this._fiat_of_pxa(amount);
+        const line = (text, key, lead) => <span key={key} style={{ display: "block", marginTop: 6, color: lead ? "#111" : "#444" }}>{text}</span>;
         const body = type === 'POWER-UP'
-            ? t("components.pixa_wallet_dialog.are_you_sure_you_want_to_power", {
-                amount: amount.toFixed(3)
-            })
-            : t("components.pixa_wallet_dialog.are_you_sure_you_want_to_power_2", {
-                amount: amount.toFixed(2)
-            });
+            ? (
+                <React.Fragment>
+                    {t("components.pixa_wallet_dialog.are_you_sure_you_want_to_power", { amount: formatNumber(amount, 3) })}
+                    {worth ? line(t("components.pixa_wallet_dialog.worth_about", { fiat: worth }), "w") : null}
+                </React.Fragment>
+            )
+            : (
+                <React.Fragment>
+                    {t("components.pixa_wallet_dialog.are_you_sure_you_want_to_power_2", { amount: formatNumber(amount, 2) })}
+                    {line(t("components.pixa_wallet_power_dialog.paid_out_in_instalments", {
+                        count: formatInteger(plan.instalments),
+                        days: formatNumber(plan.intervalDays, { min: 0, max: 1 }),
+                    }), "n", true)}
+                    {line(t("components.pixa_wallet_power_dialog.each_instalment", {
+                        amount: formatAmount(plan.instalmentPxa, "PXA", 3),
+                        fiat: this._fiat_of_pxa(plan.instalmentPxa) || "—",
+                    }), "e")}
+                    {line(t("components.pixa_wallet_power_dialog.first_payment", { date: formatDate(plan.firstDate) }), "f")}
+                    {line(t("components.pixa_wallet_power_dialog.last_payment", { date: formatDate(plan.lastDate) }), "l")}
+                    {line(t("components.pixa_wallet_power_dialog.total_at_todays_price", {
+                        amount: formatAmount(plan.totalPxa, "PXA", 3),
+                        fiat: worth || "—",
+                    }), "t", true)}
+                </React.Fragment>
+            );
 
         this._close_power_dialog();
         this._open_confirm_action(title, body, async () => {
@@ -2039,7 +2204,7 @@ class PixaWalletDialog extends React.PureComponent {
                     const formatted = api.formatter.formatAsset(amount, _LIQUID_SYMBOL, 3);
                     await api.broadcast.transferToVesting(account.username, account.username, formatted);
                     if (actions?.trigger_snackbar) actions.trigger_snackbar(t("components.pixa_wallet_dialog.powered_up_pxa_successfully", {
-                        amount: amount.toFixed(3)
+                        amount: formatNumber(amount, 3)
                     }), 'success');
                     // Optimistic update — PXP is stored as PXA-equivalent, so +amount is dimensionally correct.
                     // The authoritative values come from _refresh_after_tx() below; this just avoids a
@@ -2083,14 +2248,26 @@ class PixaWalletDialog extends React.PureComponent {
                     const vestsAmount = _pixaToVest(amount);
                     const formatted = api.formatter.formatAsset(vestsAmount, _VESTS_SYMBOL, 6);
                     await api.broadcast.withdrawVesting(account.username, formatted);
-                    if (actions?.trigger_snackbar) actions.trigger_snackbar(t("components.pixa_wallet_dialog.power_down_of_pxp_started", {
-                        amount: amount.toFixed(2)
-                    }), 'success');
-                    // Optimistic update — mark as powering down. Balances don't change until the first
-                    // weekly payout fills, so we only flip the state flag + next-payout estimate.
+                    if (actions?.trigger_snackbar) {
+                        const started = t("components.pixa_wallet_dialog.power_down_of_pxp_started", { amount: formatNumber(amount, 2) });
+                        const sep = /[.!?。]\s*$/.test(started) ? " " : ". ";
+                        actions.trigger_snackbar(started + sep + t("components.pixa_wallet_dialog.pd_first_payment_snack", {
+                            amount: formatAmount(plan.instalmentPxa, "PXA", 3),
+                            date: formatDate(plan.firstDate),
+                        }), 'success');
+                    }
+                    // Optimistic update — mirror what the chain is about to record
+                    // (rate = amount / instalments, first fill one interval from
+                    // now) so the schedule shows straight away; _refresh_after_tx
+                    // replaces it with the account's own figures.
+                    const rate = vestsAmount / plan.instalments;
                     this.setState({
                         _isPoweringDown: true,
-                        _nextPowerDown: amount / 13,
+                        _nextPowerDown: plan.instalmentPxa,
+                        _nextWithdrawalDate: plan.firstDate,
+                        _toWithdraw: Math.round(vestsAmount * 1e6),
+                        _withdrawn: 0,
+                        _withdrawRateVests: rate,
                     }, () => this.forceUpdate());
                 }
                 this._refresh_after_tx();
@@ -2146,17 +2323,17 @@ class PixaWalletDialog extends React.PureComponent {
                 });
                 if (actions?.trigger_snackbar) {
                     actions.trigger_snackbar(t("components.pixa_wallet_dialog.scheduled_to_every_h", {
-                        amount: amount.toFixed(3),
+                        amount: formatNumber(amount, 3),
                         currency: currency,
                         to: to,
-                        Number: Number(recurrentOpts.recurrence),
-                        Number_2: Number(recurrentOpts.executions)
+                        Number: formatInteger(recurrentOpts.recurrence),
+                        Number_2: formatInteger(recurrentOpts.executions)
                     }), 'success');
                 }
             } else {
                 await api.broadcast.transfer(senderUsername, to, formatted, memo || '');
                 if (actions?.trigger_snackbar) actions.trigger_snackbar(t("components.pixa_wallet_dialog.transferred_to", {
-                    amount: amount.toFixed(3),
+                    amount: formatNumber(amount, 3),
                     currency: currency,
                     to: to
                 }), 'success');
@@ -2183,10 +2360,10 @@ class PixaWalletDialog extends React.PureComponent {
         // a ~3.5 day conversion window (convert). Surface that in the copy.
         const body = currency === 'PXA'
             ? t("components.pixa_wallet_dialog.are_you_sure_you_want_to_swap", {
-                amount: amount.toFixed(3)
+                amount: formatNumber(amount, 3)
             })
             : t("components.pixa_wallet_dialog.are_you_sure_you_want_to_swap_2", {
-                amount: amount.toFixed(3)
+                amount: formatNumber(amount, 3)
             });
 
         this._close_swap_dialog();
@@ -2212,10 +2389,10 @@ class PixaWalletDialog extends React.PureComponent {
                 }
                 const successMsg = currency === 'PXA'
                     ? t("components.pixa_wallet_dialog.swapped_pxa_pxs", {
-                        amount: amount.toFixed(3)
+                        amount: formatNumber(amount, 3)
                     })
                     : t("components.pixa_wallet_dialog.swap_of_pxs_started_pxa_arrives_in", {
-                        amount: amount.toFixed(3)
+                        amount: formatNumber(amount, 3)
                     });
                 if (actions?.trigger_snackbar) actions.trigger_snackbar(successMsg, 'success');
                 this._refresh_after_tx();
@@ -2230,12 +2407,20 @@ class PixaWalletDialog extends React.PureComponent {
 
     _recompute_chart = () => {
         const n = this.state._selectedRange;
+        if (!PRICE_HISTORY_AVAILABLE) {
+            // No PXA market data to fetch yet (see PRICE_HISTORY_AVAILABLE): keep
+            // the blurred chart on its synthetic placeholder and never hit CoinGecko.
+            this.setState({_data: buildPlaceholderPriceSeries(n), _chartLoading: false});
+            return;
+        }
         this.setState({_chartLoading: true}, () => {
             this.forceUpdate(() => {
+                // HIVE stand-in series — NOT our price. Replace with the PXA market
+                // source before PRICE_HISTORY_AVAILABLE is switched on.
                 fetch(`https://api.coingecko.com/api/v3/coins/hive/market_chart?vs_currency=usd&days=${n}&precision=4`)
                     .then(res => res.json())
                     .then(data => {
-                        const _data = formatPriceChartData(data.prices, n <= 1 ? "D": n <= 7 ? "W": n <= 31 ? "M": n <= 365 ? "Y": "C");
+                        const _data = formatPriceChartData(data.prices, priceChartDateType(n));
                         this.setState({_data, _chartLoading: false}, () => {
                             this.forceUpdate();
                         });
@@ -2496,13 +2681,13 @@ class PixaWalletDialog extends React.PureComponent {
         const title = isDeposit ? t("words.deposit_to_savings") : t("words.withdraw_from_savings");
         const body = isDeposit
             ? t("components.pixa_wallet_dialog.move_into_savings_you_can_take_it", {
-                amount: amount.toFixed(3),
+                amount: formatNumber(amount, 3),
                 currency: currency
             })
             : t(
                 "components.pixa_wallet_dialog.withdraw_from_savings_the_funds_arrive_after",
                 {
-                    amount: amount.toFixed(3),
+                    amount: formatNumber(amount, 3),
                     currency: currency
                 }
             );
@@ -2514,7 +2699,7 @@ class PixaWalletDialog extends React.PureComponent {
                 if (isDeposit) {
                     await api.broadcast.transferToSavings(account.username, account.username, formatted, '');
                     if (actions?.trigger_snackbar) actions.trigger_snackbar(t("components.pixa_wallet_dialog.deposited_to_savings", {
-                        amount: amount.toFixed(3),
+                        amount: formatNumber(amount, 3),
                         currency: currency
                     }), 'success');
                 } else {
@@ -2526,7 +2711,7 @@ class PixaWalletDialog extends React.PureComponent {
                         ''
                     );
                     if (actions?.trigger_snackbar) actions.trigger_snackbar(t("components.pixa_wallet_dialog.withdrawal_of_started_arrives_in_3_days", {
-                        amount: amount.toFixed(3),
+                        amount: formatNumber(amount, 3),
                         currency: currency
                     }), 'success');
                 }
@@ -2546,7 +2731,7 @@ class PixaWalletDialog extends React.PureComponent {
     _request_cancel_savings_withdrawal = (entry) => {
         this._open_confirm_action(
             t("components.pixa_wallet_dialog.cancel_savings_withdrawal"),
-            t("components.pixa_wallet_dialog.cancel_the_pending_withdrawal_of_the", { amount: entry.amount }),
+            t("components.pixa_wallet_dialog.cancel_the_pending_withdrawal_of_the", { amount: formatAmount(entry.amount_num, entry.currency, 3) }),
             async () => {
                 const { api, account } = this.state;
                 if (!api || !account) return;
@@ -2575,7 +2760,7 @@ class PixaWalletDialog extends React.PureComponent {
     _request_cancel_recurrent_transfer = (entry) => {
         this._open_confirm_action(
             t("components.pixa_wallet_dialog.cancel_recurring_transfer"),
-            t("components.pixa_wallet_dialog.stop_the_recurring_transfer_of_to", { amount: entry.amount, to: entry.to }),
+            t("components.pixa_wallet_dialog.stop_the_recurring_transfer_of_to", { amount: formatAmount(entry.amount_num, entry.currency, 3), to: entry.to }),
             async () => {
                 const { api, account, _LIQUID_SYMBOL, _DOLLAR_SYMBOL } = this.state;
                 if (!api || !account) return;
@@ -2672,7 +2857,7 @@ class PixaWalletDialog extends React.PureComponent {
             const formatted = api.formatter.formatAsset(vestsAmount, _VESTS_SYMBOL, 6);
             await api.broadcast.delegateVestingShares(delegatorUsername, to, formatted);
             if (actions?.trigger_snackbar) actions.trigger_snackbar(t("components.pixa_wallet_dialog.delegated_pxp_to", {
-                amount: amount.toFixed(2),
+                amount: formatNumber(amount, 2),
                 to: to
             }), 'success');
 
@@ -2844,7 +3029,7 @@ class PixaWalletDialog extends React.PureComponent {
 
             if (actions?.trigger_snackbar) {
                 actions.trigger_snackbar(t("components.pixa_wallet_dialog.transferred_pxp_to", {
-                    Number: Number(amount).toFixed(2),
+                    Number: formatNumber(amount, 2),
                     to: to
                 }), 'success');
             }
@@ -2931,26 +3116,26 @@ class PixaWalletDialog extends React.PureComponent {
         const pending = (_savingsWithdrawals || []).filter(w => w.currency === currency);
         const sectionId = 'savings:' + currency;
         const summaryParts = [];
-        if (savingsBalance > 0) summaryParts.push(`${savingsBalance.toFixed(3)} ${currency}`);
-        if (pending.length > 0) summaryParts.push(t("components.pixa_wallet_dialog.pending_count", { count: pending.length }));
+        if (savingsBalance > 0) summaryParts.push(formatAmount(savingsBalance, currency, 3));
+        if (pending.length > 0) summaryParts.push(t("components.pixa_wallet_dialog.pending_count", { count: formatInteger(pending.length) }));
         return (
             <React.Fragment>
                 {this._render_section_header(sectionId, t("components.pixa_wallet_dialog.savings"), summaryParts.join(" · "))}
                 <Collapse in={this._is_section_expanded(sectionId)}>
                     <Typography style={{color: "#a5a5a5", margin: "8px 0px 0px 0px"}} component={"p"} variant={"body1"}>{t("components.pixa_wallet_dialog.in_savings_withdrawals_take_3_days_to", {
                         text: _itsOwnProfile ? t("components.pixa_wallet_dialog.you_have") : t("components.pixa_wallet_dialog.it_has"),
-                        savingsBalance: savingsBalance.toFixed(3),
+                        savingsBalance: formatNumber(savingsBalance, 3),
                         currency: currency
                     })}</Typography>
                     <List className={classes.delegationList} style={{minWidth: "auto", width: "100%"}}>
                         <ListSubheader disableSticky style={{backgroundColor: "transparent"}}>{t("components.pixa_wallet_dialog.pending_withdrawals", {
-                            pending_count: pending.length
+                            pending_count: formatInteger(pending.length)
                         })}</ListSubheader>
                         {pending.map((w, i) => (
                             <ListItem key={w.request_id != null ? w.request_id : i} className={classes.delegationListItem}>
                                 <ListItemIcon><HistoryRounded style={{opacity: 0.7}}/></ListItemIcon>
                                 <ListItemText
-                                    primary={w.amount}
+                                    primary={formatAmount(w.amount_num, w.currency, 3)}
                                     secondary={w.daysLeft > 0 ? t("components.pixa_wallet_dialog.arrives_in_day", {
                                         day: { day: w.daysLeft },
                                     }) : t("components.pixa_wallet_dialog.arriving_soon")}
@@ -2990,11 +3175,11 @@ class PixaWalletDialog extends React.PureComponent {
         const sectionId = 'recurrent:' + currency;
         return (
             <React.Fragment>
-                {this._render_section_header(sectionId, t("components.pixa_wallet_dialog.recurring_transfers"), rows.length > 0 ? t("components.pixa_wallet_dialog.active_count", { count: rows.length }) : "")}
+                {this._render_section_header(sectionId, t("components.pixa_wallet_dialog.recurring_transfers"), rows.length > 0 ? t("components.pixa_wallet_dialog.active_count", { count: formatInteger(rows.length) }) : "")}
                 <Collapse in={this._is_section_expanded(sectionId)}>
                     <List className={classes.delegationList} style={{minWidth: "auto", width: "100%"}}>
                         <ListSubheader disableSticky style={{backgroundColor: "transparent"}}>{t("components.pixa_wallet_dialog.outgoing", {
-                            row_count: rows.length
+                            row_count: formatInteger(rows.length)
                         })}</ListSubheader>
                         {rows.map((r, i) => (
                             <ListItem key={(r.to || '') + '-' + i} className={classes.delegationListItem}>
@@ -3004,9 +3189,9 @@ class PixaWalletDialog extends React.PureComponent {
                                 <ListItemText
                                     primary={<span style={{cursor: "pointer"}} onClick={() => this._open_author(r.to)}>{`@${r.to}`}</span>}
                                     secondary={t("components.pixa_wallet_dialog.every_h_left", {
-                                        amount: r.amount,
-                                        recurrence: r.recurrence,
-                                        remaining_executions: r.remaining_executions
+                                        amount: formatAmount(r.amount_num, r.currency, 3),
+                                        recurrence: formatInteger(r.recurrence),
+                                        remaining_executions: formatInteger(r.remaining_executions)
                                     })}
                                 />
                                 {_itsOwnProfile && <ListItemSecondaryAction>
@@ -3054,7 +3239,7 @@ class PixaWalletDialog extends React.PureComponent {
                 items.push({
                     key: 'c' + (c.requestid != null ? c.requestid : i),
                     icon: <CallMadeRounded style={{opacity: 0.7}}/>,
-                    primary: `${c.collateral} → PXS`,
+                    primary: `${formatAmount(c.collateral_num, c.collateral_currency, 3)} → PXS`,
                     secondary: d ? t("components.pixa_wallet_dialog.collateral_locked_excess_returns_in", {
                         d: d
                     }) : t("components.pixa_wallet_dialog.collateral_locked_excess_returns_soon"),
@@ -3066,7 +3251,7 @@ class PixaWalletDialog extends React.PureComponent {
                 items.push({
                     key: 'r' + (c.requestid != null ? c.requestid : i),
                     icon: <CallReceivedRounded style={{opacity: 0.7}}/>,
-                    primary: `${c.amount} → PXA`,
+                    primary: `${formatAmount(c.amount_num, c.currency, 3)} → PXA`,
                     secondary: d ? t("components.pixa_wallet_dialog.arrives_in", {
                         d: d
                     }) : t("components.pixa_wallet_dialog.arriving_soon"),
@@ -3083,7 +3268,7 @@ class PixaWalletDialog extends React.PureComponent {
                 items.push({
                     key: 'r' + (c.requestid != null ? c.requestid : i),
                     icon: <BankTransferOut style={{opacity: 0.7}}/>,
-                    primary: `${c.amount} → PXA`,
+                    primary: `${formatAmount(c.amount_num, c.currency, 3)} → PXA`,
                     secondary: d ? t("components.pixa_wallet_dialog.settles_in", {
                         d: d
                     }) : t("components.pixa_wallet_dialog.settling_soon"),
@@ -3094,7 +3279,7 @@ class PixaWalletDialog extends React.PureComponent {
         return (
             <React.Fragment>
                 {this._render_section_header(sectionId, t("components.pixa_wallet_dialog.pending_swaps"), items.length > 0 ? t("components.pixa_wallet_dialog.in_progress", {
-                    item_count: items.length
+                    item_count: formatInteger(items.length)
                 }) : "")}
                 <Collapse in={this._is_section_expanded(sectionId)}>
                     <Typography style={{color: "#a5a5a5", margin: "8px 0px 0px 0px"}} component={"p"} variant={"body1"}>
@@ -3102,7 +3287,7 @@ class PixaWalletDialog extends React.PureComponent {
                     </Typography>
                     <List className={classes.delegationList} style={{minWidth: "auto", width: "100%"}}>
                         <ListSubheader disableSticky style={{backgroundColor: "transparent"}}>{t("components.pixa_wallet_dialog.in_progress", {
-                            item_count: items.length
+                            item_count: formatInteger(items.length)
                         })}</ListSubheader>
                         {items.map((it) => (
                             <ListItem key={it.key} className={classes.delegationListItem}>
@@ -3195,8 +3380,9 @@ class PixaWalletDialog extends React.PureComponent {
         const broadcastAccount = _itsOwnProfile ? account : (_loggedInUsername ? { username: _loggedInUsername, name: _loggedInUsername } : account);
         const wealthLabel = _itsOwnProfile ? "of your wealth" : "of its wealth";
 
-        // Computed display values
-        const totalUsdDisplay = _totalUsd.toFixed(0);
+        // Computed display values — every figure goes through utils/numberFormat
+        // so grouping, decimal marks, percent and currency-code placement follow
+        // the language/location set in Settings.
         // Gauge basis = ACCOUNT VALUE: delegation flows are excluded entirely
         // from the PXP component — borrowed (delegated-in) stake never adds
         // value and lent (delegated-out) stake never removes it, so PXP
@@ -3218,9 +3404,9 @@ class PixaWalletDialog extends React.PureComponent {
         // "X available · Y in savings · Z pending" caption under each token's
         // price line. Returns null when nothing is locked, so the line hides.
         const _breakdownLine = (liquid, savings, pending) => {
-            const parts = [t("components.pixa_wallet_dialog.available_amount", { amount: (Number(liquid) || 0).toFixed(3) })];
-            if ((Number(savings) || 0) > 0) parts.push(t("components.pixa_wallet_dialog.in_savings_amount", { amount: Number(savings).toFixed(3) }));
-            if ((Number(pending) || 0) > 0) parts.push(t("components.pixa_wallet_dialog.pending_amount", { amount: Number(pending).toFixed(3) }));
+            const parts = [t("components.pixa_wallet_dialog.available_amount", { amount: formatNumber(liquid, 3) })];
+            if ((Number(savings) || 0) > 0) parts.push(t("components.pixa_wallet_dialog.in_savings_amount", { amount: formatNumber(savings, 3) }));
+            if ((Number(pending) || 0) > 0) parts.push(t("components.pixa_wallet_dialog.pending_amount", { amount: formatNumber(pending, 3) }));
             return parts.length > 1 ? parts.join(" · ") : null;
         };
         const _pixaBreakdown = _breakdownLine(_pixaBalance, _savingsPixa, _pendingPixa);
@@ -3229,31 +3415,50 @@ class PixaWalletDialog extends React.PureComponent {
         // no delegation flows in it (borrowing adds nothing, lending removes
         // nothing). The usable (effective) figure lives in the sentence under
         // the Delegations header, which explains the borrowed / lent parts.
-        const pxpDisplay = _ownPxp.toFixed(0);
-        const pixaDisplay = _pixaHoldings.toFixed(0);
-        const pxsDisplay = _pxsHoldings.toFixed(0);
-        const pxpUsdDisplay = _pxpUsd.toFixed(0);
-        const pixaUsdDisplay = _pixaUsd.toFixed(0);
-        const pxsUsdDisplay = _pxsUsd.toFixed(0);
+        const pxpDisplay = formatInteger(_ownPxp);
+        const pixaDisplay = formatInteger(_pixaHoldings);
+        const pxsDisplay = formatInteger(_pxsHoldings);
         // Display currency: token values are USD-anchored; convert at render time.
         const fiatRate = Number.isFinite(Number(_fiatRate)) && Number(_fiatRate) > 0 ? Number(_fiatRate) : 1;
         const cur = _currency || 'USD';
-        const fmtFiat = (usd, d = 0) => `${((Number(usd) || 0) * fiatRate).toFixed(d)} ${cur}`;
+        const fmtFiat = (usd, d = 0) => formatFiatFromUsd(usd, fiatRate, cur, d);
         const totalFiatDisplay = fmtFiat(_totalUsd, 0);
         // Raw-valued (_pxpRawUsd) to match the raw pxpDisplay beside it —
         // the same basis the gauge arcs and % splits already run on.
         const pxpFiatDisplay = fmtFiat(_pxpRawUsd, 0);
         const pixaFiatDisplay = fmtFiat(_pixaUsd, 0);
         const pxsFiatDisplay = fmtFiat(_pxsUsd, 0);
-        const pxpPctDisplay = _tokenTotalUsd > 0 ? ((_pxpRawUsd / _tokenTotalUsd) * 100).toFixed(1) : '0.0';
-        const pixaPctDisplay = _tokenTotalUsd > 0 ? ((_pixaUsd / _tokenTotalUsd) * 100).toFixed(1) : '0.0';
-        const pxsPctDisplay = _tokenTotalUsd > 0 ? ((_pxsUsd / _tokenTotalUsd) * 100).toFixed(1) : '0.0';
+        const pxpPctDisplay = formatPercent(_tokenTotalUsd > 0 ? (_pxpRawUsd / _tokenTotalUsd) * 100 : 0, 1);
+        const pixaPctDisplay = formatPercent(_tokenTotalUsd > 0 ? (_pixaUsd / _tokenTotalUsd) * 100 : 0, 1);
+        const pxsPctDisplay = formatPercent(_tokenTotalUsd > 0 ? (_pxsUsd / _tokenTotalUsd) * 100 : 0, 1);
         const hasRewards = _rewardPixa > 0 || _rewardPxs > 0 || _rewardPxp > 0;
         const _hasAnyFunds = _totalUsd > 0 || _pxpBalance > 0 || _pixaHoldings > 0 || _pxsHoldings > 0;
 
-        // Power down remaining info — to_withdraw and withdrawn are micro-vests (1e6 = 1 VEST)
-        const powerDownWeeksRemaining = _isPoweringDown && _nextPowerDown > 0 ? Math.ceil((_toWithdraw - _withdrawn) / 1e6 / (parseFloat(this.state._fullAccount?.vesting_withdraw_rate || 0) || 1)) : 0;
-        const nextPowerDownDays = _nextWithdrawalDate ? Math.max(0, Math.ceil((new Date(_nextWithdrawalDate).getTime() - Date.now()) / (1000*60*60*24))) : 0;
+        // Live power-down schedule from the account's own withdraw fields
+        // (to_withdraw / withdrawn are micro-VESTS, 1e6 = 1 VESTS): next
+        // instalment and its date, instalments left, received / still to come,
+        // completion date — see utils/powerDown.
+        const pd = powerDownStatus({
+            rateVests: this.state._withdrawRateVests,
+            toWithdrawMicro: _toWithdraw,
+            withdrawnMicro: _withdrawn,
+            nextDate: _nextWithdrawalDate,
+            vestToPixa: this.state._vestToPixa,
+            intervals: this.state._powerDownIntervals,
+            intervalSeconds: this.state._powerDownIntervalSeconds,
+        });
+        const pdActive = !!_isPoweringDown && pd.active;
+        // Amount as the account reports it (already PXA-converted at load, and
+        // set optimistically right after a broadcast); pd.nextPxa is the same
+        // figure recomputed from the raw rate, min(rate, remaining).
+        const pdNextPxa = pdActive ? (pd.nextPxa > 0 ? pd.nextPxa : (Number(_nextPowerDown) || 0)) : 0;
+        const pdNextFiat = pdActive ? this._fiat_of_pxa(pdNextPxa) : null;
+        const pdRelative = pdActive
+            ? (formatRelativeDays(pd.daysToNext) || t("components.pixa_wallet_dialog.in_days", { nextPowerDownDays: pd.daysToNext }))
+            : "";
+        const pdDueLine = pdActive && pd.nextDate
+            ? t("components.pixa_wallet_dialog.pd_due_on", { date: formatDate(pd.nextDate), relative: pdRelative })
+            : pdRelative;
 
         // Portfolio data for pie chart.
         // When the account holds nothing the chart would otherwise compute
@@ -3335,19 +3540,18 @@ class PixaWalletDialog extends React.PureComponent {
                     <div style={{display: "flex", gap: "12px", flexWrap: "wrap"}}>
                         <div className={classes.portfolioCard} onClick={() => {this._handle_tab_value_change({}, 3)}} style={{flex: "1 1 calc(50% - 6px)", backgroundImage: "url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MDAgNTAwIj4KICA8cGF0aCBkPSJNIDM3NC4wOTQgMzQzLjQyOSBDIDM2OC4wOTEgMzM3LjI3MiAzNjAuNTQ3IDMzNC4xOTQgMzUxLjc3MiAzMzQuMTk0IEwgMjQ0LjAxMiAzMzQuMTk0IEwgMjExLjk5MiAzMjIuOTU2IEwgMjE3LjA3MSAzMDguNDg2IEwgMjQ0LjAxMiAzMTguNzk5IEwgMjg3LjExNyAzMTguNzk5IEMgMjkyLjUwMyAzMTguNzk5IDI5Ni44MTUgMzE2LjY0MiAzMDAuMzU1IDMxMy4xMDMgQyAzMDMuODk2IDMwOS41NjIgMzA1LjU5IDMwNS4yNTMgMzA1LjU5IDMwMC40OCBDIDMwNS41OSAyOTIuMTY2IDMwMS41ODggMjg2LjQ3IDI5My41ODIgMjgzLjIzNyBMIDE4MS42NjYgMjQxLjgyNyBMIDE1MS42NDcgMjQxLjgyNyBMIDE1MS42NDcgMzgwLjM3NiBMIDI1OS40MDYgNDExLjE2NCBMIDM4My4wMjIgMzY0Ljk4MSBDIDM4My4xNzcgMzU2LjgyMSAzODAuMDk4IDM0OS41ODggMzc0LjA5NCAzNDMuNDI5IE0gMTIwLjg1OSAyNDEuODI3IEwgNTkuMDM0IDI0MS44MjcgTCA1OS4wMzQgNDExLjE2NCBMIDEyMC44NTkgNDExLjE2NCBMIDEyMC44NTkgMjQxLjgyNyBaIiBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAxOyB0cmFuc2Zvcm0tYm94OiBmaWxsLWJveDsgdHJhbnNmb3JtLW9yaWdpbjogNTAlIDUwJTsgZmlsbDogcmdiKDI1NSwgMjU1LCAyNTUpOyBmaWxsLW9wYWNpdHk6IDAuMDU7IiB0cmFuc2Zvcm09Im1hdHJpeCgwLjgzODY3MSwgLTAuNTQ0NjM5LCAwLjU0NDYzOSwgMC44Mzg2NzEsIC0wLjAwMDAwNiwgLTAuMDAwMDA3KSI+PC9wYXRoPgogIDxwYXRoIGQ9Ik0gMzA5LjQyIDIzLjcyNCBDIDI5Mi45MTIgMjMuNjM2IDI3Ni44NDQgMzkuNTMxIDI4NC4xOCA1OS4yNzEgTCAyNTYuNDkzIDU5LjI3MSBDIDI0Ni44NDMgNTkuMjcxIDIzOS4wMjcgNjcuMDg3IDIzOS4wMjcgNzYuNzM5IEwgMjM5LjAyNyA5NC4yMDYgQyAyMzkuMDI3IDk5LjAyNyAyNDIuOTM4IDEwMi45MzkgMjQ3Ljc2IDEwMi45MzkgTCAzMjYuMzY0IDEwMi45MzkgTCAzMjYuMzY0IDc2LjczOSBMIDM0My44MyA3Ni43MzkgTCAzNDMuODMgMTAyLjkzOSBMIDQyMi40MzUgMTAyLjkzOSBDIDQyNy4yNTggMTAyLjkzOSA0MzEuMTcgOTkuMDI3IDQzMS4xNyA5NC4yMDYgTCA0MzEuMTcgNzYuNzM5IEMgNDMxLjE3IDY3LjA4NyA0MjMuMzQ0IDU5LjI3MSA0MTMuNzAzIDU5LjI3MSBMIDM4Ni4wMTYgNTkuMjcxIEMgMzk2LjIzNCAzMC43MTEgMzU3LjgwNiAxMC41MzYgMzQwLjA3NSAzNS4xNjQgTCAzMzUuMDk3IDQxLjgwMiBMIDMzMC4xMTkgMzQuOTkxIEMgMzI0LjYxNSAyNy4yMTggMzE3LjAxOCAyMy44MTIgMzA5LjQyIDIzLjcyNCBNIDMwOC44OTcgNDEuODAyIEMgMzE2LjY2OSA0MS44MDIgMzIwLjYgNTEuMjM1IDMxNS4wOTcgNTYuNzM4IEMgMzA5LjU5NiA2Mi4yNCAzMDAuMTYzIDU4LjMwOSAzMDAuMTYzIDUwLjUzNiBDIDMwMC4xNjMgNDUuNzA3IDMwNC4wNzUgNDEuODAyIDMwOC44OTcgNDEuODAyIE0gMzYxLjMgNDEuODAyIEMgMzY5LjA3MyA0MS44MDIgMzczLjAwNCA1MS4yMzUgMzY3LjUwMiA1Ni43MzggQyAzNjEuOTk4IDYyLjI0IDM1Mi41NjUgNTguMzA5IDM1Mi41NjUgNTAuNTM2IEMgMzUyLjU2NSA0NS43MDcgMzU2LjQ3OCA0MS44MDIgMzYxLjMgNDEuODAyIE0gMjQ3Ljc2IDExMS42NzIgTCAyNDcuNzYgMTgxLjU0NSBDIDI0Ny43NiAxOTEuMTg2IDI1NS41NzUgMTk5LjAxMiAyNjUuMjI3IDE5OS4wMTIgTCA0MDQuOTY5IDE5OS4wMTIgQyA0MTQuNjExIDE5OS4wMTIgNDIyLjQzNSAxOTEuMTg2IDQyMi40MzUgMTgxLjU0NSBMIDQyMi40MzUgMTExLjY3MiBMIDM0My44MyAxMTEuNjcyIEwgMzQzLjgzIDE4MS41NDUgTCAzMjYuMzY0IDE4MS41NDUgTCAzMjYuMzY0IDExMS42NzIgTCAyNDcuNzYgMTExLjY3MiBaIiBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAxOyB0cmFuc2Zvcm0tYm94OiBmaWxsLWJveDsgdHJhbnNmb3JtLW9yaWdpbjogNTAlIDUwJTsgZmlsbDogcmdiKDI1NSwgMjU1LCAyNTUpOyBmaWxsLW9wYWNpdHk6IDAuMDU7IiB0cmFuc2Zvcm09Im1hdHJpeCgwLjgzODY3MSwgLTAuNTQ0NjM5LCAwLjU0NDYzOSwgMC44Mzg2NzEsIC0wLjAwMDAwNCwgLTAuMDAwMDEzKSI+PC9wYXRoPgo8L3N2Zz4K)", backgroundRepeat: "no-repeat", backgroundPosition: "90% 50%", backgroundSize: "30%", minWidth: "140px", padding: "16px"}}>
                             <Typography variant="body2" style={{color: "#999", marginBottom: "4px"}}>{t("components.pixa_wallet_dialog.rewards_pending")}</Typography>
-                            <Typography variant="h6" className="monospace" style={{color: "#ffffff"}}>{((_rewardPixa * _pixaUsdPrice + _rewardPxs * _pxsUsdPrice + _rewardPxpInPixa * _pixaUsdPrice) * fiatRate).toFixed(2)} {cur}</Typography>
+                            <Typography variant="h6" className="monospace" style={{color: "#ffffff"}}>{fmtFiat(_rewardPixa * _pixaUsdPrice + _rewardPxs * _pxsUsdPrice + _rewardPxpInPixa * _pixaUsdPrice, 2)}</Typography>
                             <Typography variant="caption" style={{color: "#666"}}>{t("components.pixa_wallet_dialog.pxa_pxs_pxp", {
-                                rewardPixa: _rewardPixa.toFixed(1),
-                                rewardPxs: _rewardPxs.toFixed(1),
-                                rewardPxp: _rewardPxp.toFixed(1)
+                                rewardPixa: formatNumber(_rewardPixa, 1),
+                                rewardPxs: formatNumber(_rewardPxs, 1),
+                                rewardPxp: formatNumber(_rewardPxp, 1)
                             })}</Typography>
                         </div>
                         <div className={classes.portfolioCard} onClick={() => {this._handle_tab_value_change({}, 0)}} style={{flex: "1 1 calc(50% - 6px)", backgroundImage: "url(data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MDAgNTAwIj4KICA8cGF0aCBkPSJNIDI5Mi4xMzcgNDc0LjY0MyBMIDMzOS44MTggNDI2Ljk2MSBMIDIzOC4yMTMgMzI1LjM1OCBMIDE1NC45MzMgNDA4LjY0MiBMIDAuNjUxIDI1NC4xNSBMIDMwLjAwOCAyMjQuNzk1IEwgMTU0LjkzMyAzNDkuNzE5IEwgMjM4LjIxMyAyNjYuNDM2IEwgMzY5LjM4MiAzOTcuMzk4IEwgNDE3LjA2IDM0OS43MTkgTCA0MTcuMDYgNDc0LjY0MyBMIDI5Mi4xMzcgNDc0LjY0MyBaIiBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAxOyB0cmFuc2Zvcm0tYm94OiBmaWxsLWJveDsgdHJhbnNmb3JtLW9yaWdpbjogNTAlIDUwJTsgZmlsbDogcmdiKDI1NSwgMjU1LCAyNTUpOyBmaWxsLW9wYWNpdHk6IDAuMDU7IiB0cmFuc2Zvcm09Im1hdHJpeCgwLjk5NDUyMiwgMC4xMDQ1MjgsIC0wLjEwNDUyOCwgMC45OTQ1MjIsIC0wLjAwMDAwMywgMC4wMDAwMDQpIi8+CiAgPHBhdGggZD0iTSAxODcuNDc2IDMwOC4wNjkgTCAxODcuNDc2IDE4NS41ODIgTCAxMjYuMjM2IDE4NS41ODIgTCAyMjguMzA3IDEuODU0IEwgMjI4LjMwNyAxMjQuMzQgTCAyODkuNTQ5IDEyNC4zNCBMIDE4Ny40NzYgMzA4LjA2OSBaIiBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAxOyB0cmFuc2Zvcm0tYm94OiBmaWxsLWJveDsgdHJhbnNmb3JtLW9yaWdpbjogNTAlIDUwJTsgZmlsbDogcmdiKDI1NSwgMjU1LCAyNTUpOyBmaWxsLW9wYWNpdHk6IDAuMDU7IiB0cmFuc2Zvcm09Im1hdHJpeCgwLjk0NTUxOSwgMC4zMjU1NjgsIC0wLjMyNTU2OCwgMC45NDU1MTksIC0wLjAwMDAwMywgMC4wMDAwMDMpIi8+CiAgPHBhdGggZD0iTSAzOTEuMDQ3IDM2OC44MDQgTCAzOTEuMDQ3IDI4NS4yNDcgTCAzNDkuMjcxIDI4NS4yNDcgTCA0MTguOSAxNTkuOTEzIEwgNDE4LjkgMjQzLjQ3MSBMIDQ2MC42NzcgMjQzLjQ3MSBMIDM5MS4wNDcgMzY4LjgwNCBaIiBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAxOyB0cmFuc2Zvcm0tb3JpZ2luOiA0MDQuOTc1cHggMjY0LjM2cHg7IGZpbGw6IHJnYigyNTUsIDI1NSwgMjU1KTsgZmlsbC1vcGFjaXR5OiAwLjA1OyIgdHJhbnNmb3JtPSJtYXRyaXgoMC45NDU1MTksIDAuMzI1NTY4LCAtMC4zMjU1NjgsIDAuOTQ1NTE5LCAtMC4wMDAwMDMsIC0wLjAwMDAxKSIvPgogIDxwYXRoIGQ9Ik0gMjA5LjIxNCA0ODguODk1IEwgMjA5LjIxNCA0MzYuMzQ3IEwgMTgyLjk0MSA0MzYuMzQ3IEwgMjI2LjczMSAzNTcuNTI1IEwgMjI2LjczMSA0MTAuMDc0IEwgMjUzLjAwNCA0MTAuMDc0IEwgMjA5LjIxNCA0ODguODk1IFoiIHN0eWxlPSJzdHJva2Utd2lkdGg6IDE7IHRyYW5zZm9ybS1vcmlnaW46IDIxNy45NzNweCA0MjMuMjExcHg7IGZpbGw6IHJnYigyNTUsIDI1NSwgMjU1KTsgZmlsbC1vcGFjaXR5OiAwLjA1OyIgdHJhbnNmb3JtPSJtYXRyaXgoMC45NDU1MTksIDAuMzI1NTY4LCAtMC4zMjU1NjgsIDAuOTQ1NTE5LCAwLjAwMDAwNywgMC4wMDAwMDkpIi8+Cjwvc3ZnPgo=)", backgroundRepeat: "no-repeat", backgroundPosition: "90% 50%", backgroundSize: "30%", minWidth: "140px", padding: "16px"}}>
                             <Typography variant="body2" style={{color: "#999", marginBottom: "4px"}}>{t("components.pixa_wallet_dialog.power_down")}</Typography>
-                            <Typography variant="h6" className="monospace" style={{color: "#ffffff"}}>{_isPoweringDown ? `~${_nextPowerDown.toFixed(2)} PXA` : t("components.pixa_wallet_dialog.inactive")}</Typography>
-                            <Typography variant="caption" style={{color: "#666"}}>{_isPoweringDown ? t("components.pixa_wallet_dialog.in_days", {
-                                nextPowerDownDays: nextPowerDownDays
-                            }) : t("components.pixa_wallet_dialog.not_powering_down")}</Typography>
+                            <Typography variant="h6" className="monospace" style={{color: "#ffffff"}}>{pdActive ? formatAmount(pdNextPxa, "PXA", 2) : t("components.pixa_wallet_dialog.inactive")}</Typography>
+                            {pdActive && pdNextFiat && <Typography variant="caption" component="p" className="monospace" style={{color: "#999"}}>{"≈ " + pdNextFiat}</Typography>}
+                            <Typography variant="caption" component="p" style={{color: "#666"}}>{pdActive ? pdDueLine : t("components.pixa_wallet_dialog.not_powering_down")}</Typography>
                         </div>
                     </div>
                     <div style={{width: "100%"}}>
@@ -3386,7 +3590,7 @@ class PixaWalletDialog extends React.PureComponent {
                                 </span>
                                 <span>
                                     <span className={"monospace"}>~ {pxpFiatDisplay}</span>
-                                    <span>{pxpPctDisplay}% {wealthLabel}</span>
+                                    <span>{pxpPctDisplay} {wealthLabel}</span>
                                 </span>
                             </Typography>
                             <Typography className={classes.pricedAt} variant="body2" color="textPrimary" component="p">{t("components.pixa_wallet_dialog.fungible_with_pxa")}</Typography>
@@ -3396,9 +3600,9 @@ class PixaWalletDialog extends React.PureComponent {
                                     k="components.pixa_wallet_dialog.pxp_usable_because"
                                     vars={{
                                         text: _itsOwnProfile ? t("components.pixa_wallet_dialog.you_have") : t("components.pixa_wallet_dialog.it_has"),
-                                        overall: _pxpBalance.toFixed(2),
-                                        borrowed: _receivedPxp.toFixed(2),
-                                        lended: _delegatedPxp.toFixed(2)
+                                        overall: formatNumber(_pxpBalance, 2),
+                                        borrowed: formatNumber(_receivedPxp, 2),
+                                        lended: formatNumber(_delegatedPxp, 2)
                                     }}
                                     slots={[
                                         <b className={"monospace"} key="0" style={{color: "#e0e0e0", fontWeight: 600}} />,
@@ -3409,7 +3613,7 @@ class PixaWalletDialog extends React.PureComponent {
                             <div className={classes.delegations}>
                                 <List className={classes.delegationList}>
                                     <ListSubheader disableSticky style={{backgroundColor: "transparent"}}>{t("components.pixa_wallet_dialog.outgoing_2", {
-                                        outgoingDelegation_count: _outgoingDelegations.length
+                                        outgoingDelegation_count: formatInteger(_outgoingDelegations.length)
                                     })}</ListSubheader>
                                     {_outgoingDelegations.map((d, i) => (
                                         <ListItem key={d.delegatee || i} className={classes.delegationListItem}>
@@ -3417,7 +3621,7 @@ class PixaWalletDialog extends React.PureComponent {
                                                 <Avatar src={d.image || ''} style={{borderRadius: "12px", cursor: "pointer", backgroundColor: "#000"}} className={"pixelated"} onClick={() => this._open_author(d.delegatee)} />
                                             </ListItemAvatar>
                                             <ListItemText primary={<span style={{cursor: "pointer"}} onClick={() => this._open_author(d.delegatee)}>{`@${d.delegatee}`}</span>} secondary={t("components.pixa_wallet_dialog.you_delegated_pxp", {
-                                                pxp: d.pxp.toFixed(2)
+                                                pxp: formatNumber(d.pxp, 2)
                                             })}/>
                                             {_itsOwnProfile && <ListItemSecondaryAction>
                                                 <Tooltip title={t("components.pixa_wallet_dialog.cancel_this_delegation")}>
@@ -3433,7 +3637,7 @@ class PixaWalletDialog extends React.PureComponent {
                                 </List>
                                 <List className={classes.delegationList}>
                                     <ListSubheader disableSticky style={{backgroundColor: "#020202"}}>{t("components.pixa_wallet_dialog.incoming", {
-                                        incomingDelegation_count: _incomingDelegations.length
+                                        incomingDelegation_count: formatInteger(_incomingDelegations.length)
                                     })}</ListSubheader>
                                     {_incomingDelegations.map((d, i) => (
                                         <ListItem key={d.delegator || i} className={classes.delegationListItem}>
@@ -3441,7 +3645,7 @@ class PixaWalletDialog extends React.PureComponent {
                                                 <Avatar src={d.image || ''} style={{borderRadius: "12px", cursor: "pointer", backgroundColor: "#000"}} className={"pixelated"} onClick={() => this._open_author(d.delegator)} />
                                             </ListItemAvatar>
                                             <ListItemText primary={<span style={{cursor: "pointer"}} onClick={() => this._open_author(d.delegator)}>{`@${d.delegator}`}</span>} secondary={t("components.pixa_wallet_dialog.pxp_delegated_to_you", {
-                                                pxp: (d.pxp || 0).toFixed(2)
+                                                pxp: formatNumber(d.pxp || 0, 2)
                                             })}/>
                                         </ListItem>
                                     ))}
@@ -3452,20 +3656,42 @@ class PixaWalletDialog extends React.PureComponent {
                                 </List>
                             </div>
                             <Typography component={"h2"} variant={"h6"} className={classes.subTitle}>{t("components.pixa_wallet_dialog.powering_down")}</Typography>
-                            <div style={{display: "float", height: "48px"}}>
-                                {_isPoweringDown
-                                    ? <Tooltip title={<span className={classes.tooltip}>{t("components.pixa_wallet_dialog.weekly_rounds_remaining_pxa_per_round", {
-                                        powerDownWeeksRemaining: powerDownWeeksRemaining,
-                                        _nextPowerDown: _nextPowerDown.toFixed(2)
-                                    })}</span>}><Typography style={{color: "#a5a5a5", lineHeight: "36px", height: "36px", verticalAlign: "middle", margin: "0px 8px 0px 0px", float: "left"}} component={"p"} variant={"body1"}>{t("components.pixa_wallet_dialog.the_next_power_down_gives_pxa_in", {
-                                        nextPowerDown: _nextPowerDown.toFixed(2),
-                                        nextPowerDownDays: nextPowerDownDays
-                                    })}</Typography></Tooltip>
-                                    : <Typography style={{color: "#a5a5a5", lineHeight: "36px", height: "36px", verticalAlign: "middle", margin: "0px 8px 0px 0px", float: "left"}} component={"p"} variant={"body1"}>{t("components.pixa_wallet_dialog.not_currently_powering_down", {
-                                        text: _itsOwnProfile ? t("components.pixa_wallet_dialog.you_are") : t("components.pixa_wallet_dialog.it_is")
-                                    })}</Typography>
-                                }
-                            </div>
+                            {pdActive
+                                ? (
+                                    /* The live schedule: what the next instalment pays and
+                                       when, how many are left, what has been received and
+                                       what is still to come — each with its value in the
+                                       reference currency at today's price. */
+                                    <div className={classes.powerDownSchedule}>
+                                        <Typography component={"p"} variant={"body1"} className={"lead"}>{t("components.pixa_wallet_dialog.pd_next_instalment", {
+                                            amount: formatAmount(pdNextPxa, "PXA", 3),
+                                            fiat: pdNextFiat || "—"
+                                        })}</Typography>
+                                        <Typography component={"p"} variant={"body2"}>{pdDueLine}</Typography>
+                                        <Typography component={"p"} variant={"body2"}>{t("components.pixa_wallet_dialog.pd_instalments_left", {
+                                            count: formatInteger(pd.instalmentsLeft),
+                                            total: formatInteger(pd.totalInstalments)
+                                        })}</Typography>
+                                        <Typography component={"p"} variant={"body2"}>{t("components.pixa_wallet_dialog.pd_still_to_receive", {
+                                            amount: formatAmount(pd.remainingPxa, "PXA", 3),
+                                            fiat: this._fiat_of_pxa(pd.remainingPxa) || "—"
+                                        })}</Typography>
+                                        <Typography component={"p"} variant={"body2"}>{t("components.pixa_wallet_dialog.pd_received_so_far", {
+                                            amount: formatAmount(pd.paidPxa, "PXA", 3),
+                                            total: formatAmount(pd.totalPxa, "PXA", 3)
+                                        })}</Typography>
+                                        {pd.completionDate && <Typography component={"p"} variant={"body2"}>{t("components.pixa_wallet_dialog.pd_completes_on", { date: formatDate(pd.completionDate) })}</Typography>}
+                                        <Typography component={"span"} variant={"caption"} className={"note"}>{t("components.pixa_wallet_power_dialog.estimate_note")}</Typography>
+                                    </div>
+                                )
+                                : (
+                                    <div style={{display: "float", height: "48px"}}>
+                                        <Typography style={{color: "#a5a5a5", lineHeight: "36px", height: "36px", verticalAlign: "middle", margin: "0px 8px 0px 0px", float: "left"}} component={"p"} variant={"body1"}>{t("components.pixa_wallet_dialog.not_currently_powering_down", {
+                                            text: _itsOwnProfile ? t("components.pixa_wallet_dialog.you_are") : t("components.pixa_wallet_dialog.it_is")
+                                        })}</Typography>
+                                    </div>
+                                )
+                            }
                             {/* Special Features — only visible when broadcasting from a treasury account
                                 (pixa.team or pixa.rex). Direct PXP transfers are off-policy for normal
                                 accounts and gated server-side as well. */}
@@ -3522,16 +3748,16 @@ class PixaWalletDialog extends React.PureComponent {
                             </span>
                                 <span>
                                 <span className={"monospace"}>~ {pixaFiatDisplay}</span>
-                                <span>{pixaPctDisplay}% {wealthLabel}</span>
+                                <span>{pixaPctDisplay} {wealthLabel}</span>
                             </span>
                             </Typography>
                             <Typography className={classes.pricedAt} variant="body2" color="textPrimary" component="p">{t("components.pixa_wallet_dialog.priced_at_exchange", {
-                                Number: ((Number(_pixaUsdPrice) || 0) * fiatRate).toFixed(4),
+                                Number: formatNumber((Number(_pixaUsdPrice) || 0) * fiatRate, 4),
                                 cur: cur
                             })}</Typography>
                             {_pixaBreakdown && <Typography className={classes.pricedAt} variant="body2" component="p" style={{color: "#4f4f4f"}}>{_pixaBreakdown}</Typography>}
                             <div style={{width: "100%", height: 36, display: "flow", margin: "0px 0px 16px 0px"}}>
-                                <ButtonGroup disabled={_chartLoading} style={{float: "right"}}>
+                                <ButtonGroup disabled={_chartLoading || !PRICE_HISTORY_AVAILABLE} style={{float: "right"}}>
                                     {[
                                         { label: '1D', value: '1' },
                                         { label: '1W', value: '7' },
@@ -3549,42 +3775,58 @@ class PixaWalletDialog extends React.PureComponent {
                                     ))}
                                 </ButtonGroup>
                             </div>
-                            <ResponsiveContainer width="100%" height={_view_right_mobile_enabled ? 224: 320}>
-                                <LineChart data={_data}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#2c2c2c" />
-                                    <XAxis
-                                        dataKey="name"
-                                        tick={{ fill: '#aaa', fontSize: 12 }}
-                                        axisLine={false}
-                                        tickLine={false}
-                                        domain={['auto', 'auto']}
-                                    />
-                                    <YAxis
-                                        dataKey="price"
-                                        tick={{ fill: '#aaa', fontSize: 12 }}
-                                        tickFormatter={(value) => `${(value * fiatRate).toFixed(3)} ${cur}`}
-                                        axisLine={false}
-                                        tickLine={false}
-                                        domain={['auto', 'auto']}
-                                    />
-                                    <TooltipChart
-                                        contentStyle={{
-                                            backgroundColor: '#1e1e1e',
-                                            border: 'none',
-                                            color: '#fff',
-                                        }}
-                                        content={<CustomTooltip fiatRate={fiatRate} currency={cur} />}
-                                        labelStyle={{ color: '#999' }}
-                                    />
-                                    <Line
-                                        type="monotone"
-                                        dataKey="price"
-                                        stroke="#ffffff"
-                                        strokeWidth={2}
-                                        dot={false}
-                                    />
-                                </LineChart>
-                            </ResponsiveContainer>
+                            <div className={classes.priceChartWrapper + (PRICE_HISTORY_AVAILABLE ? "" : " " + classes.priceChartWrapperLocked)}>
+                                <div className={PRICE_HISTORY_AVAILABLE ? undefined : classes.priceChartBlurred} aria-hidden={PRICE_HISTORY_AVAILABLE ? undefined : true}>
+                                    <ResponsiveContainer width="100%" height={_view_right_mobile_enabled ? 224: 320}>
+                                        <LineChart data={_data}>
+                                            <CartesianGrid strokeDasharray="3 3" stroke="#2c2c2c" />
+                                            <XAxis
+                                                dataKey="name"
+                                                tick={{ fill: '#aaa', fontSize: 12 }}
+                                                axisLine={false}
+                                                tickLine={false}
+                                                domain={['auto', 'auto']}
+                                            />
+                                            <YAxis
+                                                dataKey="price"
+                                                tick={{ fill: '#aaa', fontSize: 12 }}
+                                                tickFormatter={(value) => fmtFiat(value, 3)}
+                                                axisLine={false}
+                                                tickLine={false}
+                                                domain={['auto', 'auto']}
+                                            />
+                                            <TooltipChart
+                                                contentStyle={{
+                                                    backgroundColor: '#1e1e1e',
+                                                    border: 'none',
+                                                    color: '#fff',
+                                                }}
+                                                content={<CustomTooltip fiatRate={fiatRate} currency={cur} />}
+                                                labelStyle={{ color: '#999' }}
+                                            />
+                                            <Line
+                                                type="monotone"
+                                                dataKey="price"
+                                                stroke="#ffffff"
+                                                strokeWidth={2}
+                                                dot={false}
+                                            />
+                                        </LineChart>
+                                    </ResponsiveContainer>
+                                </div>
+                                {!PRICE_HISTORY_AVAILABLE && (
+                                    <div className={classes.centerRechart}>
+                                        <div>
+                                            <Typography className={classes.priceChartNotice} variant="body1" component="p">
+                                                {t("components.pixa_wallet_dialog.price_history_not_available_yet")}
+                                            </Typography>
+                                            <Typography className={classes.priceChartNoticeDetail} variant="body2" component="p">
+                                                {t("components.pixa_wallet_dialog.price_history_too_early")}
+                                            </Typography>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                             {this._render_pending_swap_section('PXA')}
                             {this._render_savings_section('PXA')}
                             {this._render_recurrent_section('PXA')}
@@ -3620,11 +3862,11 @@ class PixaWalletDialog extends React.PureComponent {
                                 </span>
                                 <span>
                                     <span className={"monospace"}>~ {pxsFiatDisplay}</span>
-                                    <span>{pxsPctDisplay}% {wealthLabel}</span>
+                                    <span>{pxsPctDisplay} {wealthLabel}</span>
                                 </span>
                             </Typography>
                             <Typography className={classes.pricedAt} variant="body2" color="textPrimary" component="p">{t("components.pixa_wallet_dialog.priced_at_witness_feed", {
-                                Number: ((Number(_pxsUsdPrice) || 0) * fiatRate).toFixed(2),
+                                Number: formatNumber((Number(_pxsUsdPrice) || 0) * fiatRate, 2),
                                 cur: cur
                             })}</Typography>
                             {_pxsBreakdown && <Typography className={classes.pricedAt} variant="body2" component="p" style={{color: "#4f4f4f"}}>{_pxsBreakdown}</Typography>}
@@ -3641,7 +3883,7 @@ class PixaWalletDialog extends React.PureComponent {
                                     <YAxis
                                         dataKey="price"
                                         tick={{ fill: '#aaa', fontSize: 12 }}
-                                        tickFormatter={(value) => `${(value * fiatRate).toFixed(2)} ${cur}`}
+                                        tickFormatter={(value) => fmtFiat(value, 2)}
                                         axisLine={false}
                                         tickLine={false}
                                         domain={['auto', 'auto']}
@@ -3699,9 +3941,9 @@ class PixaWalletDialog extends React.PureComponent {
                                 </Tooltip>
                             </Typography>
                             {hasRewards && <Button className={classes.rewardClaim} color="primary" variant="text" onClick={this._claim_rewards} disabled={!_itsOwnProfile}><span style={{display: "inline"}}>{t("components.pixa_wallet_dialog.claim_reward")}</span> <span className={"subtitle"} style={{display: "inline", fontWeight: "400"}}>{t("components.pixa_wallet_dialog.pxa_pxs_pxp_2", {
-                                rewardPixa: _rewardPixa.toFixed(0),
-                                rewardPxs: _rewardPxs.toFixed(0),
-                                rewardPxp: _rewardPxp.toFixed(0)
+                                rewardPixa: formatInteger(_rewardPixa),
+                                rewardPxs: formatInteger(_rewardPxs),
+                                rewardPxp: formatInteger(_rewardPxp)
                             })}</span></Button>}
                             <WalletHistory
                                 history={_walletHistory}
@@ -3917,18 +4159,18 @@ class PixaWalletDialog extends React.PureComponent {
                         <LazyTour steps={this.state._tour_steps} onFinish={this._finish_tour} />
                     </React.Suspense>
                 ) : null}
-                <PixaWalletPowerDialog type={_power_dialog_opened} open={_power_dialog_opened.length} onClose={this._close_power_dialog} onConfirm={this._handle_power_confirm} api={this.state.api} account={account} maxPXP={_powerDownablePxp} maxPXA={_pixaBalance}/>
-                <PixaWalletSendDialog type={_send_dialog_opened} open={_send_dialog_opened.length} onToggleCurrency={this._open_send_dialog} onClose={this._close_send_dialog} api={this.state.api} account={_itsOwnProfile ? account : broadcastAccount} maxPXA={_itsOwnProfile ? _pixaBalance : 999999999} maxPXS={_itsOwnProfile ? _pxsBalance : 999999999} onSend={this._handle_send_confirm} initialUsername={!_itsOwnProfile ? account.username : undefined} lockedUsername={!_itsOwnProfile}/>
+                <PixaWalletPowerDialog type={_power_dialog_opened} open={_power_dialog_opened.length} onClose={this._close_power_dialog} onConfirm={this._handle_power_confirm} api={this.state.api} account={account} maxPXP={_powerDownablePxp} maxPXA={_pixaBalance} pixaUsdPrice={_pixaUsdPrice} fiatRate={fiatRate} fiatCurrency={cur} locale={this.state._locale} powerDownIntervals={this.state._powerDownIntervals} powerDownIntervalSeconds={this.state._powerDownIntervalSeconds}/>
+                <PixaWalletSendDialog type={_send_dialog_opened} open={_send_dialog_opened.length} onToggleCurrency={this._open_send_dialog} onClose={this._close_send_dialog} api={this.state.api} account={_itsOwnProfile ? account : broadcastAccount} maxPXA={_itsOwnProfile ? _pixaBalance : 999999999} maxPXS={_itsOwnProfile ? _pxsBalance : 999999999} pixaUsdPrice={_pixaUsdPrice} pxsUsdPrice={_pxsUsdPrice} fiatRate={fiatRate} fiatCurrency={cur} locale={this.state._locale} onSend={this._handle_send_confirm} initialUsername={!_itsOwnProfile ? account.username : undefined} lockedUsername={!_itsOwnProfile}/>
                 <PixaWalletKeysDialog type={_keys_dialog_opened} open={_keys_dialog_opened.length} onClose={this._close_keys_dialog} api={this.state.api} account={account} isOwnProfile={_itsOwnProfile}/>
-                <PixaWalletSwapDialog type={_swap_dialog_opened} open={_swap_dialog_opened.length} onToggleCurrency={this._open_swap_dialog} onClose={this._close_swap_dialog} api={this.state.api} maxPXA={_pixaBalance} maxPXS={_pxsBalance} onConfirm={this._handle_swap_confirm}/>
-                <PixaWalletDelegateDialog open={_delegate_dialog_opened} onClose={this._close_delegate_dialog} api={this.state.api} account={_itsOwnProfile ? account : broadcastAccount} maxPXP={_itsOwnProfile ? _powerDownablePxp : 999999999} onDelegate={this._handle_delegate_confirm} initialDelegatee={!_itsOwnProfile ? account.username : undefined} lockedDelegatee={!_itsOwnProfile}/>
-                <PixaWalletSendPowerDialog open={_send_power_dialog_opened} onClose={this._close_send_power_dialog} api={this.state.api} account={broadcastAccount} maxPXP={_powerDownablePxp} onSendPower={this._handle_send_power_confirm}/>
+                <PixaWalletSwapDialog type={_swap_dialog_opened} open={_swap_dialog_opened.length} onToggleCurrency={this._open_swap_dialog} onClose={this._close_swap_dialog} api={this.state.api} maxPXA={_pixaBalance} maxPXS={_pxsBalance} pixaUsdPrice={_pixaUsdPrice} pxsUsdPrice={_pxsUsdPrice} fiatRate={fiatRate} fiatCurrency={cur} locale={this.state._locale} onConfirm={this._handle_swap_confirm}/>
+                <PixaWalletDelegateDialog open={_delegate_dialog_opened} onClose={this._close_delegate_dialog} api={this.state.api} account={_itsOwnProfile ? account : broadcastAccount} maxPXP={_itsOwnProfile ? _powerDownablePxp : 999999999} locale={this.state._locale} onDelegate={this._handle_delegate_confirm} initialDelegatee={!_itsOwnProfile ? account.username : undefined} lockedDelegatee={!_itsOwnProfile}/>
+                <PixaWalletSendPowerDialog open={_send_power_dialog_opened} onClose={this._close_send_power_dialog} api={this.state.api} account={broadcastAccount} maxPXP={_powerDownablePxp} locale={this.state._locale} onSendPower={this._handle_send_power_confirm}/>
                 <CreateBulkAccountDialog open={_bulk_create_dialog_opened} onClose={this._close_bulk_create_dialog} api={this.state.api} creator={"initminer"} liquidSymbol={this.state._LIQUID_SYMBOL}/>
                 <PixaWalletBulkPowerDialog open={_bulk_power_dialog_opened} onClose={this._close_bulk_power_dialog} api={this.state.api} account={account} pixaToVest={this.state._pixaToVest} maxPXP={_powerDownablePxp} vestsSymbol={this.state._VESTS_SYMBOL} onBroadcasted={this._refresh_after_tx}/>
                 <PixaWalletSupraInfoDialog open={_supra_info_dialog_opened} onClose={this._close_supra_info_dialog}/>
                 <PixaWalletPowerInfoDialog open={_power_info_dialog_opened} onClose={this._close_power_info_dialog}/>
                 <PixaWalletPixaInfoDialog open={_pixa_info_dialog_opened} onClose={this._close_pixa_info_dialog}/>
-                <PixaWalletSavingsDialog type={_savings_dialog_opened} open={_savings_dialog_opened.length} mode={_savings_dialog_mode} onClose={this._close_savings_dialog} api={this.state.api} account={account} maxDeposit={_savings_dialog_opened === "PIXA" ? _pixaBalance : _pxsBalance} maxWithdraw={_savings_dialog_opened === "PIXA" ? _savingsPixa : _savingsPxs} onConfirm={this._handle_savings_confirm}/>
+                <PixaWalletSavingsDialog type={_savings_dialog_opened} open={_savings_dialog_opened.length} mode={_savings_dialog_mode} onClose={this._close_savings_dialog} api={this.state.api} account={account} maxDeposit={_savings_dialog_opened === "PIXA" ? _pixaBalance : _pxsBalance} maxWithdraw={_savings_dialog_opened === "PIXA" ? _savingsPixa : _savingsPxs} locale={this.state._locale} onConfirm={this._handle_savings_confirm}/>
                 <PixaWalletTaxesDialog open={_taxes_dialog_opened} onClose={this._close_taxes_dialog} api={this.state.api} account={account} fiatRate={fiatRate} fiatCurrency={cur} vestToPixa={this.state._vestToPixa} pixaToVest={this.state._pixaToVest} globalProps={this.state._globalProps}/>
             </React.Fragment>
         );

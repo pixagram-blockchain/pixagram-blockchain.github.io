@@ -12,6 +12,7 @@ import MasonryExtended from "../components/MasonryExtended";
 import useWindowDimensions from "../hooks/useWindowDimensions";
 import useMasonryGrid from "../hooks/useMasonryGrid";
 import useVoteSync from "../hooks/useVoteSync";
+import { usePictureDialog } from "../hooks/usePictureDialog";
 import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto } from "../utils/voteSync";
 import { idle, cancelIdle } from "../utils/idle";
 import {
@@ -57,6 +58,15 @@ const LazyTextEditorDialog = React.lazy(loadTextEditorDialog);
 // runs in parallel.
 const loadBlogPostDialog = () => import("../components/BlogPostDialog");
 const LazyBlogPostDialog = React.lazy(loadBlogPostDialog);
+
+// ── Deferred community-picture viewer ────────────────────────────────────
+// PictureDialog is PostDialog's image half (render pool, hero animation) —
+// split out the same way and warmed on idle, so the first click on the
+// community picture isn't gated on a cold chunk fetch. The page-side state
+// (the "#picture" history entry, the clicked element) lives in the light
+// usePictureDialog hook, imported statically above.
+const loadPictureDialog = () => import("../components/PictureDialog");
+const LazyPictureDialog = React.lazy(loadPictureDialog);
 
 // Edit / delete share one module and are reached only from the card menu on
 // your own posts — warmed on idle for logged-in users only. Same split as
@@ -397,7 +407,10 @@ const parseCommunityPathname = (pathname) => {
     // community page still needs to know which community it's displaying so
     // it can load posts and have BlogPostDialog open on top — we strip the
     // `/@author/permlink` suffix before matching.
-    const raw = pathname || '';
+    // A hash never belongs to the route: the picture viewer parks "#picture"
+    // on the community URL (and post URLs may carry "#replies"), and either
+    // would stop both regexes below from matching and read as "no community".
+    const raw = String(pathname || '').split('#')[0];
     const postMatch = raw.match(/^(\/portal-[0-9]+)\/@[a-z0-9\.\-]+\/[a-z0-9\.\-]+\/?$/);
     const effective = postMatch ? postMatch[1] : raw;
     const match = effective.match(/^\/(portal-[0-9]+)(\/(created|hot|trending|votes))?(\/editor)?\/?$/);
@@ -769,7 +782,7 @@ const useCommunityGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixel
 };
 
 // ── usePostNavigation ──────────────────────────────────────────────────
-const usePostNavigation = ({ api, posts, scrollToIndex, setSelectedPostIndex, fallbackUrl }) => {
+const usePostNavigation = ({ api, posts, scrollToIndex, setSelectedPostIndex, fallbackUrl, keyboardSuspended }) => {
     const [artworkOpen, setArtworkOpen] = useState(false);
     const [currentPost, setCurrentPost] = useState({});
     const [selectedIndex, setSelectedIndex] = useState(0);
@@ -983,6 +996,10 @@ const usePostNavigation = ({ api, posts, scrollToIndex, setSelectedPostIndex, fa
             // Don't cycle through feed posts while showing an orphan — the
             // `selectedIndex` doesn't correspond to anything meaningful.
             if (isOrphan && artworkOpen) return;
+            // Another overlay owns the keyboard (the picture viewer): Enter
+            // must not open a post underneath it, arrows must not scroll
+            // the feed behind it.
+            if (keyboardSuspended) return;
             let newIndex = selectedIndex;
             switch (event.keyCode) {
                 case 40: newIndex = Math.min(posts.length - 1, selectedIndex + 1); event.preventDefault(); break;
@@ -996,7 +1013,7 @@ const usePostNavigation = ({ api, posts, scrollToIndex, setSelectedPostIndex, fa
         };
         document.addEventListener("keydown", handleKeydown);
         return () => document.removeEventListener("keydown", handleKeydown);
-    }, [selectedIndex, posts, scrollToIndex, isOrphan, artworkOpen]);
+    }, [selectedIndex, posts, scrollToIndex, isOrphan, artworkOpen, keyboardSuspended]);
 
     // Push the post URL (optionally suffixed with a "#..." intent hash) and
     // seat the dialog. The hash must ride the SAME history entry as the post
@@ -1622,9 +1639,30 @@ const Community = ({ classes, settings, pathname, api }) => {
 
     const grid = useCommunityGrid({ windowWidth, windowHeight, isMobile, overscanByPixels });
 
+    // ── Community picture viewer ───────────────────────────────────────
+    // Click on the community picture (CommunityHeader / CommunityInfo call
+    // `onOpenPicture` with the click event) → "#picture" is pushed, the
+    // picture hero-animates out of its element into PictureDialog, rendered
+    // with the current renderer like an artwork; closing flies it back and
+    // pops the entry. A deep-linked "/portal-N#picture" opens it once the
+    // community image is known. Declared BEFORE usePostNavigation so its
+    // open flag can suspend the feed's Enter/arrow shortcuts. Mounted lazily
+    // on first open, kept mounted afterwards, chunk warmed on idle.
+    const pictureNav = usePictureDialog(community?.image || '');
+    const [pictureDialogMounted, setPictureDialogMounted] = useState(false);
+    useEffect(() => {
+        if (pictureNav.open) setPictureDialogMounted(true);
+    }, [pictureNav.open]);
+    useEffect(() => {
+        if (pictureDialogMounted) return;
+        const id = idle(() => { loadPictureDialog().catch(() => {}); });
+        return () => cancelIdle(id);
+    }, [pictureDialogMounted]);
+
     const postNav = usePostNavigation({
         api, posts, scrollToIndex: grid.scrollToIndex, setSelectedPostIndex: grid.setSelectedPostIndex,
         fallbackUrl: buildCommunityUrl(communityName, SORT_METHODS[sorting] || 'created'),
+        keyboardSuspended: pictureNav.open,
     });
 
     const { dialogs, openDialog, closeDialog } = useDialogManager();
@@ -1953,9 +1991,12 @@ const Community = ({ classes, settings, pathname, api }) => {
         onToggleJoined: handleToggleJoined, onViewMembers: () => openDialog('membersList'),
         onTabChange: handleTabChange, onTextEditor: handleTextEditor,
         onEditCommunity: () => openDialog('editCommunity'), onAddSomeone: () => openDialog('addSomeone'),
+        // Community picture click → PictureDialog. Pass the click event
+        // itself (its currentTarget is the element the picture flies out of).
+        onOpenPicture: pictureNav.openPicture,
         classes,
     }), [community, members, rules, postsCount, isJoined, tabValue, isAdmin,
-        handleToggleJoined, handleTabChange, handleTextEditor, classes, openDialog]);
+        handleToggleJoined, handleTabChange, handleTextEditor, classes, openDialog, pictureNav.openPicture]);
 
     // ── Render ─────────────────────────────────────────────────────────
     return (
@@ -2044,6 +2085,15 @@ const Community = ({ classes, settings, pathname, api }) => {
                         onVoteChange={onVoteChange} onClose={postNav.closePost}
                         onPrevious={postNav.previousPost} onNext={postNav.nextPost}
                     />
+                </React.Suspense>
+            )}
+
+            {pictureDialogMounted && (
+                <React.Suspense fallback={DIALOG_FALLBACK}>
+                    <LazyPictureDialog open={pictureNav.open} src={pictureNav.src}
+                                       renderer={settings._renderer} mode={settings._mode}
+                                       originRect={pictureNav.originRect} getReturnRect={pictureNav.getReturnRect}
+                                       onClose={pictureNav.closePicture} />
                 </React.Suspense>
             )}
 

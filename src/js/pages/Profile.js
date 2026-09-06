@@ -10,6 +10,7 @@ import { CellMeasurer, CellMeasurerCache, createMasonryCellPositioner } from "@p
 import MasonryExtended from "../components/MasonryExtended";
 import useWindowDimensions from "../hooks/useWindowDimensions";
 import useVoteSync from "../hooks/useVoteSync";
+import { usePictureDialog } from "../hooks/usePictureDialog";
 import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto } from "../utils/voteSync";
 import { idle, cancelIdle } from "../utils/idle";
 import {
@@ -68,6 +69,15 @@ const LazyPostDialog = React.lazy(loadPostDialog);
 const loadOwnPostDialogs = () => import("../components/EditPostDialog");
 const LazyEditPostDialog = React.lazy(loadOwnPostDialogs);
 const LazyDeletePostDialog = React.lazy(() => loadOwnPostDialogs().then(m => ({ default: m.DeletePostDialog })));
+
+// ── Deferred profile-picture viewer ────────────────────────────────────
+// PictureDialog is PostDialog's image half (render pool, hero animation) —
+// split out the same way and warmed on idle, so the first click on the
+// profile picture isn't gated on a cold chunk fetch. The page-side state
+// (the "#picture" history entry, the clicked element) lives in the light
+// usePictureDialog hook, imported statically above.
+const loadPictureDialog = () => import("../components/PictureDialog");
+const LazyPictureDialog = React.lazy(loadPictureDialog);
 
 // Suspense fallback for a lazily-loaded dialog — shown only on a cold open
 // (chunk not yet cached, before idle-prefetch ran). A dim backdrop appears
@@ -1994,6 +2004,25 @@ const Profile = ({ classes, settings, pathname, api }) => {
 
     const postNav = usePostNavigation({ api, posts: visiblePosts, masonryRefs: grid.masonryRefs, scrollToIndex: grid.scrollToIndex, setSelectedPostIndex: grid.setSelectedPostIndex, profileUsername: parsed.username, nsfwEnabled: settings._nsfw_enabled });
 
+    // ── Profile picture viewer ─────────────────────────────────────────
+    // Click on the profile picture (ProfileSidebar / ProfileMobileCard call
+    // `onOpenPicture` with the click event) → "#picture" is pushed, the
+    // picture hero-animates out of its element into PictureDialog, rendered
+    // with the current renderer like an artwork; closing flies it back and
+    // pops the entry. A deep-linked "/@user#picture" opens it once the
+    // account image is known. Mounted lazily on first open, kept mounted
+    // afterwards, chunk warmed on idle — the PostDialog pattern.
+    const pictureNav = usePictureDialog(profile.account?.image || '');
+    const [pictureDialogMounted, setPictureDialogMounted] = useState(false);
+    useEffect(() => {
+        if (pictureNav.open) setPictureDialogMounted(true);
+    }, [pictureNav.open]);
+    useEffect(() => {
+        if (pictureDialogMounted) return;
+        const id = idle(() => { loadPictureDialog().catch(() => {}); });
+        return () => cancelIdle(id);
+    }, [pictureDialogMounted]);
+
     // ── Dialogs ────────────────────────────────────────────────────────
     const [walletOpen, setWalletOpen] = useState(parsed.modal === 'wallet');
     const [walletView, setWalletView] = useState(walletViewToTabValue(parsed.walletView));
@@ -2376,7 +2405,10 @@ const Profile = ({ classes, settings, pathname, api }) => {
         onToggleFollowing: profile.toggleFollowing, onTabChange: (e,v) => setTabValue(v),
         onGoToCommunity: goToCommunity, onCreateCommunity: () => setCreateCommunityOpen(true),
         onWalletOpen: handleWalletOpen, onEditProfile: () => setEditOpen(true),
-    }), [profile, postsCount, tabValue, classes, openFollowListModal, goToCommunity, handleWalletOpen]);
+        // Profile picture click → PictureDialog. Pass the click event itself
+        // (its currentTarget is the element the picture flies out of).
+        onOpenPicture: pictureNav.openPicture,
+    }), [profile, postsCount, tabValue, classes, openFollowListModal, goToCommunity, handleWalletOpen, pictureNav.openPicture]);
 
     const bottomBarHidden = isMobile && mobileCardExpanded;
     const fabTransform = isMobile
@@ -2442,6 +2474,15 @@ const Profile = ({ classes, settings, pathname, api }) => {
             {postDialogMounted && (
                 <React.Suspense fallback={DIALOG_FALLBACK}>
                     <LazyPostDialog renderer={settings._renderer} mode={settings._mode} nsfw={settings._nsfw_enabled} format={settings._format} data={postNav.currentPost} open={postNav.artworkOpen} locales={locales} api={api} account={profile.loggedInUser} originRect={postNav.originRect} onVoteChange={onVoteChange} onClose={postNav.closePost} getReturnRect={postNav.getReturnRect} onDrawerPush={postNav.onDrawerPush} onDrawerPop={postNav.onDrawerPop} onPrevious={postNav.previousPost} onNext={postNav.nextPost} />
+                </React.Suspense>
+            )}
+
+            {pictureDialogMounted && (
+                <React.Suspense fallback={DIALOG_FALLBACK}>
+                    <LazyPictureDialog open={pictureNav.open} src={pictureNav.src}
+                                       renderer={settings._renderer} mode={settings._mode}
+                                       originRect={pictureNav.originRect} getReturnRect={pictureNav.getReturnRect}
+                                       onClose={pictureNav.closePicture} />
                 </React.Suspense>
             )}
 

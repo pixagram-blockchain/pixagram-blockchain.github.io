@@ -27,6 +27,7 @@ import useLiveTimeAgo from "../hooks/useLiveTimeAgo";
 // (describeOperation(tx, …), for (const tx of history)), so importing the
 // resolver under its own name would shadow — and read — as the wrong thing.
 import { t, tk, tx as translate, useLanguage } from "../utils/text";
+import { formatAmount, formatDate, resolveLocale } from "../utils/numberFormat";
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Asset helpers (ported from PixaWalletDialog so this component is standalone).
@@ -81,10 +82,14 @@ function toDisplayUnit(asset, vestToPixa) {
     return { token, value: parsed.value };
 }
 
+// Display string for a unit — grouping/decimal marks follow the Settings
+// locale. Rows keep the raw units (see `amounts` below) and format at render
+// time, so a language switch re-formats every row; only the two market
+// subtitles bake this string in, and `rows` is rebuilt on a locale change.
 function fmtUnit(unit) {
     if (!unit) return "";
     const p = DISPLAY_PRECISION[unit.token] ?? 3;
-    return `${unit.value.toFixed(p)} ${unit.token}`;
+    return formatAmount(unit.value, unit.token, p);
 }
 
 const isAssetString = (s) => typeof s === "string" && /^-?\d+(\.\d+)?\s+[A-Za-z]+$/.test(s.trim());
@@ -104,7 +109,7 @@ function collectAssetParts(payload, vestToPixa) {
     }
     return Object.keys(byToken)
         .filter((t) => Math.abs(byToken[t]) > 1e-9)
-        .map((t) => fmtUnit({ token: t, value: byToken[t] }));
+        .map((t) => ({ token: t, value: byToken[t] }));
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -116,7 +121,9 @@ function collectAssetParts(payload, vestToPixa) {
 
 function describeOperation(tx, me, vestToPixa) {
     const d = tx.data || {};
-    const A = (asset) => fmtUnit(toDisplayUnit(asset, vestToPixa));
+    // `amounts` holds raw { token, value } units — never pre-formatted strings —
+    // so the spam filter can compare numbers and the row formats per locale.
+    const A = (asset) => toDisplayUnit(asset, vestToPixa);
     const out = { kind: "other", direction: "self", title: "", subtitle: "", amounts: [] };
 
     switch (tx.type) {
@@ -168,7 +175,7 @@ function describeOperation(tx, me, vestToPixa) {
             out.direction = "self";
             const pxp = toDisplayUnit(d.vesting_shares, vestToPixa);
             out.title = (pxp && pxp.value > 0) ? tk("components.wallet_history.power_down") : tk("components.wallet_history.power_down_stopped");
-            out.amounts = pxp && pxp.value > 0 ? [fmtUnit(pxp)] : [];
+            out.amounts = pxp && pxp.value > 0 ? [pxp] : [];
             break;
         }
         case "fill_vesting_withdraw": {
@@ -247,7 +254,7 @@ function describeOperation(tx, me, vestToPixa) {
             out.amounts = [
                 d.reward_pixa ? A(d.reward_pixa) : null,
                 d.reward_pxs ? A(d.reward_pxs) : null,
-                d.reward_vests ? fmtUnit(toDisplayUnit(d.reward_vests, vestToPixa)) : null,
+                d.reward_vests ? toDisplayUnit(d.reward_vests, vestToPixa) : null,
             ].filter(Boolean);
             break;
         }
@@ -314,7 +321,7 @@ function describeOperation(tx, me, vestToPixa) {
             out.subtitle = sell ? tk("components.wallet_history.selling", {
                 fmtUnit: fmtUnit(sell)
             }) : "";
-            out.amounts = sell ? [fmtUnit(sell)] : [];
+            out.amounts = sell ? [sell] : [];
             break;
         }
         case "limit_order_cancel": {
@@ -333,7 +340,7 @@ function describeOperation(tx, me, vestToPixa) {
             out.subtitle = paid ? tk("components.wallet_history.paid", {
                 fmtUnit: fmtUnit(paid)
             }) : "";
-            out.amounts = got ? [fmtUnit(got)] : [];
+            out.amounts = got ? [got] : [];
             break;
         }
 
@@ -502,7 +509,7 @@ const HistoryRow = React.memo(function HistoryRow({ row, classes, locales }) {
     const s = DIR_STYLE[desc.direction] || DIR_STYLE.self;
     const sign = s.sign;
     const amount = desc.amounts.length
-        ? desc.amounts.map((a, i) => (i === 0 ? `${sign}${a}` : a)).join("  +  ")
+        ? desc.amounts.map((a, i) => (i === 0 ? `${sign}${fmtUnit(a)}` : fmtUnit(a))).join("  +  ")
         : "";
 
     // Live relative date — one watcher per MOUNTED row: the windowing above
@@ -510,8 +517,10 @@ const HistoryRow = React.memo(function HistoryRow({ row, classes, locales }) {
     // and the rest go with the list on dialog close. Rows without a
     // timestamp (date null) arm nothing.
     const rel = useLiveTimeAgo(date);
+    // Absolute timestamp in the Settings locale (the `locales` prop is kept
+    // for callers but the wallet-wide formatter is the source of truth).
     const abs = date
-        ? date.toLocaleDateString(locales, {
+        ? formatDate(date, {
             weekday: "long", year: "numeric", month: "long",
             day: "numeric", hour: "numeric", minute: "numeric",
         })
@@ -552,6 +561,10 @@ const HistoryRow = React.memo(function HistoryRow({ row, classes, locales }) {
  * windows against the nearest scrollable ancestor — no inner scrollbar.
  * ──────────────────────────────────────────────────────────────────────────── */
 function WalletHistory({ history, username, locales, vestToPixa, classes }) {
+    // Re-render on a language switch; `locale` also re-keys the rows memo so
+    // the few subtitle strings formatted at describe time follow it too.
+    useLanguage();
+    const locale = resolveLocale();
     const [fIncoming, setIncoming] = React.useState(true);
     const [fOutgoing, setOutgoing] = React.useState(true);
     const [fPersonal, setPersonal] = React.useState(true);
@@ -576,7 +589,7 @@ function WalletHistory({ history, username, locales, vestToPixa, classes }) {
             if (isPersonal && !fPersonal) continue;
 
             if (fHideSpam && desc.amounts.length) {
-                const nums = desc.amounts.map((a) => parseFloat(a)).filter(Number.isFinite);
+                const nums = desc.amounts.map((a) => a && a.value).filter(Number.isFinite);
                 if (nums.length && nums.every((n) => Math.abs(n) < 1)) continue;
             }
 
@@ -587,7 +600,7 @@ function WalletHistory({ history, username, locales, vestToPixa, classes }) {
             });
         }
         return out;
-    }, [history, username, vestToPixa, fIncoming, fOutgoing, fPersonal, fRewards, fHideSpam]);
+    }, [history, username, vestToPixa, fIncoming, fOutgoing, fPersonal, fRewards, fHideSpam, locale]);
 
     // 2) Virtualize against the dialog's own scrollbar (no inner scroll area).
     const { listRef, start, end } = useScrollParentWindowing(rows.length, ROW_H);

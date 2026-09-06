@@ -36,11 +36,19 @@ const ProfileSidebar = React.memo(({
                                        onGoToCommunity,
                                        onCreateCommunity,
                                        onWalletOpen,
-                                       onEditProfile
+                                       onEditProfile,
+                                       onOpenPicture
                                    }) => {
     const handleTabChange = React.useCallback((e, v) => {
         onTabChange(e, v);
     }, [onTabChange]);
+
+    // The Edit button sits INSIDE the picture; its click must not bubble
+    // into the picture's ButtonBase and open the viewer as well.
+    const handleEditClick = React.useCallback((e) => {
+        e.stopPropagation();
+        onEditProfile?.(e);
+    }, [onEditProfile]);
 
     const username = account?.name || '';
     const customDisplayName = account?._profile?.display_name || null;
@@ -66,12 +74,15 @@ const ProfileSidebar = React.memo(({
                             <div className={classes.walletButtons}>
                                 <IconButton className={classes.menuButton} onClick={onWalletOpen} data-tour="profile-wallet"><AccountBalanceWalletRounded/></IconButton>
                             </div>
-                            <ButtonBase style={{margin: "16px -4px 16px 16px", borderRadius: "56px 0px 0px 56px"}}>
+                            {/* Click → PictureDialog (Profile's usePictureDialog measures
+                                this button: same box and same 56px corners as the picture,
+                                so the hero flies out of exactly what is on screen). */}
+                            <ButtonBase onClick={onOpenPicture} style={{margin: "16px -4px 16px 16px", borderRadius: "56px 0px 0px 56px"}}>
                                 <div className={classes.profileImage + " pixelated"}
                                      style={{backgroundColor: "#1e1e1e", backgroundImage: cssBackgroundImage(profileImage), height: (tabValue === 0) ? "150px": (tabValue === 1) ? "225px": "300px"}}
                                      alt={displayName + " (@" + username + ")"}>
                                     {isOwnProfile && (
-                                        <IconButton onClick={onEditProfile} className={classes.menuButtonEdit}><Edit/></IconButton>
+                                        <IconButton onClick={handleEditClick} className={classes.menuButtonEdit}><Edit/></IconButton>
                                     )}
                                 </div>
                             </ButtonBase>

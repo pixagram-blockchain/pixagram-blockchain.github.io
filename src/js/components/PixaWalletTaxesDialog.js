@@ -44,7 +44,8 @@ import { buildAllReports, PxsAnchoredPriceProvider, summarizeCounterparties, inc
 import { generateTaxReportPdf, generateTaxReportCsvs } from "../utils/tax/taxReport";
 
 import { T } from "../utils/T";
-import { t, getLocaleCode } from "../utils/text";
+import { t } from "../utils/text";
+import { formatNumber, formatInteger, formatAmount } from "../utils/numberFormat";
 
 import { withLanguage } from "../utils/withLanguage";
 /**
@@ -108,9 +109,11 @@ const ymd = (d) => isValidDate(d) ? `${d.getFullYear()}-${pad2(d.getMonth() + 1)
 const dayStartMs = (d) => isValidDate(d) ? Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0) : NaN;
 const dayEndMs = (d) => isValidDate(d) ? Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999) : NaN;
 
-// Display formatters for engine output.
-const fmtFiat = (n) => Number(n || 0).toLocaleString(getLocaleCode(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtQty = (n) => Number(n || 0).toLocaleString(getLocaleCode(), { maximumFractionDigits: 4 });
+// Display formatters for engine output — Settings locale, cached Intl
+// instances (utils/numberFormat). The currency code is placed by the
+// surrounding catalogue strings, so these print the bare number.
+const fmtFiat = (n) => formatNumber(n || 0, 2);
+const fmtQty = (n) => formatNumber(n || 0, { min: 0, max: 4 });
 
 // One entry per engine ruleset — twenty-six jurisdictions. The note is the
 // one-line summary shown under the options and inside the report footer.
@@ -161,7 +164,7 @@ function capNote(total) {
             "components.pixa_wallet_taxes_dialog.showing_the_first_of_export_the_csv",
             {
                 VIEW_CAP: VIEW_CAP,
-                total: total.toLocaleString(getLocaleCode())
+                total: formatInteger(total)
             }
         )}</Typography>
     );
@@ -1205,7 +1208,7 @@ class PixaWalletTaxesDialog extends React.Component {
                             <List dense>
                                 {keys.map(k => {
                                     const s = ob[k];
-                                    const sent = Object.entries(s.byAsset).map(([a, q]) => `${(+q).toFixed(3)} ${a}`).join('  ·  ');
+                                    const sent = Object.entries(s.byAsset).map(([a, q]) => formatAmount(+q, a, 3)).join('  ·  ');
                                     return (
                                         <ListItem key={k} style={{ paddingTop: 4, paddingBottom: 4 }}>
                                             <ListItemText
@@ -1288,7 +1291,7 @@ class PixaWalletTaxesDialog extends React.Component {
                                 <Typography style={{ color: "#bdbdbd", fontSize: "0.8rem", lineHeight: 1.5 }}>{t(
                                     "components.pixa_wallet_taxes_dialog.seen_in_history_but_not_booked_into",
                                     {
-                                        skippedTotal: skippedTotal.toLocaleString(getLocaleCode())
+                                        skippedTotal: formatInteger(skippedTotal)
                                     }
                                 )}</Typography>
                                 <Typography style={{ color: "#8a8a8a", fontSize: "0.74rem", lineHeight: 1.6, fontFamily: "monospace", marginTop: 4, wordBreak: "break-word" }}>
@@ -1333,7 +1336,7 @@ class PixaWalletTaxesDialog extends React.Component {
             <div className={classes.progressWrap}>
                 <CircularProgress size={34} style={{ color: "#d0d0d0" }} />
                 <Typography style={{ color: "#bdbdbd", marginTop: 14 }}>{t("components.pixa_wallet_taxes_dialog.fetching_transactions", {
-                    count: _progress.count > 0 ? ' ' + t("components.pixa_wallet_taxes_dialog.operations_progress", { count: _progress.count.toLocaleString(getLocaleCode()) }) : ''
+                    count: _progress.count > 0 ? ' ' + t("components.pixa_wallet_taxes_dialog.operations_progress", { count: formatInteger(_progress.count) }) : ''
                 })}</Typography>
                 <Typography style={{ color: "#6f6f6f", fontSize: "0.75rem", marginTop: 4 }}>
                     {_progress.page > 0 ? t("components.pixa_wallet_taxes_dialog.page_1000_per_request", {
@@ -1436,7 +1439,7 @@ class PixaWalletTaxesDialog extends React.Component {
                             )}
                         </Typography>
                     ) : cps.map(c => {
-                        const sent = Object.entries(c.byAsset).map(([a, q]) => `${(+q).toFixed(0)} ${a}`).join(' + ');
+                        const sent = Object.entries(c.byAsset).map(([a, q]) => formatAmount(+q, a, 0)).join(' + ');
                         const val = (_intents && _intents[c.counterparty]) || c.suggestedIntent;
                         const meta = INTENT_OPTIONS.find(o => o[0] === val);
                         return (
@@ -1511,7 +1514,7 @@ class PixaWalletTaxesDialog extends React.Component {
                                         "components.pixa_wallet_taxes_dialog.prefilled_from_the_chain_1_vest_pxa",
                                         {
                                             _vestingRateAuto: _vestingRateAuto.toFixed(9).replace(/0+$/, '').replace(/\.$/, ''),
-                                            _vestingRateAuto_2: (_vestingRateAuto * 1e6).toLocaleString('en-US', { maximumFractionDigits: 3 })
+                                            _vestingRateAuto_2: formatNumber(_vestingRateAuto * 1e6, { min: 0, max: 3 })
                                         }
                                     )
                                     : t("components.pixa_wallet_taxes_dialog.pxa_per_vest_helper"),

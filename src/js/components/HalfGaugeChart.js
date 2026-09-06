@@ -5,7 +5,8 @@ import Typography from "@material-ui/core/Typography";
 import Fade from "@material-ui/core/Fade";
 
 import { T } from "../utils/T";
-import { t, getLocaleCode } from "../utils/text";
+import { t, useLanguage } from "../utils/text";
+import { formatFiat, formatNumber, formatPercent } from "../utils/numberFormat";
 
 const styles = theme => ({
     container: {
@@ -157,27 +158,29 @@ const styles = theme => ({
 });
 
 /**
- * Formats a numeric value with magnitude-dependent precision, then applies
- * locale grouping (thousands separators). Lifted verbatim from the inline
- * center-value expression:
- *   < 1   -> 3 decimals
- *   < 10  -> 2 decimals
- *   < 100 -> 1 decimal
+ * Magnitude-dependent precision for money labels (utils/numberFormat does the
+ * locale work):
+ *   < 1   -> up to 3 decimals
+ *   < 10  -> up to 2 decimals
+ *   < 100 -> up to 1 decimal
  *   else  -> integer
+ * formatValue prints the bare number (for catalogue strings that place the
+ * currency themselves); formatMoney prints it with the ISO code where the
+ * locale puts it.
  */
+const precisionFor = (v) => (v < 1 ? 3 : v < 10 ? 2 : v < 100 ? 1 : 0);
 const formatValue = (value) => {
-    const v = parseFloat(value);
-    return Number(
-        parseFloat(
-            v < 1 ? v.toFixed(3)
-                : v < 10 ? v.toFixed(2)
-                    : v < 100 ? v.toFixed(1)
-                        : parseInt(value)
-        )
-    ).toLocaleString(getLocaleCode());
+    const v = parseFloat(value) || 0;
+    return formatNumber(v, { min: 0, max: precisionFor(v) });
+};
+const formatMoney = (value, currency) => {
+    const v = parseFloat(value) || 0;
+    return formatFiat(v, currency, { min: 0, max: precisionFor(v) });
 };
 
 const HalfGaugeChart = ({ classes, data, totalValue, delegationDeltaValue = 0, onSliceClick, currency = 'USD', fiatRate = 1 }) => {
+    // Re-render on a language switch so number/percent formats follow it.
+    useLanguage();
     const [hoveredIndex, setHoveredIndex] = useState(null);
     const [activeIndex, setActiveIndex] = useState(null);
     const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, data: null });
@@ -474,7 +477,7 @@ const HalfGaugeChart = ({ classes, data, totalValue, delegationDeltaValue = 0, o
                                     className={"monospace"}
                                     style={{ textShadow: "0px 1px 2px rgba(255,255,255,0.5)" }}
                                 >
-                                    {slice.percentage.toFixed(0)}%
+                                    {formatPercent(slice.percentage, 0)}
                                 </text>
                             </g>
                         );
@@ -487,7 +490,7 @@ const HalfGaugeChart = ({ classes, data, totalValue, delegationDeltaValue = 0, o
                         {t("components.half_gauge_chart.total_wealth")}
                     </Typography>
                     <Typography component="h3" variant="h3" className={"monospace"}>
-                        {formatValue(displayValue * rate)} {cur}
+                        {formatMoney(displayValue * rate, cur)}
                     </Typography>
                     {showDelegationDelta && (
                         <p className={classes.centerSecondary}>
@@ -520,7 +523,7 @@ const HalfGaugeChart = ({ classes, data, totalValue, delegationDeltaValue = 0, o
                             />
                             <div className={classes.legendText}>
                                 <strong>{slice.name}</strong>
-                                <span className={"monospace"}>{(slice.value * rate).toLocaleString(getLocaleCode())} {cur}</span>
+                                <span className={"monospace"}>{formatFiat(slice.value * rate, cur, { min: 0, max: 2 })}</span>
                             </div>
                         </div>
                     </Fade>
@@ -539,11 +542,12 @@ const HalfGaugeChart = ({ classes, data, totalValue, delegationDeltaValue = 0, o
                     <h4 style={{ color: tooltip.data.color }}>
                         {tooltip.data.name}
                     </h4>
-                    <div className="value">{(tooltip.data.value * rate).toLocaleString(getLocaleCode())} {cur}</div>
+                    <div className="value">{formatFiat(tooltip.data.value * rate, cur, { min: 0, max: 2 })}</div>
                     <div className="percentage"><T
                         k="components.half_gauge_chart.0_0_of_total"
                         vars={{
-                            percentage: tooltip.data.percentage.toFixed(2)
+                            // The "%" sign lives in the catalogue string, so only the number is localised.
+                            percentage: formatNumber(tooltip.data.percentage, 2)
                         }}
                         slots={[<span className={"monospace"} key="0" />]} /></div>
                     {tooltip.data.description && (

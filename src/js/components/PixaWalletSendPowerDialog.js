@@ -20,6 +20,7 @@ import CircularProgress from "@material-ui/core/CircularProgress";
 
 import { T } from "../utils/T";
 import { t } from "../utils/text";
+import { formatAmount, formatNumber, numericInputProps, resolveLocale } from "../utils/numberFormat";
 
 import { withLanguage } from "../utils/withLanguage";
 /*
@@ -89,18 +90,18 @@ const SLIDER_MARKS = [
     { value: 100, label: "100%" },
 ];
 
+// Grouping and decimal characters follow the Settings locale
+// (numericInputProps); the value handed back stays a "." decimal string.
 function NumberFormatCustom(props) {
-    const { inputRef, onChange, ...other } = props;
+    const { inputRef, onChange, locale, ...other } = props;
     return (
         <NumericFormat
             {...other}
-            ref={inputRef}
+            getInputRef={inputRef}
             onValueChange={(values) => {
                 onChange({ target: { name: props.name, value: values.value } });
             }}
-            thousandSeparator={" "}
-            decimalSeparator={"."}
-            allowedDecimalSeparators={[",", "."]}
+            {...numericInputProps(locale)}
             thousandsGroupStyle={'thousand'}
             decimalScale={6}
             fixedDecimalScale={false}
@@ -444,10 +445,11 @@ class PixaWalletSendPowerDialog extends React.PureComponent {
                                 InputLabelProps={{ shrink: true }}
                                 InputProps={{
                                     inputComponent: NumberFormatCustom,
+                                    inputProps: { locale: resolveLocale() },
                                     startAdornment: <PixaPower style={{margin: "0px 8px -12px 0px", fontSize: "1em"}}/>
                                 }}
                                 helperText={t("words.max_max_pxp", {
-                                    max: max.toFixed(6)
+                                    max: formatNumber(max, { min: 0, max: 6 })
                                 })}
                             />
 
@@ -485,7 +487,7 @@ class PixaWalletSendPowerDialog extends React.PureComponent {
                     <DialogContent>
                         <Fade in timeout={0}><Typography style={{marginTop: 8, marginBottom: 24}} component={"h2"} variant={"h6"}>{t("components.pixa_wallet_send_power_dialog.confirm_power_transfer")}</Typography></Fade>
                         <div style={{textAlign: "center"}}>
-                            <Fade in timeout={150}><Typography className={"monospace"} variant="body2" color="textSecondary" component="span" style={{display: "block", fontSize: "36px", fontWeight: "bold", color: "#111"}}>{`${displayAmount.toFixed(2)} PXP`}</Typography></Fade>
+                            <Fade in timeout={150}><Typography className={"monospace"} variant="body2" color="textSecondary" component="span" style={{display: "block", fontSize: "36px", fontWeight: "bold", color: "#111"}}>{formatAmount(displayAmount, "PXP", 2)}</Typography></Fade>
                             <Fade in timeout={300}><Typography className={"monospace"} variant="body2" color="textSecondary" component="span" style={{fontSize: "14px", color: "#666"}}>{t("components.pixa_wallet_send_power_dialog.from", { ownerUsername })}</Typography></Fade>
                         </div><br/>
                         <div style={{textAlign: "center"}}>

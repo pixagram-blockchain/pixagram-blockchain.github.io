@@ -22,6 +22,14 @@ import VotingPowerDisplay from "./VotingPowerDisplay";
 import Edit from "@material-ui/icons/Edit";
 import { cssBackgroundImage } from "../utils/safeUrl";
 
+// The picture ButtonBases carry the SAME corner radii as the picture classes
+// they wrap (profileImageMobile / profileImageMobileOpened /
+// profileImageMobileBig), so the viewer's hero measures the exact shape on
+// screen and the ripple clips to it.
+const PICTURE_BUTTON_COLLAPSED = { borderRadius: "0px 12px 12px 0px" };
+const PICTURE_BUTTON_OPENED = { borderRadius: "8px" };
+const PICTURE_BUTTON_BIG = { borderRadius: "24px" };
+
 const ProfileMobileCard = React.memo(({
                                           classes,
                                           account,
@@ -47,11 +55,19 @@ const ProfileMobileCard = React.memo(({
                                           onGoToCommunity,
                                           onCreateCommunity,
                                           onWalletOpen,
-                                          onEditProfile
+                                          onEditProfile,
+                                          onOpenPicture
                                       }) => {
     const handleTabChange = React.useCallback((e, v) => {
         onTabChange(e, v);
     }, [onTabChange]);
+
+    // The Edit button sits INSIDE the big picture; its click must not bubble
+    // into the picture's ButtonBase and open the viewer as well.
+    const handleEditClick = React.useCallback((e) => {
+        e.stopPropagation();
+        onEditProfile?.(e);
+    }, [onEditProfile]);
 
     // Dismiss on a real CLICK on the backdrop (not a pointer/touch-down), and
     // consume the event. Closing on the actual click keeps the backdrop "live"
@@ -106,7 +122,9 @@ const ProfileMobileCard = React.memo(({
                         onClick={onToggleExpanded}
                         data-tour="profile-card-toggle"
                         avatar={
-                            <ButtonBase style={{borderRadius: "12px"}}>
+                            /* Tap → PictureDialog. usePictureDialog stops the click
+                               here so the CardHeader's expand toggle doesn't fire too. */
+                            <ButtonBase onClick={onOpenPicture} style={expanded ? PICTURE_BUTTON_OPENED : PICTURE_BUTTON_COLLAPSED}>
                                 <div className={(expanded ? classes.profileImageMobileOpened : classes.profileImageMobile) + " pixelated"}
                                      style={{backgroundImage: profileBg}}
                                      alt={displayName + " (@" + username + ")"}>
@@ -125,12 +143,12 @@ const ProfileMobileCard = React.memo(({
                         <CardContent>
                             <div style={{display: "flex"}}>
                                 <Fade in={expanded} timeout={450}>
-                                    <ButtonBase style={{borderRadius: "32px"}}>
+                                    <ButtonBase onClick={onOpenPicture} style={PICTURE_BUTTON_BIG}>
                                         <div className={classes.profileImageMobileBig + " pixelated"}
                                              style={{backgroundImage: profileBg}}
                                              alt={displayName + " (@" + username + ")"}>
                                             {isOwnProfile && (
-                                                <IconButton onClick={onEditProfile} className={classes.menuButtonEdit}><Edit/></IconButton>
+                                                <IconButton onClick={handleEditClick} className={classes.menuButtonEdit}><Edit/></IconButton>
                                             )}
                                         </div>
                                     </ButtonBase>

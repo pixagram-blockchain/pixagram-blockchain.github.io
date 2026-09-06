@@ -541,9 +541,9 @@ class Home extends React.PureComponent {
         // consumed.
         this.state = {
             _y: 0,
-            _firstTimeRevealImage: 100,
-            _intervalTimeRevealImage: 2000,
-            _intervalTimeRevealImageMultipier: 0.8,
+            _firstTimeRevealImage: 0,
+            _intervalTimeRevealImage: 150,
+            _intervalTimeRevealImageMultipier: 1.5,
             _learn_more_opened: false,
             // Stays true after the first open, so the lazily-loaded dialog
             // keeps its exit transition instead of unmounting abruptly.
@@ -1517,7 +1517,7 @@ class Home extends React.PureComponent {
                         >
                             {_artworks_url.map((url, i) => (
                                 <div key={`img1-${i}`}>
-                                    <Fade key={`img1a-${i}-${Boolean(i <= _y-1)}`} in={Boolean(i <= _y-1)} timeout={{appear: _intervalTimeRevealImage, enter: _intervalTimeRevealImage, exit: _intervalTimeRevealImage}}><img
+                                    <Fade key={`img1a-${i}-${Boolean(i <= _y-1)}`} in={Boolean(i <= _y-1)} timeout={{appear: 500, enter: 500, exit: 500}}><img
                                         className="pixelated"
                                         src={url}
                                         draggable={false}

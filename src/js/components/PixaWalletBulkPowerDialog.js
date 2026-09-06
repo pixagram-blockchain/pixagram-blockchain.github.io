@@ -31,7 +31,8 @@ import PixaPower from "../icons/PixaPower";
 import * as actions from "../actions/utils";
 
 import { T } from "../utils/T";
-import { t, getLocaleCode } from "../utils/text";
+import { t } from "../utils/text";
+import { formatNumber, formatInteger } from "../utils/numberFormat";
 
 import { withLanguage } from "../utils/withLanguage";
 /*
@@ -639,7 +640,8 @@ class PixaWalletBulkPowerDialog extends React.PureComponent {
                                             value={e.pxp}
                                             disabled={_building}
                                             onChange={(ev) => {
-                                                const v = ev.target.value.replace(/[^0-9.]/g, "");
+                                                // Accept a "," decimal too (fr/de keyboards), store "." form.
+                                                const v = ev.target.value.replace(/,/g, ".").replace(/[^0-9.]/g, "");
                                                 this._setEntry(i, "pxp", v);
                                             }}
                                             InputLabelProps={{ shrink: true }}
@@ -661,15 +663,15 @@ class PixaWalletBulkPowerDialog extends React.PureComponent {
                                 <Typography variant="body2" style={{ color: overBudget ? "#e0e0e0" : "#999", fontSize: 13 }}>
                                     <T k="components.pixa_wallet_bulk_power_dialog.total_pxp"
                                        vars={{
-                                           total: totalPxp.toLocaleString(getLocaleCode(), { maximumFractionDigits: 6 }),
+                                           total: formatNumber(totalPxp, { min: 0, max: 6 }),
                                            available: maxPXP > 0
                                                ? t("components.pixa_wallet_bulk_power_dialog.of_available", {
-                                                     max: maxPXP.toLocaleString(getLocaleCode(), { maximumFractionDigits: 3 }) })
+                                                     max: formatNumber(maxPXP, { min: 0, max: 3 }) })
                                                : ""
                                        }}
                                        slots={[<span className={classes.mono} key="0" />]} />
                                 </Typography>
-                                <Chip size="small" label={t("components.pixa_wallet_bulk_power_dialog.valid_count", { count: valid.length })} style={{ backgroundColor: "#242424", color: "#ddd" }} />
+                                <Chip size="small" label={t("components.pixa_wallet_bulk_power_dialog.valid_count", { count: formatInteger(valid.length) })} style={{ backgroundColor: "#242424", color: "#ddd" }} />
                             </div>
 
                             <TextField
@@ -696,7 +698,7 @@ class PixaWalletBulkPowerDialog extends React.PureComponent {
                                 <div className={classes.expiredBanner}>{t(
                                         "components.pixa_wallet_bulk_power_dialog.the_total_pxp_exceeds_s_available_pixa",
                                         {
-                                            totalPxp: totalPxp.toLocaleString(getLocaleCode(), { maximumFractionDigits: 6 }),
+                                            totalPxp: formatNumber(totalPxp, { min: 0, max: 6 }),
                                             from: from
                                         }
                                     )}</div>
