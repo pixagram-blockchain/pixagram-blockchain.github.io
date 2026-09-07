@@ -47,6 +47,7 @@ const CommunityInfo = React.memo(({
                                       onEditCommunity,
                                       onAddSomeone,
                                       onOpenPicture,
+                                      fabAway,
                                       classes
                                   }) => {
     useLanguage();
@@ -88,8 +89,10 @@ const CommunityInfo = React.memo(({
                                 )}
                             </div>
                             <div className={classes.writeButtons}>
+                                {/* fabAway: stepped right out from under the picture's edge
+                                    while the picture flies to the viewer and back. */}
                                 <IconButton
-                                    className={classes.menuButton}
+                                    className={fabAway ? `${classes.menuButton} ${classes.menuButtonAway}` : classes.menuButton}
                                     onClick={onTextEditor}
                                     data-tour="community-write"
                                 >
@@ -140,7 +143,8 @@ const CommunityInfo = React.memo(({
         prevProps.rules === nextProps.rules &&
         prevProps.postsCount === nextProps.postsCount &&
         prevProps.isAdmin === nextProps.isAdmin &&
-        prevProps.onOpenPicture === nextProps.onOpenPicture;
+        prevProps.onOpenPicture === nextProps.onOpenPicture &&
+        prevProps.fabAway === nextProps.fabAway;
 });
 
 export default CommunityInfo;

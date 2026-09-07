@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, memo } from "preact/
 // inside event handlers but NOT across an `await` (each setState in a promise
 // continuation would otherwise re-render separately).
 import { unstable_batchedUpdates as batch } from "preact/compat";
-import { HISTORY, buildPostUrl, isPostUrl, parsePostUrl, isDeletedPost } from "../utils/constants";
+import { HISTORY, buildPostUrl, isPostUrl, parsePostUrl, isDeletedPost, POST_DRAWER_TAB_HASHES } from "../utils/constants";
 import withStyles from "@material-ui/core/styles/withStyles";
 import * as actions from "../actions/utils";
 import { CellMeasurer } from "@pixagram/virtualized/dist/es/index";
@@ -1258,9 +1258,15 @@ const usePostNavigation = ({ api, posts, masonryRef, scrollToIndex, scrollTo, se
     }, [masonryRef, setSelectedPostIndex]);
 
     // ── Open / Close ───────────────────────────────────────────────────
-    const openPost = useCallback((data, rect) => {
+    // Push the post URL (optionally suffixed with a "#…" drawer-tab hash)
+    // and seat the dialog. The hash must ride the SAME history entry as the
+    // post URL: PostDialog adopts HISTORY.location.hash when its `open`/
+    // `data` props land, and the cold-entry seed above re-pushes pathname +
+    // hash together, so appending it here is the whole contract (same shape
+    // as Community's pushAndOpen).
+    const pushAndOpen = useCallback((data, rect, hash) => {
         const postUrl = buildPostUrl(data);
-        if (postUrl) HISTORY.push(postUrl);
+        if (postUrl) HISTORY.push(hash ? postUrl + hash : postUrl);
         // Invalidate any in-flight orphan fetch — a card click is never an
         // orphan by definition (data came from the feed grid).
         orphanFetchTokenRef.current += 1;
@@ -1270,6 +1276,18 @@ const usePostNavigation = ({ api, posts, masonryRef, scrollToIndex, scrollTo, se
         setOriginRect(rect || null);
         historyDepthRef.current = 1;
     }, []);
+
+    // Plain open — card title / image click.
+    const openPost = useCallback((data, rect) => pushAndOpen(data, rect), [pushAndOpen]);
+
+    // Comment-button open — same navigation, but the pushed URL carries the
+    // "#replies" tab hash so PostDialog opens straight on the comments. Same
+    // deep-link scheme as Profile's comment/reply links ("#replies&focus=
+    // <b64>" pins one reply; the bare hash just selects the tab).
+    const openPostComments = useCallback(
+        (data, rect) => pushAndOpen(data, rect, POST_DRAWER_TAB_HASHES[1]),
+        [pushAndOpen],
+    );
 
     const closePost = useCallback(() => {
         const depth = historyDepthRef.current;
@@ -1408,11 +1426,11 @@ const usePostNavigation = ({ api, posts, masonryRef, scrollToIndex, scrollTo, se
     return useMemo(() => ({
         artworkOpen, currentPost, originRect, isOrphan,
         createDialogOpen, setCreateDialogOpen,
-        openPost, closePost, onDrawerPush, onDrawerPop, getReturnRect,
+        openPost, openPostComments, closePost, onDrawerPush, onDrawerPop, getReturnRect,
         nextPost: (isOrphan || !canGoNext) ? undefined : nextPost,
         previousPost: (isOrphan || !canGoPrev) ? undefined : previousPost,
     }), [artworkOpen, currentPost, originRect, isOrphan, createDialogOpen,
-        openPost, closePost, onDrawerPush, onDrawerPop, getReturnRect,
+        openPost, openPostComments, closePost, onDrawerPush, onDrawerPop, getReturnRect,
         nextPost, previousPost, canGoNext, canGoPrev]);
 };
 
@@ -1627,7 +1645,7 @@ const Feed = ({ classes, settings, pathname, api }) => {
         columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
         selectedPostIndex, postListHeight, pageWidth,
     } = grid;
-    const { openPost } = postNav;
+    const { openPost, openPostComments } = postNav;
     const cellRenderer = useCallback((data) => {
         const { index, key, parent, style, isScrolling } = data;
         if (!parent?.props?.itemsWithSizes?.[index | 0]) return null;
@@ -1657,6 +1675,7 @@ const Feed = ({ classes, settings, pathname, api }) => {
             <CellMeasurer cache={cellMeasurerCache} index={index} key={key} parent={parent}>
                 <PaperCard
                     onOpen={openPost}
+                    onCommentsClick={openPostComments}
                     locales={locales}
                     nsfw={settings._nsfw_enabled}
                     data={item}
@@ -1682,7 +1701,7 @@ const Feed = ({ classes, settings, pathname, api }) => {
             </CellMeasurer>
         );
     }, [posts, columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
-        selectedPostIndex, postListHeight, pageWidth, openPost,
+        selectedPostIndex, postListHeight, pageWidth, openPost, openPostComments,
         locales, settings, openCardMenu, api, loggedInUser, onVoteChange]);
 
     // ── Render ─────────────────────────────────────────────────────────

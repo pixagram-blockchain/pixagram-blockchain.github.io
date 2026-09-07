@@ -67,10 +67,21 @@ const styles = theme => ({
         },
     },
     comments: {
-        color: '#888',
+        color: '#666',
         transition: 'color 275ms cubic-bezier(0.4, 0, 0.2, 1) 5ms',
         '&:hover': {
-            color: '#bbb',
+            color: '#999',
+            transition: 'color 275ms cubic-bezier(0.4, 0, 0.2, 1) 5ms',
+        },
+    },
+    // A post that has replies: same #eee as a cast vote (see `voted`), so the
+    // icon reads as "there is something here, click it" rather than as the
+    // dim resting state of the vote buttons.
+    commentsActive: {
+        color: '#666',
+        transition: 'color 275ms cubic-bezier(0.4, 0, 0.2, 1) 5ms',
+        '&:hover': {
+            color: '#999',
             transition: 'color 275ms cubic-bezier(0.4, 0, 0.2, 1) 5ms',
         },
     },
@@ -301,33 +312,42 @@ function Number({
 }
 
 // Comments Component
+// Nothing is rendered while the post has no replies: an icon next to a "0"
+// is a dead affordance. Once there is a thread to read, icon and count take
+// the cast-vote colour (`commentsActive`) and open the post on its replies
+// tab through onCommentsClick. The dim/disabled look only survives for a
+// host that renders the card without a handler.
 function Comments({ classes, commentsNumber, onCommentsClick }) {
+    // `Number` is shadowed by the local component below, so coerce with a
+    // unary plus (the count may arrive as a string from older payloads).
+    const count = +commentsNumber || 0;
+    if (count <= 0) return null;
+
     const disabled = typeof onCommentsClick !== 'function';
     const handleClick = disabled ? undefined : onCommentsClick;
+    const colorClass = disabled ? classes.comments : classes.commentsActive;
     return (
-        <>
+        <span className={colorClass} style={disabled ? { opacity: 0.5 } : undefined}>
             <IconButton
-                className={classes.comments}
                 aria-label={t("words.comments")}
                 onClick={handleClick}
                 disabled={disabled}
-                style={disabled ? { opacity: 0.5 } : undefined}
+                style={{color: "inherit"}}
             >
                 <CommentRounded />
             </IconButton>
             <span
                 onClick={handleClick}
-                className={'monospace ' + classes.comments}
+                className={'monospace'}
                 style={{
                     cursor: disabled ? 'default' : 'pointer',
                     marginRight: 4,
-                    marginLeft: -4,
-                    opacity: disabled ? 0.5 : 1,
+                    marginLeft: -4
                 }}
             >
-                {commentsNumber}
+                {count}
             </span>
-        </>
+        </span>
     );
 }
 

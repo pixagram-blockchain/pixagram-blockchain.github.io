@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useReducer, useRef, memo } f
 // Coalesce co-arriving setState calls after an await into one render (Preact
 // doesn't auto-batch in promise continuations).
 import { unstable_batchedUpdates as batch } from "preact/compat";
-import { HISTORY, buildPostUrl, buildCommentFocusHash, isPostUrl, parsePostUrl, isDeletedPost, isCommunityPostUrl, COMMUNITY_TAG_REGEX } from "../utils/constants";
+import { HISTORY, buildPostUrl, buildCommentFocusHash, isPostUrl, parsePostUrl, isDeletedPost, isCommunityPostUrl, COMMUNITY_TAG_REGEX, POST_DRAWER_TAB_HASHES } from "../utils/constants";
 import withStyles from "@material-ui/core/styles/withStyles";
 import * as actions from "../actions/utils";
 import { CellMeasurer, CellMeasurerCache, createMasonryCellPositioner } from "@pixagram/virtualized/dist/es/index";
@@ -92,6 +92,21 @@ const DIALOG_FALLBACK = (
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  1. STYLES                                                          ║
 // ╚══════════════════════════════════════════════════════════════════════╝
+
+// ── Wallet FAB "make way" choreography for the picture viewer ───────────
+// The desktop FAB straddles the profile picture's left edge (its right half
+// hovers over it); while the picture flies to the viewer and back it steps
+// aside: left by FAB_AWAY_SHIFT px and down to FAB_AWAY_SCALE — the card
+// clips at its left edge and leaves only 74px beside the picture, so the
+// 80px button also shrinks a little to clear the picture without leaving
+// the card. The dialog holds the take-off for FAB_AWAY_MS (+ a beat) so
+// the slide always completes first.
+const FAB_AWAY_MS = 220;
+const FAB_AWAY_SHIFT = 37;
+const FAB_AWAY_SCALE = 0.85;
+// After the viewer closes: the reverse hero has landed before `open` flips
+// false, then the Backdrop fades for ~195ms — the FAB comes back after that.
+const FAB_RETURN_DELAY_MS = 260;
 
 const styles = theme => ({
     root: { position: "absolute", width: "100%", height: "100%", display: "flex", overflow: "hidden" },
@@ -209,7 +224,15 @@ const styles = theme => ({
     // anchor's right edge) and half-way down the image. It used to be
     // position:fixed with no offsets, i.e. placed by its static position, which
     // Chrome centred (align-content on the anchor) and WebKit put at the top.
-    menuButton: { display: "block", position: "absolute", top: "50%", left: "100%", zIndex: 1, width: 80, height: 80, transform: "translate(calc(-50% + 17px), -50%)", transition: `color ${TF}, background-color ${TF}`, color: "#101010", backgroundColor: "#c7c7c7", boxShadow: "0 0 8px #c7c7c788, 0 0 16px #c7c7c7cc", "&:hover": { color: "#101010", backgroundColor: "#fff", boxShadow: "0 0 8px #ffffff88, 0 0 16px #ffffffcc" }, "& svg": { width: "1.375em", height: "1.375em" }, "& .MuiTouchRipple-child": { backgroundImage: RIPPLE } },
+    menuButton: { display: "block", position: "absolute", top: "50%", left: "100%", zIndex: 1, width: 80, height: 80, transform: "translate(calc(-50% + 17px), -50%) scale(1)", transition: `color ${TF}, background-color ${TF}, transform ${FAB_AWAY_MS}ms ${E}`, color: "#101010", backgroundColor: "#c7c7c7", boxShadow: "0 0 8px #c7c7c788, 0 0 16px #c7c7c7cc", "&:hover": { color: "#101010", backgroundColor: "#fff", boxShadow: "0 0 8px #ffffff88, 0 0 16px #ffffffcc" }, "& svg": { width: "1.375em", height: "1.375em" }, "& .MuiTouchRipple-child": { backgroundImage: RIPPLE } },
+    // Picture viewer open (and until the dialog has faded out after closing):
+    // the FAB's right half hovers over the picture, and the flying picture is
+    // a layer above the page that would seem to slice through it at take-off
+    // and landing — so it steps LEFT, out from under the picture's edge,
+    // before the picture moves. The card clips at its left edge and leaves
+    // only 74px beside the picture, so the 80px button also shrinks a little
+    // to clear the picture (2px) without leaving the card (4px).
+    menuButtonAway: { transform: `translate(calc(-50% + 17px - ${FAB_AWAY_SHIFT}px), -50%) scale(${FAB_AWAY_SCALE})` },
     menuButtonEdit: { position: "absolute", top: 16, right: 16, backgroundColor: "#000", color: "#fff", transition: `color 175ms ${E} 5ms, background-color 175ms ${E} 5ms`, "&:hover": { backgroundColor: "#171717", color: "#c7c7c7" } },
     cardTabs: { backgroundColor: "#1e1e1e", "& .MuiTab-root": { minWidth: "72px !important" }, "& .MuiTab-textColorPrimary.Mui-selected": { backgroundColor: "transparent" }, "& .MuiTab-textColorPrimary.Mui-selected .MuiTab-wrapper": { color: "#171717 !important" }, "& .MuiTab-fullWidth": { backgroundColor: "transparent", color: "#989898", transition: `all 225ms ${E} 0ms`, borderRadius: "21px" }, "& .MuiTab-fullWidth:hover": { backgroundColor: "rgba(255,255,255,0.06)" }, "& span.MuiTabs-indicator": { zIndex: "-1", height: "48px", backgroundColor: "#c7c7c7", borderRadius: "21px", transform: "scale3d(0.875, 0.75, 1)" }, margin: "16px 16px 0px 16px", width: "calc(100% - 32px)", borderRadius: "21px", position: "absolute", top: 0, left: 0, zIndex: 1, transition: `transform 300ms ${E} 0ms` },
     metadataSwipeableViews: { padding: "72px 16px 4px 16px", overflow: "overlay", height: "100%", [theme.breakpoints.down("sm")]: { paddingTop: "0px !important" } },
@@ -1736,12 +1759,26 @@ const usePostNavigation = ({ api, posts, masonryRefs, scrollToIndex, setSelected
         return unlisten;
     }, [posts]);
 
-    const openPost = useCallback((data, rect) => {
-        const u = buildPostUrl(data); if (u) HISTORY.push(u);
+    // Push the post URL (optionally with a "#…" drawer-tab hash on the SAME
+    // history entry — PostDialog adopts HISTORY.location.hash when it opens,
+    // exactly as openCommentArtwork below relies on) and seat the dialog.
+    const pushAndOpen = useCallback((data, rect, hash) => {
+        const u = buildPostUrl(data); if (u) HISTORY.push(hash ? u + hash : u);
         orphanFetchTokenRef.current += 1;
         setIsOrphan(false);
         setArtworkOpen(true); setCurrentPost(data); setOriginRect(rect||null); historyDepthRef.current = 1;
     }, []);
+
+    // Plain open — card title / image click on the posts tab.
+    const openPost = useCallback((data, rect) => pushAndOpen(data, rect), [pushAndOpen]);
+
+    // Comment-button open — pushes "…/permlink#replies" so PostDialog lands
+    // on the comments tab. The bare hash just selects the tab; the comment
+    // and reply cards add "&focus=<b64>" on top of it (openCommentArtwork).
+    const openPostComments = useCallback(
+        (data, rect) => pushAndOpen(data, rect, POST_DRAWER_TAB_HASHES[1]),
+        [pushAndOpen],
+    );
 
     const closePost = useCallback(() => {
         const depth = historyDepthRef.current;
@@ -1915,12 +1952,12 @@ const usePostNavigation = ({ api, posts, masonryRefs, scrollToIndex, setSelected
     // props) recomputed on every Profile render — scroll ticks included.
     return useMemo(() => ({
         artworkOpen, currentPost, originRect, isOrphan,
-        openPost, closePost, onDrawerPush, onDrawerPop, getReturnRect,
+        openPost, openPostComments, closePost, onDrawerPush, onDrawerPop, getReturnRect,
         nextPost: (isOrphan || !canGoNext) ? undefined : nextPost,
         previousPost: (isOrphan || !canGoPrev) ? undefined : previousPost,
         openCommentArtwork,
     }), [artworkOpen, currentPost, originRect, isOrphan,
-        openPost, closePost, onDrawerPush, onDrawerPop, getReturnRect,
+        openPost, openPostComments, closePost, onDrawerPush, onDrawerPop, getReturnRect,
         nextPost, previousPost, canGoNext, canGoPrev, openCommentArtwork]);
 };
 
@@ -2012,7 +2049,7 @@ const Profile = ({ classes, settings, pathname, api }) => {
     // pops the entry. A deep-linked "/@user#picture" opens it once the
     // account image is known. Mounted lazily on first open, kept mounted
     // afterwards, chunk warmed on idle — the PostDialog pattern.
-    const pictureNav = usePictureDialog(profile.account?.image || '');
+    const pictureNav = usePictureDialog(profile.account?.image || '', { heroDelay: isMobile ? 0 : FAB_AWAY_MS + 30 });
     const [pictureDialogMounted, setPictureDialogMounted] = useState(false);
     useEffect(() => {
         if (pictureNav.open) setPictureDialogMounted(true);
@@ -2022,6 +2059,15 @@ const Profile = ({ classes, settings, pathname, api }) => {
         const id = idle(() => { loadPictureDialog().catch(() => {}); });
         return () => cancelIdle(id);
     }, [pictureDialogMounted]);
+    // The wallet FAB steps aside for the whole viewer session — out before
+    // the picture takes off (the dialog waits for it), still out while the
+    // picture flies back and lands, back once the dialog has faded out.
+    const [fabAway, setFabAway] = useState(false);
+    useEffect(() => {
+        if (pictureNav.open) { setFabAway(true); return undefined; }
+        const t = setTimeout(() => setFabAway(false), FAB_RETURN_DELAY_MS);
+        return () => clearTimeout(t);
+    }, [pictureNav.open]);
 
     // ── Dialogs ────────────────────────────────────────────────────────
     const [walletOpen, setWalletOpen] = useState(parsed.modal === 'wallet');
@@ -2234,7 +2280,7 @@ const Profile = ({ classes, settings, pathname, api }) => {
         columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
         selectedPostIndex, postListHeight, pageWidth,
     } = grid;
-    const { openPost, openCommentArtwork } = postNav;
+    const { openPost, openPostComments, openCommentArtwork } = postNav;
     // Stable comment/reply open handler — replaces the per-cell inline
     // `(d) => postNav.openCommentArtwork(d, api, profile.account)` closure
     // and narrows those renderers' dependency from the whole `profile`
@@ -2264,10 +2310,10 @@ const Profile = ({ classes, settings, pathname, api }) => {
         const visible = threshold+bottom>st && top<st+viewH+threshold;
         cellMeasurerCache.visible_ids[size.id] = visible||(cellMeasurerCache.visible_ids[size.id]||false);
         return (<CellMeasurer cache={cellMeasurerCache} index={index} key={key} parent={parent}>
-            <PaperCard onOpen={openPost} locales={locales} nsfw={settings._nsfw_enabled} data={item} renderer={settings._renderer} mode={settings._mode} onMenuClick={openCardMenu} api={api} voter={profile.loggedInUser} onVoteChange={onVoteChange} is_scrolling={isScrolling} selected={selectedPostIndex===index} size={size} visible={cellMeasurerCache.visible_ids[size.id]} column_width={columnWidth} image_height={ih} image_width={columnWidth} id={size.id} key={size.id} rowIndex={rowIdx} columnIndex={colIdx} style={style} />
+            <PaperCard onOpen={openPost} onCommentsClick={openPostComments} locales={locales} nsfw={settings._nsfw_enabled} data={item} renderer={settings._renderer} mode={settings._mode} onMenuClick={openCardMenu} api={api} voter={profile.loggedInUser} onVoteChange={onVoteChange} is_scrolling={isScrolling} selected={selectedPostIndex===index} size={size} visible={cellMeasurerCache.visible_ids[size.id]} column_width={columnWidth} image_height={ih} image_width={columnWidth} id={size.id} key={size.id} rowIndex={rowIdx} columnIndex={colIdx} style={style} />
         </CellMeasurer>);
     }, [tabData.posts, columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
-        selectedPostIndex, postListHeight, pageWidth, openPost,
+        selectedPostIndex, postListHeight, pageWidth, openPost, openPostComments,
         locales, settings, openCardMenu, api, profile.loggedInUser, onVoteChange]);
 
     const cellRendererComments = useCallback((data) => {
@@ -2408,7 +2454,9 @@ const Profile = ({ classes, settings, pathname, api }) => {
         // Profile picture click → PictureDialog. Pass the click event itself
         // (its currentTarget is the element the picture flies out of).
         onOpenPicture: pictureNav.openPicture,
-    }), [profile, postsCount, tabValue, classes, openFollowListModal, goToCommunity, handleWalletOpen, pictureNav.openPicture]);
+        // Wallet FAB stepped aside for the picture's flight (see fabAway).
+        fabAway,
+    }), [profile, postsCount, tabValue, classes, openFollowListModal, goToCommunity, handleWalletOpen, pictureNav.openPicture, fabAway]);
 
     const bottomBarHidden = isMobile && mobileCardExpanded;
     const fabTransform = isMobile

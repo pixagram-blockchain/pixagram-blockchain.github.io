@@ -76,11 +76,19 @@ const currentHash = () => HISTORY.location.hash || "";
 /**
  * @param {string} src  the picture currently shown on the page ('' while the
  *                      account / community is still loading)
+ * @param {object} [options]
+ * @param {number} [options.heroDelay=0]  ms the dialog must wait after the
+ *   click before the picture takes off — time for the page to move things
+ *   out of the flight's way (the FAB that straddles the picture's edge).
+ *   Stamped on originRect as `notBefore` (performance.now() clock); the
+ *   dialog paints and launches the hero no earlier than that. The return
+ *   flight needs no hold: the page keeps the way clear while the viewer is
+ *   open and only restores it after the dialog has faded out.
  * @returns {{ open, src, originRect, openPicture, closePicture, getReturnRect }}
  *   openPicture(target) — `target` is the click event (its currentTarget is
  *   the anchor), the anchor element itself, or a pre-measured rect.
  */
-export function usePictureDialog(src) {
+export function usePictureDialog(src, options) {
     const [open, setOpen] = useState(false);
     const [originRect, setOriginRect] = useState(null);
     // Mirrors `open` for the synchronous paths below (HISTORY listeners and
@@ -92,6 +100,8 @@ export function usePictureDialog(src) {
     const anchorRef = useRef(null);
     const srcRef = useRef(src);
     srcRef.current = src;
+    const heroDelayRef = useRef(0);
+    heroDelayRef.current = (options && options.heroDelay > 0) ? options.heroDelay : 0;
 
     // ── URL → state ──────────────────────────────────────────────────
     // Idempotent: the URL is the source of truth. "#picture" on the current
@@ -150,6 +160,9 @@ export function usePictureDialog(src) {
             rect = { left: target.left || 0, top: target.top || 0, width: target.width, height: target.height, radius: target.radius || ZERO_RADIUS };
         }
         if (el) rect = measureAnchor(el);
+        if (rect && heroDelayRef.current > 0) {
+            rect = { ...rect, notBefore: performance.now() + heroDelayRef.current };
+        }
         anchorRef.current = el;
         openRef.current = true;
         if (currentHash() !== PICTURE_HASH) {

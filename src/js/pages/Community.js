@@ -108,6 +108,21 @@ const slideKeyframe = (axis, from) => ({
     "100%": { transform: `translate${axis}(0px)`, filter: "opacity(1)" },
 });
 
+// ── Write FAB "make way" choreography for the picture viewer ────────────
+// The desktop FAB is centred on the portal picture's right edge (its left
+// half hovers over it); while the picture flies to the viewer and back it
+// steps aside: right by FAB_AWAY_SHIFT px and down to FAB_AWAY_SCALE — the
+// card clips at its right edge and leaves only 74px beside the picture, so
+// the 80px button also shrinks a little to clear the picture without leaving
+// the card. The dialog holds the take-off for FAB_AWAY_MS (+ a beat) so the
+// slide always completes first.
+const FAB_AWAY_MS = 220;
+const FAB_AWAY_SHIFT = 37;
+const FAB_AWAY_SCALE = 0.85;
+// After the viewer closes: the reverse hero has landed before `open` flips
+// false, then the Backdrop fades for ~195ms — the FAB comes back after that.
+const FAB_RETURN_DELAY_MS = 260;
+
 const styles = (theme) => ({
     root: {
         position: "absolute", width: "100%", height: "100%",
@@ -326,8 +341,8 @@ const styles = (theme) => ({
     menuButton: {
         display: "block", position: "absolute", top: "50%", left: "100%",
         zIndex: 1, width: 80, height: 80,
-        transform: "translate(calc(-50% + 17px), -50%)",
-        transition: `color ${TRANSITION_FAST}, background-color ${TRANSITION_FAST}`,
+        transform: "translate(calc(-50% + 17px), -50%) scale(1)",
+        transition: `color ${TRANSITION_FAST}, background-color ${TRANSITION_FAST}, transform ${FAB_AWAY_MS}ms ${EASE_STANDARD}`,
         color: "#101010", backgroundColor: "#c7c7c7",
         boxShadow: "0 0 8px #c7c7c788, 0 0 16px #c7c7c7cc",
         "&:hover": {
@@ -336,6 +351,14 @@ const styles = (theme) => ({
         },
         "& svg": { width: "1.375em", height: "1.375em" },
         "& .MuiTouchRipple-child": { backgroundImage: RAINBOW_RIPPLE },
+    },
+    // Picture viewer open (and until the dialog has faded out after closing):
+    // the FAB's left half hovers over the picture, and the flying picture is
+    // a layer above the page that would seem to slice through it at take-off
+    // and landing — so it steps RIGHT, out from under the picture's edge,
+    // before the picture moves. See FAB_AWAY_* for why it also shrinks.
+    menuButtonAway: {
+        transform: `translate(calc(-50% + 17px + ${FAB_AWAY_SHIFT}px), -50%) scale(${FAB_AWAY_SCALE})`,
     },
     menuButtonEdit: {
         position: "absolute", top: 16, left: 16, backgroundColor: "#000", color: "#fff",
@@ -1648,7 +1671,7 @@ const Community = ({ classes, settings, pathname, api }) => {
     // community image is known. Declared BEFORE usePostNavigation so its
     // open flag can suspend the feed's Enter/arrow shortcuts. Mounted lazily
     // on first open, kept mounted afterwards, chunk warmed on idle.
-    const pictureNav = usePictureDialog(community?.image || '');
+    const pictureNav = usePictureDialog(community?.image || '', { heroDelay: isMobile ? 0 : FAB_AWAY_MS + 30 });
     const [pictureDialogMounted, setPictureDialogMounted] = useState(false);
     useEffect(() => {
         if (pictureNav.open) setPictureDialogMounted(true);
@@ -1658,6 +1681,15 @@ const Community = ({ classes, settings, pathname, api }) => {
         const id = idle(() => { loadPictureDialog().catch(() => {}); });
         return () => cancelIdle(id);
     }, [pictureDialogMounted]);
+    // The write FAB steps aside for the whole viewer session — out before
+    // the picture takes off (the dialog waits for it), still out while the
+    // picture flies back and lands, back once the dialog has faded out.
+    const [fabAway, setFabAway] = useState(false);
+    useEffect(() => {
+        if (pictureNav.open) { setFabAway(true); return undefined; }
+        const t = setTimeout(() => setFabAway(false), FAB_RETURN_DELAY_MS);
+        return () => clearTimeout(t);
+    }, [pictureNav.open]);
 
     const postNav = usePostNavigation({
         api, posts, scrollToIndex: grid.scrollToIndex, setSelectedPostIndex: grid.setSelectedPostIndex,
@@ -1994,9 +2026,11 @@ const Community = ({ classes, settings, pathname, api }) => {
         // Community picture click → PictureDialog. Pass the click event
         // itself (its currentTarget is the element the picture flies out of).
         onOpenPicture: pictureNav.openPicture,
+        // Write FAB stepped aside for the picture's flight (see fabAway).
+        fabAway,
         classes,
     }), [community, members, rules, postsCount, isJoined, tabValue, isAdmin,
-        handleToggleJoined, handleTabChange, handleTextEditor, classes, openDialog, pictureNav.openPicture]);
+        handleToggleJoined, handleTabChange, handleTextEditor, classes, openDialog, pictureNav.openPicture, fabAway]);
 
     // ── Render ─────────────────────────────────────────────────────────
     return (

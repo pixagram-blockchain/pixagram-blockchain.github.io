@@ -37,7 +37,8 @@ const ProfileSidebar = React.memo(({
                                        onCreateCommunity,
                                        onWalletOpen,
                                        onEditProfile,
-                                       onOpenPicture
+                                       onOpenPicture,
+                                       fabAway
                                    }) => {
     const handleTabChange = React.useCallback((e, v) => {
         onTabChange(e, v);
@@ -72,7 +73,10 @@ const ProfileSidebar = React.memo(({
                     <div style={{width: "100%"}}>
                         <div style={{display: "flex", position: "relative"}}>
                             <div className={classes.walletButtons}>
-                                <IconButton className={classes.menuButton} onClick={onWalletOpen} data-tour="profile-wallet"><AccountBalanceWalletRounded/></IconButton>
+                                {/* fabAway: stepped left out from under the picture's edge
+                                    while the picture flies to the viewer and back. */}
+                                <IconButton className={fabAway ? `${classes.menuButton} ${classes.menuButtonAway}` : classes.menuButton}
+                                            onClick={onWalletOpen} data-tour="profile-wallet"><AccountBalanceWalletRounded/></IconButton>
                             </div>
                             {/* Click → PictureDialog (Profile's usePictureDialog measures
                                 this button: same box and same 56px corners as the picture,

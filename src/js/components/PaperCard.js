@@ -730,10 +730,12 @@ function PaperCardInner({
 
     // Only forward a handler if the parent actually provided one. When no
     // handler is passed, leave this undefined so PaperCardActions renders the
-    // comments button in its disabled / dimmed state.
+    // comments button in its disabled / dimmed state. The canvas rect rides
+    // along exactly as it does for a title/image click, so the page's
+    // openPostComments can seat the dialog with the same hero animation.
     const handleCommentsClick = useCallback(
-        onCommentsClick ? (() => onCommentsClick(data)) : undefined,
-        [onCommentsClick, data]
+        onCommentsClick ? (() => onCommentsClick(data, getCanvasBoundingRect())) : undefined,
+        [onCommentsClick, data, getCanvasBoundingRect]
     );
 
     const imageClass = classes.image + (renderer === 'square' ? ' pixelated ' : '');

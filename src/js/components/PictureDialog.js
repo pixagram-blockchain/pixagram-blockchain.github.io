@@ -22,7 +22,9 @@ import { pngdby } from "../utils/png-db";
  *   src             the picture (data URI or URL)
  *   renderer, mode  settings._renderer / settings._mode
  *   originRect      { left, top, width, height, radius:[tl,tr,br,bl] } of the
- *                   clicked element, or null → plain scale-in
+ *                   clicked element, or null → plain scale-in. An optional
+ *                   `notBefore` (performance.now() timestamp) holds the
+ *                   take-off until then — see renderPipeline's deliver().
  *   getReturnRect   () → same shape, live, or null → plain fade-out
  *   onClose         fires once the close animation has landed — the host
  *                   then pops its "#picture" history entry
@@ -722,23 +724,38 @@ function PictureDialog(props) {
         const renderId = inst.currentRenderId;
         if (!size || !size.width) return;
 
+        // Take-off hold. The host may have asked (originRect.notBefore) for
+        // the picture to stay put while the page moves something out of the
+        // flight's way — the FAB straddling the picture's edge steps aside
+        // first. The render itself is not delayed, only the delivery: staging,
+        // paint and kick happen together in setImgd, so the picture appears
+        // at its origin exactly when it starts moving and never sits painted
+        // over the button in the meantime. The bitmap simply waits; a close
+        // or reopen in between bumps the render id and setImgd drops it.
+        const deliver = (dims, b, isPreview) => {
+            const o = inst.heroAnimating ? inst.originRect : null;
+            const wait = (o && o.notBefore) ? o.notBefore - performance.now() : 0;
+            if (wait > 0) setTimeout(() => setImgd(dims, b, id, renderId, isPreview), wait);
+            else setImgd(dims, b, id, renderId, isPreview);
+        };
+
         // Undecodable-for-the-pool picture: paint the raw bitmap (a clone —
         // the transfer detaches whatever it is handed) with no renderer.
         if (!imgd) {
             const raw = inst.rawBitmap;
             if (!raw || typeof createImageBitmap !== "function") return;
             createImageBitmap(raw)
-                .then((clone) => setImgd({ width: raw.width, height: raw.height }, clone, id, renderId))
+                .then((clone) => deliver({ width: raw.width, height: raw.height }, clone, false))
                 .catch(() => {});
             return;
         }
 
         const cb = (d, b) => {
             const dims = (d && d.width && d.height) ? d : imgd;
-            if (b) return setImgd(dims, b, id, renderId);
+            if (b) return deliver(dims, b, false);
             // Pool handed pixels without a bitmap — mint one.
             if (d && d.data && typeof createImageBitmap === "function") {
-                createImageBitmap(d).then((bmp) => setImgd(dims, bmp, id, renderId)).catch(() => {});
+                createImageBitmap(d).then((bmp) => deliver(dims, bmp, false)).catch(() => {});
             }
         };
 
@@ -798,7 +815,7 @@ function PictureDialog(props) {
                         return;
                     }
                     const pw = bitmap.width;
-                    setImgd(imgd, bitmap, id, renderId, true); // paints + kicks the hero
+                    deliver(imgd, bitmap, true); // paints + kicks the hero (after the hold, if any)
                     inst.pendingFullRender = (size.width * 2 > pw) ? runFullRender : null;
                 }).catch(() => { if (renderId === inst.currentRenderId) runFullRender(); });
                 return;

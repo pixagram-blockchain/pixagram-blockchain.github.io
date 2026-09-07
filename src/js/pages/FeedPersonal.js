@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, memo } from "preact/
 // Coalesce co-arriving setState calls after an await into a single render
 // (Preact doesn't auto-batch across await / in promise continuations).
 import { unstable_batchedUpdates as batch } from "preact/compat";
-import { HISTORY, buildPostUrl, isPostUrl, parsePostUrl, isDeletedPost } from "../utils/constants";
+import { HISTORY, buildPostUrl, isPostUrl, parsePostUrl, isDeletedPost, POST_DRAWER_TAB_HASHES } from "../utils/constants";
 import withStyles from "@material-ui/core/styles/withStyles";
 import * as actions from "../actions/utils";
 import { CellMeasurer } from "@pixagram/virtualized/dist/es/index";
@@ -809,12 +809,25 @@ const usePostNavigation = ({ api, posts, masonryRef, scrollToIndex, setSelectedP
         return unlisten;
     }, [posts]);
 
-    const openPost = useCallback((data, rect) => {
-        const u = buildPostUrl(data); if (u) HISTORY.push(u);
+    // Push the post URL (optionally with a "#…" drawer-tab hash on the SAME
+    // history entry — PostDialog adopts HISTORY.location.hash when it opens)
+    // and seat the dialog. See Feed.js for the full note.
+    const pushAndOpen = useCallback((data, rect, hash) => {
+        const u = buildPostUrl(data); if (u) HISTORY.push(hash ? u + hash : u);
         orphanFetchTokenRef.current += 1;
         setIsOrphan(false);
         setArtworkOpen(true); setCurrentPost(data); setOriginRect(rect || null); historyDepthRef.current = 1;
     }, []);
+
+    // Plain open — card title / image click.
+    const openPost = useCallback((data, rect) => pushAndOpen(data, rect), [pushAndOpen]);
+
+    // Comment-button open — pushes "…/permlink#replies" so PostDialog lands
+    // on the comments tab (same deep-link scheme as Profile's comment links).
+    const openPostComments = useCallback(
+        (data, rect) => pushAndOpen(data, rect, POST_DRAWER_TAB_HASHES[1]),
+        [pushAndOpen],
+    );
 
     const closePost = useCallback(() => {
         const depth = historyDepthRef.current;
@@ -907,11 +920,11 @@ const usePostNavigation = ({ api, posts, masonryRef, scrollToIndex, setSelectedP
     return useMemo(() => ({
         artworkOpen, currentPost, originRect, isOrphan,
         createDialogOpen, setCreateDialogOpen,
-        openPost, closePost, onDrawerPush, onDrawerPop, getReturnRect,
+        openPost, openPostComments, closePost, onDrawerPush, onDrawerPop, getReturnRect,
         nextPost: (isOrphan || !canGoNext) ? undefined : nextPost,
         previousPost: (isOrphan || !canGoPrev) ? undefined : previousPost,
     }), [artworkOpen, currentPost, originRect, isOrphan, createDialogOpen,
-        openPost, closePost, onDrawerPush, onDrawerPop, getReturnRect,
+        openPost, openPostComments, closePost, onDrawerPush, onDrawerPop, getReturnRect,
         nextPost, previousPost, canGoNext, canGoPrev]);
 };
 
@@ -1083,7 +1096,7 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
         columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
         selectedPostIndex, postListHeight, pageWidth,
     } = grid;
-    const { openPost } = postNav;
+    const { openPost, openPostComments } = postNav;
     const cellRenderer = useCallback((data) => {
         const { index, key, parent, style, isScrolling } = data;
         if (!parent?.props?.itemsWithSizes?.[index | 0]) return null;
@@ -1104,7 +1117,7 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
 
         return (
             <CellMeasurer cache={cellMeasurerCache} index={index} key={key} parent={parent}>
-                <PaperCard onOpen={openPost} locales={locales} nsfw={settings._nsfw_enabled} data={item}
+                <PaperCard onOpen={openPost} onCommentsClick={openPostComments} locales={locales} nsfw={settings._nsfw_enabled} data={item}
                            renderer={settings._renderer} mode={settings._mode} onMenuClick={openCardMenu} api={api}
                            voter={loggedInUser} onVoteChange={onVoteChange} is_scrolling={isScrolling}
                            selected={selectedPostIndex === index} size={size} visible={cellMeasurerCache.visible_ids[size.id]}
@@ -1113,7 +1126,7 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
             </CellMeasurer>
         );
     }, [posts, columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
-        selectedPostIndex, postListHeight, pageWidth, openPost,
+        selectedPostIndex, postListHeight, pageWidth, openPost, openPostComments,
         locales, settings, openCardMenu, api, loggedInUser, onVoteChange]);
 
     // ── Render ─────────────────────────────────────────────────────────

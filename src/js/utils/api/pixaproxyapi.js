@@ -8,7 +8,32 @@
  * registry, notification-read receipts, Argon2id auto-tune benchmark, and
  * the offline broadcast outbox. The pixa_cache database is no longer opened.
  *
- * @version 4.4.0
+ * v4.5.0: Broadcasts are inclusion-confirmed. dpixa's BroadcastAPI.send()
+ * — the funnel every broadcast.* convenience method and sendOperations()
+ * go through — called condenser_api.broadcast_transaction, which answers
+ * `{}` as soon as the node has the tx in its mempool. The proxy now routes
+ * that funnel through condenser_api.broadcast_transaction_synchronous
+ * (see PixaProxyAPI#_installSynchronousSend): the node holds the request
+ * until it has applied a block containing the tx and answers
+ * { id, block_num, trx_num, rc_cost }, or answers { expired: true } once a
+ * block past the tx's expiration arrives (~60 s), which the proxy turns
+ * into PixaAPIError('TX_EXPIRED'). Consequences: `vote_done` and every
+ * other post-broadcast event fire after inclusion, never on a mempool
+ * accept; the offline queue's `completed` status is truthful; and a tx a
+ * node accepts but the block producers never include surfaces as an error
+ * instead of vanishing. New `vote_pending` event carries the optimistic UI
+ * in the meantime. Hivemind still indexes a block a second or two after
+ * hived applies it, so read-backs go through VotesAPI#awaitVoteVisible or
+ * TransactionStatusAPI#awaitHivemindBlock instead of trusting one read.
+ *
+ * NODE-SIDE PREREQUISITE: the API node's reverse proxy must keep a request
+ * open longer than the worst-case synchronous wait (tx expiration 60 s +
+ * one block). pixagram-node's jussi/nginx.conf ships proxy_read_timeout
+ * 30s — raise it to 90s. Otherwise the expiry path comes back as HTTP 504,
+ * dpixa's retryingFetch re-posts the same signed tx, and hived answers
+ * "Transaction is a duplicate" while erasing the first request's callback.
+ *
+ * @version 4.5.0
  *
  * API Groups and Methods:
  *
@@ -152,6 +177,7 @@
  * votes (VotesAPI):
  *   - getActiveVotes(author, permlink)
  *   - getAccountVotes(account)
+ *   - awaitVoteVisible(voter, author, permlink, weight, options?)  // poll hivemind until the vote row matches
  *
  * content (ContentAPI):
  *   - getContent(author, permlink, options?)   // options.raw=true → bypass cache + sanitization
@@ -319,6 +345,9 @@
  *
  * transaction (TransactionStatusAPI):
  *   - findTransaction(transactionId, expiration)
+ *   - isConfirmed(transactionId)
+ *   - getHivemindHead()                          // hive.db_head_state → { db_head_block, db_head_time, db_head_age } | null
+ *   - awaitHivemindBlock(blockNum, options?)     // resolve once hivemind has indexed blockNum
  *
  * jsonrpc (JsonRpcAPI):
  *   - getMethods(forceRefresh)
@@ -1093,6 +1122,81 @@ export class PixaProxyAPI {
         return best;
     }
 
+    /**
+     * Route every dpixa broadcast through
+     * condenser_api.broadcast_transaction_synchronous.
+     *
+     * dpixa builds, signs and sends a transaction as
+     * sendOperations() → sign() → send(); broadcast.vote/comment/transfer/…
+     * are thin wrappers over sendOperations(). Only the last RPC changes:
+     * the fork's send() calls condenser_api.broadcast_transaction and returns
+     * `{ id }` merged with the node's empty `{}` the moment the node has the
+     * tx in its mempool. Upstream dhive calls the synchronous variant here;
+     * this restores that behaviour without patching the library.
+     *
+     * Contract of the replacement:
+     *   - resolves { id, block_num, trx_num, rc_cost } once the node has
+     *     applied a block containing the tx (condenser_api holds the HTTP
+     *     request until its on_post_apply_block sees the txid) — typically
+     *     1.5–4 s; the response includes the node-computed transaction id;
+     *   - throws PixaAPIError('TX_EXPIRED', { id, block_num }) when the node
+     *     answers { expired: true }, i.e. a block whose timestamp passed the
+     *     tx's expiration arrived first (~60 s with dpixa's default
+     *     expireTime). Callers, _send() and the BroadcastQueue already treat
+     *     a throw as a failed broadcast; the queue re-signs a fresh tx on
+     *     retry, so it never re-posts the same txid;
+     *   - node-side rejections (auth, RC, duplicate, expiration checks on
+     *     accept) throw exactly as before — they happen before the wait.
+     *
+     * The original fire-and-forget send() stays reachable as
+     * `client.broadcast.sendAsync()` for callers that explicitly want
+     * mempool-accept semantics. Idempotent: safe to call again on a
+     * re-created client.
+     *
+     * Timing notes. dpixa exempts broadcast_transaction* methods from its
+     * per-attempt fetch timeout and browsers do not time out fetch(), so the
+     * client side waits as long as needed. The reverse proxy in front of the
+     * node must not cut the request first: pixagram-node's nginx has
+     * proxy_read_timeout 30s, which covers the success path but not the
+     * expiry path — raise it to 90s before enabling this in production. A
+     * proxy-side 504 is retried by dpixa's retryingFetch with the SAME signed
+     * tx; hived then throws "Transaction is a duplicate" and, as a side
+     * effect, erases the still-waiting first request's callback.
+     *
+     * @param {import('@pixagram/dpixa').Client} client
+     * @private
+     */
+    _installSynchronousSend(client) {
+        const broadcast = client?.broadcast;
+        if (!broadcast || broadcast.__pixaSynchronousSend) return;
+
+        const originalSend = typeof broadcast.send === 'function'
+            ? broadcast.send.bind(broadcast)
+            : null;
+
+        broadcast.send = async (transaction) => {
+            const result = await client.call(
+                'condenser_api',
+                'broadcast_transaction_synchronous',
+                [transaction]
+            );
+
+            if (result && result.expired === true) {
+                throw new PixaAPIError(
+                    `Transaction ${result.id} expired before being included in a block`,
+                    'TX_EXPIRED',
+                    { id: result.id, block_num: result.block_num }
+                );
+            }
+
+            // { id, block_num, trx_num, rc_cost?, expired: false }
+            return result;
+        };
+
+        if (originalSend) broadcast.sendAsync = originalSend;
+        broadcast.__pixaSynchronousSend = true;
+    }
+
     updateConfig(newConfig) {
         this.config = { ...this.config, ...newConfig };
         if (this.keyManager && newConfig.PIN_TIMEOUT !== undefined) {
@@ -1248,6 +1352,10 @@ export class PixaProxyAPI {
                 Array.isArray(nodes) ? nodes : [nodes],
                 clientOptions
             );
+
+            // v4.5.0: every broadcast resolves on inclusion in a block, not on
+            // mempool acceptance. See _installSynchronousSend() for the contract.
+            this._installSynchronousSend(this.client);
 
             // Initialize all API groups
             this.database = new DatabaseAPI(this);
@@ -4324,6 +4432,63 @@ class VotesAPI {
         return this.proxy.client.call('condenser_api', 'get_active_votes', [normalizedAuthor, permlink]);
     }
 
+    /**
+     * Wait until hivemind reports the vote as broadcast.
+     *
+     * A synchronous broadcast returns when hived has the tx in a block, but
+     * condenser_api.get_active_votes and every bridge.* call are answered by
+     * hivemind, which indexes that block a second or two later (longer on a
+     * small or distant node). Re-reading once right after `vote_done` can
+     * therefore still show the previous state. This polls until the voter's
+     * row carries the expected weight, or gives up.
+     *
+     * Hivemind keeps the row after a vote removal with `percent: 0` and
+     * `rshares: 0` — that row is what a weight-0 broadcast produces, and an
+     * absent row is accepted for weight 0 as well (row never created).
+     * `percent` arrives as a string from condenser rows.
+     *
+     * @param {string} voter
+     * @param {string} author
+     * @param {string} permlink
+     * @param {number} weight - the weight that was broadcast (-10000..10000)
+     * @param {object} [options]
+     * @param {number} [options.tries=10]        - number of reads before giving up
+     * @param {number} [options.intervalMs=1000] - delay between reads
+     * @returns {Promise<{visible: boolean, vote: (object|null), tries: number}>}
+     *   `visible` false means hivemind had not caught up within the budget —
+     *   NOT that the vote failed; the chain state is what `vote_done` reported.
+     */
+    async awaitVoteVisible(voter, author, permlink, weight, options = {}) {
+        const { tries = 10, intervalMs = 1000 } = options;
+        const normalizedVoter = normalizeAccount(voter);
+        const normalizedAuthor = normalizeAccount(author);
+        const expected = Number(weight) || 0;
+
+        let vote = null;
+        let attempt = 0;
+        for (; attempt < tries; attempt++) {
+            let rows = null;
+            try {
+                rows = await this.getActiveVotes(normalizedAuthor, permlink);
+            } catch (e) {
+                console.warn('[VotesAPI] awaitVoteVisible read failed:', e.message);
+            }
+
+            if (Array.isArray(rows)) {
+                vote = rows.find(v => v && v.voter === normalizedVoter) || null;
+                const percent = vote ? (Number(vote.percent) || 0) : 0;
+                if (percent === expected && (vote || expected === 0)) {
+                    return { visible: true, vote, tries: attempt + 1 };
+                }
+            }
+
+            if (attempt < tries - 1) {
+                await new Promise(resolve => setTimeout(resolve, intervalMs));
+            }
+        }
+        return { visible: false, vote, tries: attempt };
+    }
+
     async getAccountVotes(account) {
         const normalizedAccount = normalizeAccount(account);
         return this.proxy.client.call('condenser_api', 'get_account_votes', [normalizedAccount]);
@@ -4953,10 +5118,18 @@ class BroadcastAPI {
      *
      * When the queue is NOT initialized: falls back to direct sendOperations.
      *
+     * v4.5.0: online broadcasts resolve only once the tx is in a block
+     * (see _installSynchronousSend). A successful result is
+     * { id, block_num, trx_num, rc_cost } — `block_num` is the block that
+     * contains the tx. A tx that no block included before its expiration
+     * throws PixaAPIError('TX_EXPIRED'); the catch below correctly treats
+     * that as a chain error (re-checks connectivity, then propagates) rather
+     * than as "offline". Expect the await to take 1.5–4 s.
+     *
      * @param {Array} operations — [[opName, opData], ...] tuples
      * @param {string} key — WIF private key string
      * @param {object} [meta={}] — Metadata for dedup/display { account, keyType, ... }
-     * @returns {Promise<object>} Broadcast result or queue entry
+     * @returns {Promise<object>} Broadcast result ({ id, block_num, trx_num, rc_cost }) or queue entry
      * @private
      */
     async _send(operations, key, meta = {}, broadcastFn = null) {
@@ -5181,6 +5354,21 @@ class BroadcastAPI {
                 weight: finalWeight,
             };
 
+            // v4.5.0: _send() now resolves on inclusion in a block (1.5–4 s),
+            // so tell the UI the vote is on its way before the wait. This is
+            // the moment for the optimistic vote; `vote_done` below is the
+            // confirmation, and a throw between the two means it was NOT
+            // broadcast (queued offline, rejected, or TX_EXPIRED).
+            if (this.proxy.eventEmitter) {
+                this.proxy.eventEmitter.emit('vote_pending', {
+                    voter: normalizedVoter,
+                    author: normalizedAuthor,
+                    permlink,
+                    weight: finalWeight,
+                    outcome: classifyVoteOutcome(finalWeight),
+                });
+            }
+
             const result = await this._send(
                 [['vote', op]], key,
                 { account: normalizedVoter, voter: normalizedVoter, author: normalizedAuthor, permlink, keyType: 'posting' }
@@ -5192,6 +5380,12 @@ class BroadcastAPI {
             // Listeners (e.g. the snackbar in Index) own the user-facing message,
             // so components no longer emit their own success snackbar — this is
             // what removes the duplicate "voted" toast.
+            //
+            // v4.5.0: fires after the tx is in a block. `blockNum` is the block
+            // that contains it (null when the op was queued offline, in which
+            // case `result` is the queue entry). Hivemind indexes that block a
+            // second or two later — re-read through votes.awaitVoteVisible() or
+            // transaction.awaitHivemindBlock(blockNum), not a single fetch.
             if (this.proxy.eventEmitter) {
                 this.proxy.eventEmitter.emit('vote_done', {
                     voter: normalizedVoter,
@@ -5200,6 +5394,7 @@ class BroadcastAPI {
                     weight: finalWeight,
                     outcome: classifyVoteOutcome(finalWeight),
                     result,
+                    blockNum: Number.isInteger(result?.block_num) ? result.block_num : null,
                 });
             }
 
@@ -8438,6 +8633,68 @@ class TransactionStatusAPI {
         const result = await this.findTransaction(transactionId);
         const confirmedStatuses = ['within_irreversible_block', 'within_reversible_block'];
         return confirmedStatuses.includes(result.status);
+    }
+
+    /**
+     * Hivemind's own head block (hive.db_head_state).
+     *
+     * Tells how far the social-layer index is behind the chain on the node
+     * you are connected to. Routing note: pixagram-node's nginx forwards only
+     * the `bridge`, `follow_api` and `tags_api` namespaces (plus a list of
+     * condenser methods) to hivemind; `hive.db_head_state` reaches hivemind
+     * only once `["hive"] = true` is added to `hivemind_apis` in
+     * jussi/nginx.conf. Until then hived answers "Could not find API hive"
+     * and this resolves null.
+     *
+     * @returns {Promise<{db_head_block: number, db_head_time: string, db_head_age: number}|null>}
+     */
+    async getHivemindHead() {
+        try {
+            const r = await this.proxy.client.call('hive', 'db_head_state', {});
+            if (r && Number.isFinite(Number(r.db_head_block))) {
+                return {
+                    db_head_block: Number(r.db_head_block),
+                    db_head_time: r.db_head_time ?? null,
+                    db_head_age: Number(r.db_head_age) || 0,
+                };
+            }
+        } catch (_) { /* not routed to hivemind on this node */ }
+        return null;
+    }
+
+    /**
+     * Resolve once hivemind on this node has indexed `blockNum` — the
+     * `block_num` a synchronous broadcast returned (`vote_done.blockNum`).
+     * After it resolves true, bridge.* and get_active_votes reflect the tx.
+     *
+     * @param {number} blockNum
+     * @param {object} [options]
+     * @param {number} [options.tries=10]
+     * @param {number} [options.intervalMs=1000]
+     * @returns {Promise<{indexed: boolean, head: (number|null), tries: number}>}
+     *   `indexed` false with `head` null means the head-state method is not
+     *   routed on this node (see getHivemindHead); fall back to
+     *   votes.awaitVoteVisible() or a content-specific re-read.
+     */
+    async awaitHivemindBlock(blockNum, options = {}) {
+        const { tries = 10, intervalMs = 1000 } = options;
+        const target = Number(blockNum);
+        if (!Number.isFinite(target) || target <= 0) {
+            return { indexed: false, head: null, tries: 0 };
+        }
+
+        let head = null;
+        let attempt = 0;
+        for (; attempt < tries; attempt++) {
+            const state = await this.getHivemindHead();
+            if (!state) return { indexed: false, head: null, tries: attempt + 1 };
+            head = state.db_head_block;
+            if (head >= target) return { indexed: true, head, tries: attempt + 1 };
+            if (attempt < tries - 1) {
+                await new Promise(resolve => setTimeout(resolve, intervalMs));
+            }
+        }
+        return { indexed: false, head, tries: attempt };
     }
 }
 
