@@ -1,5 +1,6 @@
 import {generate, transform} from "./AI";
 import { analyze_colors, downscale_rgba, WasmDownscaleConfig, downscale_prepared, prepare_rgba } from 'smart-downscaler';
+import { heicTo, isHeic } from "heic-to"
 
 // Function to smooth the image data
 function smoothImageData(imageData) {
@@ -186,6 +187,15 @@ export const processImageFile = async function ({file, description},
 
     const continue_it = async (blob, title) => {
         const maxPixels = maxWidth * maxHeight;
+
+        if (await isHeic(blob)) {
+            blob = await heicTo({
+                blob: blob,
+                type: "image/jpeg",
+                quality: 0.75
+            })
+        }
+
         const bitmap = await createImageBitmap(blob, {resizeQuality: "pixelated"});
         const ratio = computeRatio(bitmap.width, bitmap.height, maxPixels);
 

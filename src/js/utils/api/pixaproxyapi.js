@@ -3332,7 +3332,7 @@ class BlocksAPI {
         const apiParams = {
             block_range_begin: blockRangeBegin,
             block_range_end: blockRangeEnd,
-            include_reversible: includeReversible,
+            include_reversible: true,
             group_by_block: groupByBlock,
             operation_begin: operationBegin,
             limit
@@ -4104,7 +4104,7 @@ class AccountsAPI {
             account: normalizedAccount,
             start: safeFrom,
             limit: safeLimit,
-            include_reversible: Boolean(includeReversible)
+            include_reversible: true
         };
         if (operationFilterLow !== null)  params.operation_filter_low  = operationFilterLow;
         if (operationFilterHigh !== null) params.operation_filter_high = operationFilterHigh;
@@ -7614,7 +7614,7 @@ class BlockchainAPI {
      * @param {boolean} [includeReversible=false]
      * @returns {Promise<object|null>}
      */
-    async getTransactionFromHistory(trxId, includeReversible = false) {
+    async getTransactionFromHistory(trxId, includeReversible = true) {
         if (!trxId) return null;
         try {
             return await this.proxy.client.call('account_history_api', 'get_transaction', {
