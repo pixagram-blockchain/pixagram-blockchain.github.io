@@ -27,7 +27,7 @@ import SendIcon from "@material-ui/icons/Send";
 import ImageIcon from "@material-ui/icons/Image";
 import DescriptionIcon from "@material-ui/icons/Description";
 import CloseIcon from "@material-ui/icons/Close";
-import {isArtworkPixelart, processImageFile, quantizeImageData} from "../utils/pix2art/file2imgd";
+import {isArtworkPixelart, normalizeUpload, processImageFile, quantizeImageData} from "../utils/pix2art/file2imgd";
 import JSLoader from "../utils/JSLoader";
 import Fade from "@material-ui/core/Fade";
 import LicenseCustomizationDialog from "./LicenseCustomizationDialog";
@@ -1195,7 +1195,7 @@ const UploadZone = memo(({
                 <Input
                     inputRef={inputRef}
                     onChange={onFileUpload}
-                    inputProps={{ accept: "image/*" }}
+                    inputProps={{ accept: "image/*,.heic,.heif" }}
                     style={{ display: "none", position: "absolute" }}
                     id="button-file-dialog-secondary"
                     type="file"
@@ -2389,7 +2389,12 @@ function NewPost(props) {
         if (!imageFile) return;
 
         try {
-            const pixelartImagedata = await isArtworkPixelart(imageFile, 512, 512, 160);
+            // HEIC (iPhone) uploads are converted once here, so the preview
+            // <img>, the probe and the AI/pipeline paths (which get `upload`
+            // via inputFile) all see a file the browser can decode. Anything
+            // else passes through untouched.
+            const upload = await normalizeUpload(imageFile);
+            const pixelartImagedata = await isArtworkPixelart(upload, 512, 512, 160);
 
             if (pixelartImagedata instanceof ImageData) {
                 dispatch({
@@ -2416,12 +2421,12 @@ function NewPost(props) {
                 // Revoke any existing URL
                 safeRevokeURL(inputFileUrl);
 
-                const url = URL.createObjectURL(imageFile);
+                const url = URL.createObjectURL(upload);
                 dispatch({
                     type: actionTypes.SET_MULTIPLE,
                     payload: {
                         inputFileUrl: url,
-                        inputFile: imageFile,
+                        inputFile: upload,
                         useAiOpen: true
                     }
                 });

@@ -44,7 +44,7 @@ import RadioGroup from "@material-ui/core/RadioGroup";
 import Radio from "@material-ui/core/Radio";
 import Slider from "@material-ui/core/Slider";
 import Fade from "@material-ui/core/Fade";
-import { isArtworkPixelart, processImageFile, quantizeImageData } from "../utils/pix2art/file2imgd";
+import { isArtworkPixelart, normalizeUpload, processImageFile, quantizeImageData } from "../utils/pix2art/file2imgd";
 import JSLoader from "../utils/JSLoader";
 
 import { t } from "../utils/text";
@@ -521,16 +521,23 @@ function ImageWizard(props) {
         resetState();
         const gen = genRef.current;
 
-        const url = URL.createObjectURL(file);
-        inputUrlRef.current = url;
-        setInputFileUrl(url);
-
         (async () => {
             try {
+                // HEIC (iPhone) uploads are converted once here, so the preview
+                // <img>, the probe and processImageFile (memoized, same File)
+                // all get a file the browser can decode. Anything else passes
+                // through untouched.
+                const upload = await normalizeUpload(file);
+                if (genRef.current !== gen) return;
+
+                const url = URL.createObjectURL(upload);
+                inputUrlRef.current = url;
+                setInputFileUrl(url);
+
                 // Same probe as NewPost: already-pixel-art uploads skip the AI
                 // question — the file is just heavy encoding, so re-encoding
                 // (plus optional quantization) is all it needs.
-                const pixelartImagedata = await isArtworkPixelart(file, 512, 512, 160);
+                const pixelartImagedata = await isArtworkPixelart(upload, 512, 512, 160);
                 if (genRef.current !== gen) return;
 
                 if (pixelartImagedata instanceof ImageData) {
@@ -928,16 +935,16 @@ function ImageWizard(props) {
                                     ? "Weighing…"
                                     : outKb !== null
                                         ? `≈ ${outKb.toFixed(2)} kB — ${fitsBudget ? t("components.image_wizard.fits_the_kb_limit", {
-                                maxKb: maxKb
-                            }) : t("components.image_wizard.over_the_kb_limit_reduce_size_or", {
-                                maxKb: maxKb
-                            })}`
+                                            maxKb: maxKb
+                                        }) : t("components.image_wizard.over_the_kb_limit_reduce_size_or", {
+                                            maxKb: maxKb
+                                        })}`
                                         : t("components.image_wizard.image_wizard_kb_budget", {
-                                maxKb: maxKb
-                            })
+                                            maxKb: maxKb
+                                        })
                                 : t("components.image_wizard.image_wizard_kb_budget", {
-                                maxKb: maxKb
-                            })}
+                                    maxKb: maxKb
+                                })}
                         </Typography>
                     </Box>
                     <Box>

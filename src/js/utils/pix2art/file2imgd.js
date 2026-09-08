@@ -1,6 +1,6 @@
 import {generate, transform} from "./AI";
 import { analyze_colors, downscale_rgba, WasmDownscaleConfig, downscale_prepared, prepare_rgba } from 'smart-downscaler';
-import { heicTo, isHeic } from "heic-to"
+import { isHeic, probe, toFile } from "@pixagram/heic";
 
 // Function to smooth the image data
 function smoothImageData(imageData) {
@@ -77,6 +77,7 @@ export const isArtworkPixelart = async function(file, maxWidth, maxHeight, maxCo
     maxHeight = parseInt(maxHeight);
 
     const maxPixels = maxWidth * maxHeight;
+    file = await normalizeUpload(file); // HEIC → JPEG/PNG; createImageBitmap cannot decode HEIC outside Safari
     const bitmap = await createImageBitmap(file);
     const ratio = computeRatio(bitmap.width, bitmap.height, maxPixels);
 
@@ -164,6 +165,34 @@ function generateScaledFromPrepared(options, prepared, origWidth, origHeight) {
 // Export the generateScaledImageData function for use in quantization
 export { generateScaledImageData };
 
+// Normalize an upload to a browser-decodable file, converting HEIC exactly once.
+//
+// An upload reaches three consumers before continue_it: the preview <img>
+// (object URL), createImageBitmap in isArtworkPixelart, and transform(), which
+// sends the bytes to the AI server as-is. Chrome and Firefox decode HEIC in
+// none of them and neither does the AI, so an iPhone HEIC is converted here,
+// up front, with @pixagram/heic, and everything downstream keeps seeing a
+// standard image. PNG when the source carries alpha, otherwise JPEG at q=0.92:
+// the picture is downscaled to ≤2560 px and palette-quantized afterwards, so
+// that quality is invisible in the result while keeping the AI upload small.
+//
+// Non-HEIC uploads pass through untouched (272-byte sniff; the decoder wasm is
+// never loaded). Memoized per File object so the probe and the pipeline share
+// one decode when both are handed the same upload.
+const normalizedUploads = new WeakMap();
+export const normalizeUpload = async function(file) {
+    if (!(file instanceof Blob) || !(await isHeic(file))) { return file; }
+    let converted = normalizedUploads.get(file);
+    if (!converted) {
+        converted = probe(file).then((info) => toFile(file, info.hasAlpha
+            ? { type: "image/png" }
+            : { type: "image/jpeg", quality: 0.92 }));
+        normalizedUploads.set(file, converted);
+        converted.catch(() => normalizedUploads.delete(file)); // a retry reruns the conversion
+    }
+    return converted;
+};
+
 // Main function to process the image file
 export const processImageFile = async function ({file, description},
                                                 maxWidth,
@@ -187,14 +216,6 @@ export const processImageFile = async function ({file, description},
 
     const continue_it = async (blob, title) => {
         const maxPixels = maxWidth * maxHeight;
-
-        if (await isHeic(blob)) {
-            blob = await heicTo({
-                blob: blob,
-                type: "image/jpeg",
-                quality: 0.75
-            })
-        }
 
         const bitmap = await createImageBitmap(blob, {resizeQuality: "pixelated"});
         const ratio = computeRatio(bitmap.width, bitmap.height, maxPixels);
@@ -269,6 +290,11 @@ export const processImageFile = async function ({file, description},
             prompt: title || ""
         };
     }
+
+    // Both branches below need a decodable file: transform() uploads it to the
+    // AI as-is and continue_it hands it to createImageBitmap. Memoized, so an
+    // upload already normalized by the caller (or by isArtworkPixelart) is free.
+    if (file instanceof Blob) { file = await normalizeUpload(file); }
 
     if(typeof file === "undefined" && typeof description === "string") {
 
