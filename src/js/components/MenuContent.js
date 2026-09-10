@@ -679,7 +679,7 @@ const MainView = React.memo(({
                         <div data-tour="menu-categories">
                             <ListSubheader disableSticky className={classes.metaListHeader}>{t("components.menu_content.trending_categories")}</ListSubheader>
                             <div className={classes.chips} style={{ paddingBottom: 8 }}>
-                                <TagChipIcon key={"disc-chiphome"} icon={<HomeRounded />} tag={""} onClick={onTagClick} />
+                                <TagChipIcon key={"disc-chiphome"} icon={<HomeRounded style={{color: "#c5c5c5 !important", fill: "#c5c5c5 !important"}}/>} tag={""} onClick={onTagClick} />
                                 {trendingTags.map(t => <TagChip key={"disc-chip-" + t} tag={t} onClick={onTagClick} />)}
                             </div>
                         </div>

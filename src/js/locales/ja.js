@@ -147,6 +147,7 @@ export default {
         "last_block": "最終ブロック",
         "miss": "未生成",
         "price_feed": "価格フィード",
+        "api_available": "API利用可能",
         "voted": "投票済み",
         "quantization_applied": "減色を適用しました",
         "downscale_ratio": "縮小率",
@@ -584,6 +585,7 @@ export default {
             "pd_received_so_far": "受取済み: {{amount}} / {{total}}",
             "pd_completes_on": "{{date}} に完了",
             "pd_first_payment_snack": "初回の払い出し {{amount}} は {{date}} です。",
+            "trade": "取引",
         },
         "login_dialog": {
             "master": "Master",
@@ -2458,6 +2460,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "あなたの{{label}}は攻撃的に受け取られる可能性があります — やわらかい表現のほうが伝わります。",
             "rated_likely_to_read_as_toxic_by": "端末上で動作する攻撃的コメント判定により、攻撃的に読まれる可能性は {{percent}}％ と評価されました — サーバーへは何も送信していません。そのまま投稿することも、設定で判定を無効にすることもできます。"
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "取引所",
+            "subtitle": "トークンを取引または交換できるプラットフォームです。",
+            "empty": "まだ掲載されている取引所はありません。"
         }
     }
 };

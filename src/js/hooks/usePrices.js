@@ -5,11 +5,10 @@ import { get_cached_settings, subscribe as subscribe_settings } from '../utils/s
 /**
  * Live token prices + the user's display currency, in one hook.
  *
- * Token values are anchored in USD by PricesAPI (pixaproxyapi): exactly one
- * token is fixed and the other derived through the on-chain PXS/PXA ratio.
- * While PXA has no exchange listing (PricesAPI.EXCHANGE_ENABLED = false) PXS
- * is the fixed side and PXA = PXS ÷ ratio; once the exchange anchor is
- * switched on, PXA comes from the exchange and PXS = PXA × ratio. Either way
+ * Token values are anchored in USD by PricesAPI (pixaproxyapi): PXA is the
+ * one anchored token — 12 cents until it is listed, the exchange/CoinGecko
+ * spot afterwards (PricesAPI.EXCHANGE_ENABLED) — and PXS is always derived
+ * from it through the on-chain PXS/PXA ratio: PXS = PXA × ratio. Either way
  * this hook only sees pxaUsd / pxsUsd. The *display* currency is a pure
  * front-end concern: we read the user's selected currency from settings and a
  * USD→currency rate from Frankfurter (cached on api.prices), then expose
@@ -31,11 +30,13 @@ export function usePrices(api) {
     const prices = api && api.prices;
 
     // Seed synchronously so the first paint already shows real numbers (design
-    // fallbacks until the live chain / exchange / fiat reads land).
+    // fallbacks until the live chain / exchange / fiat reads land). The bare
+    // fallback mirrors PricesAPI's seed: PXA at its 12-cent anchor, PXS at the
+    // design Big Mac price (DESIGN_BIG_MAC_USD, 6.22).
     const [snap, setSnap] = useState(() =>
         prices && typeof prices.getSync === 'function'
             ? prices.getSync()
-            : { pxaUsd: 0.12, pxsUsd: 6.12 }
+            : { pxaUsd: 0.12, pxsUsd: 6.22 }
     );
     const [currency, setCurrency] = useState(
         () => get_cached_settings().currency || 'USD'

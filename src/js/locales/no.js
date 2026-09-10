@@ -146,6 +146,7 @@ export default {
         "last_block": "Siste blokk",
         "miss": "Bommet",
         "price_feed": "Prisfeed",
+        "api_available": "API tilgjengelig",
         "voted": "Stemt",
         "quantization_applied": "Kvantisering utført",
         "downscale_ratio": "Nedskaleringsforhold",
@@ -583,6 +584,7 @@ export default {
             "pd_received_so_far": "Mottatt så langt: {{amount}} av {{total}}",
             "pd_completes_on": "Fullføres {{date}}",
             "pd_first_payment_snack": "Første utbetaling på {{amount}} den {{date}}.",
+            "trade": "Handle",
         },
         "login_dialog": {
             "master": "Master",
@@ -2454,6 +2456,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "Din {{label}} kan oppfattes som giftig — en vennligere formulering vil lande bedre.",
             "rated_likely_to_read_as_toxic_by": "Vurdert til {{percent}} % sannsynlighet for å oppfattes som giftig av hjelperen for giftige kommentarer på enheten din — ingenting ble sendt til en server. Du kan fortsatt publisere den som den er, eller slå av hjelperen i Innstillinger."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "Børser",
+            "subtitle": "Plattformer der du kan handle eller konvertere dine tokens.",
+            "empty": "Ingen børser er lagt til ennå."
         }
     }
 };

@@ -117,35 +117,59 @@ const useMasonryGrid = ({
     );
 
     // ── Root measurement ───────────────────────────────────────────────
+    // Only the WIDTH is load-bearing (columnWidth derives from it). The
+    // wrapper's height is ~0 by design — the masonry inside it is
+    // position:absolute — so the previous `height >= 100` gate meant (a) a
+    // window resize never re-measured the root, leaving columnWidth stuck at
+    // its mount value, and (b) the 50 ms retry below never settled and
+    // forced a layout every tick for the page's lifetime. Gate on width
+    // only, bail out on unchanged values, and let a ResizeObserver (drawer
+    // toggles, orientation changes) do the re-measuring instead of polling.
+    const measureRoot = useCallback(() => {
+        const el = rootRef.current;
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 100) return false;
+        setRootDimensions(prev =>
+            (prev.width === rect.width && prev.height === rect.height)
+                ? prev
+                : { width: rect.width, height: rect.height });
+        return true;
+    }, []);
+
     const setRootElement = useCallback((el) => {
         if (!el) return;
         rootRef.current = el;
-        const rect = el.getBoundingClientRect();
-        setRootDimensions({ width: rect.width, height: rect.height });
-    }, []);
+        measureRoot();
+    }, [measureRoot]);
+
+    useEffect(() => { measureRoot(); }, [windowWidth, windowHeight, measureRoot]);
 
     useEffect(() => {
-        if (!rootRef.current) return;
-        const rect = rootRef.current.getBoundingClientRect();
-        if (rect.width >= 100 && rect.height >= 100) {
-            setRootDimensions({ width: rect.width, height: rect.height });
-        }
-    }, [windowWidth, windowHeight]);
+        const el = rootRef.current;
+        if (!el || typeof ResizeObserver === "undefined") return;
+        const ro = new ResizeObserver(() => { measureRoot(); });
+        ro.observe(el);
+        return () => ro.disconnect();
+        // rootRef is populated by the callback ref before effects run.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [measureRoot]);
 
-    // Retry until root has valid dimensions (masonry is position:absolute
-    // so the wrapper div may start at 0×0 before content lays out)
+    // Bounded retry for the rare case where the wrapper has no width yet at
+    // ref-attach time (hidden tab, pending layout). Stops as soon as a width
+    // lands, or after 5 s — never an unbounded forced-layout loop again.
     useEffect(() => {
-        if (rootDimensions.width >= 100 && rootDimensions.height >= 100) return;
+        if (rootDimensions.width >= 100) return;
         let cancelled = false;
+        let attempts = 0;
+        let timer = 0;
         const retry = () => {
-            if (cancelled || !rootRef.current) return;
-            const r = rootRef.current.getBoundingClientRect();
-            if (r.width >= 100 && r.height >= 100) setRootDimensions({ width: r.width, height: r.height });
-            else setTimeout(retry, 50);
+            if (cancelled) return;
+            if (!measureRoot() && ++attempts < 100) timer = setTimeout(retry, 50);
         };
-        setTimeout(retry, 50);
-        return () => { cancelled = true; };
-    }, [rootDimensions.width, rootDimensions.height]);
+        timer = setTimeout(retry, 50);
+        return () => { cancelled = true; clearTimeout(timer); };
+    }, [rootDimensions.width, measureRoot]);
 
     const setMasonryElement = useCallback((el) => { if (el) masonryRef.current = el; }, []);
 
@@ -228,9 +252,14 @@ const useMasonryGrid = ({
 
     const scrollToIndex = useCallback((index) => {
         const idx = index ?? selectedPostIndex;
+        // Viewport height comes from the scroll container itself — the
+        // wrapper div is ~0 px tall (see root measurement above), so
+        // rootDimensions.height would pin the target card to the top edge.
+        const container = masonryRef.current?._scrollingContainer;
+        const viewH = container?.clientHeight || rootDimensions.height || 0;
         const top = (topScrollByIndex.current[idx] || 0)
             + (heightByIndex.current[idx] || 0) / 2
-            - rootDimensions.height / 3;
+            - viewH / 3;
         scrollTo(top);
     }, [selectedPostIndex, rootDimensions.height, scrollTo]);
 

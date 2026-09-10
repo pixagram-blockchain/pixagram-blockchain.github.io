@@ -146,6 +146,7 @@ export default {
         "last_block": "Poslední blok",
         "miss": "Zmeškané",
         "price_feed": "Cenový feed",
+        "api_available": "API dostupné",
         "voted": "Hlasováno",
         "quantization_applied": "Kvantizace použita",
         "downscale_ratio": "Poměr zmenšení",
@@ -583,6 +584,7 @@ export default {
             "pd_received_so_far": "Dosud obdrženo: {{amount}} z {{total}}",
             "pd_completes_on": "Dokončeno {{date}}",
             "pd_first_payment_snack": "První platba {{amount}} dne {{date}}.",
+            "trade": "Obchodovat",
         },
         "login_dialog": {
             "master": "Master",
@@ -2454,6 +2456,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "Váš {{label}} může působit toxicky — laskavější formulace zapůsobí lépe.",
             "rated_likely_to_read_as_toxic_by": "Podle Toxic Comment Helperu běžícího přímo v zařízení působí s pravděpodobností {{percent}} % toxicky — na server se nic neodesílalo. Můžete to i tak zveřejnit beze změny, nebo pomocníka vypnout v Nastavení."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "Burzy",
+            "subtitle": "Platformy, na kterých můžete obchodovat s tokeny nebo je směňovat.",
+            "empty": "Zatím není uvedena žádná burza."
         }
     }
 };

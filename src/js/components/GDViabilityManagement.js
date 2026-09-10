@@ -21,10 +21,20 @@ const styles = theme => ({
             flexDirection: "column"
         }
     },
+    // Desktop: a vertical rail pinned to the left edge that runs the (nearly)
+    // full height of the panel — an 18.5px inset top and bottom, matching its
+    // left inset — with the two tabs splitting that height between them. The
+    // indicator pill follows the selected tab's own height (MUI writes it
+    // inline for vertical tabs), so it is NOT fixed here.
     tabs: {
+        "& .MuiTabs-scroller": {
+            minHeight: 0
+        },
         "& .MuiTab-root": {
+            flex: "1 1 0%",
             minWidth: "88px",
             minHeight: "64px",
+            maxHeight: "none",
             borderRadius: "16px",
             transition: "color 225ms cubic-bezier(0.4, 0, 0.2, 1) 0ms"
         },
@@ -53,6 +63,7 @@ const styles = theme => ({
             color: "#989898",
             transition: "all 225ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
             width: "88px",
+            height: "100%",
             borderRadius: "16px"
         },
         "& .MuiTabs-flexContainerVertical:hover": {
@@ -61,12 +72,12 @@ const styles = theme => ({
         "& span.MuiTabs-indicator": {
             zIndex: "-1",
             width: "88px",
-            height: "64px !important",
-            marginTop: -4,
+            // height: intentionally left to MUI's inline value (= tab height)
+            marginTop: 0,
             marginRight: 0,
             backgroundColor: "#c7c7c7",
             borderRadius: "16px",
-            transform: "scale3d(0.875, 0.85, 1)",
+            transform: "scale3d(0.875, 0.965, 1)",
             transformOrigin: "50% 50%",
             transition: "all 360ms cubic-bezier(0.4, 0, 0.2, 1) 0ms"
         },
@@ -76,8 +87,9 @@ const styles = theme => ({
         justifyContent: "center",
         alignItems: "center",
         position: "absolute",
-        top: "50%",
-        transform: "translateY(-50%)",
+        top: 18.5,
+        bottom: 18.5,
+        transform: "none",
         height: "auto",
         borderRadius: "18px",
         margin: "0px 0px 0px 18.5px",
@@ -90,6 +102,7 @@ const styles = theme => ({
         [theme.breakpoints.down("sm")]: {
             position: "relative",
             top: "0",
+            bottom: "auto",
             transform: "none",
             flexDirection: "row",
             justifyContent: "center",
@@ -107,12 +120,14 @@ const styles = theme => ({
             "& .MuiTabs-flexContainerVertical": {
                 flexDirection: "row",
                 width: "100%",
+                height: "auto",
                 borderRadius: "21px"
             },
             "& .MuiTab-root": {
                 flex: 1,
                 minWidth: "unset",
                 minHeight: "48px",
+                maxHeight: "none",
                 borderRadius: "21px"
             },
             "& .MuiTab-textColorInherit": {

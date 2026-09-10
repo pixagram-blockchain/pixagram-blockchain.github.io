@@ -657,6 +657,53 @@ function getOperationUser(opTuple) {
     }
 }
 
+/**
+ * Virtual-operation test that survives both account-history encodings:
+ * `virtual_op` is a numeric counter (> 0) on the older plugin and a boolean on
+ * HAF-backed nodes. The proxy normalises it to a number, but a boolean must
+ * still read as virtual should a raw entry ever reach this component.
+ */
+function isVirtualOperation(op) {
+    if (!op) return false;
+    const v = op.virtual_op;
+    return v === true || Number(v) > 0;
+}
+
+/**
+ * The block itself (block_api.get_block) is the authoritative source for the
+ * transactions it carries: it is complete even when account-history indexing
+ * is filtered or lagging, and it is served for reversible blocks too. Flatten
+ * `transactions[i].operations[j]` into the same applied-operation rows that
+ * account_history_api.get_ops_in_block yields for virtual ops, so a single
+ * renderer draws both lists. `transaction_ids` is emitted alongside
+ * `transactions` by block_api, so every row carries its real trx_id.
+ */
+function flattenBlockTransactions(block) {
+    if (!block || !Array.isArray(block.transactions)) return [];
+    const ids = Array.isArray(block.transaction_ids) ? block.transaction_ids : [];
+    const rows = [];
+    block.transactions.forEach((tx, trxInBlock) => {
+        const ops = (tx && Array.isArray(tx.operations)) ? tx.operations : [];
+        ops.forEach((op, opInTrx) => {
+            // The proxy already hands us ["type", {…}]; accept a raw AppBase
+            // { type, value } object as well so the list never goes blank.
+            const tuple = Array.isArray(op)
+                ? op
+                : [String((op && op.type) || "").replace(/_operation$/, ""), (op && op.value) || {}];
+            rows.push({
+                trx_id: ids[trxInBlock] || "",
+                block: block.block_number,
+                trx_in_block: trxInBlock,
+                op_in_trx: opInTrx,
+                virtual_op: 0,
+                timestamp: block.timestamp,
+                op: tuple,
+            });
+        });
+    });
+    return rows;
+}
+
 /** Estimate block payload size */
 function estimateBlockSize(block) {
     if (!block) return "0kB";
@@ -718,7 +765,7 @@ const WITNESS_LIGHT_STYLE = { color: "#fff" };
  */
 const OperationList = React.memo(function OperationList({ operations, classes, renderItem }) {
     useLanguage();
-    return <React.Fragment>{(operations || []).map(op => renderItem(op, classes))}</React.Fragment>;
+    return <React.Fragment>{(operations || []).map((op, index) => renderItem(op, classes, index))}</React.Fragment>;
 });
 
 class BlockViewer extends React.PureComponent {
@@ -963,16 +1010,17 @@ class BlockViewer extends React.PureComponent {
                 neighborNums.push(i);
             }
 
-            // Fetch main block ops + all neighbor block headers in parallel
+            // Fetch, in parallel: every applied operation of the selected block
+            // (account_history_api.get_ops_in_block — the only source of
+            // virtual ops) + the full block for it and each neighbour
+            // (block_api.get_block — transactions and strip-card data).
             const [allOps, ...neighborResults] = await Promise.allSettled([
                 api.blocks.getOpsInBlock(blockNum, false),
                 ...neighborNums.map(n => api.blocks.getBlock(n)),
             ]);
 
-            // Separate regular vs. virtual operations
             const ops = allOps.status === "fulfilled" && Array.isArray(allOps.value) ? allOps.value : [];
-            const transactions      = ops.filter(op => op.virtual_op === 0);
-            const virtualOperations = ops.filter(op => op.virtual_op > 0);
+            const virtualOperations = ops.filter(isVirtualOperation);
 
             // Build neighbor blocks array (ascending order)
             const neighborBlocks = [];
@@ -986,6 +1034,13 @@ class BlockViewer extends React.PureComponent {
             neighborBlocks.sort((a, b) => b.block_number - a.block_number);
 
             const blockData = neighborBlocks.find(b => b.block_number === blockNum) || null;
+
+            // Regular transactions are read off the block; the account-history
+            // rows are only a fallback for the (unexpected) case where the
+            // block fetch itself failed.
+            const transactions = blockData
+                ? flattenBlockTransactions(blockData)
+                : ops.filter(op => !isVirtualOperation(op));
 
             this._newBlockNums.clear();
             this._cardClickHandlers = null; // far jump: drop stale per-block handlers
@@ -1023,14 +1078,19 @@ class BlockViewer extends React.PureComponent {
         try {
             const allOps = await api.blocks.getOpsInBlock(blockNum, false);
             const ops = Array.isArray(allOps) ? allOps : [];
-            const transactions      = ops.filter(op => op.virtual_op === 0);
-            const virtualOperations = ops.filter(op => op.virtual_op > 0);
+            const virtualOperations = ops.filter(isVirtualOperation);
 
             // Only apply if the user hasn't navigated away while we were loading.
             if (this.state.block !== blockNum) return;
 
+            // The strip already holds this block (it was fetched with
+            // block_api.get_block for its card), so its transactions come for
+            // free — no second block request.
             const blockData = this.state.neighborBlocks.find(b => b.block_number === blockNum)
                 || this.state.blockData;
+            const transactions = (blockData && blockData.block_number === blockNum)
+                ? flattenBlockTransactions(blockData)
+                : ops.filter(op => !isVirtualOperation(op));
 
             this.setState({
                 transactions,
@@ -1460,7 +1520,7 @@ class BlockViewer extends React.PureComponent {
 
     /** Selecting an operation from the list (we already hold its data). */
     _selectOperation = (trxId, operationData) => {
-        const isVirtual = (operationData && operationData.virtual_op > 0)
+        const isVirtual = isVirtualOperation(operationData)
             || this._isVirtualTrxId(trxId);
 
         this.setState({
@@ -1576,13 +1636,13 @@ class BlockViewer extends React.PureComponent {
         );
     }
 
-    _renderOperationItem = (op, classes) => {
+    _renderOperationItem = (op, classes, index = 0) => {
         if (!op || !op.op) return null;
 
         const [opType, opData] = op.op;
         const user  = getOperationUser(op.op);
-        const isVirtual = op.virtual_op > 0 || this._isVirtualTrxId(op.trx_id);
-        const trxId = isVirtual ? "virtual" : op.trx_id.substring(0, 8);
+        const isVirtual = isVirtualOperation(op) || this._isVirtualTrxId(op.trx_id);
+        const trxId = isVirtual ? "virtual" : String(op.trx_id).substring(0, 8);
 
         const detailData = {
             trx_id: op.trx_id,
@@ -1596,7 +1656,7 @@ class BlockViewer extends React.PureComponent {
         return (
             <ListItem
                 onClick={() => this._selectOperation(trxId, detailData)}
-                key={`${op.trx_id}-${op.op_in_trx}-${op.virtual_op}`}
+                key={`${index}-${op.trx_id}-${op.trx_in_block}-${op.op_in_trx}`}
                 className={classes.listItem}
             >
                 <ListItemAvatar>

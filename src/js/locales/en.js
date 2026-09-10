@@ -160,6 +160,7 @@ export default {
         "last_block": "Last Block",
         "miss": "Miss",
         "price_feed": "Price Feed",
+        "api_available": "API available",
         "voted": "Voted",
         "quantization_applied": "Quantization applied",
         "downscale_ratio": "Downscale Ratio",
@@ -1582,6 +1583,12 @@ export default {
             "pd_received_so_far": "Received so far: {{amount}} of {{total}}",
             "pd_completes_on": "Completes on {{date}}",
             "pd_first_payment_snack": "First payment of {{amount}} on {{date}}.",
+            "trade": "Trade",
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "Exchanges",
+            "subtitle": "Platforms where you can trade or convert your tokens.",
+            "empty": "No exchange is listed yet.",
         },
         "pixa_wallet_keys_dialog": {
             "copy_to_clipboard": "Copy to clipboard",

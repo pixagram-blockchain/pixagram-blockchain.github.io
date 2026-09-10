@@ -149,6 +149,7 @@ export default {
         "last_block": "Останній блок",
         "miss": "Пропуски",
         "price_feed": "Ціновий фід",
+        "api_available": "API доступний",
         "voted": "Проголосовано",
         "quantization_applied": "Квантування застосовано",
         "downscale_ratio": "Коефіцієнт зменшення",
@@ -586,6 +587,7 @@ export default {
             "pd_received_so_far": "Уже отримано: {{amount}} із {{total}}",
             "pd_completes_on": "Завершиться {{date}}",
             "pd_first_payment_snack": "Перша виплата {{amount}} — {{date}}.",
+            "trade": "Торгувати",
         },
         "login_dialog": {
             "master": "Master",
@@ -2457,6 +2459,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "Ваш {{label}} може сприйнятися як токсичний — добріше формулювання спрацює краще.",
             "rated_likely_to_read_as_toxic_by": "Оцінено як {{percent}}% імовірно токсичне локальним Помічником токсичних коментарів — нічого не надсилалося на сервер. Ви все одно можете опублікувати як є або вимкнути помічник у Налаштуваннях."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "Біржі",
+            "subtitle": "Платформи, на яких можна торгувати токенами або конвертувати їх.",
+            "empty": "Поки що не додано жодної біржі."
         }
     }
 };

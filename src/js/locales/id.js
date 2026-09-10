@@ -147,6 +147,7 @@ export default {
         "last_block": "Blok terakhir",
         "miss": "Terlewat",
         "price_feed": "Umpan harga",
+        "api_available": "API tersedia",
         "voted": "Dipilih",
         "quantization_applied": "Kuantisasi diterapkan",
         "downscale_ratio": "Rasio penurunan skala",
@@ -584,6 +585,7 @@ export default {
             "pd_received_so_far": "Sudah diterima: {{amount}} dari {{total}}",
             "pd_completes_on": "Selesai pada {{date}}",
             "pd_first_payment_snack": "Pembayaran pertama sebesar {{amount}} pada {{date}}.",
+            "trade": "Berdagang",
         },
         "login_dialog": {
             "master": "Master",
@@ -2458,6 +2460,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "{{label}} Anda mungkin terdengar kasar — pilihan kata yang lebih ramah akan lebih diterima.",
             "rated_likely_to_read_as_toxic_by": "Dinilai berpeluang {{percent}} % terbaca kasar oleh Toxic Comment Helper yang berjalan di perangkat Anda — tidak ada yang dikirim ke server. Anda tetap bisa memublikasikannya, atau menonaktifkan pembantu ini di Pengaturan."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "Bursa",
+            "subtitle": "Platform tempat Anda dapat memperdagangkan atau mengonversi token Anda.",
+            "empty": "Belum ada bursa yang tercatat."
         }
     }
 };

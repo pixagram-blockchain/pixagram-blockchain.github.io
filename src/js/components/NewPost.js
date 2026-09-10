@@ -1811,6 +1811,74 @@ const PublishForm = memo(({
                           }) => {
     useLanguage();
 
+    // ---- Tag input --------------------------------------------------------
+    // The Autocomplete's text input is controlled so that Space and Tab (and
+    // whitespace arriving through a paste or a virtual keyboard that emits no
+    // Space keydown) commit the pending text as a tag, exactly like Enter.
+    const [tagInput, setTagInput] = useState('');
+
+    // Tries to add every token as a tag (lowercased, validated, deduplicated)
+    // in a single onTagsChange call. Returns the tokens that were rejected.
+    const addTags = (tokens) => {
+        const nextTags = [...tags];
+        const rejected = [];
+        tokens.forEach((token) => {
+            const normalized = token.toLowerCase().trim();
+            if (!normalized) return;
+            if (!validateSingleTag(normalized).valid) {
+                rejected.push(token);
+            } else if (!nextTags.includes(normalized)) {
+                nextTags.push(normalized);
+            }
+        });
+        if (nextTags.length !== tags.length) onTagsChange(nextTags);
+        return rejected;
+    };
+
+    // Commits every whitespace-terminated token of `text`; anything that cannot
+    // be committed (invalid tag) stays in the field so the user can fix it.
+    // Returns the text left pending in the field.
+    const consumeTagInput = (text) => {
+        const tokens = text.split(/\s+/);
+        const trailing = tokens.pop(); // text after the last whitespace ('' when it ended with one)
+        const pending = addTags(tokens).concat(trailing ? [trailing] : []).join(' ');
+        setTagInput(pending);
+        return pending;
+    };
+
+    const handleTagInputChange = (event, value, reason) => {
+        // 'reset' is the Autocomplete clearing the field after a selection or
+        // a value change; the field is cleared here only once a tag is added,
+        // so an invalid tag is never silently wiped.
+        if (reason === 'reset') return;
+        const native = event ? (event.nativeEvent || event) : null;
+        if (reason === 'input' && /\s/.test(value) && !(native && native.isComposing)) {
+            consumeTagInput(value);
+            return;
+        }
+        setTagInput(value);
+    };
+
+    const handleTagKeyDown = (event) => {
+        const native = event.nativeEvent || event;
+        if (native.isComposing || event.which === 229) return; // let the IME finish
+        const isSpace = event.key === ' ' || event.key === 'Spacebar';
+        const isTab = event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey;
+        if (!isSpace && !isTab) return;
+        const value = event.target.value || '';
+        if (isSpace) {
+            // A tag can never contain a space: Space always means "commit what is typed".
+            event.preventDefault();
+            consumeTagInput(value + ' ');
+            return;
+        }
+        // Tab commits the pending text and keeps the focus in the field; with
+        // nothing to commit it moves the focus as usual (no keyboard trap).
+        if (value.trim() && consumeTagInput(value + ' ') !== value) {
+            event.preventDefault();
+        }
+    };
+
     const titleCharCount = title.length;
     const descriptionCharCount = description.length;
 
@@ -1903,15 +1971,13 @@ const PublishForm = memo(({
                         freeSolo
                         classes={{ paper: classes.tagPopper }}
                         value={tags}
+                        inputValue={tagInput}
+                        onInputChange={handleTagInputChange}
                         onChange={(e, newValue, reason) => {
                             if (reason === 'select-option' || reason === 'create-option') {
                                 const lastTag = newValue[newValue.length - 1];
                                 const raw = typeof lastTag === 'string' ? lastTag : (lastTag && lastTag.label || '');
-                                const normalized = raw.toLowerCase().trim();
-                                const validation = validateSingleTag(normalized);
-                                if (!validation.valid) return;
-                                if (tags.includes(normalized)) return;
-                                onTagsChange([...tags, normalized]);
+                                if (addTags([raw]).length === 0) setTagInput('');
                             } else if (reason === 'remove-option') {
                                 onTagsChange(newValue.filter(t => typeof t === 'string'));
                             } else if (reason === 'clear') {
@@ -1951,9 +2017,10 @@ const PublishForm = memo(({
                         renderInput={(params) => (
                             <TextField
                                 {...params}
+                                inputProps={{ ...params.inputProps, onKeyDown: handleTagKeyDown }}
                                 variant="outlined"
                                 label={t("words.tags")}
-                                placeholder={tags.length < VALIDATION.TAGS_MAX_COUNT ? "Add tag and press Enter" : ""}
+                                placeholder={tags.length < VALIDATION.TAGS_MAX_COUNT ? "Add tag and press Space or Enter" : ""}
                                 onBlur={() => onFieldBlur('tags')}
                                 error={touched.tags && !!validationErrors.tags}
                                 className={touched.tags && validationErrors.tags ? classes.errorField : ''}

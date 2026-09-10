@@ -25,9 +25,11 @@
 // ---------------
 //   - Dark-grey paper (#181818), the same `darkGreyDialog` palette used by
 //     PixaWalletSendDialog / DelegateDialog / PowerDialog.
-//   - Filled TextField for username; one filled TextField for each of the
-//     three gift amounts. NumericFormat input formatting matches the
-//     wallet dialogs (space thousand separator, dot decimal).
+//   - Filled TextField for username (with an "@" InputAdornment); one filled
+//     TextField for each of the three gift amounts — PXA and PXS side by
+//     side (auto-fit grid, stacked on narrow screens), PXP delegation on its
+//     own full-width line. NumericFormat input formatting matches the wallet
+//     dialogs (space thousand separator, dot decimal).
 //   - Strict greyscale — no theme accents. The method selector is a
 //     two-cell segmented control in the same #101010 / #262626 idiom as the
 //     wallet summary block.
@@ -264,7 +266,17 @@ const USERNAME_INPUT_PROPS = {
     autoComplete: "off",
     style: { textTransform: "lowercase" },
 };
-const USERNAME_AT_STYLE = { marginRight: 4, color: "#fff" };
+// The "@" prefix must be a real InputAdornment, not a bare <span>: FilledInput
+// vertically centres raw start-adornment children in its 56px root, while the
+// input text sits 27px down under the shrunk label, so a bare span floats
+// above the text (and above the status icon on the right, which is already an
+// InputAdornment). InputAdornment applies the filled-variant start offset
+// (margin-top 16px) that puts the "@" on the text baseline; its default 8px
+// right margin matches the icon gap of the amount fields below.
+const USERNAME_AT_STYLE = { color: "#fff" };
+const USERNAME_AT_ADORNMENT = (
+    <InputAdornment position="start" disableTypography style={USERNAME_AT_STYLE}>@</InputAdornment>
+);
 const TITLE_ROW_STYLE = { display: "flex", alignItems: "center", gap: 12 };
 const TITLE_ICON_STYLE = { color: "#cccccc" };
 const INTRO_STYLE = { margin: "16px 0" };
@@ -606,6 +618,18 @@ const styles = (theme) => ({
         gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
         gap: 8,
         marginTop: 4,
+    },
+    // PXA + PXS gift fields share one line whenever two 200px columns fit
+    // (always at maxWidth="sm"), and fall back to stacking on narrow phones.
+    // Column gap only: when stacked, the section label's own top margin
+    // already provides the vertical rhythm.
+    giftRow: {
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+        columnGap: "12px",
+    },
+    giftCell: {
+        minWidth: 0, // let the filled input shrink instead of overflowing the grid cell
     },
     methodOption: {
         display: "flex",
@@ -1370,7 +1394,7 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
                     onChange={onUsernameChange}
                     InputLabelProps={SHRINK_LABEL_PROPS}
                     InputProps={{
-                        startAdornment: <span style={USERNAME_AT_STYLE}>@</span>,
+                        startAdornment: USERNAME_AT_ADORNMENT,
                         endAdornment: <InputAdornment position="end">{usernameIcon}</InputAdornment>,
                     }}
                     inputProps={USERNAME_INPUT_PROPS}
@@ -1466,41 +1490,46 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
                     <Typography style={CANT_AFFORD_STYLE}>{walletWarning}</Typography>
                 )}
 
-                {/* ── PXA gift ── */}
-                <div className={classes.sectionLabel}>{t("components.add_account_dialog.send_pxa")}</div>
-                {renderAmountField({
-                    label: t("words.amount"),
-                    currency: "PXA",
-                    decimals: 3,
-                    icon: PXA_FIELD_ICON,
-                    value: pxaAmount,
-                    max: pxaGiftCap,
-                    onAmountChange: setPxaFromAmount,
-                    helperText: isRc
-                        ? t("components.add_account_dialog.max_pxa_no_fee", {
-                            pxaGiftCap: pxaGiftCap.toFixed(PREC[SYM_PXA])
-                        })
-                        : t("components.add_account_dialog.max_pxa_after_fee", {
-                            pxaGiftCap: pxaGiftCap.toFixed(PREC[SYM_PXA])
-                        }),
-                })}
+                {/* ── PXA + PXS gifts — one line when two columns fit, stacked otherwise ── */}
+                <div className={classes.giftRow}>
+                    <div className={classes.giftCell}>
+                        <div className={classes.sectionLabel}>{t("components.add_account_dialog.send_pxa")}</div>
+                        {renderAmountField({
+                            label: t("words.amount"),
+                            currency: "PXA",
+                            decimals: 3,
+                            icon: PXA_FIELD_ICON,
+                            value: pxaAmount,
+                            max: pxaGiftCap,
+                            onAmountChange: setPxaFromAmount,
+                            helperText: isRc
+                                ? t("components.add_account_dialog.max_pxa_no_fee", {
+                                    pxaGiftCap: pxaGiftCap.toFixed(PREC[SYM_PXA])
+                                })
+                                : t("components.add_account_dialog.max_pxa_after_fee", {
+                                    pxaGiftCap: pxaGiftCap.toFixed(PREC[SYM_PXA])
+                                }),
+                        })}
+                    </div>
+                    <div className={classes.giftCell}>
+                        <div className={classes.sectionLabel}>{t("components.add_account_dialog.send_pxs")}</div>
+                        {renderAmountField({
+                            label: t("words.amount"),
+                            currency: "PXS",
+                            decimals: 3,
+                            icon: PXS_FIELD_ICON,
+                            value: pxsAmount,
+                            max: pxsBalance,
+                            onAmountChange: setPxsFromAmount,
+                            helperText: t("components.add_account_dialog.max_pxs", {
+                                pxsBalance: pxsBalance.toFixed(PREC[SYM_PXS])
+                            }),
+                        })}
+                    </div>
+                </div>
 
-                {/* ── PXS gift ── */}
-                <div className={classes.sectionLabel}>{t("components.add_account_dialog.send_pxs")}</div>
-                {renderAmountField({
-                    label: t("words.amount"),
-                    currency: "PXS",
-                    decimals: 3,
-                    icon: PXS_FIELD_ICON,
-                    value: pxsAmount,
-                    max: pxsBalance,
-                    onAmountChange: setPxsFromAmount,
-                    helperText: t("components.add_account_dialog.max_pxs", {
-                        pxsBalance: pxsBalance.toFixed(PREC[SYM_PXS])
-                    }),
-                })}
-
-                {/* ── PXP delegation (shown as PXA-equivalent Power; sent as VESTS) ── */}
+                {/* ── PXP delegation — always its own full-width line
+                      (shown as PXA-equivalent Power; sent as VESTS) ── */}
                 <div className={classes.sectionLabel}>{t("components.add_account_dialog.delegate_pxp")}</div>
                 {renderAmountField({
                     label: t("words.amount"),
@@ -1512,11 +1541,11 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
                     onAmountChange: setPxpFromAmount,
                     helperText: vestRatio > 0
                         ? t(
-                        "components.add_account_dialog.max_pxp_delegated_as_vesting_shares_returns",
-                        {
-                            pxpAvailable: pxpAvailable.toFixed(PREC[SYM_PXP])
-                        }
-                    )
+                            "components.add_account_dialog.max_pxp_delegated_as_vesting_shares_returns",
+                            {
+                                pxpAvailable: pxpAvailable.toFixed(PREC[SYM_PXP])
+                            }
+                        )
                         : t("components.add_account_dialog.vesting_rate_unavailable"),
                 })}
             </div>
@@ -1541,11 +1570,11 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
                 <strong style={SUCCESS_NAME_STYLE}>@{username}</strong> {t("components.add_account_dialog.is_live_on_chain")}
             </Typography>
             <Typography className={classes.statusMessage} style={SUCCESS_SUB_STYLE}>{t(
-                    "components.add_account_dialog.the_recipients_keys_backup_pdf_was_downloaded",
-                    {
-                        text: pdfDownloaded ? " " + t("components.add_account_dialog.please_hand_it_over_securely") : "."
-                    }
-                )}</Typography>
+                "components.add_account_dialog.the_recipients_keys_backup_pdf_was_downloaded",
+                {
+                    text: pdfDownloaded ? " " + t("components.add_account_dialog.please_hand_it_over_securely") : "."
+                }
+            )}</Typography>
             {!pdfDownloaded && (
                 <Button variant="contained" color="primary" onClick={triggerPdfDownload}>
                     {t("components.add_account_dialog.re_download_backup_pdf")}
@@ -1553,8 +1582,8 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
             )}
             {autoCloseInSec !== null && (
                 <Typography style={AUTO_CLOSE_STYLE}>{t("components.add_account_dialog.closing_in_s", {
-                        autoCloseInSec: autoCloseInSec
-                    })}</Typography>
+                    autoCloseInSec: autoCloseInSec
+                })}</Typography>
             )}
         </div>
     );

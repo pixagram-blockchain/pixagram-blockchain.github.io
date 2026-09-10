@@ -86,6 +86,11 @@ export const CURRENCY_COUNTRIES = {
 // preference in settings.js's first-run auto-selection — mainnet nodes are
 // preferred outright, regardless of ping time, so a new visitor is never
 // silently auto-picked onto the testnet just because it answered faster.
+//
+// Optional `witness: "<account>"` names the witness operating the node. The
+// Governance → Viability Management → Witnesses table marks that witness
+// "API available"; without it, the witness is matched when the host of its
+// on-chain `url` equals the node's host.
 export const DEFAULT_NODES = [
     {
         id: "eu-east",

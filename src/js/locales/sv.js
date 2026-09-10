@@ -146,6 +146,7 @@ export default {
         "last_block": "Senaste block",
         "miss": "Missade",
         "price_feed": "Prisflöde",
+        "api_available": "API tillgängligt",
         "voted": "Röstat",
         "quantization_applied": "Kvantisering utförd",
         "downscale_ratio": "Nedskalningsförhållande",
@@ -583,6 +584,7 @@ export default {
             "pd_received_so_far": "Mottaget hittills: {{amount}} av {{total}}",
             "pd_completes_on": "Slutförs {{date}}",
             "pd_first_payment_snack": "Första utbetalningen på {{amount}} den {{date}}.",
+            "trade": "Handla",
         },
         "login_dialog": {
             "master": "Master",
@@ -2454,6 +2456,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "Din {{label}} kan uppfattas som toxisk — en vänligare formulering landar bättre.",
             "rated_likely_to_read_as_toxic_by": "Bedömd som {{percent}} % sannolik att uppfattas som toxisk av hjälpen för toxiska kommentarer direkt på din enhet — inget skickades till någon server. Du kan ändå publicera den som den är, eller stänga av hjälpen i Inställningar."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "Börser",
+            "subtitle": "Plattformar där du kan handla eller konvertera dina tokens.",
+            "empty": "Ingen börs har lagts till ännu."
         }
     }
 };

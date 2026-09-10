@@ -146,6 +146,7 @@ export default {
         "last_block": "Viimeisin lohko",
         "miss": "Ohitetut",
         "price_feed": "Hintasyöte",
+        "api_available": "API käytettävissä",
         "voted": "Äänestetty",
         "quantization_applied": "Kvantisointi suoritettu",
         "downscale_ratio": "Pienennyssuhde",
@@ -583,6 +584,7 @@ export default {
             "pd_received_so_far": "Tähän mennessä saatu: {{amount}} / {{total}}",
             "pd_completes_on": "Valmis {{date}}",
             "pd_first_payment_snack": "Ensimmäinen maksu {{amount}} {{date}}.",
+            "trade": "Käy kauppaa",
         },
         "login_dialog": {
             "master": "Master",
@@ -2454,6 +2456,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "{{label}} voi vaikuttaa vihamieliseltä — ystävällisempi sanamuoto toimii paremmin.",
             "rated_likely_to_read_as_toxic_by": "Laitteella toimiva Toxic Comment Helper arvioi {{percent}} %:n todennäköisyydellä tekstin vaikuttavan vihamieliseltä — mitään ei lähetetty palvelimelle. Voit silti julkaista sen sellaisenaan tai poistaa avustajan käytöstä asetuksissa."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "Pörssit",
+            "subtitle": "Alustat, joilla voit käydä kauppaa tai muuntaa tokeneita.",
+            "empty": "Yhtään pörssiä ei ole vielä listattu."
         }
     }
 };

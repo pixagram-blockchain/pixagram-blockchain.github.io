@@ -146,6 +146,7 @@ export default {
         "last_block": "Laatste blok",
         "miss": "Gemist",
         "price_feed": "Prijsfeed",
+        "api_available": "API beschikbaar",
         "voted": "Gestemd",
         "quantization_applied": "Kwantisatie toegepast",
         "downscale_ratio": "Verkleiningsfactor",
@@ -583,6 +584,7 @@ export default {
             "pd_received_so_far": "Tot nu toe ontvangen: {{amount}} van {{total}}",
             "pd_completes_on": "Voltooid op {{date}}",
             "pd_first_payment_snack": "Eerste betaling van {{amount}} op {{date}}.",
+            "trade": "Handelen",
         },
         "login_dialog": {
             "master": "Master",
@@ -2454,6 +2456,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "Je {{label}} kan toxisch overkomen — een vriendelijkere formulering komt beter aan.",
             "rated_likely_to_read_as_toxic_by": "Door de Toxic Comment Helper op je apparaat beoordeeld op {{percent}}% kans om als toxisch over te komen — er is niets naar een server gestuurd. Je kunt het zo posten, of de helper uitzetten bij Instellingen."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "Handelsplaatsen",
+            "subtitle": "Platforms waar je je tokens kunt verhandelen of converteren.",
+            "empty": "Er is nog geen handelsplaats toegevoegd."
         }
     }
 };

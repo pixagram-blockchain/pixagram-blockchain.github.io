@@ -146,6 +146,7 @@ export default {
         "last_block": "Último bloco",
         "miss": "Falhas",
         "price_feed": "Feed de preços",
+        "api_available": "API disponível",
         "voted": "Votado",
         "quantization_applied": "Quantização aplicada",
         "downscale_ratio": "Fator de redução",
@@ -583,6 +584,7 @@ export default {
             "pd_received_so_far": "Recebido até agora: {{amount}} de {{total}}",
             "pd_completes_on": "Conclui em {{date}}",
             "pd_first_payment_snack": "Primeiro pagamento de {{amount}} em {{date}}.",
+            "trade": "Negociar",
         },
         "login_dialog": {
             "master": "Master",
@@ -2457,6 +2459,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "O seu {{label}} pode soar tóxico — uma formulação mais gentil resultará melhor.",
             "rated_likely_to_read_as_toxic_by": "Avaliado com {{percent}} % de probabilidade de soar tóxico pelo assistente de comentários tóxicos que corre no seu dispositivo — nada foi enviado para um servidor. Pode publicar assim mesmo ou desligar o assistente nas definições."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "Plataformas de negociação",
+            "subtitle": "Plataformas onde pode negociar ou converter os seus tokens.",
+            "empty": "Ainda não há nenhuma exchange listada."
         }
     }
 };

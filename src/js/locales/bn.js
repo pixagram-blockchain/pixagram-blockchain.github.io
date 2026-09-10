@@ -148,6 +148,7 @@ export default {
         "last_block": "শেষ ব্লক",
         "miss": "মিস",
         "price_feed": "মূল্য ফিড",
+        "api_available": "API উপলব্ধ",
         "voted": "ভোট দেওয়া হয়েছে",
         "quantization_applied": "কোয়ান্টাইজেশন প্রয়োগ হয়েছে",
         "downscale_ratio": "ডাউনস্কেল অনুপাত",
@@ -585,6 +586,7 @@ export default {
             "pd_received_so_far": "এ পর্যন্ত পাওয়া গেছে: {{amount}} / {{total}}",
             "pd_completes_on": "{{date}} তারিখে সম্পন্ন হবে",
             "pd_first_payment_snack": "{{amount}}-এর প্রথম পেমেন্ট {{date}} তারিখে।",
+            "trade": "ট্রেড করুন",
         },
         "login_dialog": {
             "master": "Master",
@@ -2456,6 +2458,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "আপনার {{label}} রূঢ় শোনাতে পারে — একটু সদয় ভাষা ভালোভাবে পৌঁছাবে।",
             "rated_likely_to_read_as_toxic_by": "ডিভাইসেই চলা Toxic Comment Helper-এর হিসাবে এটি {{percent}}% সম্ভাবনায় রূঢ় ঠেকতে পারে — কোনো সার্ভারে কিছু পাঠানো হয়নি। চাইলে যেমন আছে তেমনই পোস্ট করতে পারেন, বা সেটিংসে হেল্পারটি বন্ধ করতে পারেন।",
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "এক্সচেঞ্জসমূহ",
+            "subtitle": "যেসব প্ল্যাটফর্মে আপনি আপনার টোকেন ট্রেড বা রূপান্তর করতে পারেন।",
+            "empty": "এখনও কোনো এক্সচেঞ্জ তালিকাভুক্ত হয়নি।"
         }
     }
 };

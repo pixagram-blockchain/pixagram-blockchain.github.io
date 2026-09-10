@@ -146,6 +146,7 @@ export default {
         "last_block": "கடைசி பிளாக்",
         "miss": "தவறியவை",
         "price_feed": "விலைத் தரவு",
+        "api_available": "API கிடைக்கிறது",
         "voted": "வாக்களித்தது",
         "quantization_applied": "வண்ணக் குறைப்பு செய்யப்பட்டது",
         "downscale_ratio": "சிறிதாக்க விகிதம்",
@@ -583,6 +584,7 @@ export default {
             "pd_received_so_far": "இதுவரை பெற்றது: {{amount}} / {{total}}",
             "pd_completes_on": "{{date}} அன்று நிறைவடையும்",
             "pd_first_payment_snack": "{{amount}} முதல் பணம் {{date}} அன்று.",
+            "trade": "வர்த்தகம் செய்",
         },
         "login_dialog": {
             "master": "Master",
@@ -2454,6 +2456,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "உங்கள் {{label}} நச்சுத்தன்மையாகத் தோன்றலாம் — கனிவான சொற்கள் சிறப்பாகச் சேரும்.",
             "rated_likely_to_read_as_toxic_by": "சாதனத்திலேயே இயங்கும் Toxic Comment Helper இதை {{percent}}% நச்சுத்தன்மையாகப் படிக்கப்படும் என மதிப்பிட்டுள்ளது — எதுவும் சர்வருக்கு அனுப்பப்படவில்லை. அப்படியே இடுகையிடலாம், அல்லது அமைப்புகளில் helper ஐ அணைக்கலாம்."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "பரிமாற்றகங்கள்",
+            "subtitle": "உங்கள் டோக்கன்களை வர்த்தகம் செய்யவோ மாற்றவோ கூடிய தளங்கள்.",
+            "empty": "இன்னும் எந்தப் பரிமாற்றகமும் பட்டியலிடப்படவில்லை."
         }
     }
 };

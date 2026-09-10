@@ -100,12 +100,12 @@ export const isArtworkPixelart = async function(file, maxWidth, maxHeight, maxCo
 function buildDownscaleConfig(colors) {
     const config = new WasmDownscaleConfig();
     config.palette_size = colors;
-    config.palette_strategy = 'medoid';          // exact source colors; try 'oklab' to let color_rarity/detail_boost shape the palette too
+    config.palette_strategy = 'hue';          // exact source colors; try 'oklab' to let color_rarity/detail_boost shape the palette too
     config.segmentation_method = "hierarchy_fast";
     config.two_pass_refinement = true;
     config.region_weight = 0.15;
     config.neighbor_weight = 0.15;                // lowered from 0.24 — less erosion of thin features (lips, eyes)
-    config.max_resolution_mp = 1.25;             // (prepare-time) resolution cap
+    config.max_resolution_mp = 1.0;             // (prepare-time) resolution cap
     config.max_color_preprocess = 16384;           // (prepare-time) color pre-quantization
     config.k_centroid = 4;                        // "Salient" — keep colorful minorities in mixed tiles (was 2=Dominant)
     config.k_centroid_iterations = 2;

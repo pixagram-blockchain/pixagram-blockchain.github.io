@@ -77,6 +77,7 @@ const PixaWalletSavingsDialog   = lazyDialog(() => import("../components/PixaWal
 const CreateBulkAccountDialog   = lazyDialog(() => import("../components/CreateBulkAccountDialog"),   { name: "WalletBulkCreate" });
 const PixaWalletBulkPowerDialog = lazyDialog(() => import("../components/PixaWalletBulkPowerDialog"), { name: "WalletBulkPower" });
 const PixaWalletTaxesDialog     = lazyDialog(() => import("../components/PixaWalletTaxesDialog"),     { name: "WalletTaxes" });
+const PixaWalletExchangesDialog = lazyDialog(() => import("../components/PixaWalletExchangesDialog"), { name: "WalletExchanges" });
 
 // ── First-open wallet tour ───────────────────────────────────────────────────
 // Walks the user through the wallet's views (main, PXP, PXA, PXS, history)
@@ -114,6 +115,7 @@ import HalfGaugeChart from "./HalfGaugeChart";
 import CloseRounded from "@material-ui/icons/CloseRounded";
 import ExpandMoreRounded from "@material-ui/icons/ExpandMoreRounded";
 import DescriptionRounded from "@material-ui/icons/DescriptionRounded";
+import ShowChartRounded from "@material-ui/icons/ShowChartRounded";
 import WalletHistory from "./WalletHistory";
 import { cssBackgroundImage } from "../utils/safeUrl";
 
@@ -1059,10 +1061,29 @@ const normalizeWalletAccount = (account) => {
     };
 };
 
+/**
+ * First-paint prices for the wallet: PricesAPI's synchronous snapshot when the
+ * api is already wired (it seeds itself with PXA at the 12-cent anchor and
+ * PXS at the design Big Mac price, 6.22), else those same two numbers, so the
+ * two never disagree.
+ */
+function wallet_seed_prices(api) {
+    const snap = api && api.prices && typeof api.prices.getSync === 'function'
+        ? api.prices.getSync()
+        : null;
+    const pxaUsd = Number(snap && snap.pxaUsd);
+    const pxsUsd = Number(snap && snap.pxsUsd);
+    return {
+        pxaUsd: Number.isFinite(pxaUsd) && pxaUsd > 0 ? pxaUsd : 0.12,
+        pxsUsd: Number.isFinite(pxsUsd) && pxsUsd > 0 ? pxsUsd : 6.22,
+    };
+}
+
 class PixaWalletDialog extends React.PureComponent {
 
     constructor(props) {
         super(props);
+        const seedPrices = wallet_seed_prices(props.api);
         this.state = {
             classes: props.classes,
             keepMounted: props.keepMounted || false,
@@ -1083,6 +1104,7 @@ class PixaWalletDialog extends React.PureComponent {
             _power_info_dialog_opened: false,
             _pixa_info_dialog_opened: false,
             _taxes_dialog_opened: false,
+            _exchanges_dialog_opened: false,
             _history: HISTORY,
             _selectedRange: 7,
             _data: PRICE_HISTORY_AVAILABLE ? [] : buildPlaceholderPriceSeries(7),
@@ -1110,7 +1132,11 @@ class PixaWalletDialog extends React.PureComponent {
                 [1672531200000, 5.36],
                 [1688169600000, 5.58],
                 [1704067200000, 5.69],
-                [1744372675555, 5.69]
+                [1735689600000, 5.79],
+                [1751328000000, 6.01],
+                [1767225600000, 6.12],
+                [1782864000000, 6.22],
+                [1788998400000, 6.22]
             ], "C"),
             _tab_value: (props.initialView !== undefined && props.initialView !== null) ? props.initialView : false,
             _view_right_mobile_enabled: (window.innerWidth || document.documentElement.clientWidth || (document.body || document.getElementsByTagName('body')[0]).clientWidth) <= 960,
@@ -1148,8 +1174,11 @@ class PixaWalletDialog extends React.PureComponent {
             // fr-CH, same catalogue) still re-renders this PureComponent and
             // the sub-dialogs it hands it to.
             _locale: resolveLocale(),
-            _pixaUsdPrice: 0.06,
-            _pxsUsdPrice: 5.69,
+            // Seed from PricesAPI's last-known snapshot (its own seed is PXA at
+            // the 12-cent anchor, PXS at the design Big Mac price 6.22) so the
+            // first paint and the refreshed figures come from the same model.
+            _pixaUsdPrice: seedPrices.pxaUsd,
+            _pxsUsdPrice: seedPrices.pxsUsd,
             _fiatRate: 1,
             _currency: 'USD',
             _pxpUsd: 0,
@@ -1385,8 +1414,9 @@ class PixaWalletDialog extends React.PureComponent {
                 api.globals.getDynamicGlobalProperties(),
                 api.market.getTicker().catch(() => null),
                 // Pricing logic lives on the API — see PricesAPI in pixaproxyapi.js.
-                // Reads the witness median feed, applies plausibility guard, falls back
-                // to design constants ($5.69 PXS / $0.06 PXA) when the feed is unset.
+                // PXA is the USD anchor ($0.12 until listed, then the market);
+                // PXS = PXA × the witness median feed ratio (design ratio
+                // 6.22 ÷ 0.12 → $6.22 while the feed is unset or implausible).
                 api.prices.get().catch(() => api.prices.getSync()),
             ]);
 
@@ -1464,8 +1494,9 @@ class PixaWalletDialog extends React.PureComponent {
             const isPoweringDown = withdrawRate > 0 && toWithdraw > withdrawn;
 
             // USD pricing comes from api.prices — see PricesAPI for the full model.
-            // Short version: PXS = $5.69 (design), PXA = $0.06 (design, overridden by
-            // witness feed when the feed carries a plausible ratio).
+            // Short version: PXA = $0.12 (anchor, market price once listed);
+            // PXS = PXA × ratio, the ratio being the witness median feed when
+            // plausible, else the design one (Big Mac $6.22 ÷ $0.12).
             const pixaUsdPrice = prices.pxaUsd;
             const pxsUsdPrice  = prices.pxsUsd;
 
@@ -2821,6 +2852,13 @@ class PixaWalletDialog extends React.PureComponent {
         this.setState({_taxes_dialog_opened: false}, () => { this.forceUpdate(); });
     }
 
+    _open_exchanges_dialog = () => {
+        this.setState({_exchanges_dialog_opened: true}, () => { this.forceUpdate(); });
+    }
+    _close_exchanges_dialog = () => {
+        this.setState({_exchanges_dialog_opened: false}, () => { this.forceUpdate(); });
+    }
+
     _open_delegate_dialog = () => {
         this.setState({_delegate_dialog_opened: true}, () => { this.forceUpdate(); });
     }
@@ -3324,6 +3362,7 @@ class PixaWalletDialog extends React.PureComponent {
             _power_info_dialog_opened,
             _pixa_info_dialog_opened,
             _taxes_dialog_opened,
+            _exchanges_dialog_opened,
             _savings_dialog_opened,
             _savings_dialog_mode,
             _savingsPixa,
@@ -3571,6 +3610,7 @@ class PixaWalletDialog extends React.PureComponent {
                                 <Button onClick={this._open_bulk_create_dialog} variant={"text"}>{t("words.create_accounts")} <PersonAddRounded style={{marginLeft: "8px"}}/></Button>
                             )}
                             {_itsOwnProfile && <Button onClick={this._open_taxes_dialog} variant={"text"}>{t("components.pixa_wallet_dialog.taxes")} <DescriptionRounded style={{marginLeft: "8px"}}/></Button>}
+                            {_itsOwnProfile && <Button onClick={this._open_exchanges_dialog} variant={"text"}>{t("components.pixa_wallet_dialog.trade")} <ShowChartRounded style={{marginLeft: "8px"}}/></Button>}
                         </div>
                     </div>
                 </div>
@@ -4172,6 +4212,7 @@ class PixaWalletDialog extends React.PureComponent {
                 <PixaWalletPixaInfoDialog open={_pixa_info_dialog_opened} onClose={this._close_pixa_info_dialog}/>
                 <PixaWalletSavingsDialog type={_savings_dialog_opened} open={_savings_dialog_opened.length} mode={_savings_dialog_mode} onClose={this._close_savings_dialog} api={this.state.api} account={account} maxDeposit={_savings_dialog_opened === "PIXA" ? _pixaBalance : _pxsBalance} maxWithdraw={_savings_dialog_opened === "PIXA" ? _savingsPixa : _savingsPxs} locale={this.state._locale} onConfirm={this._handle_savings_confirm}/>
                 <PixaWalletTaxesDialog open={_taxes_dialog_opened} onClose={this._close_taxes_dialog} api={this.state.api} account={account} fiatRate={fiatRate} fiatCurrency={cur} vestToPixa={this.state._vestToPixa} pixaToVest={this.state._pixaToVest} globalProps={this.state._globalProps}/>
+                <PixaWalletExchangesDialog open={_exchanges_dialog_opened} onClose={this._close_exchanges_dialog}/>
             </React.Fragment>
         );
     }

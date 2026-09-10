@@ -147,6 +147,7 @@ export default {
         "last_block": "अंतिम ब्लॉक",
         "miss": "चूक",
         "price_feed": "मूल्य फ़ीड",
+        "api_available": "API उपलब्ध",
         "voted": "वोट किया",
         "quantization_applied": "क्वांटीकरण लागू",
         "downscale_ratio": "डाउनस्केल अनुपात",
@@ -584,6 +585,7 @@ export default {
             "pd_received_so_far": "अब तक मिला: {{amount}} / {{total}}",
             "pd_completes_on": "{{date}} को पूरा होगा",
             "pd_first_payment_snack": "{{amount}} की पहली किश्त {{date}} को।",
+            "trade": "ट्रेड करें",
         },
         "login_dialog": {
             "master": "Master",
@@ -2458,6 +2460,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "आपका {{label}} विषाक्त लग सकता है — नरम शब्द बेहतर असर करेंगे।",
             "rated_likely_to_read_as_toxic_by": "आपके डिवाइस पर चल रहे विषाक्त-टिप्पणी सहायक ने इसे {{percent}} % संभावना से विषाक्त प्रतीत होने वाला आँका — सर्वर पर कुछ नहीं भेजा गया। आप इसे जैसा है वैसा पोस्ट कर सकते हैं, या सेटिंग्स में सहायक बंद कर सकते हैं।"
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "एक्सचेंज",
+            "subtitle": "ऐसे प्लेटफ़ॉर्म जहाँ आप अपने टोकन ट्रेड या रूपांतरित कर सकते हैं।",
+            "empty": "अभी तक कोई एक्सचेंज सूचीबद्ध नहीं है।"
         }
     }
 };

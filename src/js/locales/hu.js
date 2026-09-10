@@ -146,6 +146,7 @@ export default {
         "last_block": "Utolsó blokk",
         "miss": "Kihagyott",
         "price_feed": "Árfolyam-feed",
+        "api_available": "API elérhető",
         "voted": "Megszavazva",
         "quantization_applied": "Kvantálás alkalmazva",
         "downscale_ratio": "Kicsinyítési arány",
@@ -583,6 +584,7 @@ export default {
             "pd_received_so_far": "Eddig beérkezett: {{amount}} / {{total}}",
             "pd_completes_on": "Befejeződik: {{date}}",
             "pd_first_payment_snack": "Az első, {{amount}} összegű kifizetés: {{date}}.",
+            "trade": "Kereskedés",
         },
         "login_dialog": {
             "master": "Master",
@@ -2454,6 +2456,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "A(z) {{label}} mérgezőnek tűnhet — egy kedvesebb megfogalmazás jobban célba ér.",
             "rated_likely_to_read_as_toxic_by": "Az eszközön futó Toxic Comment Helper {{percent}}% valószínűséggel mérgezően olvashatónak értékelte — semmi sem lett elküldve szerverre. Ettől még közzéteheted így, vagy kikapcsolhatod a segédet a Beállításokban."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "Tőzsdék",
+            "subtitle": "Platformok, ahol kereskedhetsz a tokenjeiddel, vagy átválthatod őket.",
+            "empty": "Még egyetlen tőzsde sincs listázva."
         }
     }
 };

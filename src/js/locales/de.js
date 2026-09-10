@@ -146,6 +146,7 @@ export default {
         "last_block": "Letzter Block",
         "miss": "Verpasst",
         "price_feed": "Preis-Feed",
+        "api_available": "API verfügbar",
         "voted": "Gestimmt",
         "quantization_applied": "Quantisierung angewendet",
         "downscale_ratio": "Verkleinerungsfaktor",
@@ -583,6 +584,7 @@ export default {
             "pd_received_so_far": "Bisher erhalten: {{amount}} von {{total}}",
             "pd_completes_on": "Abgeschlossen am {{date}}",
             "pd_first_payment_snack": "Erste Zahlung von {{amount}} am {{date}}.",
+            "trade": "Handeln",
         },
         "login_dialog": {
             "master": "Master",
@@ -2457,6 +2459,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "Dein {{label}} könnte toxisch wirken — eine freundlichere Formulierung kommt besser an.",
             "rated_likely_to_read_as_toxic_by": "Mit {{percent}} % Wahrscheinlichkeit als toxisch eingeschätzt — durch den Helfer für toxische Kommentare direkt auf deinem Gerät; es wurde nichts an einen Server gesendet. Du kannst den Text unverändert veröffentlichen oder den Helfer in den Einstellungen abschalten."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "Börsen",
+            "subtitle": "Plattformen, auf denen du deine Token handeln oder umtauschen kannst.",
+            "empty": "Noch keine Börse gelistet."
         }
     }
 };

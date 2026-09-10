@@ -156,6 +156,7 @@ export default {
         "last_block": "Τελευταίο μπλοκ",
         "miss": "Χαμένα",
         "price_feed": "Ροή τιμής",
+        "api_available": "API διαθέσιμο",
         "voted": "Ψηφίστηκε",
         "quantization_applied": "Εφαρμόστηκε κβαντισμός",
         "downscale_ratio": "Λόγος σμίκρυνσης",
@@ -593,6 +594,7 @@ export default {
             "pd_received_so_far": "Έχουν εισπραχθεί: {{amount}} από {{total}}",
             "pd_completes_on": "Ολοκληρώνεται στις {{date}}",
             "pd_first_payment_snack": "Πρώτη πληρωμή {{amount}} στις {{date}}.",
+            "trade": "Συναλλαγές",
         },
         "login_dialog": {
             "master": "Master",
@@ -2463,6 +2465,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "Το {{label}} σας μπορεί να ακουστεί τοξικό — μια πιο ήπια διατύπωση θα λειτουργήσει καλύτερα.",
             "rated_likely_to_read_as_toxic_by": "Ο Βοηθός τοξικών σχολίων που τρέχει στη συσκευή σας εκτίμησε {{percent}} % πιθανότητα να διαβαστεί ως τοξικό — τίποτα δεν στάλθηκε σε διακομιστή. Μπορείτε να το δημοσιεύσετε ως έχει ή να απενεργοποιήσετε τον βοηθό στις Ρυθμίσεις."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "Χρηματιστήρια",
+            "subtitle": "Πλατφόρμες όπου μπορείτε να κάνετε συναλλαγές ή να μετατρέψετε τα token σας.",
+            "empty": "Δεν υπάρχει ακόμη κανένα χρηματιστήριο στη λίστα."
         }
     }
 };

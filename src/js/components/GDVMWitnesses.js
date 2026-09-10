@@ -12,6 +12,7 @@ import ButtonBase from "@material-ui/core/ButtonBase";
 import CircularProgress from "@material-ui/core/CircularProgress";
 import Skeleton from "@material-ui/lab/Skeleton";
 import { cssBackgroundImage } from "../utils/safeUrl";
+import { DEFAULT_NODES } from "../utils/constants";
 
 import { T } from "../utils/T";
 import { t } from "../utils/text";
@@ -127,6 +128,23 @@ const styles = theme => ({
         display: "block",
         fontSize: "11px",
         fontFamily: "'Normative Pro'"
+    },
+    // "API available" — the witness also operates one of the public API nodes
+    // (DEFAULT_NODES). Same pill as witnessBadge, sized to sit after the name.
+    apiBadge: {
+        display: "inline-block",
+        verticalAlign: "middle",
+        marginLeft: "8px",
+        padding: "1px 6px",
+        borderRadius: "8px",
+        backgroundColor: "#262626",
+        color: "#bbb",
+        fontSize: "10px",
+        lineHeight: "16px",
+        fontFamily: "'Geist Mono'",
+        fontWeight: "bold",
+        letterSpacing: "0.5px",
+        whiteSpace: "nowrap"
     },
     versionBadge: {
         margin: "8px",
@@ -265,26 +283,95 @@ const formatVotes = (v) => {
     return String(Math.round(n));
 };
 
+// ──────────────────────────────────────────────────────────────
+// Price feed
+//
+// The fork renamed the HBD-era witness fields to PXS: the record carries
+// `pxs_exchange_rate` / `last_pxs_exchange_update` (the same `pxs_*` names the
+// proxy's witnessSetProperties() broadcasts). `hbd_*` / `sbd_*` are kept as
+// fallbacks only so a stock-named node still renders.
+//
+// The feed is a Price { base: "X PXS", quote: "Y PIXA" } and is read as a
+// ratio — how many PXA one PXS is worth (quote ÷ base, the same orientation
+// as PricesAPI's feedRatio) — and written that way: "1 PXS = 102 PXA".
+// There is no fiat on chain, so no dollar sign anywhere.
+// ──────────────────────────────────────────────────────────────
+const getWitnessPriceFeed = (w) =>
+    (w && (w.pxs_exchange_rate || w.hbd_exchange_rate || w.sbd_exchange_rate)) || null;
+
+const getWitnessFeedUpdatedAt = (w) =>
+    (w && (w.last_pxs_exchange_update || w.last_hbd_exchange_update || w.last_sbd_exchange_update)) || null;
+
+const parseFeedAsset = (a) => {
+    if (!a) return { amount: NaN, symbol: '' };
+    if (typeof a === 'string') {
+        const m = a.trim().match(/^([\d.]+)\s*([A-Za-z]*)$/);
+        return m ? { amount: Number(m[1]), symbol: m[2] || '' } : { amount: NaN, symbol: '' };
+    }
+    if (typeof a === 'object' && 'amount' in a) {
+        const p = Number(a.precision || 0);
+        return { amount: Number(a.amount) / Math.pow(10, p), symbol: '' };
+    }
+    return { amount: NaN, symbol: '' };
+};
+
+// Human string of the raw feed as published, e.g. "1.000 PXS / 20.000 PIXA".
+const formatRawPriceFeed = (feed) => {
+    if (!feed || !feed.base || !feed.quote) return '';
+    const asText = (a) => (typeof a === 'string' ? a : `${parseFeedAsset(a).amount}`);
+    return `${asText(feed.base)} / ${asText(feed.quote)}`;
+};
+
+// Chain symbol → the symbol the app writes (PIXA is shown as PXA everywhere).
+const DISPLAY_SYMBOL = { PIXA: 'PXA', PXS: 'PXS', VESTS: 'PXP' };
+const displaySymbol = (sym, fallback) => DISPLAY_SYMBOL[sym] || sym || fallback;
+
+// 102.000 → "102", 101.500 → "101.5", 57.143 → "57.143"
+const formatRatio = (n) => n.toFixed(3).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+
 const formatPriceFeed = (feed) => {
-    // feed is witness.hbd_exchange_rate: { base: Asset, quote: Asset }
-    // Returns PXS / PIXA. An untouched feed is 0/0 — render as em-dash.
     if (!feed) return '—';
-    const parseAmount = (a) => {
-        if (!a) return NaN;
-        if (typeof a === 'string') {
-            const m = a.match(/([\d.]+)/);
-            return m ? Number(m[1]) : NaN;
-        }
-        if (typeof a === 'object' && 'amount' in a) {
-            const p = Number(a.precision || 0);
-            return Number(a.amount) / Math.pow(10, p);
-        }
-        return NaN;
-    };
-    const base = parseAmount(feed.base);
-    const quote = parseAmount(feed.quote);
-    if (!isFinite(base) || !isFinite(quote) || quote === 0) return '—';
-    return `$${(base / quote).toFixed(3)}`;
+    const base = parseFeedAsset(feed.base);    // PXS side
+    const quote = parseFeedAsset(feed.quote);  // PXA side
+    // A witness that never published a feed still carries a zero price
+    // (0/0, or 0 PXS over the default quote) — render as em-dash rather than
+    // a meaningless ratio.
+    if (!isFinite(base.amount) || !isFinite(quote.amount)) return '—';
+    if (base.amount <= 0 || quote.amount <= 0) return '—';
+    const ratio = quote.amount / base.amount;  // PXA per 1 PXS
+    return `1 ${displaySymbol(base.symbol, 'PXS')} = ${formatRatio(ratio)} ${displaySymbol(quote.symbol, 'PXA')}`;
+};
+
+// ──────────────────────────────────────────────────────────────
+// "API available"
+//
+// A witness is marked as running a public API node when it matches one of
+// the app's known nodes (utils/constants DEFAULT_NODES): either the node
+// entry names it explicitly (`witness: "<account>"`) or the host of the
+// witness's on-chain `url` is the node's host.
+// ──────────────────────────────────────────────────────────────
+const hostOf = (url) => {
+    if (!url || typeof url !== 'string') return '';
+    try {
+        const u = new URL(url.trim());
+        if (u.protocol !== 'https:' && u.protocol !== 'http:') return '';
+        return u.hostname.toLowerCase().replace(/^www\./, '');
+    } catch (e) {
+        return '';
+    }
+};
+
+const findApiNodeForWitness = (w) => {
+    if (!w || !Array.isArray(DEFAULT_NODES)) return null;
+    const owner = String(w.owner || '').toLowerCase();
+    const witnessHost = hostOf(w.url);
+    for (const node of DEFAULT_NODES) {
+        if (!node) continue;
+        if (node.witness && String(node.witness).toLowerCase() === owner) return node;
+        const nodeHost = hostOf(node.url);
+        if (witnessHost && nodeHost && witnessHost === nodeHost) return node;
+    }
+    return null;
 };
 
 // Was a hand-rolled English ladder ("3m ago", "2h ago"). utils/TimeAgo now
@@ -644,6 +731,9 @@ class GDVMWitnesses extends React.PureComponent {
         const voted = _myVotes.has(name);
         const labelId = `witness-vote-${name}`;
         const avatarUrl = _avatars[name] || '';
+        const apiNode = findApiNodeForWitness(witness);
+        const feed = getWitnessPriceFeed(witness);
+        const feedUpdated = formatTimeAgo(getWitnessFeedUpdatedAt(witness));
 
         return (
             <tr key={name}>
@@ -661,6 +751,14 @@ class GDVMWitnesses extends React.PureComponent {
                         <div className={classes.witnessInfo}>
                             <strong className={classes.witnessName}>
                                 @{name}
+                                {apiNode && (
+                                    <span
+                                        className={classes.apiBadge}
+                                        title={apiNode.url}
+                                    >
+                                        {t("words.api_available")}
+                                    </span>
+                                )}
                             </strong>
                             <span className={classes.witnessDescription}>
                                 {witness.url || ''}
@@ -685,8 +783,15 @@ class GDVMWitnesses extends React.PureComponent {
                 <td className={classes.monoText}>
                     {witness.total_missed != null ? witness.total_missed : '—'}
                 </td>
-                <td className={classes.monoText}>
-                    {formatPriceFeed(witness.hbd_exchange_rate)}
+                <td className={classes.monoText} title={formatRawPriceFeed(feed)}>
+                    <div className={classes.blockInfo}>
+                        {formatPriceFeed(feed)}
+                    </div>
+                    {feedUpdated !== '—' && (
+                        <div className={classes.blockTime}>
+                            ({feedUpdated})
+                        </div>
+                    )}
                 </td>
                 <td>
                     <Checkbox
@@ -736,10 +841,10 @@ class GDVMWitnesses extends React.PureComponent {
                     <span className={classes.witnessBadge}>{t("components.gdvmwitnesses.you_are_a_witness")}</span>
                 </div>
                 <Typography className={classes.sectionDescription}><T
-                        k="components.gdvmwitnesses.broadcast_a_new_set_of_chain_parameters"
-                        vars={{
-                            currentAccount: _currentAccount
-                        }} /></Typography>
+                    k="components.gdvmwitnesses.broadcast_a_new_set_of_chain_parameters"
+                    vars={{
+                        currentAccount: _currentAccount
+                    }} /></Typography>
                 <TextField
                     className={classes.textFieldWrapper}
                     label={t("components.gdvmwitnesses.account_creation_fee")}

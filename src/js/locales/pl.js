@@ -149,6 +149,7 @@ export default {
         "last_block": "Ostatni blok",
         "miss": "Pominięcia",
         "price_feed": "Feed cenowy",
+        "api_available": "API dostępne",
         "voted": "Zagłosowano",
         "quantization_applied": "Zastosowano kwantyzację",
         "downscale_ratio": "Współczynnik pomniejszenia",
@@ -586,6 +587,7 @@ export default {
             "pd_received_so_far": "Dotychczas otrzymano: {{amount}} z {{total}}",
             "pd_completes_on": "Zakończenie {{date}}",
             "pd_first_payment_snack": "Pierwsza wypłata {{amount}} dnia {{date}}.",
+            "trade": "Handluj",
         },
         "login_dialog": {
             "master": "Master",
@@ -2457,6 +2459,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "Twój {{label}} może zabrzmieć toksycznie — łagodniejsze sformułowanie zadziała lepiej.",
             "rated_likely_to_read_as_toxic_by": "Oceniono na {{percent}}% ryzyka odbioru jako toksyczny przez działający na urządzeniu Toxic Comment Helper — nic nie zostało wysłane na serwer. Możesz opublikować bez zmian albo wyłączyć pomocnika w Ustawieniach."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "Giełdy",
+            "subtitle": "Platformy, na których możesz handlować tokenami lub je konwertować.",
+            "empty": "Żadna giełda nie została jeszcze dodana."
         }
     }
 };

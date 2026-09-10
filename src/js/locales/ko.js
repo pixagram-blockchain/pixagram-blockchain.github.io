@@ -147,6 +147,7 @@ export default {
         "last_block": "마지막 블록",
         "miss": "누락",
         "price_feed": "가격 피드",
+        "api_available": "API 사용 가능",
         "voted": "투표함",
         "quantization_applied": "색상 양자화 적용됨",
         "downscale_ratio": "축소 비율",
@@ -584,6 +585,7 @@ export default {
             "pd_received_so_far": "지금까지 수령: {{amount}} / {{total}}",
             "pd_completes_on": "{{date}}에 완료",
             "pd_first_payment_snack": "첫 지급 {{amount}}은(는) {{date}}에 이루어집니다.",
+            "trade": "거래",
         },
         "login_dialog": {
             "master": "Master",
@@ -2458,6 +2460,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "작성한 {{label}}이(가) 공격적으로 들릴 수 있습니다 — 더 부드러운 표현이 잘 전달됩니다.",
             "rated_likely_to_read_as_toxic_by": "기기에서 실행되는 악성 댓글 도우미가 공격적으로 읽힐 가능성을 {{percent}} %로 평가했습니다 — 서버로 전송된 것은 없습니다. 그대로 게시할 수도 있고, 설정에서 도우미를 끌 수도 있습니다."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "거래소",
+            "subtitle": "토큰을 거래하거나 전환할 수 있는 플랫폼입니다.",
+            "empty": "아직 등록된 거래소가 없습니다."
         }
     }
 };

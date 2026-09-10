@@ -147,6 +147,7 @@ export default {
         "last_block": "最后出块",
         "miss": "漏块",
         "price_feed": "价格喂价",
+        "api_available": "API 可用",
         "voted": "已投票",
         "quantization_applied": "已应用色彩量化",
         "downscale_ratio": "缩小比例",
@@ -584,6 +585,7 @@ export default {
             "pd_received_so_far": "已收：{{amount}} / {{total}}",
             "pd_completes_on": "于 {{date}} 完成",
             "pd_first_payment_snack": "首期 {{amount}} 将于 {{date}} 支付。",
+            "trade": "交易",
         },
         "login_dialog": {
             "master": "Master",
@@ -2458,6 +2460,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "你的{{label}}可能显得具有攻击性 — 更温和的措辞会更受欢迎。",
             "rated_likely_to_read_as_toxic_by": "在你设备上运行的不当评论助手评估其有 {{percent}}% 的可能被读作攻击性内容 —— 没有任何内容被发送到服务器。你仍可原样发布，或在设置中关闭该助手。"
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "交易所",
+            "subtitle": "可以交易或兑换代币的平台。",
+            "empty": "暂无已收录的交易所。"
         }
     }
 };

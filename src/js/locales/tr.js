@@ -150,6 +150,7 @@ export default {
         "last_block": "Son blok",
         "miss": "Kaçırılan",
         "price_feed": "Fiyat beslemesi",
+        "api_available": "API kullanılabilir",
         "voted": "Oylandı",
         "quantization_applied": "Renk azaltma uygulandı",
         "downscale_ratio": "Küçültme oranı",
@@ -587,6 +588,7 @@ export default {
             "pd_received_so_far": "Şimdiye kadar alınan: {{amount}} / {{total}}",
             "pd_completes_on": "{{date}} tarihinde tamamlanır",
             "pd_first_payment_snack": "{{amount}} tutarındaki ilk ödeme {{date}} tarihinde.",
+            "trade": "İşlem yap",
         },
         "login_dialog": {
             "master": "Master",
@@ -2458,6 +2460,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "{{label}} metnin kırıcı algılanabilir — daha nazik bir ifade daha iyi karşılanır.",
             "rated_likely_to_read_as_toxic_by": "Cihaz üzerinde çalışan Toxic Comment Helper bunu %{{percent}} olasılıkla kırıcı okunacak diye derecelendirdi — sunucuya hiçbir şey gönderilmedi. Yine de olduğu gibi paylaşabilir veya Ayarlar'dan yardımcıyı kapatabilirsin."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "Borsalar",
+            "subtitle": "Tokenlarınla işlem yapabileceğin veya onları dönüştürebileceğin platformlar.",
+            "empty": "Henüz listelenmiş bir borsa yok."
         }
     }
 };

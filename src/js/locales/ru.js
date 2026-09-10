@@ -149,6 +149,7 @@ export default {
         "last_block": "Последний блок",
         "miss": "Пропуски",
         "price_feed": "Ценовой фид",
+        "api_available": "API доступен",
         "voted": "Проголосовано",
         "quantization_applied": "Квантование применено",
         "downscale_ratio": "Коэффициент уменьшения",
@@ -586,6 +587,7 @@ export default {
             "pd_received_so_far": "Уже получено: {{amount}} из {{total}}",
             "pd_completes_on": "Завершится {{date}}",
             "pd_first_payment_snack": "Первая выплата {{amount}} — {{date}}.",
+            "trade": "Торговать",
         },
         "login_dialog": {
             "master": "Master",
@@ -2460,6 +2462,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "Ваш {{label}} может прозвучать токсично — более мягкая формулировка сработает лучше.",
             "rated_likely_to_read_as_toxic_by": "Помощник по токсичным комментариям, работающий на вашем устройстве, оценил вероятность токсичного прочтения в {{percent}} % — на сервер ничего не отправлялось. Вы можете опубликовать как есть или отключить помощник в настройках."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "Биржи",
+            "subtitle": "Платформы, на которых можно торговать токенами или конвертировать их.",
+            "empty": "Пока не добавлена ни одна биржа."
         }
     }
 };

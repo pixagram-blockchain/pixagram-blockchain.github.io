@@ -319,8 +319,13 @@ const enrichPostForCard = (post, account, voterProfiles) => {
     return {
         id: post._entity_id || post.id || `${post.author}_${post.permlink}`,
         author: {
-            username: account.name || '',
-            name: resolveDisplayName(account),
+            // The chain author is the source of truth. A sanitized account
+            // entity can come back keyed by `_entity_id` with no top-level
+            // `name` (buildMaps already tolerates that) — falling through to
+            // '' here silently broke every consumer that reads
+            // `author.username`, including the load-more cursor below.
+            username: account.name || account._entity_id || post.author || '',
+            name: resolveDisplayName(account, post.author),
             image: account.image || account._profile?.profile_image || '',
         },
         title: post.root_title || post.title || '',
@@ -447,6 +452,15 @@ const fetchAndEnrichPosts = async (api, sort, tag, existingPosts, pagination, on
 
     let posts = null;
 
+    // Same id derivation as enrichPostForCard, so a raw page can be checked
+    // against the already-enriched list before the account round-trip.
+    const rawId = (p) => p._entity_id || p.id || `${p.author}_${p.permlink}`;
+    const existingIds = existingPosts?.length ? new Set(existingPosts.map(p => p.id)) : null;
+    // "Nothing past the cursor" — every row is already on screen (or the
+    // page is just the cursor row itself).
+    const hasNothingNew = (rows) =>
+        !!existingIds && rows.length > 0 && rows.every(p => existingIds.has(rawId(p)));
+
     if (sort === 'created' && api?.tags?.getDiscussionsByCreated) {
         posts = await api.tags.getDiscussionsByCreated(dbQuery).catch(e => {
             console.warn('[Feed] database.getDiscussions(created) failed:', e.message);
@@ -454,7 +468,19 @@ const fetchAndEnrichPosts = async (api, sort, tag, existingPosts, pagination, on
         });
     }
 
-    if (!Array.isArray(posts) || posts.length === 0) {
+    // A paginated database page that contains nothing past the cursor means
+    // the cursor was not honoured — a cached first page (the proxy's
+    // _fetchDiscussionsWithCache) or start_author/start_permlink dropped from
+    // the query. Left alone, loadMorePosts read that as "end of feed"
+    // (setHasMore(false)) and pagination silently stopped after page one.
+    // Treat it exactly like an empty page: fall through to the bridge with
+    // the same cursor, and only conclude "end" if that comes back empty too.
+    const staleDbPage = Array.isArray(posts) && pagination?.start_author && hasNothingNew(posts);
+    if (staleDbPage) {
+        console.warn('[Feed] database.getDiscussions(created) ignored the pagination cursor — retrying via bridge');
+    }
+
+    if (!Array.isArray(posts) || posts.length === 0 || staleDbPage) {
         const rankedOpts = {
             sort,
             tag: tag || null,
@@ -485,8 +511,7 @@ const fetchAndEnrichPosts = async (api, sort, tag, existingPosts, pagination, on
             const authorAcc = accountsMap[p.author] || { name: p.author || '', _profile: {} };
             return enrichPostForCard(p, authorAcc, voterProfiles);
         });
-        if (existingPosts?.length) {
-            const existingIds = new Set(existingPosts.map(p => p.id));
+        if (existingIds) {
             return enriched.filter(p => !existingIds.has(p.id));
         }
         return enriched;
@@ -920,15 +945,29 @@ const useFeedData = (api, pathname) => {
         const currentPosts = postsRef.current;
         if (loadingMore || isLoading || !hasMore || !currentPosts?.length || !api?.initialized) return;
 
+        // Cursor = the last card. `author` is the enriched {username,…}
+        // object; the old `last.author?.username || last.author` fell
+        // through to that OBJECT whenever username was '' (see
+        // enrichPostForCard), so the node got `start_author: [object]`
+        // and pagination died silently. Only ever hand it a string.
         const last = currentPosts[currentPosts.length - 1];
-        const startAuthor = last.author?.username || last.author || '';
+        const startAuthor = typeof last.author === 'string'
+            ? last.author
+            : (last.author?.username || '');
         const startPermlink = last.permlink || '';
-        if (!startAuthor || !startPermlink) return;
+        if (!startAuthor || !startPermlink) {
+            console.warn('[Feed] load-more: last card has no usable cursor', { startAuthor, startPermlink });
+            return;
+        }
 
         setLoadingMore(true);
         try {
-            const sort = SORT_METHODS[sorting] || 'created';
-            const tag = parseTagFromPathname(pathname);
+            // Feed identity from feedIdRef, not the pathname prop: with the
+            // post overlay open the prop is the post URL, whose tag parses
+            // as '' — paginating a tagged feed then appended untagged rows.
+            const { sortIndex, path } = feedIdRef.current;
+            const sort = SORT_METHODS[sortIndex] || 'created';
+            const tag = parseTagFromPathname(path);
             const newPosts = overlayPendingVotes(await fetchAndEnrichPosts(api, sort, tag, currentPosts, {
                 start_author: startAuthor, start_permlink: startPermlink,
             }));
@@ -940,13 +979,14 @@ const useFeedData = (api, pathname) => {
                 // scrolled-through list, not just page one.
                 viewCache.patch(cacheKeyRef.current, { posts: [...currentPosts, ...newPosts] });
             } else {
+                console.info(`[Feed] load-more: no rows past @${startAuthor}/${startPermlink} — end of ${sort} feed`);
                 setHasMore(false);
             }
         } catch (e) {
             console.warn('[Feed] _load_more_posts failed:', e.message);
         }
         setLoadingMore(false);
-    }, [api, sorting, pathname, loadingMore, isLoading, hasMore]);
+    }, [api, loadingMore, isLoading, hasMore]);
 
     const handleSortingChange = useCallback((e, newSorting) => {
         if (sorting === newSorting) return;
@@ -1300,12 +1340,12 @@ const usePostNavigation = ({ api, posts, masonryRef, scrollToIndex, scrollTo, se
 
         if (!isPostUrl(HISTORY.location.pathname)) return;
         if (depth > 0) HISTORY.go(-depth);
-        // depth === 0 means the dialog was opened straight from the URL
-        // (deep-link/refresh, or a back→forward re-open) rather than via
-        // openPost, so there's no tracked entry to rewind. REPLACE the post
-        // URL with the fallback instead of pushing on top of it — pushing
-        // would leave the post URL sitting behind us in history, and the very
-        // next browser Back would land on it and re-open the dialog. Replace
+            // depth === 0 means the dialog was opened straight from the URL
+            // (deep-link/refresh, or a back→forward re-open) rather than via
+            // openPost, so there's no tracked entry to rewind. REPLACE the post
+            // URL with the fallback instead of pushing on top of it — pushing
+            // would leave the post URL sitting behind us in history, and the very
+            // next browser Back would land on it and re-open the dialog. Replace
         // swaps it out entirely, so Back goes to whatever preceded the post.
         else HISTORY.replace(fallbackUrl || "/created/");
     }, [fallbackUrl]);
@@ -1755,8 +1795,8 @@ const Feed = ({ classes, settings, pathname, api }) => {
                 onClick={openCreateDialog}
                 className={classes.mainFab}
                 style={{ transform: grid.hideFab
-                    ? "translateY(calc(96px + env(safe-area-inset-bottom, 0px)))"
-                    : "translateY(-8px)" }}
+                        ? "translateY(calc(96px + env(safe-area-inset-bottom, 0px)))"
+                        : "translateY(-8px)" }}
             >
                 <Fab variant="extended" size="large">
                     <PhotoCameraRounded style={{ marginRight: 12 }} />

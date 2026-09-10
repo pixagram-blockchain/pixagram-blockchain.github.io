@@ -149,6 +149,7 @@ export default {
         "last_block": "Ultimul bloc",
         "miss": "Ratate",
         "price_feed": "Feed de preț",
+        "api_available": "API disponibil",
         "voted": "Votat",
         "quantization_applied": "Cuantizare aplicată",
         "downscale_ratio": "Raport de micșorare",
@@ -586,6 +587,7 @@ export default {
             "pd_received_so_far": "Primit până acum: {{amount}} din {{total}}",
             "pd_completes_on": "Se încheie pe {{date}}",
             "pd_first_payment_snack": "Prima plată de {{amount}} pe {{date}}.",
+            "trade": "Tranzacționează",
         },
         "login_dialog": {
             "master": "Master",
@@ -2457,6 +2459,11 @@ export default {
         "toxicity_hint": {
             "your_might_come_across_as_toxic_a": "{{label}} ar putea suna toxic — o formulare mai blândă va prinde mai bine.",
             "rated_likely_to_read_as_toxic_by": "Evaluat ca având {{percent}}% șanse să sune toxic de către Toxic Comment Helper de pe dispozitiv — nimic nu a fost trimis vreunui server. Poți totuși să-l publici așa cum e sau poți opri asistentul din Setări."
+        },
+        "pixa_wallet_exchanges_dialog": {
+            "title": "Burse",
+            "subtitle": "Platforme unde poți tranzacționa sau converti tokenurile tale.",
+            "empty": "Nicio bursă nu este listată încă."
         }
     }
 };

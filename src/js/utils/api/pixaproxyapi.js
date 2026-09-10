@@ -3271,19 +3271,88 @@ class TagsAPI {
 // Blocks API Group
 // ============================================
 
+/**
+ * AppBase namespaces (block_api, account_history_api) encode an operation as
+ * `{ type: "vote_operation", value: {…} }`, while every consumer in the app —
+ * BlockViewer, the blockchain.getOperations() generator, getOperationUser()
+ * switches — was written against the condenser tuple `["vote", {…}]`. These
+ * helpers translate the AppBase shape back to that tuple so the switch of RPC
+ * namespace below is invisible to callers. Legacy tuples pass through untouched.
+ */
+function legacyOperationFromAppbase(op) {
+    if (Array.isArray(op)) return op;                       // already ["type", {…}]
+    if (!op || typeof op !== 'object') return op;
+    const type = (typeof op.type === 'string') ? op.type.replace(/_operation$/, '') : op.type;
+    return [type, (op.value !== undefined ? op.value : {})];
+}
+
+/**
+ * account_history_api.get_ops_in_block entry → condenser applied-operation
+ * shape. `virtual_op` is a uint32 counter on older account-history plugins and
+ * a boolean on HAF-backed nodes; both are collapsed to a number (0 = real op,
+ * > 0 = virtual) so `op.virtual_op > 0` keeps meaning "virtual" everywhere.
+ */
+function legacyAppliedOperation(entry) {
+    if (!entry || typeof entry !== 'object') return entry;
+    const v = entry.virtual_op;
+    const virtualOp = (v === true) ? 1 : (v === false ? 0 : (Number(v) || 0));
+    return { ...entry, virtual_op: virtualOp, op: legacyOperationFromAppbase(entry.op) };
+}
+
+/** block_api.get_block payload → signed block with tuple-shaped operations. */
+function legacyBlockFromAppbase(block) {
+    if (!block || typeof block !== 'object') return block;
+    if (!Array.isArray(block.transactions)) return block;
+    return {
+        ...block,
+        transactions: block.transactions.map(tx => (
+            (tx && Array.isArray(tx.operations))
+                ? { ...tx, operations: tx.operations.map(legacyOperationFromAppbase) }
+                : tx
+        ))
+    };
+}
+
 class BlocksAPI {
     constructor(proxy) { this.proxy = proxy; }
 
+    /**
+     * Full signed block via block_api.get_block (reversible blocks included).
+     * Operations are returned in the condenser tuple shape — see
+     * legacyBlockFromAppbase().
+     * @param {number} blockNum
+     * @returns {Promise<object|null>} null when the block does not exist (yet)
+     */
     async getBlock(blockNum) {
-        return this.proxy.client.database.getBlock(blockNum);
+        const result = await this.proxy.client.call('block_api', 'get_block', {
+            block_num: blockNum
+        });
+        return result?.block ? legacyBlockFromAppbase(result.block) : null;
     }
 
     async getBlockHeader(blockNum) {
         return this.proxy.client.database.getBlockHeader(blockNum);
     }
 
+    /**
+     * Every operation applied in a block — real ones AND virtual ones
+     * (producer_reward, curation_reward, fill_vesting_withdraw, …) — via
+     * account_history_api.get_ops_in_block. `include_reversible` is on so the
+     * head block, which the live BlockViewer opens on, is not empty until it
+     * becomes irreversible.
+     * @param {number}  blockNum
+     * @param {boolean} [onlyVirtual=false] - true → virtual operations only
+     * @returns {Promise<object[]>} condenser applied-operation entries:
+     *   { trx_id, block, trx_in_block, op_in_trx, virtual_op, timestamp, op: [type, payload] }
+     */
     async getOpsInBlock(blockNum, onlyVirtual = false) {
-        return this.proxy.client.database.getOperations(blockNum, onlyVirtual);
+        const result = await this.proxy.client.call('account_history_api', 'get_ops_in_block', {
+            block_num: blockNum,
+            only_virtual: Boolean(onlyVirtual),
+            include_reversible: true
+        });
+        const ops = Array.isArray(result?.ops) ? result.ops : [];
+        return ops.map(legacyAppliedOperation);
     }
 
     /**
@@ -3476,22 +3545,32 @@ class GlobalsAPI {
  * that window — including the bootstrap placeholder `{0.001 PXS, 0.001 PIXA}`,
  * which reads as 1:1 — the feed is treated as unset and DESIGN_RATIO is used.
  *
- * Exactly ONE of the two tokens is anchored in USD; the other is derived
- * through that ratio. Which one depends on the exchange switch:
+ * PXA is the ONLY token anchored in USD; PXS is always derived from it:
  *
- *   EXCHANGE_ENABLED = true    (target — once PXA is listed)
- *     PXA/USD = exchange spot          (getPXAUSDPrice)
+ *     PXA/USD = market price of PXA        (getPXAUSDPrice)
  *     PXS/USD = PXA/USD × ratio
  *
- *   EXCHANGE_ENABLED = false   (today — no market for PXA yet)
- *     PXS/USD = PXS_USD_ANCHOR         (6.12)
- *     PXA/USD = PXS/USD ÷ ratio
+ * PXS cannot be known without PXA: the ratio witnesses publish is a median of
+ * Big Mac prices expressed in PXA, and turning it into a dollar figure needs
+ * exactly one external input — what a PXA trades for. PXS is never a USD
+ * anchor, so there is no "PXS fixed, PXA derived" mode.
  *
- * The exchange reader is fully in place (endpoint config, JSON path, quote
- * conversion, timeout, RAM cache, stale-on-error). Its data source is not:
- * with EXCHANGE.url unset it returns EXCHANGE_PXA_USD_PLACEHOLDER (0.12) and
- * never touches the network. Going live is two edits in this class — point
- * EXCHANGE at the ticker and flip EXCHANGE_ENABLED — with no call site touched.
+ * Where PXA/USD comes from depends on the market switch:
+ *
+ *   EXCHANGE_ENABLED = false   (today — PXA not yet listed)
+ *     PXA/USD = PXA_USD_ANCHOR (0.12). No network. PXS ≈ $5–7 through the feed
+ *     (design $6.22, the current US Big Mac, while the feed is unset).
+ *
+ *   EXCHANGE_ENABLED = true    (once PXA trades — CoinGecko or the exchange)
+ *     PXA/USD = ticker spot; falls back to the last live read, then to
+ *     PXA_USD_ANCHOR, when the ticker cannot be read.
+ *
+ * Either way PXS = PXA × ratio, so flipping the switch never changes the
+ * derivation direction — only where the PXA figure is read from. The exchange
+ * reader is fully in place (endpoint config, JSON path, quote conversion,
+ * timeout, RAM cache, stale-on-error); going live is two edits in this class —
+ * point EXCHANGE at the ticker and flip EXCHANGE_ENABLED — with no call site
+ * touched.
  *
  * PXP is PXA-denominated staked influence, so it follows PXA/USD.
  *
@@ -3500,11 +3579,14 @@ class GlobalsAPI {
  *   const { pxaUsd, pxsUsd, anchor, source, ratio, feedRatio, exchange, isReal }
  *       = await api.prices.get();
  *
- *   anchor     'pxs' | 'exchange'                        which side is fixed in USD
+ *   anchor     'pxa'                                     PXA is the USD-anchored side (always)
  *   source     'design' | 'feed'                         where the ratio came from
  *   ratio      effective PXA-per-PXS used                (feedRatio when plausible, else DESIGN_RATIO)
  *   feedRatio  raw chain ratio, even when rejected       (null when the feed could not be read)
- *   exchange   'off' | 'placeholder' | 'live' | 'stale'  state of the exchange leg
+ *   exchange   'off' | 'placeholder' | 'live' | 'stale'  state of the market leg:
+ *              'off' = switch is false, PXA_USD_ANCHOR in use; 'placeholder' =
+ *              switch on but no ticker URL / no read ever succeeded (anchor in
+ *              use); 'live' = ticker read; 'stale' = last live read reused
  *
  * Or sync (returns anchor/design values until first fetch, then last known):
  *   const { pxaUsd, pxsUsd } = api.prices.getSync();
@@ -3516,32 +3598,44 @@ class GlobalsAPI {
  * written to LacertaDB.
  */
 class PricesAPI {
-    // ── Anchors ─────────────────────────────────────────────────────────────
+    // ── Anchor ──────────────────────────────────────────────────────────────
 
     /**
-     * Master switch for the exchange anchor.
-     *   false → PXS is fixed at PXS_USD_ANCHOR, PXA = PXS ÷ ratio   (today)
-     *   true  → PXA is read from the exchange, PXS = PXA × ratio    (once listed)
+     * USD value of 1 PXA — the single number the whole token economy hangs
+     * off. 12 US cents is the launch price PXA is set to trade at; it is what
+     * getPXAUSDPrice() returns while the market switch is off, and what the
+     * reader falls back to when a configured ticker cannot be read and no
+     * earlier live read exists. PXS is never anchored: it is PXA × ratio.
+     */
+    static PXA_USD_ANCHOR = 0.12;
+
+    /** @deprecated alias of PXA_USD_ANCHOR, kept for external readers. */
+    static EXCHANGE_PXA_USD_PLACEHOLDER = this.PXA_USD_ANCHOR;
+
+    /**
+     * Market switch for the PXA leg. Both settings derive PXS = PXA × ratio;
+     * the switch only chooses where PXA/USD is read from:
+     *   false → PXA_USD_ANCHOR, no network                        (today)
+     *   true  → EXCHANGE ticker, stale-on-error, anchor as last resort
+     *           (once PXA is listed — set EXCHANGE.url at the same time)
      * Per-instance runtime override: api.prices.setExchangeEnabled(bool).
      */
     static EXCHANGE_ENABLED = false;
 
-    /** USD value of 1 PXS while the exchange anchor is disabled. */
-    static PXS_USD_ANCHOR = 6.12;
-
     /**
-     * USD value of 1 PXA the exchange reader returns while PXA is not listed
-     * (EXCHANGE.url unset), or when a configured ticker cannot be read and no
-     * earlier live read exists to fall back on.
+     * US Big Mac price from the latest edition of The Economist's index
+     * (Jul 2026). One PXS references one Big Mac, so this is the design PXS
+     * in USD while the witness feed is unset/bootstrap — the same series the
+     * wallet's PXS chart plots. Bump it with each new edition.
      */
-    static EXCHANGE_PXA_USD_PLACEHOLDER = 0.12;
+    static DESIGN_BIG_MAC_USD = 6.22;
 
     /**
      * Design PXS/PXA ratio (PXA per PXS), used ONLY when the witness feed is
-     * unset/bootstrap. Derived from the two anchors so both derivation
-     * directions agree on the placeholder numbers (6.12 ÷ 51 = 0.12).
+     * unset/bootstrap: a $6.22 Big Mac is 51.8 PXA at 12 cents, so the design
+     * PXS lands at 0.12 × 51.8 = $6.22 — inside the expected $5–7 band.
      */
-    static DESIGN_RATIO = this.PXS_USD_ANCHOR / this.EXCHANGE_PXA_USD_PLACEHOLDER; // = 51
+    static DESIGN_RATIO = this.DESIGN_BIG_MAC_USD / this.PXA_USD_ANCHOR;
 
     static MIN_PLAUSIBLE_RATIO = 10;    // PXA per PXS
     static MAX_PLAUSIBLE_RATIO = 1000;
@@ -3558,7 +3652,12 @@ class PricesAPI {
     /**
      * Where getPXAUSDPrice() reads the PXA spot price once PXA is listed.
      * `url: null` means "not listed": the reader short-circuits to
-     * EXCHANGE_PXA_USD_PLACEHOLDER without a network call.
+     * PXA_USD_ANCHOR without a network call.
+     *
+     * CoinGecko, once PXA has a coin id there, is a one-line fill:
+     *   url:   'https://api.coingecko.com/api/v3/simple/price?ids=<coin-id>&vs_currencies=usd'
+     *   path:  '<coin-id>.usd'
+     *   quote: 'USD'
      *
      *   url          ticker endpoint returning JSON, e.g.
      *                'https://api.example-exchange.com/v1/ticker?symbol=PXAUSDT'
@@ -3591,13 +3690,13 @@ class PricesAPI {
     constructor(proxy) {
         this.proxy = proxy;
         this.exchangeEnabled = PricesAPI.EXCHANGE_ENABLED;
-        // Seed with the anchor/design numbers. They are the same in both modes
-        // by construction (6.12 ÷ 51 = 0.12 and 0.12 × 51 = 6.12), so the first
-        // paint is right whichever side ends up anchored.
+        // Seed with the anchor and the design ratio: PXA at 12 cents, PXS at
+        // the design Big Mac price (6.22). The first paint is already in the
+        // right shape; the feed read only moves PXS.
         this._current = {
-            pxaUsd: PricesAPI.PXS_USD_ANCHOR / PricesAPI.DESIGN_RATIO,   // 0.12
-            pxsUsd: PricesAPI.PXS_USD_ANCHOR,                            // 6.12
-            anchor: this.exchangeEnabled ? 'exchange' : 'pxs',
+            pxaUsd: PricesAPI.PXA_USD_ANCHOR,                              // 0.12
+            pxsUsd: PricesAPI.PXA_USD_ANCHOR * PricesAPI.DESIGN_RATIO,     // 6.22
+            anchor: 'pxa',        // PXA is the USD-anchored side — always
             source: 'design',     // 'design' | 'feed' — where the ratio came from
             ratio: PricesAPI.DESIGN_RATIO,
             feedRatio: null,      // raw PXA-per-PXS from feed, even when rejected
@@ -3606,9 +3705,9 @@ class PricesAPI {
             lastUpdated: 0,
         };
         this._inFlight = null;  // shared promise for concurrent get() calls
-        // Last exchange read: { price, ts, state }. RAM only.
+        // Last market read of PXA/USD: { price, ts, state }. RAM only.
         this._exchange = {
-            price: PricesAPI.EXCHANGE_PXA_USD_PLACEHOLDER,
+            price: PricesAPI.PXA_USD_ANCHOR,
             ts: 0,
             state: 'placeholder',
         };
@@ -3647,9 +3746,10 @@ class PricesAPI {
 
     /**
      * Runtime override of EXCHANGE_ENABLED for this instance. Flipping it
-     * forces a refresh, so 'prices_updated' fires with the other derivation
-     * direction. Useful from the console to exercise the exchange wiring
-     * before changing the static default:
+     * forces a refresh, so 'prices_updated' fires with PXA read from the other
+     * source (anchor ↔ ticker); PXS follows as PXA × ratio in both cases.
+     * Useful from the console to exercise the exchange wiring before changing
+     * the static default:
      *     await api.prices.setExchangeEnabled(true)
      *
      * @param {boolean} on
@@ -3666,24 +3766,23 @@ class PricesAPI {
     }
 
     /**
-     * Spot price of 1 PXA in USD, as read from the exchange PXA trades on —
-     * the single market-defined anchor the token economy hangs off once
-     * EXCHANGE_ENABLED is true.
+     * Price of 1 PXA in USD — the single anchor the token economy hangs off.
      *
      * There is NO fiat on chain. Witnesses publish only the PXS/PXA ratio via
      * feed_publish. To peg that ratio to real purchasing power, each witness
      * prices a Big Mac in its local currency X, converts PXA→X using the
-     * exchange price of PXA, takes the cross-witness median, and trails it over
+     * market price of PXA, takes the cross-witness median, and trails it over
      * an 84h window. The on-chain result is a pure base/quote ratio — never a
      * dollar — but that computation needs exactly ONE external input: the
-     * exchange price of PXA. This method is that input.
+     * market price of PXA. This method is that input, and PXS/USD is derived
+     * from it in _refresh() as PXA/USD × ratio.
      *
      * Resolution order:
      *   1. fresh RAM cache (EXCHANGE.freshnessMs, unless forceRefresh) → 'live'
-     *   2. EXCHANGE.url unset (PXA not listed)                        → 'placeholder'
+     *   2. market switch off, or EXCHANGE.url unset (PXA not listed)  → 'placeholder' (= PXA_USD_ANCHOR)
      *   3. network read via _readExchangeTicker()                     → 'live'
      *   4. read failed, an earlier live read exists                   → 'stale'
-     *   5. read failed, nothing earlier                               → 'placeholder'
+     *   5. read failed, nothing earlier                               → 'placeholder' (= PXA_USD_ANCHOR)
      * Never throws. The state is surfaced as `exchange` in the next
      * _refresh() snapshot; the raw read lives in this._exchange.
      *
@@ -3699,10 +3798,11 @@ class PricesAPI {
             return last.price;
         }
 
-        if (!cfg.url) {
-            // Mechanism in place, market not yet: fixed placeholder, no network.
+        if (!this.exchangeEnabled || !cfg.url) {
+            // Market leg off, or mechanism in place but PXA not listed yet:
+            // the 12-cent anchor, no network.
             this._exchange = {
-                price: PricesAPI.EXCHANGE_PXA_USD_PLACEHOLDER,
+                price: PricesAPI.PXA_USD_ANCHOR,
                 ts: Date.now(),
                 state: 'placeholder',
             };
@@ -3720,7 +3820,7 @@ class PricesAPI {
                 return last.price;
             }
             this._exchange = {
-                price: PricesAPI.EXCHANGE_PXA_USD_PLACEHOLDER,
+                price: PricesAPI.PXA_USD_ANCHOR,
                 ts: Date.now(),
                 state: 'placeholder',
             };
@@ -3807,24 +3907,18 @@ class PricesAPI {
             }
         }
 
-        // 2. USD anchor — exactly one side is fixed, the other derived.
-        let pxaUsd, pxsUsd, anchor, exchange;
-        if (this.exchangeEnabled) {
-            // PXA from the exchange; PXS follows:  PXS_USD = PXA_USD × ratio.
-            // get() already rate-limits _refresh() to FRESHNESS_MS, so read the
-            // ticker fresh here — the exchange-level cache is for direct callers.
-            try { pxaUsd = await this.getPXAUSDPrice({ forceRefresh: true }); }
-            catch (e) { pxaUsd = PricesAPI.EXCHANGE_PXA_USD_PLACEHOLDER; }
-            pxsUsd = pxaUsd * ratio;
-            anchor = 'exchange';
-            exchange = this._exchange.state;
-        } else {
-            // No market for PXA yet: PXS fixed; PXA follows:  PXA_USD = PXS_USD ÷ ratio
-            pxsUsd = PricesAPI.PXS_USD_ANCHOR;
-            pxaUsd = pxsUsd / ratio;
-            anchor = 'pxs';
-            exchange = 'off';
-        }
+        // 2. USD anchor — PXA, always; PXS follows:  PXS_USD = PXA_USD × ratio.
+        //    With the market switch off getPXAUSDPrice() is the 12-cent anchor
+        //    and never touches the network; with it on, get() already
+        //    rate-limits _refresh() to FRESHNESS_MS, so the ticker is read
+        //    fresh here — the exchange-level cache is for direct callers.
+        let pxaUsd;
+        try { pxaUsd = await this.getPXAUSDPrice({ forceRefresh: true }); }
+        catch (e) { pxaUsd = PricesAPI.PXA_USD_ANCHOR; }
+        if (!Number.isFinite(pxaUsd) || pxaUsd <= 0) pxaUsd = PricesAPI.PXA_USD_ANCHOR;
+        const pxsUsd = pxaUsd * ratio;
+        const anchor = 'pxa';
+        const exchange = this.exchangeEnabled ? this._exchange.state : 'off';
 
         const next = {
             pxaUsd,

@@ -85,15 +85,15 @@ export const transform = async (file, step_n, fidelity, callback = () => {}, cal
 
     return new Promise(async function (resolve, reject) {
         callback("AI CONVERT");
-        callback2("COMPUTE", Date.now(), Date.now() + 25 * 1000);
+        callback2("COMPUTE", Date.now(), Date.now() + 60 * 1000);
         console.log({
             fidelity,
             step_n
         })
         var input_image = (file.size > 1000000) ? await resizeImageTo2MP(file) : file;
         var num_inference_steps = step_n;
-        var img2img_strength = (0.7 - Math.min(0.4, Math.max(0, fidelity)));
-        var guidance_scale = Math.max(1, (step_n|0)/10);
+        var img2img_strength = (0.75 - Math.min(0.4, Math.max(0, fidelity)));
+        var guidance_scale = Math.max(1, 0.2+(step_n|0)/10);
 
         var dynamic_config = {
             ...PRESETS_TRANSFORM,
