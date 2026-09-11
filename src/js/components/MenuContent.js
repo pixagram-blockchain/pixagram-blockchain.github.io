@@ -39,7 +39,7 @@ import AccountBalanceWallet from "@material-ui/icons/AccountBalanceWallet"; // e
 import ExitToApp from "@material-ui/icons/ExitToApp";
 import Tooltip from "@material-ui/core/Tooltip";
 import * as actions from "../actions/utils";
-import { HISTORY, PROPOSALS_PORTAL, COMMUNITY_PORTALS } from "../utils/constants";
+import { HISTORY, PROPOSALS_PORTAL, COMMUNITY_PORTALS, buildFeedFocusHash } from "../utils/constants";
 import NewspaperVariant from "../icons/NewspaperVariant";
 import Chip from "@material-ui/core/Chip";
 import Typography from "@material-ui/core/Typography";
@@ -603,10 +603,19 @@ const ProposalsTile = React.memo(({ classes, portal, onGoToCommunity }) => {
 ProposalsTile.displayName = "ProposalsTile";
 
 // ----- Friend tile: a recent feed author as a rounded square with an
-// unseen-posts badge ("4+"). Clicking it navigates to their profile.
-const FriendTile = React.memo(({ classes, friend, onGoToProfile }) => {
+// unseen-posts badge ("4+"). Clicking it opens the personal feed — the same
+// page as the feed tile leading the row, NOT the author's profile — scrolled
+// to this friend's NEWEST unseen post (`friend.permlink`, kept by
+// fetchFriends): the badge counts posts sitting unseen in /feed, so that is
+// where the click lands, with the older unseen ones reading on below it.
+// The author name only survives in the tooltip. Bound with a stable data
+// prop, like TagChip, so the .map() in MainView returns stable children.
+const FriendTile = React.memo(({ classes, friend, onGoToFeedPost }) => {
     useLanguage();
-    const handleClick = useCallback(() => onGoToProfile(friend.name), [friend.name, onGoToProfile]);
+    const handleClick = useCallback(
+        () => onGoToFeedPost(friend.name, friend.permlink),
+        [friend.name, friend.permlink, onGoToFeedPost]
+    );
     return (
         <Tooltip title={"@" + friend.name}>
             <Badge
@@ -622,12 +631,14 @@ const FriendTile = React.memo(({ classes, friend, onGoToProfile }) => {
             </Badge>
         </Tooltip>
     );
-}, (prev, next) => prev.friend === next.friend && prev.onGoToProfile === next.onGoToProfile);
+}, (prev, next) => prev.friend === next.friend && prev.onGoToFeedPost === next.onGoToFeedPost);
 FriendTile.displayName = "FriendTile";
 
 // ----- Feed tile: the relocated feed button. Always the FIRST element of the
 // "Friends" row, followed by up to FRIENDS_MAX recent-author tiles. Clicking
-// it opens /feed (same handler the header button used).
+// it opens /feed — the personal feed, i.e. the `feedpersonal` page of
+// PAGE_ROUTES — at the top. Every button of the Friends row is an entry to
+// that one page; the friend tiles just add where in it to land.
 const FeedTile = React.memo(({ classes, onGoToFeed }) => {
     useLanguage();
     return (
@@ -652,11 +663,14 @@ FeedTile.displayName = "FeedTile";
 // hosts the relocated feed button, so it is gated on `feedEnabled` (logged
 // in), NOT on the friend count — the feed must stay reachable even when no
 // recent friend activity exists (friends is always empty while logged out).
+// Every button of that row leads to the personal feed (/feed): the feed
+// tile to its top (`onGoToFeed`), each badged friend tile to that friend's
+// newest unseen post in it (`onGoToFeedPost`).
 const MainView = React.memo(({
                                  classes, proposalsPortal, governancePortals, friends, feedEnabled,
                                  trendingTags, trendingPortals,
                                  recommendedTags, recommendedPortals,
-                                 onGoToCommunity, onGoToProfile, onGoToFeed, onTagClick
+                                 onGoToCommunity, onGoToFeed, onGoToFeedPost, onTagClick
                              }) => {
         useLanguage();
         return (
@@ -668,7 +682,7 @@ const MainView = React.memo(({
                             <div className={classes.discoverGrid}>
                                 <FeedTile classes={classes} onGoToFeed={onGoToFeed} />
                                 {friends.map(f => (
-                                    <FriendTile key={"friend-" + f.name} classes={classes} friend={f} onGoToProfile={onGoToProfile} />
+                                    <FriendTile key={"friend-" + f.name} classes={classes} friend={f} onGoToFeedPost={onGoToFeedPost} />
                                 ))}
                             </div>
                         </div>
@@ -734,8 +748,8 @@ const MainView = React.memo(({
         );
     }, (prev, next) =>
         prev.onGoToCommunity === next.onGoToCommunity &&
-        prev.onGoToProfile === next.onGoToProfile &&
         prev.onGoToFeed === next.onGoToFeed &&
+        prev.onGoToFeedPost === next.onGoToFeedPost &&
         prev.onTagClick === next.onTagClick &&
         prev.feedEnabled === next.feedEnabled &&
         prev.proposalsPortal === next.proposalsPortal &&
@@ -1021,7 +1035,9 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
     // stops at the first post published before last_feed_check (or at the
     // FEED_MAX_PAGES cap = 3 × 20 posts, whichever comes first). Everything
     // collected before that boundary is "unseen"; the FRIENDS_MAX most
-    // recently active authors are kept with their unseen-post counts.
+    // recently active authors are kept with their unseen-post counts and the
+    // permlink of their newest unseen post — the card the tile scrolls the
+    // feed to (see handleFeedFocus).
     const fetchFriends = useCallback(async (username) => {
         if (!pixaAPI || !username || !pixaAPI.content || !pixaAPI.content.getDiscussionsByFeed) return;
         try {
@@ -1046,7 +1062,7 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
                     if (!post || !post.author) continue;
                     const createdMs = toMs(post.created);
                     if (lastCheck && createdMs && createdMs <= lastCheck) { reachedSeen = true; break; }
-                    unseen.push({ author: post.author, created: createdMs });
+                    unseen.push({ author: post.author, permlink: post.permlink || "", created: createdMs });
                 }
                 if (reachedSeen || fresh.length < FEED_PAGE_SIZE) break; // seen boundary or feed exhausted
                 cursor = page[page.length - 1];
@@ -1056,15 +1072,16 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
             if (!isMounted.current) return;
             if (unseen.length === 0) { setFriends([]); return; }
 
-            // Aggregate per author: unseen count + most recent activity.
+            // Aggregate per author: unseen count + most recent activity, and
+            // which post that activity is.
             const byAuthor = new Map();
             for (const p of unseen) {
                 const entry = byAuthor.get(p.author);
                 if (entry) {
                     entry.unseen += 1;
-                    if (p.created > entry.latest) entry.latest = p.created;
+                    if (p.created > entry.latest) { entry.latest = p.created; entry.permlink = p.permlink; }
                 } else {
-                    byAuthor.set(p.author, { name: p.author, unseen: 1, latest: p.created });
+                    byAuthor.set(p.author, { name: p.author, unseen: 1, latest: p.created, permlink: p.permlink });
                 }
             }
             const top = Array.from(byAuthor.values())
@@ -1083,7 +1100,7 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
             }
 
             if (isMounted.current) {
-                setFriends(top.map(f => ({ name: f.name, unseen: f.unseen, image: imageMap[f.name] || "" })));
+                setFriends(top.map(f => ({ name: f.name, unseen: f.unseen, permlink: f.permlink, image: imageMap[f.name] || "" })));
             }
         } catch (e) {
             console.log("[MenuContent] Failed to fetch friends:", e.message);
@@ -1293,7 +1310,23 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
     }, []);
     const handleNotificationClose = useCallback(() => setNotifOpen(false), []);
     const handleUnreadCountChange = useCallback((count) => setNotifCount(count), []);
+    // The Friends row's navigation. Both push /feed, which PAGE_ROUTES
+    // resolves to the `feedpersonal` page (the personal feed, never the
+    // public /created etc. feeds); that page writes `last_feed_check` on
+    // view, which is what clears the friend badges on the next fetch.
+    //   handleFeedOpen  — the feed tile: the top of the feed. Ignores its
+    //                     arguments on purpose (handed straight to onClick).
+    //   handleFeedFocus — a friend tile: "/feed#focus=<author/permlink>",
+    //                     the friend's newest unseen post; FeedPersonal pages
+    //                     until that post is loaded and scrolls its card into
+    //                     view (buildFeedFocusHash documents why it is a hash
+    //                     and how FeedPersonal picks it up whether or not it
+    //                     is already the mounted page). A friend with no
+    //                     permlink falls back to the plain feed.
     const handleFeedOpen = useCallback(() => HISTORY.push("/feed"), []);
+    const handleFeedFocus = useCallback((author, permlink) => {
+        HISTORY.push("/feed" + (permlink ? buildFeedFocusHash(author, permlink) : ""));
+    }, []);
     const handleLinkedInClick = useCallback(() => window.open("https://www.linkedin.com/company/pixagram-blockchain/?viewAsMember=true", "_blank", "noopener,noreferrer"), []);
     const handleCloseMenuAds = useCallback(() => {
         legacyApi.set_settings({ closed_menu_ads: true }, () => {
@@ -1302,7 +1335,6 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
         });
     }, []);
     const handleGoToCommunity = useCallback((communityName) => { HISTORY.push("/" + communityName); }, []);
-    const handleGoToProfile = useCallback((name) => { HISTORY.push("/@" + name); }, []);
 
     // ---- Derived ----
     const theme = useTheme();
@@ -1430,8 +1462,8 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
                         recommendedTags={recommendedTags}
                         recommendedPortals={recommendedPortals}
                         onGoToCommunity={handleGoToCommunity}
-                        onGoToProfile={handleGoToProfile}
                         onGoToFeed={handleFeedOpen}
+                        onGoToFeedPost={handleFeedFocus}
                         onTagClick={handleTagNavigation}
                     />
                 </div>

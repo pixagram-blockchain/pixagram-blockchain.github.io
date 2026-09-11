@@ -181,6 +181,10 @@ const useMasonryGrid = ({
         cellMeasurerCache.visible_ids = visibleIdsInit();
         cellPositioner.reset(cellPositionerConfig);
         masonry.clearCellPositions();
+        // The tracked positions belong to the layout just discarded; cells
+        // in range re-track on the next render, the rest read as unplaced.
+        topScrollByIndex.current = [];
+        heightByIndex.current = [];
         masonry.forceUpdate();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [columnWidth, cellMeasurerCache, cellPositioner, cellPositionerConfig]);
@@ -295,9 +299,25 @@ const useMasonryGrid = ({
     }, [scrollTo]);
 
     const trackElementPosition = useCallback((index, top, height, rowIndex, columnIndex) => {
-        topScrollByIndex.current[index] = top;
-        heightByIndex.current[index] = height;
+        // Masonry also runs the cellRenderer for cells it is still MEASURING,
+        // off-layout, with a width-only style — `+style.top` is NaN there.
+        // Never let that pass overwrite a position recorded while the cell
+        // was actually placed; getCellPosition relies on the distinction.
+        if (Number.isFinite(top)) {
+            topScrollByIndex.current[index] = top;
+            heightByIndex.current[index] = height;
+        }
         xyByIndex.current[index] = [rowIndex, columnIndex];
+    }, []);
+
+    // Where a cell currently sits in the scroll container — or null while
+    // the masonry hasn't placed it yet: it lays cells out lazily as the
+    // viewport approaches them, so a card deep in the list has no position
+    // until something scrolls towards it (see FeedPersonal's focus seek).
+    const getCellPosition = useCallback((index) => {
+        const top = topScrollByIndex.current[index];
+        if (!Number.isFinite(top)) return null;
+        return { top, height: heightByIndex.current[index] || 0 };
     }, []);
 
     // Force-clear all Masonry caches in one call. Used by the parent
@@ -312,6 +332,8 @@ const useMasonryGrid = ({
         cellMeasurerCache.visible_ids = visibleIdsInit();
         cellPositioner.reset(cellPositionerConfig);
         masonry.clearCellPositions();
+        topScrollByIndex.current = [];
+        heightByIndex.current = [];
         masonry.forceUpdate();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [cellMeasurerCache, cellPositioner, cellPositionerConfig]);
@@ -324,7 +346,7 @@ const useMasonryGrid = ({
         getScrollTop, restoreScrollTop,
         rootDimensions, overscanByPixels,
         selectedPostIndex, setSelectedPostIndex, trackElementPosition,
-        xyByIndex, resetMasonry,
+        getCellPosition, xyByIndex, resetMasonry,
     };
 };
 

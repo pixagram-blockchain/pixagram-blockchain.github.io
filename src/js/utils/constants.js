@@ -752,33 +752,68 @@ export function parsePostDrawerHash(rawHash) {
     return idx === undefined ? null : idx;
 }
 
-// ── Comment focus deep-links ───────────────────────────────────────────
-// "#replies&focus=<b64url>" opens a post's thread with one comment pinned
-// in its hover state and the tree path down to it brightened (PostDialog
-// parses it; BlogPostDialog can adopt the same param). The payload is
+// ── Post reference codec (shared by the focus deep-links below) ────────
 // base64url("author/permlink"): account names and permlinks are plain
 // [a-z0-9.-], so "/" is an unambiguous separator, and the alphabet swap
-// (+ → -, / → _, padding stripped) keeps the value URL-safe.
-export function buildCommentFocusHash(author, permlink, tabHash) {
-    const base = tabHash || POST_DRAWER_TAB_HASHES[1];
+// (+ → -, / → _, padding stripped) keeps the value URL-safe. encodePostRef
+// returns "" when it can't produce a value; decodePostRef returns null.
+function encodePostRef(author, permlink) {
     const a = String(author || "").replace(/^@/, "");
     const p = String(permlink || "");
-    if (!a || !p || typeof btoa !== "function") return base;
-    let b64 = "";
-    try { b64 = btoa(a + "/" + p).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
-    catch (e) { return base; }
-    return base + "&focus=" + b64;
+    if (!a || !p || typeof btoa !== "function") return "";
+    try { return btoa(a + "/" + p).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
+    catch (e) { return ""; }
 }
 
-export function parseCommentFocusHash(rawHash) {
-    const h = (rawHash || "").replace(/^#/, "");
-    const part = h.split("&").find((s) => s.indexOf("focus=") === 0);
-    if (!part || typeof atob !== "function") return null;
-    let raw = part.slice(6).replace(/-/g, "+").replace(/_/g, "/");
+function decodePostRef(b64) {
+    if (!b64 || typeof atob !== "function") return null;
+    let raw = String(b64).replace(/-/g, "+").replace(/_/g, "/");
     while (raw.length % 4) raw += "=";
     let decoded = "";
     try { decoded = atob(raw); } catch (e) { return null; }
     const i = decoded.indexOf("/");
     if (i <= 0 || i >= decoded.length - 1) return null;
     return { author: decoded.slice(0, i), permlink: decoded.slice(i + 1) };
+}
+
+// ── Comment focus deep-links ───────────────────────────────────────────
+// "#replies&focus=<b64url>" opens a post's thread with one comment pinned
+// in its hover state and the tree path down to it brightened (PostDialog
+// parses it; BlogPostDialog can adopt the same param). The payload is the
+// post-ref codec above.
+export function buildCommentFocusHash(author, permlink, tabHash) {
+    const base = tabHash || POST_DRAWER_TAB_HASHES[1];
+    const ref = encodePostRef(author, permlink);
+    return ref ? base + "&focus=" + ref : base;
+}
+
+export function parseCommentFocusHash(rawHash) {
+    const h = (rawHash || "").replace(/^#/, "");
+    const part = h.split("&").find((s) => s.indexOf("focus=") === 0);
+    return part ? decodePostRef(part.slice(6)) : null;
+}
+
+// ── Feed focus deep-links ──────────────────────────────────────────────
+// "/feed#focus=<b64url>" opens the personal feed scrolled to one post: the
+// drawer's Friends row (MenuContent) pushes it for a friend's newest unseen
+// post, and FeedPersonal consumes it — paging until the post is loaded, then
+// scrolling its card into view. Same post-ref payload as the comment focus,
+// but with no drawer-tab segment in front: the target is a card in the list,
+// not a tab of an open dialog, so `focus=` must be the FIRST segment.
+//
+// It rides the URL hash on purpose. PAGE_ROUTES matches the pathname alone,
+// so a query string would break the feedpersonal route while the hash is
+// invisible to the router; and Index.navigate() ignores a push that keeps
+// the pathname (FeedPersonal already mounted), so FeedPersonal watches
+// HISTORY itself for the hash — on PUSH only, never on POP, so backing out of
+// a post onto the same entry does not scroll the reader away again.
+export function buildFeedFocusHash(author, permlink) {
+    const ref = encodePostRef(author, permlink);
+    return ref ? "#focus=" + ref : "";
+}
+
+export function parseFeedFocusHash(rawHash) {
+    const h = (rawHash || "").replace(/^#/, "");
+    if (h.indexOf("focus=") !== 0) return null;
+    return decodePostRef(h.split("&")[0].slice(6));
 }
