@@ -185,8 +185,7 @@ const styles = theme => ({
         marginBottom: "16px",
         padding: "20px",
         borderRadius: "16px",
-        backgroundColor: "#101010",
-        border: "1px solid #ffffff12"
+        backgroundColor: "#101010"
     },
     witnessPanelHeader: {
         display: "flex",
@@ -259,6 +258,28 @@ function NumberFormatCustom(props) {
 }
 
 // ──────────────────────────────────────────────────────────────
+// account_creation_fee bounds, in 0.001-PIXA units — the stock Hive
+// HIVE_MIN_ACCOUNT_CREATION_FEE / HIVE_MAX_ACCOUNT_CREATION_FEE. The node
+// rejects anything outside this range ("account_creation_fee smaller than
+// minimum account creation fee"), so the form enforces it before signing.
+// ──────────────────────────────────────────────────────────────
+const FEE_SYMBOL = 'PIXA';           // raw chain symbol (never the display "PXA")
+const FEE_PRECISION = 3;
+const FEE_MIN_UNITS = 1;             // 0.001 PIXA
+const FEE_MAX_UNITS = 1000000000;    // 1,000,000.000 PIXA
+
+// "0.001" → 1; "" / "abc" / negative → NaN
+const feeInputToUnits = (s) => {
+    const n = Number(String(s === null || s === undefined ? '' : s).trim());
+    return Number.isFinite(n) && n >= 0 ? Math.round(n * Math.pow(10, FEE_PRECISION)) : NaN;
+};
+const isValidFeeUnits = (u) =>
+    Number.isInteger(u) && u >= FEE_MIN_UNITS && u <= FEE_MAX_UNITS;
+// 1 → "0.001 PIXA" — the asset string dpixa's Types.Asset serializer expects
+const feeUnitsToAsset = (u) =>
+    `${(u / Math.pow(10, FEE_PRECISION)).toFixed(FEE_PRECISION)} ${FEE_SYMBOL}`;
+
+// ──────────────────────────────────────────────────────────────
 // A witness is considered "active" when it has a real signing
 // key. Disabled witnesses publish the null public key, which
 // is a long run of 1s regardless of chain address prefix
@@ -313,6 +334,27 @@ const parseFeedAsset = (a) => {
         return { amount: Number(a.amount) / Math.pow(10, p), symbol: '' };
     }
     return { amount: NaN, symbol: '' };
+};
+
+// Read-only display values of the witness's current on-chain parameters
+// (`witness.props`). `account_creation_fee` may arrive as a legacy asset
+// string ("0.001 PIXA") or an NAI object — `parseFeedAsset` reads both. The
+// fork renamed `hbd_interest_rate` → `pxs_interest_rate`; the stock names are
+// kept as fallbacks like the price-feed fields above (first *defined* value
+// wins — 0 is a legitimate rate, so no `||` chain here).
+const asPlainNumberString = (v) =>
+    (v === null || v === undefined || v === '' || !Number.isFinite(Number(v))) ? '' : String(Number(v));
+
+const getWitnessChainProps = (w) => {
+    const p = (w && w.props) || {};
+    const fee = parseFeedAsset(p.account_creation_fee);
+    const rate = [p.pxs_interest_rate, p.hbd_interest_rate, p.sbd_interest_rate]
+        .find((v) => v !== undefined && v !== null);
+    return {
+        baseFee: Number.isFinite(fee.amount) ? fee.amount.toFixed(FEE_PRECISION) : '',
+        maxBlockSize: asPlainNumberString(p.maximum_block_size),
+        interestRate: asPlainNumberString(rate)
+    };
 };
 
 // Human string of the raw feed as published, e.g. "1.000 PXS / 20.000 PIXA".
@@ -394,9 +436,14 @@ class GDVMWitnesses extends React.PureComponent {
             _currentAccount: null,
             // ── Witness self-administration ──
             _selfWitness: null,    // full witness record for the current account, or null
-            _propsBaseFee: "0.000",         // account_creation_fee — locked to 0 PIXA for now
-            _propsMaxBlockSize: 131072,     // maximum_block_size — locked
-            _propsInterestRate: 0,          // pxs_interest_rate — uint16 basis points (locked to 0%)
+            // Chain parameters, all seeded from the witness's current on-chain
+            // `props` in _loadData. `account_creation_fee` and `url` are
+            // operator-editable and broadcast; maximum_block_size and
+            // pxs_interest_rate stay read-only in this release and are never
+            // sent (see _handleBroadcastWitnessProps).
+            _propsBaseFee: "",              // account_creation_fee as typed, e.g. "0.001"
+            _propsMaxBlockSize: "",         // maximum_block_size (bytes)
+            _propsInterestRate: "",         // pxs_interest_rate (basis points; 100 = 1%)
             _propsUrl: "",                  // url — editable witness URL
             _propsBroadcasting: false,
             _propsError: "",
@@ -516,8 +563,11 @@ class GDVMWitnesses extends React.PureComponent {
 
             // Seed the editable URL field from the witness's current
             // on-chain `url` so re-broadcasting "as is" doesn't accidentally
-            // blank out a previously-set value.
+            // blank out a previously-set value. The read-only parameters are
+            // seeded from the same record so the panel shows what is actually
+            // on chain.
             const seedUrl = (selfWitness && typeof selfWitness.url === 'string') ? selfWitness.url : "";
+            const chainProps = getWitnessChainProps(selfWitness);
 
             if (!this._mounted) return;
             this.setState({
@@ -527,6 +577,9 @@ class GDVMWitnesses extends React.PureComponent {
                 _myVotes: myVotes,
                 _currentAccount: currentAccount,
                 _selfWitness: selfWitness,
+                _propsBaseFee: chainProps.baseFee,
+                _propsMaxBlockSize: chainProps.maxBlockSize,
+                _propsInterestRate: chainProps.interestRate,
                 _propsUrl: seedUrl
             }, () => this.forceUpdate());
         } catch (e) {
@@ -603,12 +656,16 @@ class GDVMWitnesses extends React.PureComponent {
     // Witness-properties helpers
     // ──────────────────────────────────────────────────────────────
 
-    // Format a numeric string into the on-chain asset string with the
-    // correct symbol and 3-decimal precision: "0.000 PIXA".
-    _formatAsset = (amountStr, symbol) => {
-        const n = Number(amountStr);
-        const safe = isFinite(n) && n >= 0 ? n : 0;
-        return `${safe.toFixed(3)} ${symbol}`;
+    _handlePropsBaseFeeChange = (e) => {
+        const value = e.target.value;
+        // NumericFormat also reports prop-driven changes (the seed from
+        // chain); ignore those so they don't clear a fresh success/error.
+        if (value === this.state._propsBaseFee) return;
+        this.setState({
+            _propsBaseFee: value,
+            _propsError: "",
+            _propsSuccess: false
+        });
     };
 
     _handlePropsUrlChange = (e) => {
@@ -621,39 +678,27 @@ class GDVMWitnesses extends React.PureComponent {
 
     _handleBroadcastWitnessProps = async () => {
         const { api } = this.props;
-        const {
-            _currentAccount,
-            _selfWitness,
-            _propsBaseFee,
-            _propsMaxBlockSize,
-            _propsInterestRate,
-            _propsUrl
-        } = this.state;
+        const { _currentAccount, _selfWitness, _propsBaseFee, _propsUrl } = this.state;
 
-        if (!_currentAccount || !_selfWitness || !api?.broadcast?.witnessSetProperties) {
+        if (!_currentAccount || !_selfWitness || !api?.broadcast?.witnessUpdate) {
             this.setState({ _propsError: "Missing account, witness record, or broadcast API." });
             return;
         }
 
-        // Build the friendly WitnessProps object. The API layer
-        // (BroadcastAPI.witnessSetProperties) calls dpixa's
-        // utils.buildWitnessUpdateOp which serializes each value to its
-        // on-chain hex form using the matching Types serializer.
+        // Broadcast witness_update, signed by the account's ACTIVE authority
+        // (BroadcastAPI.witnessUpdate requests 'active'). witness_set_properties
+        // is authorized instead by the block-signing key — which this account's
+        // active key is not — so it can't be used from a UI that only has the
+        // active key. witness_update is the active-key equivalent.
         //
-        // Type contract per dpixa's chain/serializer.ts:
-        //   key                  → PublicKey (current block-signing key, REQUIRED)
-        //   account_creation_fee → Asset (string "N.NNN PIXA")
-        //   maximum_block_size   → uint32
-        //   pxs_interest_rate    → uint16 (basis points; 100 = 1%)
-        //   url                  → string (witness operator's URL)
+        // The block-signing key goes in block_signing_key (passed through
+        // unchanged — no rotation), NOT as an authorizing key.
         //
-        // NOTE: account_creation_fee, maximum_block_size, and pxs_interest_rate
-        // are intentionally locked for the first release. Only `url` is
-        // operator-editable here.
-        //
-        // `key` is sourced from the witness's current on-chain signing_key.
-        // It's required by the chain even when we aren't rotating it; we
-        // pass through the existing value unchanged.
+        // witness_update is NOT sparse: owner/url/block_signing_key/props/fee
+        // are all set every time. So the two read-only parameters
+        // (maximum_block_size, interest rate) must be re-sent unchanged — we
+        // carry the witness record's current `props` forward verbatim and only
+        // override account_creation_fee.
         const signingKey = _selfWitness.signing_key;
         if (!signingKey) {
             this.setState({
@@ -662,12 +707,35 @@ class GDVMWitnesses extends React.PureComponent {
             return;
         }
 
+        // Validate in integer 0.001-PIXA units so float noise can't push a
+        // typed "0.001" below the chain floor. This is the guard that stops
+        // the "account_creation_fee smaller than minimum" (min 0.001) reject.
+        const feeUnits = feeInputToUnits(_propsBaseFee);
+        if (!isValidFeeUnits(feeUnits)) {
+            this.setState({
+                _propsError: `Account creation fee must be between ${feeUnitsToAsset(FEE_MIN_UNITS)} and ${feeUnitsToAsset(FEE_MAX_UNITS)}.`
+            });
+            return;
+        }
+
+        // The chain rejects an empty url ("URL size must be greater than 0"),
+        // so fail fast here instead of round-tripping to the node.
+        const url = String(_propsUrl || "").trim();
+        if (!url) {
+            this.setState({ _propsError: "Witness URL cannot be empty." });
+            return;
+        }
+
+        // Preserve the record's current chain props (correct field names for
+        // this chain, including the interest-rate field) and change only the
+        // fee. account_creation_fee goes out as a display-symbol asset string;
+        // BroadcastAPI.witnessUpdate translates it to the chain symbol.
+        const currentProps = (_selfWitness.props && typeof _selfWitness.props === 'object' && !Array.isArray(_selfWitness.props))
+            ? _selfWitness.props
+            : {};
         const props = {
-            key: signingKey,
-            account_creation_fee: this._formatAsset(_propsBaseFee, 'PIXA'),
-            maximum_block_size: Number(_propsMaxBlockSize) >>> 0,
-            pxs_interest_rate: Number(_propsInterestRate) & 0xffff,
-            url: String(_propsUrl || "").trim()
+            ...currentProps,
+            account_creation_fee: feeUnitsToAsset(feeUnits)
         };
 
         this.setState({
@@ -677,14 +745,20 @@ class GDVMWitnesses extends React.PureComponent {
         });
 
         try {
-            await api.broadcast.witnessSetProperties(_currentAccount, props);
+            await api.broadcast.witnessUpdate({
+                owner: _currentAccount,
+                url,
+                blockSigningKey: signingKey,
+                props,
+                fee: feeUnitsToAsset(0)   // "0.000 PIXA" — registration fee, unused for an existing witness
+            });
             if (!this._mounted) return;
             this.setState({
                 _propsBroadcasting: false,
                 _propsSuccess: true
             }, () => this.forceUpdate());
         } catch (e) {
-            console.warn('[GDVMWitnesses] witnessSetProperties failed:', e?.message);
+            console.warn('[GDVMWitnesses] witnessUpdate failed:', e?.message);
             if (!this._mounted) return;
             this.setState({
                 _propsBroadcasting: false,
@@ -809,8 +883,9 @@ class GDVMWitnesses extends React.PureComponent {
     // ──────────────────────────────────────────────────────────────
     // Witness self-administration panel
     // Rendered only when the logged-in account is itself an active witness.
-    // The first three properties are locked for the initial release; only
-    // the witness `url` is operator-editable.
+    // `account_creation_fee` and `url` are operator-editable; maximum_block_size
+    // and the interest rate are shown read-only and re-sent unchanged. Broadcast
+    // as witness_update, signed by the account's active key.
     // ──────────────────────────────────────────────────────────────
     _renderWitnessAdminPanel = () => {
         const { classes } = this.props;
@@ -828,9 +903,11 @@ class GDVMWitnesses extends React.PureComponent {
 
         if (!_currentAccount || !_selfWitness) return null;
 
-        // The url is optional on-chain (empty string is valid), so the
-        // broadcast button only blocks while a broadcast is in flight.
+        // `account_creation_fee` and `url` are validated in the handler and
+        // the signing key is resolved by the API layer, so the broadcast
+        // button only blocks while a broadcast is in flight.
         const canBroadcast = !_propsBroadcasting;
+        const feeOutOfRange = _propsBaseFee !== "" && !isValidFeeUnits(feeInputToUnits(_propsBaseFee));
 
         return (
             <div className={classes.witnessPanel}>
@@ -850,12 +927,14 @@ class GDVMWitnesses extends React.PureComponent {
                     label={t("components.gdvmwitnesses.account_creation_fee")}
                     variant="outlined"
                     fullWidth
-                    disabled
                     value={_propsBaseFee}
+                    onChange={this._handlePropsBaseFeeChange}
+                    disabled={_propsBroadcasting}
+                    error={feeOutOfRange}
                     InputLabelProps={{ shrink: true }}
                     InputProps={{
                         inputComponent: NumberFormatCustom,
-                        inputProps: { currency: "PIXA" }
+                        inputProps: { currency: FEE_SYMBOL }
                     }}
                 />
                 <TextField
