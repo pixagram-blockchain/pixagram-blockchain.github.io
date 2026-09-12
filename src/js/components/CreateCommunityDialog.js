@@ -45,6 +45,33 @@ import { t, getLanguage } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
 
+/**
+ * The indexer's updateProps limits — read from api.communities.PROPS_RULES
+ * when `api` is present; this fallback mirrors stock hivemind
+ * (CommunityOp._read_props). Title cap is 20, not 32.
+ */
+const FALLBACK_PROPS_RULES = {
+    title: { min: 3, max: 20 }, about: { max: 120 }, description: { max: 1000 }, flag_text: { max: 1000 },
+};
+const propsRulesOf = (api) => (api && api.communities && api.communities.PROPS_RULES) || FALLBACK_PROPS_RULES;
+
+/**
+ * Shape + check an updateProps payload the way the indexer will. Falls back
+ * to trimming alone on an API build without normalizeProps.
+ */
+const normalizePortalProps = (api, raw) => {
+    if (api && api.communities && typeof api.communities.normalizeProps === "function") {
+        return api.communities.normalizeProps(raw);
+    }
+    const props = {};
+    for (const [k, v] of Object.entries(raw)) {
+        if (v === undefined) continue;
+        props[k] = typeof v === "string" ? v.trim() : v;
+    }
+    if (typeof props.lang === "string") props.lang = props.lang.toLowerCase();
+    return { props, problems: [], dropped: [] };
+};
+
 // Hoisted static styles — were inline literals re-created on every render.
 const ST_C_BBB__FS_22 = { color: "#bbb", fontSize: 22 };
 const ST_C_DDD = { color: "#ddd" };
@@ -585,8 +612,14 @@ class CreateCommunityDialog extends React.PureComponent {
     _goToNextStep = () => this._handleTabChange({}, this.state._tab_value + 1);
 
     _canAdvance = () => {
-        const { _tab_value, _title, _about } = this.state;
-        if (_tab_value === 0) return _title.trim().length >= 3 && _about.trim().length >= 10;
+        const { _tab_value, _title, _about, _lang, api } = this.state;
+        if (_tab_value === 0) {
+            if (_about.trim().length < 10) return false;
+            // Same rules the indexer applies to updateProps in Phase 4 —
+            // a title it would refuse must not get past step 1.
+            const { problems } = normalizePortalProps(api, { title: _title, about: _about, lang: _lang });
+            return problems.length === 0;
+        }
         return true;
     };
 
@@ -708,8 +741,21 @@ class CreateCommunityDialog extends React.PureComponent {
         // ── Phase 3 — Set creator as admin ──────────────────────────────────
         this.setState({ _creation_phase: "admin" });
 
+        // Every broadcast resolves once hived has the tx in a block and
+        // returns { id, block_num, … }; remember the highest block so the
+        // read-backs below can gate on hivemind's head where the node exposes
+        // it (they fall through to a plain content read-back where it does not).
+        let blockNum = null;
+        const broadcastStartedAt = Date.now();
+        const noteBlock = (res) => {
+            if (Number.isInteger(res?.block_num)) blockNum = Math.max(blockNum ?? 0, res.block_num);
+        };
+        const canAwait = api.communities
+            && typeof api.communities.awaitRoleVisible === "function"
+            && typeof api.communities.awaitPropsVisible === "function";
+
         try {
-            await api.broadcast.customJson({
+            noteBlock(await api.broadcast.customJson({
                 requiredPostingAuths: [_portal_username],
                 id: "community",
                 json: JSON.stringify(["setRole", {
@@ -717,66 +763,148 @@ class CreateCommunityDialog extends React.PureComponent {
                     account: _logged_in_user,
                     role: "admin",
                 }]),
-            }, portalAuths);
+            }, portalAuths));
         } catch (err) {
             console.error("[CreateCommunityDialog] setRole failed:", err);
             this.setState({ _creation_phase: "error", _creation_error: err.message || "Failed to set admin role" });
             return;
         }
 
+        // hived only records the setRole; pixamind registers the community
+        // and applies the role when IT processes those blocks, a second or
+        // two later — and an updateProps it receives for a community it has
+        // not registered yet is dropped silently. This used to be a fixed
+        // 3 s sleep, which is both too long on a fast node and not enough on
+        // a slow one. Wait for the actual condition instead: the roster
+        // shows the creator as admin (which also proves the community row
+        // exists). On budget exhaustion carry on anyway — the ops are on
+        // chain, and the props read-back below will tell us if they landed.
+        if (canAwait) {
+            const roleRb = await api.communities.awaitRoleVisible(
+                _portal_username, _logged_in_user, "admin", { blockNum, tries: 20 });
+            if (!roleRb.visible) {
+                console.warn("[CreateCommunityDialog] admin role not indexed after", roleRb.tries, "reads; block", blockNum);
+            }
+        } else {
+            await new Promise((r) => setTimeout(r, 3000));
+        }
+
         // ── Phase 4 — Configure portal properties ───────────────────────────
         this.setState({ _creation_phase: "configuring" });
 
-        // Give pixamind a moment to index the community from the setRole op
-        // in Phase 3 before we send updateProps — otherwise it may silently
-        // drop the update for a community it hasn't registered yet.
-        await new Promise((r) => setTimeout(r, 3000));
+        // The indexer validates this payload with asserts and discards the
+        // WHOLE op on the first failure — untrimmed strings ('invalid
+        // padding'), a title over 20 chars, a lang outside ISO 639-1, or any
+        // key it does not know ('extraneous keys'). Only the normalized
+        // payload is broadcast. Keys the API's rules do not list are removed
+        // rather than sent: one unknown key would cost the title and about
+        // too. If pixamind accepts default_beneficiary, add it to
+        // COMMUNITY_PROPS_RULES.validKeys in pixaproxyapi.js and it goes
+        // through again.
+        const wanted = {
+            title: _title,
+            about: _about,
+            description: "",
+            lang: _lang,
+            is_nsfw: false,
+            flag_text: "",
+        };
+        if (_default_beneficiary && _beneficiary_percentage > 0) {
+            wanted.default_beneficiary = {
+                account: _default_beneficiary,
+                weight: _beneficiary_percentage * 100,
+            };
+        }
+        const { props: portalProps, problems, dropped } = normalizePortalProps(api, wanted);
+        if (dropped.length) {
+            console.warn("[CreateCommunityDialog] updateProps keys not accepted by the indexer rules, not sent:", dropped);
+        }
+        if (problems.length) {
+            // The account exists and the admin role is set; only the
+            // settings are refused. Say so — the portal can be configured
+            // from its settings dialog once the field is fixed.
+            this.setState({
+                _creation_phase: "error",
+                _creation_error: "Portal " + _portal_username + " was created, but its settings cannot be applied: "
+                    + problems.map((p) => p.reason).join("; ") + ". Fix them from the portal's settings.",
+            });
+            return;
+        }
+
+        // Subscribe the creator FIRST (keyManager handles the creator's key).
+        // Hivemind applies blocks in order, so once the updateProps below is
+        // read back as visible, this earlier subscribe is indexed as well —
+        // the portal page then opens with the right title AND the right
+        // subscribe-button state, without a second read-back. It is a
+        // courtesy op: if it fails (declined key prompt, RC) the portal must
+        // still get its configuration, so it is logged rather than fatal.
+        let subscribed = false;
+        try {
+            noteBlock(await api.broadcast.customJson({
+                requiredPostingAuths: [_logged_in_user],
+                id: "community",
+                json: JSON.stringify(["subscribe", {
+                    community: _portal_username,
+                }]),
+            }));
+            subscribed = true;
+        } catch (err) {
+            console.warn("[CreateCommunityDialog] creator subscribe failed (non-fatal):", err);
+        }
 
         try {
-            // Match the field set that EditCommunityDialog uses — pixamind
-            // validates strictly and unknown keys (e.g. settings) can cause
-            // silent rejection of the entire op.
-            const portalProps = {
-                title: _title,
-                about: _about,
-                description: "",
-                lang: _lang,
-                is_nsfw: false,
-                flag_text: "",
-            };
-
-            if (_default_beneficiary && _beneficiary_percentage > 0) {
-                portalProps.default_beneficiary = {
-                    account: _default_beneficiary,
-                    weight: _beneficiary_percentage * 100,
-                };
-            }
-
             // Sign updateProps with portal's own posting key — portal is the
             // owner of its own community and always has posting permission.
             // Must use requiredPostingAuths (not requiredAuths) because
             // pixamind only processes community ops under posting authority.
-            await api.broadcast.customJson({
+            noteBlock(await api.broadcast.customJson({
                 requiredPostingAuths: [_portal_username],
                 id: "community",
                 json: JSON.stringify(["updateProps", {
                     community: _portal_username,
                     props: portalProps,
                 }]),
-            }, { posting: portalAuths.posting });
-
-            // Subscribe the creator (keyManager handles the creator's key)
-            await api.broadcast.customJson({
-                requiredPostingAuths: [_logged_in_user],
-                id: "community",
-                json: JSON.stringify(["subscribe", {
-                    community: _portal_username,
-                }]),
-            });
+            }, { posting: portalAuths.posting }));
         } catch (err) {
             console.error("[CreateCommunityDialog] configure failed:", err);
             this.setState({ _creation_phase: "error", _creation_error: err.message || "Failed to configure portal" });
             return;
+        }
+
+        // ── Phase 5 — Wait for the index before showing the portal ──────────
+        // HISTORY.push below lands on the portal page, whose first fetch is
+        // bridge.get_community (hivemind). Without this wait it races the
+        // indexer and renders the default title/about, or a stale subscribe
+        // state, until the next reload — the same symptom as an edit that
+        // "doesn't show". Budget exhaustion is not a failure: the props are
+        // on chain and the page will catch up; it is logged so a pixamind
+        // rejection of the props object (e.g. an unsupported key) is visible.
+        this.setState({ _creation_phase: "indexing" });
+        let visible = true;
+        if (canAwait) {
+            // observer = the creator, i.e. the params the portal page will
+            // query with once we navigate there (jussi caches per params).
+            const propsRb = await api.communities.awaitPropsVisible(
+                _portal_username, portalProps, { blockNum, observer: _logged_in_user });
+            visible = propsRb.visible;
+            if (!visible) {
+                console.warn("[CreateCommunityDialog] portal props not indexed after", propsRb.tries, "reads; block", blockNum);
+                // Slow indexer or refused payload? The actor's `error`
+                // notification carries the indexer's own reason.
+                let rejection = null;
+                if (typeof api.communities.getLastPropsRejection === "function") {
+                    rejection = await api.communities.getLastPropsRejection(_portal_username, { sinceTs: broadcastStartedAt - 60000 });
+                }
+                if (rejection) {
+                    console.error("[CreateCommunityDialog] indexer rejected updateProps:", rejection);
+                    this.setState({
+                        _creation_phase: "error",
+                        _creation_error: "Portal " + _portal_username + " was created, but the index rejected its settings: "
+                            + rejection.reason + ". Fix them from the portal's settings.",
+                    });
+                    return;
+                }
+            }
         }
 
         // ── Done ─────────────────────────────────────────────────────────────
@@ -797,6 +925,12 @@ class CreateCommunityDialog extends React.PureComponent {
                 about: _about,
                 type: _portal_type,
                 creator: _logged_in_user,
+                // Additive: the parent can render optimistically and knows
+                // whether a bridge read may still lag (visible=false).
+                props: portalProps,
+                subscribed,
+                block_num: blockNum,
+                visible,
             });
         }
 
@@ -833,9 +967,10 @@ class CreateCommunityDialog extends React.PureComponent {
 
         phases.push(
             { key: "admin",       label: t("components.create_community_dialog.setting_as_admin", {
-                _logged_in_user: _logged_in_user
-            }) },
+                    _logged_in_user: _logged_in_user
+                }) },
             { key: "configuring", label: "Setting portal's configuration" },
+            { key: "indexing",    label: "Waiting for the portal index" },
         );
 
         const phaseOrder = phases.map(p => p.key).concat("done");
@@ -923,6 +1058,12 @@ class CreateCommunityDialog extends React.PureComponent {
 
         const insufficientPxp = _pxp_loaded && _delegation_pxp > _available_pxp;
 
+        // What the indexer would refuse in the current title/about/lang —
+        // shown inline, since _canAdvance silently disables "Next" on it.
+        const stepProblems = _title.trim()
+            ? normalizePortalProps(this.state.api, { title: _title, about: _about, lang: _lang }).problems
+            : [];
+
         return [
             // ── Step 1: Portal Details ───────────────────────────────────────
             <DialogContent key="view-1">
@@ -946,6 +1087,7 @@ class CreateCommunityDialog extends React.PureComponent {
                         onChange={this._handleTitleChange}
                         placeholder={t("components.create_community_dialog.my_awesome_portal")}
                         labelWidth={85}
+                        inputProps={{ maxLength: propsRulesOf(this.state.api).title.max }}
                     />
                 </FormControl>
 
@@ -959,6 +1101,7 @@ class CreateCommunityDialog extends React.PureComponent {
                         rows={3}
                         placeholder={t("components.create_community_dialog.describe_what_your_portal_is_about")}
                         labelWidth={45}
+                        inputProps={{ maxLength: propsRulesOf(this.state.api).about.max }}
                     />
                 </FormControl>
 
@@ -999,6 +1142,11 @@ class CreateCommunityDialog extends React.PureComponent {
                         ))}
                     </Select>
                 </FormControl>
+                {stepProblems.length > 0 && (
+                    <Typography style={ST_FS_12__C_666__TA_LEFT} color="error">
+                        {stepProblems.map((p) => p.reason).join(" · ")}
+                    </Typography>
+                )}
             </DialogContent>,
 
             // ── Step 2: Credentials ──────────────────────────────────────────

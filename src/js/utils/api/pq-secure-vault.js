@@ -19,10 +19,37 @@
  * argon2_* keys). Omit it to use this instance's tuned profile; pass the
  * record's own params when re-deriving an existing record's key.
  *
+ * v3.1 (key-material hygiene, no format change — VAULT_VERSION stays 4):
+ *   - Every secret this module hands out or keeps (Argon2 master, HKDF
+ *     sub-keys, decrypted plaintext) is moved into an off-heap buffer
+ *     (CryptoUtils.secureCopy) and the library-allocated original is zeroed.
+ *     noble/hash-wasm allocate ≤ 64-byte outputs on V8's moving heap, where
+ *     `.fill(0)` is not final — see CryptoUtils.secureAlloc.
+ *   - PIN bytes and the raw Argon2 output are zeroed after derivation; the
+ *     session-cache helpers zero their plaintext like encrypt()/decrypt() do.
+ *   - Commitment tags are hashed incrementally instead of via a
+ *     concatenation of key ‖ nonce, which copied the key into an array
+ *     nobody zeroed.
+ *   - verifyPinAgainstSealed(): proves a PIN from the first record's
+ *     commitment tag alone, no plaintext produced. This makes the "verify
+ *     hash" question moot: BLAKE3(key ‖ nonce) already IS an offline oracle
+ *     of exactly the strength a stored verify hash would be, so storing one
+ *     (generateVerifyHash) adds nothing and omitting it protects nothing.
+ *   - unsealKeysBytes() takes an optional expectedAccount and recomputes
+ *     the AAD `${account}:${type}` instead of trusting the record's own
+ *     aad_account, so records cannot be swapped between key types.
+ *   - sealKeysBytes() throws on a non-Uint8Array value instead of silently
+ *     dropping that key from the sealed blob.
+ *
+ * Naming: nothing here is post-quantum beyond the symmetric margin
+ * (256-bit keys, Argon2id, ChaCha20-Poly1305, HKDF-SHA-512, BLAKE3 — no
+ * KEM). `PQSecureVault` / `initPQVault` stay as compatibility aliases only;
+ * do not describe the vault as post-quantum in external documents.
+ *
  * Dependencies:
  *   npm install hash-wasm @noble/ciphers @noble/hashes
  *
- * @version 3.0.0
+ * @version 3.1.0
  * @module SecureVault
  */
 
@@ -31,7 +58,8 @@ import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha512 } from '@noble/hashes/sha2.js';
 import { blake3 } from '@noble/hashes/blake3.js';
-import { randomBytes, bytesToHex, hexToBytes, utf8ToBytes, concatBytes } from '@noble/hashes/utils.js';
+import { randomBytes, bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
+import { CryptoUtils } from './crypto-utils.js';
 
 // ============================================
 // Constants
@@ -89,17 +117,31 @@ const COMMITMENT_SIZE = 32;
  * @private
  */
 async function argon2idDerive(pin, saltBytes, memoryKib, iterations, parallelism = DEFAULT_PARALLELISM) {
-    const pinBytes = typeof pin === 'string' ? utf8ToBytes(pin) : pin;
-    const hash = await argon2id({
-        password: pinBytes,
-        salt: saltBytes,
-        parallelism: parallelism,
-        iterations: iterations,
-        memorySize: memoryKib,
-        hashLength: 32,
-        outputType: 'binary',
-    });
-    return new Uint8Array(hash);
+    // A string PIN is immutable and unzeroable; the byte encoding we make
+    // from it is ours and gets zeroed. Bytes passed in belong to the caller.
+    const ownsPin = typeof pin === 'string';
+    const pinBytes = ownsPin ? utf8ToBytes(pin) : pin;
+    let hash = null;
+    try {
+        hash = await argon2id({
+            password: pinBytes,
+            salt: saltBytes,
+            parallelism: parallelism,
+            iterations: iterations,
+            memorySize: memoryKib,
+            hashLength: 32,
+            outputType: 'binary',
+        });
+        if (!(hash instanceof Uint8Array)) hash = new Uint8Array(hash);
+        // hash-wasm's output is a JS-allocated 32-byte array (on-heap in V8).
+        // Move it off-heap so the caller's fill(0) is final; the original is
+        // zeroed in `finally`. (hash-wasm's own WASM linear memory keeps the
+        // Argon2 blocks until they are overwritten — not reachable from here.)
+        return CryptoUtils.secureCopy(hash);
+    } finally {
+        hash?.fill(0);
+        if (ownsPin) pinBytes.fill(0);
+    }
 }
 
 /**
@@ -118,7 +160,20 @@ async function argon2idDerive(pin, saltBytes, memoryKib, iterations, parallelism
  */
 function deriveSubkey(ikm, purpose, salt, length = 32) {
     const info = typeof purpose === 'string' ? utf8ToBytes(purpose) : purpose;
-    return hkdf(sha512, ikm, salt, info, length);
+    const okm = hkdf(sha512, ikm, salt, info, length);
+    // noble allocates the OKM on-heap; hand out an off-heap copy (see header).
+    const out = CryptoUtils.secureCopy(okm);
+    okm.fill(0);
+    return out;
+}
+
+/**
+ * Key-commitment tag: BLAKE3(key ‖ nonce), hashed incrementally so the key
+ * is never copied into a concatenation buffer that nobody zeros.
+ * @private
+ */
+function commitmentTag(key, nonce) {
+    return blake3.create().update(key).update(nonce).digest();
 }
 
 /**
@@ -139,10 +194,14 @@ function deriveSubkey(ikm, purpose, salt, length = 32) {
  */
 function chachaEncrypt(key, plaintext, aad) {
     const nonce = randomBytes(NONCE_SIZE);
-    const commitment = blake3(concatBytes(key, nonce));
+    const commitment = commitmentTag(key, nonce);
     const cipher = chacha20poly1305(key, nonce, aad);
     const ct = cipher.encrypt(plaintext);
-    return concatBytes(nonce, commitment, ct);
+    const out = new Uint8Array(NONCE_SIZE + COMMITMENT_SIZE + ct.length);
+    out.set(nonce, 0);
+    out.set(commitment, NONCE_SIZE);
+    out.set(ct, NONCE_SIZE + COMMITMENT_SIZE);
+    return out;
 }
 
 /**
@@ -166,13 +225,18 @@ function chachaDecrypt(key, data, aad) {
     const ct = data.subarray(NONCE_SIZE + COMMITMENT_SIZE);
 
     // Verify key commitment before decryption (constant-time via timingSafeEqual)
-    const expectedCommitment = blake3(concatBytes(key, nonce));
+    const expectedCommitment = commitmentTag(key, nonce);
     if (!timingSafeEqual(storedCommitment, expectedCommitment)) {
         throw new Error('Key commitment failed — wrong key or tampered ciphertext');
     }
 
     const cipher = chacha20poly1305(key, nonce, aad);
-    return cipher.decrypt(ct);
+    const pt = cipher.decrypt(ct);
+    // The plaintext is key material: give the caller an off-heap copy whose
+    // fill(0) is final, and zero noble's on-heap output.
+    const out = CryptoUtils.secureCopy(pt);
+    pt.fill(0);
+    return out;
 }
 
 /**
@@ -369,7 +433,10 @@ export class SecureVault {
     async deriveKeyAsArrayBuffer(pin, salt, params) {
         const encKey = await this._deriveEncKey(pin, salt, params);
         try {
-            return encKey.buffer.slice(0);
+            // Not `encKey.buffer.slice(0)`: that returns the WHOLE backing
+            // buffer, which is only equal to the key while encKey happens to
+            // be a dedicated allocation.
+            return CryptoUtils.secureCopy(encKey).buffer;
         } finally {
             encKey.fill(0);
         }
@@ -381,7 +448,11 @@ export class SecureVault {
      * Generate a PIN verification hash.
      * Pipeline: PIN → Argon2id → HKDF("verify", salt) → hex.
      * Domain-separated from encryption key — cannot derive encryption key.
-     * Safe to store in plaintext.
+     *
+     * Storing it is neither more nor less safe than storing the sealed
+     * records: every record already carries BLAKE3(key ‖ nonce), an offline
+     * PIN oracle of identical strength (one Argon2id derivation per guess).
+     * Prefer verifyPinAgainstSealed(), which needs no extra stored value.
      *
      * @param {string} pin
      * @param {string} salt
@@ -683,7 +754,13 @@ export class SecureVault {
             const sealed = {};
 
             for (const [type, keyBytes] of Object.entries(keyMap)) {
-                if (!(keyBytes instanceof Uint8Array)) continue;
+                if (keyBytes == null) continue; // absent key type — nothing to seal
+                if (!(keyBytes instanceof Uint8Array)) {
+                    // v3.1: used to `continue` — a WIF that arrived as a string
+                    // vanished from the sealed blob with no error, and the user
+                    // found out at the next unlock.
+                    throw new TypeError(`sealKeysBytes: key '${type}' must be a Uint8Array (got ${typeof keyBytes})`);
+                }
                 const aad = `${account}:${type}`;
                 const aadBytes = utf8ToBytes(aad);
                 try {
@@ -710,10 +787,17 @@ export class SecureVault {
      * @param {string} pin
      * @param {string} salt
      * @param {string} sealedJson
+     * @param {object} [params]
+     * @param {string} [expectedAccount] — v3.1: when given, the AAD is
+     *        recomputed as `${expectedAccount}:${type}` and must match the
+     *        record's own aad_account. Without it the record's self-declared
+     *        AAD is trusted, which lets a rewritten blob swap records between
+     *        key types (the `active` record filed under `posting`). Callers
+     *        that know the account should always pass it.
      * @returns {Promise<object>} { posting: Uint8Array, active: Uint8Array, ... }
      *                            Caller must zero each Uint8Array after use.
      */
-    async unsealKeysBytes(pin, salt, sealedJson, params) {
+    async unsealKeysBytes(pin, salt, sealedJson, params, expectedAccount) {
         const encKey = await this._deriveEncKey(pin, salt, params);
         const result = {};
         let ok = false;
@@ -721,8 +805,12 @@ export class SecureVault {
             const sealed = JSON.parse(sealedJson);
 
             for (const [type, record] of Object.entries(sealed)) {
+                const aad = expectedAccount ? `${expectedAccount}:${type}` : record.aad_account;
+                if (expectedAccount && record.aad_account !== aad) {
+                    throw new Error(`Sealed record '${type}' is bound to '${record.aad_account}', expected '${aad}'`);
+                }
                 const data = fromBase64(record.ciphertext);
-                const aadBytes = utf8ToBytes(record.aad_account);
+                const aadBytes = utf8ToBytes(aad);
                 result[type] = this._decryptBytes(encKey, data, aadBytes);
             }
             ok = true;
@@ -737,6 +825,40 @@ export class SecureVault {
                     if (bytes instanceof Uint8Array) bytes.fill(0);
                 }
             }
+        }
+    }
+
+    /**
+     * Prove a PIN against a sealed blob WITHOUT producing any plaintext.
+     *
+     * Derives the encryption key and compares the first record's stored
+     * commitment tag with BLAKE3(key ‖ nonce). Same cost as an unseal (one
+     * Argon2id derivation), but no key material is ever decrypted, so there
+     * is nothing to zero afterwards except the derived key itself.
+     *
+     * @param {string} pin
+     * @param {string} salt
+     * @param {string} sealedJson — Output of sealKeysBytes() / sealKeys()
+     * @param {object} [params]
+     * @returns {Promise<boolean>}
+     */
+    async verifyPinAgainstSealed(pin, salt, sealedJson, params) {
+        let sealed;
+        try { sealed = JSON.parse(sealedJson); } catch { return false; }
+        const records = Object.values(sealed ?? {}).filter(r => r && typeof r.ciphertext === 'string');
+        if (records.length === 0) return false;
+
+        const encKey = await this._deriveEncKey(pin, salt, params);
+        try {
+            const data = fromBase64(records[0].ciphertext);
+            if (data.length < NONCE_SIZE + COMMITMENT_SIZE + 16) return false;
+            const nonce  = data.subarray(0, NONCE_SIZE);
+            const stored = data.subarray(NONCE_SIZE, NONCE_SIZE + COMMITMENT_SIZE);
+            return timingSafeEqual(stored, commitmentTag(encKey, nonce));
+        } catch {
+            return false;
+        } finally {
+            encKey.fill(0);
         }
     }
 
@@ -771,8 +893,11 @@ export class SecureVault {
         if (!this._cachedEncKey) throw new Error('Vault not unlocked. Call unlockSession() first.');
         const pt = utf8ToBytes(plaintext);
         const aadBytes = aad ? utf8ToBytes(aad) : undefined;
-        const ct = this._encryptBytes(this._cachedEncKey, pt, aadBytes);
-        return toBase64(ct);
+        try {
+            return toBase64(this._encryptBytes(this._cachedEncKey, pt, aadBytes));
+        } finally {
+            pt.fill(0);
+        }
     }
 
     /**
@@ -785,8 +910,13 @@ export class SecureVault {
         if (!this._cachedEncKey) throw new Error('Vault not unlocked. Call unlockSession() first.');
         const data = fromBase64(ciphertextB64);
         const aadBytes = aad ? utf8ToBytes(aad) : undefined;
-        const pt = this._decryptBytes(this._cachedEncKey, data, aadBytes);
-        return new TextDecoder().decode(pt);
+        let pt = null;
+        try {
+            pt = this._decryptBytes(this._cachedEncKey, data, aadBytes);
+            return new TextDecoder().decode(pt);
+        } finally {
+            pt?.fill(0);
+        }
     }
 
     /**

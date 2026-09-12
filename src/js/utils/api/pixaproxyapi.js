@@ -33,7 +33,57 @@
  * dpixa's retryingFetch re-posts the same signed tx, and hived answers
  * "Transaction is a duplicate" while erasing the first request's callback.
  *
- * @version 4.5.0
+ * v4.5.1: Community edits are read back before they are reported as done.
+ * A `community` custom_json (updateProps, setRole, subscribe, …) is not
+ * interpreted by hived at all — hivemind parses it when IT processes the
+ * block, so bridge.get_community lags the synchronous broadcast by the same
+ * second or two as votes do. Two additions close that gap:
+ *   - CommunitiesAPI#awaitPropsVisible(name, props, options?) polls
+ *     bridge.get_community until the raw row carries the props that were
+ *     broadcast (the community-side twin of VotesAPI#awaitVoteVisible), and
+ *     awaitRoleVisible(name, account, role, options?) does the same for the
+ *     roster — the condition a freshly created portal's first updateProps
+ *     depends on, which CreateCommunityDialog used to approximate with a
+ *     fixed 3 s sleep;
+ *   - BroadcastAPI#customJson emits `community_updated` after every
+ *     `community` custom_json is included, carrying the outgoing op so
+ *     listeners can update optimistically while the read-back runs.
+ *
+ * v4.5.2: The other half of "sometimes it works". hived includes any
+ * well-formed custom_json; it is hivemind that validates an updateProps
+ * payload (CommunityOp._read_props), with asserts that discard the WHOLE
+ * op on the first failure and leave only an `error` notification behind:
+ * strings must be pre-stripped (a trailing space or newline = 'invalid
+ * padding'), title 3–20 chars, about ≤ 120, description/flag_text ≤ 1000,
+ * lang in ISO 639-1, no unknown keys. Whether an edit "takes" therefore
+ * depends on its content. CommunitiesAPI#normalizeProps mirrors those rules
+ * client-side (COMMUNITY_PROPS_RULES — one place to adjust if pixamind
+ * differs), getLastPropsRejection reads the indexer's reason back, and the
+ * read-back budget now reflects hivemind's trail_blocks lag (20 s default,
+ * one shared deadline for the head-block gate and the content polling).
+ *
+ * v4.6.0 (key-material lifecycle, with session-manager v6.3 / yolo-buffer
+ * v2.2 / pq-secure-vault v3.1):
+ *   - logout()/disconnect()/Session.ENDED/Session.EXPIRED/PIN.LOCKED now lock
+ *     KeyManager. Its encrypted cache used to outlive all of them, so
+ *     requestKey()/getKeyIfAvailable()/getWalletKeys() kept answering for a
+ *     logged-out or PIN-locked account.
+ *   - KeyManager defers PIN validity to SessionManager (one clock, wall-clock
+ *     based) and reads the current account's keys from it first.
+ *   - Every BroadcastAPI call site resolves its key through
+ *     requestKeyBuffer() (YOLOBuffer) and signs via
+ *     PixaProxyAPI#_withPrivateKey / #_broadcastOperations, which zero the
+ *     derived PrivateKey (`.secret`) without optional chaining. Opt-in
+ *     config.SIGN_THEN_SEND signs inside the key scope and sends afterwards.
+ *   - getWalletKeys(): requestPrivate now defaults to FALSE (BREAKING); a
+ *     PIN-protected session needs `{ pin }` for a private export.
+ *   - A DEVICE_UNWRAP_FAILED unlock is reported as VAULT_ERROR and not
+ *     counted as a failed PIN attempt.
+ *   - Dead LacertaDB-vault code removed from KeyManager (migrateKeysToVault,
+ *     setVault → no-ops; unlockVault delegates to unlockWithPin); plaintext
+ *     cache entries are refused rather than served.
+ *
+ * @version 4.6.0
  *
  * API Groups and Methods:
  *
@@ -313,6 +363,11 @@
  *
  * communities (CommunitiesAPI):
  *   - getCommunity(name, observer)
+ *   - PROPS_RULES                                       // the indexer's updateProps limits (edit COMMUNITY_PROPS_RULES if the fork differs)
+ *   - normalizeProps(props)                             // trim/coerce/drop-unknown + list what the indexer would still reject
+ *   - awaitPropsVisible(name, props, options?)         // poll bridge.get_community until the broadcast props are indexed
+ *   - awaitRoleVisible(name, account, role, options?)  // poll until the roster shows account holding role (community exists)
+ *   - getLastPropsRejection(actor, options?)           // the indexer's `error` notification for a skipped community op
  *   - listCommunities(options)
  *   - getSubscriptions(account)
  *   - getRankedPosts(options)
@@ -408,6 +463,29 @@ let VERSION = null;
 let DEFAULT_CHAIN_ID = null;
 let NETWORK_ID = 128;
 
+/**
+ * Zero the raw 32-byte secret inside a dpixa PrivateKey (kept in `.secret`).
+ *
+ * No optional chaining on purpose: with `pk.secret?.fill?.(0)` a renamed
+ * field turns every cleanup in this file into a silent no-op. A missing
+ * field is reported loudly (once) rather than thrown, because this runs in
+ * `finally` blocks where a throw would mask the real result.
+ *
+ * @param {object|null|undefined} pk — dpixa PrivateKey
+ * @returns {boolean} true if a secret buffer was zeroed
+ */
+let _zeroPrivateKeyWarned = false;
+function zeroPrivateKey(pk) {
+    if (!pk) return false;
+    const secret = pk.secret;
+    if (secret instanceof Uint8Array) { secret.fill(0); return true; }
+    if (!_zeroPrivateKeyWarned) {
+        _zeroPrivateKeyWarned = true;
+        console.error('[PixaProxyAPI] zeroPrivateKey: PrivateKey exposes no `.secret` Uint8Array — key material is NOT being zeroed; check the installed dpixa version');
+    }
+    return false;
+}
+
 // SecureVault loaded lazily — see _ensureVault()
 let _SecureVault = null;
 let _initSecureVault = null;
@@ -437,6 +515,12 @@ const CONFIG = {
     PIN_MAX_ATTEMPTS: 10,
     PIN_LOCKOUT_MS: 5 * 60 * 1000,
     PIN_WIPE_LIMIT: 50,
+    // v4.6: sign inside the key scope, send afterwards (see
+    // PixaProxyAPI#_broadcastOperations). Cuts the private key's lifetime
+    // from the whole broadcast_transaction_synchronous wait (1.5–60 s) to
+    // the signature itself. OFF until exercised against the fork on a test
+    // account: it bypasses dpixa's convenience methods.
+    SIGN_THEN_SEND: false,
     // SECURITY (v4.3 — M2): Absolute session lifetime. Even with sliding
     // window refresh, sessions expire after this duration from creation.
     // Prevents indefinite session survival on compromised devices.
@@ -1490,39 +1574,21 @@ export class PixaProxyAPI {
                     if (!account) throw new PixaAPIError('No active account for broadcast', 'NO_ACCOUNT');
 
                     const keyType = meta.keyType || this._inferKeyType(opType);
-                    this.sessionManager.touchActivity();
+                    // v6.3: no touchActivity() here — a queue drain is not user
+                    // presence and must not extend the PIN window. isLockedFn
+                    // (below) keeps a locked session from draining at all.
 
-                    // v6.1: Get key as YOLOBuffer from SessionManager (byte-level, auto-zeroing).
-                    // Falls back to KeyManager.requestKeyBuffer for backward compat.
-                    let keyBuf;
-                    try {
-                        keyBuf = this.sessionManager.getKeyAsYOLO(keyType);
-                    } catch (_) {
-                        keyBuf = await this.keyManager.requestKeyBuffer(account, keyType);
+                    // Key as a YOLOBuffer. SessionManager only when it holds THIS
+                    // account (it used to be asked regardless of meta.account and
+                    // would sign with the current account's key); KeyManager's
+                    // encrypted cache otherwise.
+                    let keyBuf = null;
+                    if (this.sessionManager?.currentAccount === account) {
+                        try { keyBuf = this.sessionManager.getKeyAsYOLO(keyType); } catch (_) { keyBuf = null; }
                     }
+                    if (!keyBuf) keyBuf = await this.keyManager.requestKeyBuffer(account, keyType);
 
-                    return YOLOBuffer.use(keyBuf, async (wifBytes) => {
-                        // Decode WIF bytes → PrivateKey. The WIF string is transient.
-                        const wif = new TextDecoder().decode(wifBytes);
-                        const privateKey = PrivateKey.from(wif);
-
-                        try {
-                            if (operations.length === 1) {
-                                const [op, opData] = operations[0];
-                                const methodName = op.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-                                const method = this.client.broadcast[methodName];
-                                if (typeof method === 'function') {
-                                    return method.call(this.client.broadcast, opData, privateKey);
-                                }
-                            }
-
-                            return this.client.broadcast.sendOperations(operations, privateKey);
-                        } finally {
-                            // Zero the 32-byte internal secret buffer
-                            if (privateKey.secret) privateKey.secret.fill(0);
-                        }
-                    });
-                    // wifBytes auto-zeroed by YOLOBuffer.use()
+                    return this._broadcastOperations(operations, keyBuf);
                 };
 
                 // FIX (v5.0): Inject session lock checker so drain can detect
@@ -1544,10 +1610,17 @@ export class PixaProxyAPI {
             this.keyManager.setSessionManager(this.sessionManager);
             this.keyManager._unlockWithPin = this.unlockWithPin.bind(this);
 
-            // Listen for PIN lock events from SessionManager's inactivity timer
-            this.eventEmitter.on('pin_locked', ({ account }) => {
+            // v6.3: a SessionManager lock (timer or wall-clock deadline) must
+            // reach KeyManager's encrypted cache too — it used to keep serving
+            // keys via requestKey()/getKeyIfAvailable() after the PIN "expired".
+            // Same for logout and session expiry, which never touched KeyManager.
+            const lockKeyManager = () => { try { this.keyManager.lock(); } catch (_) {} };
+            this.eventEmitter.on(PixaEvents.PIN.LOCKED, ({ account } = {}) => {
                 console.debug(`[PixaProxyAPI] PIN locked for ${account}`);
+                lockKeyManager();
             });
+            this.eventEmitter.on(PixaEvents.Session.ENDED, lockKeyManager);
+            this.eventEmitter.on(PixaEvents.Session.EXPIRED, lockKeyManager);
 
             // FIX (v4.2 — timer desync): When SessionManager resets its PIN
             // timer via touchActivity(), also reset KeyManager's passive
@@ -1657,6 +1730,95 @@ export class PixaProxyAPI {
         }
     }
 
+    /**
+     * Run `fn(privateKey)` with a dpixa PrivateKey built from whatever the
+     * caller has — a YOLOBuffer (preferred), a WIF string (legacy), or a
+     * PrivateKey instance (caller-owned) — and zero what was derived here.
+     *
+     * The key material lives until `fn` settles, so keep network I/O out of
+     * `fn` wherever possible (see _broadcastOperations).
+     *
+     * @template T
+     * @param {YOLOBuffer|string|object} key
+     * @param {(pk: object) => T|Promise<T>} fn
+     * @returns {Promise<T>}
+     * @private
+     */
+    async _withPrivateKey(key, fn) {
+        if (key instanceof YOLOBuffer) {
+            return key.use(async (wifBytes) => {
+                // WIF bytes → WIF string → PrivateKey. The string is the one copy
+                // this path cannot zero; raw-32 key storage removes it.
+                const pk = PrivateKey.fromString(new TextDecoder().decode(wifBytes));
+                try { return await fn(pk); } finally { zeroPrivateKey(pk); }
+            });
+        }
+        if (typeof key === 'string') {
+            const pk = PrivateKey.fromString(key);
+            try { return await fn(pk); } finally { zeroPrivateKey(pk); }
+        }
+        if (key && typeof key === 'object') {
+            // Caller-owned PrivateKey: they control its lifetime and may reuse
+            // it, so it is NOT zeroed here.
+            return fn(key);
+        }
+        throw new PixaAPIError('A signing key is required (YOLOBuffer, WIF string, or PrivateKey)', 'KEY_REQUIRED');
+    }
+
+    /**
+     * Sign and broadcast operations with the given key, keeping the key's
+     * lifetime as short as this dpixa build allows.
+     *
+     * Default: dpixa's sign-and-send funnel — broadcast.<op>() convenience
+     * methods when there is one for the single op, else sendOperations().
+     * The key is zeroed when the broadcast RESOLVES, i.e. after
+     * broadcast_transaction_synchronous has waited for block inclusion
+     * (1.5–4 s, up to ~60 s on the expiry path).
+     *
+     * With `config.SIGN_THEN_SEND === true`: the envelope is prepared
+     * (BroadcastAPI#prepareTransaction), signed with dpixa's own
+     * cryptoUtils.signTransaction INSIDE the key scope, the key is zeroed,
+     * and only then is the signed tx sent. Key lifetime: microseconds, no
+     * network wait inside it. Off by default until exercised against the
+     * fork on a test account — it bypasses the convenience methods, and
+     * _send's history notes a serialization difference in this fork's
+     * sendOperations() that the convenience path avoided.
+     *
+     * @param {Array} operations — [[opName, opData], ...]
+     * @param {YOLOBuffer|string|object} key
+     * @param {object} [opts]
+     * @param {(pk: object) => Promise<object>} [opts.broadcastFn] — custom
+     *        broadcaster; always uses the sign-and-send funnel (cannot be split)
+     * @param {boolean} [opts.preferConvenience=true] — false to force
+     *        sendOperations() for already-built ops (witness_set_properties)
+     * @returns {Promise<object>} broadcast result
+     * @private
+     */
+    async _broadcastOperations(operations, key, opts = {}) {
+        const { broadcastFn = null, preferConvenience = true } = opts;
+        const broadcast = this.client.broadcast;
+
+        if (this.config?.SIGN_THEN_SEND === true && !broadcastFn && cryptoUtils
+            && typeof this.broadcast?.prepareTransaction === 'function') {
+            const expireMs = Number(broadcast.expireTime) > 0 ? Number(broadcast.expireTime) : 60_000;
+            const tx = await this.broadcast.prepareTransaction(operations, { expirationSeconds: Math.round(expireMs / 1000) });
+            // Sync inside the scope: the callback returns before any await.
+            const signed = await this._withPrivateKey(key, (pk) => this.broadcast._signPrepared(tx, pk));
+            return broadcast.send(signed);   // key material is already zeroed
+        }
+
+        return this._withPrivateKey(key, async (pk) => {
+            if (broadcastFn) return broadcastFn(pk);
+            if (preferConvenience && operations.length === 1) {
+                const [opType, opData] = operations[0];
+                const methodName = opType.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+                const method = broadcast[methodName];
+                if (typeof method === 'function') return method.call(broadcast, opData, pk);
+            }
+            return broadcast.sendOperations(operations, pk);
+        });
+    }
+
     async hasVaultConfig() {
         return this.sessionManager?.isPinProtected ?? false;
     }
@@ -1664,13 +1826,22 @@ export class PixaProxyAPI {
     /**
      * Retrieve wallet keys for an account.
      * Public keys are always returned from chain data.
-     * Private keys are returned ONLY if already available in session/vault cache.
-     * This method NEVER triggers PIN dialog or key-entry prompts — it is silent.
-     * Use keyManager.requestKey(account, type) to prompt the user for a specific key.
+     * Private keys are returned ONLY when explicitly requested AND already
+     * available in the session cache. This method NEVER triggers PIN dialog
+     * or key-entry prompts — it is silent.
+     *
+     * v6.3 — BREAKING: `requestPrivate` now defaults to FALSE. It defaulted to
+     * true, so any caller that only wanted public keys received four WIF
+     * strings and kept them in component state. A "show my keys" screen must
+     * opt in with `{ requestPrivate: true }`; if the session is PIN-protected,
+     * pass `{ pin }` as well — it is verified (vault commitment check, no
+     * plaintext) before anything is exported, and a wrong PIN counts as a
+     * failed attempt like unlockWithPin().
      *
      * @param {string} account - Account username
      * @param {object} [options]
-     * @param {boolean} [options.requestPrivate=true] - Whether to look up private keys
+     * @param {boolean} [options.requestPrivate=false] - Whether to export private keys (opt-in)
+     * @param {string} [options.pin] - Required for private export on a PIN-protected session
      * @param {string[]} [options.keyTypes=['posting','active','owner','memo']] - Which key types to request
      * @returns {Promise<{publicKeys: object, privateKeys: object, availableTypes: string[]}>}
      */
@@ -1680,7 +1851,18 @@ export class PixaProxyAPI {
             throw new PixaAPIError('Invalid account parameter', 'INVALID_ACCOUNT');
         }
 
-        const requestPrivate = options.requestPrivate !== false;
+        const requestPrivate = options.requestPrivate === true;
+        if (requestPrivate && this.sessionManager?.isPinProtected
+            && this.sessionManager.currentAccount === normalizedAccount) {
+            const lockout = await this.keyManager._checkPinLockout();
+            if (lockout.locked) {
+                throw new PixaAPIError(`Too many failed attempts. Try again in ${lockout.remainingSec}s.`, 'PIN_LOCKED', { remainingSec: lockout.remainingSec });
+            }
+            if (typeof options.pin !== 'string' || !(await this.sessionManager.verifyPin(options.pin))) {
+                if (typeof options.pin === 'string') await this.keyManager._recordFailedPinAttempt();
+                throw new PixaAPIError('PIN required to export private keys', 'PIN_REQUIRED', { account: normalizedAccount });
+            }
+        }
         const keyTypes = options.keyTypes || ['posting', 'active', 'owner', 'memo'];
 
         const publicKeys = { posting: '', active: '', owner: '', memo: '' };
@@ -1717,10 +1899,12 @@ export class PixaProxyAPI {
                         privateKeys[type] = key;
                         availableTypes.push(type);
                         // Derive public key as fallback if chain data was missing
-                        try {
-                            const pub = PrivateKey.fromString(key).createPublic().toString();
-                            if (!publicKeys[type]) publicKeys[type] = pub;
-                        } catch (_) {}
+                        if (!publicKeys[type]) {
+                            let pk = null;
+                            try { pk = PrivateKey.fromString(key); publicKeys[type] = pk.createPublic().toString(); }
+                            catch (_) {}
+                            finally { zeroPrivateKey(pk); }
+                        }
                     }
                 } catch (e) {
                     // Key not available
@@ -1733,6 +1917,11 @@ export class PixaProxyAPI {
 
     async logout() {
         const account = this.sessionManager?.currentAccount;
+        // v6.3: KeyManager's encrypted cache used to outlive logout —
+        // requestKey()/getWalletKeys() kept answering for the logged-out
+        // account. (The Session.ENDED listener does this too; explicit here so
+        // it holds even if the listeners were removed by release().)
+        try { await this.keyManager?.lock(); } catch (_) {}
         await this.sessionManager?.endSession();
         this.eventEmitter.emit(PixaEvents.Session.ENDED, { account });
     }
@@ -1964,6 +2153,12 @@ export class PixaProxyAPI {
             this.eventEmitter.emit(PixaEvents.PIN.UNLOCKED, { account: normalizedAccount });
             return { success: true, account: normalizedAccount };
         } catch (error) {
+            if (error?.code === 'DEVICE_UNWRAP_FAILED') {
+                // v6.3: infrastructure failure (device key / IndexedDB), not a
+                // wrong PIN — deliberately NOT counted as a failed attempt.
+                console.error('[unlockWithPin] Device-key unwrap failed:', error.message);
+                return { success: false, error: 'Stored keys could not be read on this device. Retry, or log in again with your key.', code: 'VAULT_ERROR' };
+            }
             console.error('[unlockWithPin] Error:', error);
             return { success: false, error: 'Authentication failed', code: 'AUTH_FAILED' };
         }
@@ -1993,13 +2188,16 @@ export class PixaProxyAPI {
         const isPinMode = this.sessionManager?.currentMode === SessionMode.PIN;
 
         if (isPinMode) {
-            if (this.keyManager.isPINValid()) {
-                try {
-                    const key = await this.keyManager.requestKey(normalizedAccount, keyType);
-                    if (key) {
-                        return { needsUnlock: false, unlockType: null, account: normalizedAccount };
-                    }
-                } catch (e) {}
+            // v6.3: a presence check, not requestKey() — that minted a WIF
+            // string and, on a cache miss, emitted pin_required/key_required
+            // as a side effect of asking "do I need to unlock?".
+            let smHasKey = false;
+            try {
+                smHasKey = this.sessionManager.currentAccount === normalizedAccount
+                    && !!this.sessionManager.getKeys()[keyType];   // throws when locked/expired
+            } catch (_) { smHasKey = false; }
+            if (smHasKey && this.keyManager.isPINValid()) {
+                return { needsUnlock: false, unlockType: null, account: normalizedAccount };
             }
             return { needsUnlock: true, unlockType: 'pin', account: normalizedAccount };
         }
@@ -2056,6 +2254,7 @@ export class PixaProxyAPI {
                 for (const type of derivedTypes) {
                     const derived = PrivateKey.fromLogin(normalizedAccount, key, type);
                     const pubKey = derived.createPublic().toString();
+                    zeroPrivateKey(derived);   // only the public key is needed from here on
 
                     let typeMatches = false;
                     if (type === 'memo') {
@@ -2093,6 +2292,7 @@ export class PixaProxyAPI {
                 }
 
                 const publicKey = privateKey.createPublic().toString();
+                zeroPrivateKey(privateKey);   // only the public key is needed from here on
 
                 // SECURITY FIX (v3.5.2): Check all key_auths for multi-authority support
                 let matches = false;
@@ -2259,6 +2459,7 @@ export class PixaProxyAPI {
     }
 
     disconnect() {
+        try { this.keyManager?.lock(); } catch (_) {}   // v6.3: see logout()
         this.sessionManager?.endSession().catch(() => {});
         if (this.connectivity) this.connectivity.destroy();
         if (this.broadcastQueue) this.broadcastQueue.destroy();
@@ -2293,9 +2494,12 @@ export class PixaProxyAPI {
         try { this.connectivity?.destroy(); } catch (_) {}
         try { this.broadcastQueue?.destroy(); } catch (_) {}
         try { Promise.resolve(this.keyManager?.lock()).catch(() => {}); } catch (_) {}
-        // SessionManager is deliberately NOT touched here: its only teardown
-        // in this class is endSession(), and ending the session is the one
-        // thing a node switch must not do.
+        // SessionManager.dispose() (v6.3) zeros the in-memory keys, stops the
+        // PIN timer and removes the page listeners WITHOUT ending the
+        // persisted session — ending it is the one thing a node switch must
+        // not do. Before this, the superseded instance kept plaintext keys
+        // alive until GC.
+        try { this.sessionManager?.dispose?.(); } catch (_) {}
         try { if (this.client && typeof this.client.disconnect === 'function') this.client.disconnect(); } catch (_) {}
         try { this.eventEmitter.removeAllListeners(); } catch (_) {}
     }
@@ -5220,8 +5424,13 @@ class BroadcastAPI {
      * that as a chain error (re-checks connectivity, then propagates) rather
      * than as "offline". Expect the await to take 1.5–4 s.
      *
+     * v6.3: `key` is normally a YOLOBuffer from keyManager.requestKeyBuffer()
+     * (WIF strings and caller-owned PrivateKey instances still work). The
+     * PrivateKey is derived inside PixaProxyAPI#_withPrivateKey and zeroed
+     * there; with config.SIGN_THEN_SEND the key never spans the network wait.
+     *
      * @param {Array} operations — [[opName, opData], ...] tuples
-     * @param {string} key — WIF private key string
+     * @param {YOLOBuffer|string|PrivateKey} key — signing key
      * @param {object} [meta={}] — Metadata for dedup/display { account, keyType, ... }
      * @returns {Promise<object>} Broadcast result ({ id, block_num, trx_num, rc_cost }) or queue entry
      * @private
@@ -5237,34 +5446,23 @@ class BroadcastAPI {
         // its own key when it drains, so deriving one here would leave a live
         // 32-byte secret on the heap for a value that is never used.
         if (this.proxy.broadcastQueue && this.proxy.connectivity && !this.proxy.connectivity.isOnline) {
+            // The queue re-resolves the key at drain time; release ours now.
+            if (key instanceof YOLOBuffer) key.destroy();
             const opType = operations[0]?.[0] || 'unknown';
             return this.proxy.broadcastQueue.enqueue(opType, operations, { ...meta, keyType });
         }
 
-        // SECURITY: only zero what we derived ourselves. When the caller passes
-        // a PrivateKey instance they own its lifetime and may reuse it, so
-        // wiping `.secret` here would corrupt their next signature.
-        const derivedHere = typeof key === 'string';
-        const privateKey = derivedHere ? PrivateKey.fromString(key) : key;
-
-        // ── Online: broadcast directly with the caller's already-obtained key ──
-        // Prefer dpixa convenience methods (broadcast.transfer, broadcast.vote, etc.)
-        // over sendOperations — the fork's sendOperations has serialization issues
-        // that cause signature mismatches ("Missing Authority" errors).
-        if (!broadcastFn && operations.length === 1) {
-            const [opType, opData] = operations[0];
-            const methodName = opType.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-            const method = this.proxy.client.broadcast[methodName];
-            if (typeof method === 'function') {
-                broadcastFn = (pk) => method.call(this.proxy.client.broadcast, opData, pk);
-            }
-        }
-
+        // ── Online: sign + broadcast. Key handling lives in
+        // PixaProxyAPI#_withPrivateKey (derive, zero what we derived; a
+        // caller-owned PrivateKey is left alone — they may reuse it).
+        // Single ops go through dpixa's convenience methods (broadcast.vote,
+        // broadcast.transfer, …); note that in dpixa those are thin wrappers
+        // over sendOperations() (see _installSynchronousSend), so an older
+        // comment here blaming sendOperations() alone for "Missing Authority"
+        // signature mismatches described a difference in how the op was
+        // BUILT, not in signing — the auto-routing is kept for that reason.
         try {
-            if (broadcastFn) {
-                return await broadcastFn(privateKey);
-            }
-            return await this.proxy.client.broadcast.sendOperations(operations, privateKey);
+            return await this.proxy._broadcastOperations(operations, key, { broadcastFn });
         } catch (e) {
             // Network failure mid-broadcast — if queue exists, re-check connectivity
             if (this.proxy.broadcastQueue && this.proxy.connectivity) {
@@ -5276,11 +5474,6 @@ class BroadcastAPI {
                 }
             }
             throw e; // Genuine chain/validation error — propagate
-        } finally {
-            // Zero the 32-byte internal secret regardless of outcome. Both
-            // returns above are awaited, so the broadcast has completed by the
-            // time this runs.
-            if (derivedHere && privateKey?.secret?.fill) privateKey.secret.fill(0);
         }
     }
 
@@ -5327,7 +5520,7 @@ class BroadcastAPI {
         if (externalKey) {
             key = externalKey;
         } else {
-            key = await this.proxy.keyManager.requestKey(normalizedAccount, keyType);
+            key = await this.proxy.keyManager.requestKeyBuffer(normalizedAccount, keyType);
         }
 
         const ensureString = (val) => {
@@ -5439,7 +5632,7 @@ class BroadcastAPI {
 
         // ── Internal broadcast helper (shared by direct & deferred paths) ──
         const _broadcastVote = async (finalWeight) => {
-            const key = await this.proxy.keyManager.requestKey(normalizedVoter, 'posting');
+            const key = await this.proxy.keyManager.requestKeyBuffer(normalizedVoter, 'posting');
 
             const op = {
                 voter: normalizedVoter,
@@ -5577,8 +5770,8 @@ class BroadcastAPI {
         };
 
 
-        const key = await this.proxy.keyManager.requestKey(normalizedAuthor, 'posting');
-        const result = await this.proxy.client.broadcast.comment(op, PrivateKey.fromString(key));
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedAuthor, 'posting');
+        const result = await this.proxy._broadcastOperations([['comment', op]], key);
 
         // ── Post-broadcast: invalidate caches and notify listeners ─────────
         // Top-level posts (parent_author === '') and replies are distinguished
@@ -5629,7 +5822,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid author parameter', 'INVALID_ACCOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedAuthor, 'posting');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedAuthor, 'posting');
 
         const op = {
             author: normalizedAuthor,
@@ -5659,7 +5852,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid amount format', 'INVALID_AMOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedFrom, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedFrom, 'active');
         const op = {
             from: normalizedFrom,
             to: normalizedTo,
@@ -5693,7 +5886,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid amount format', 'INVALID_AMOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedFrom, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedFrom, 'active');
         return this._send(
             [['transfer_to_vesting', {
                 from: normalizedFrom,
@@ -5722,7 +5915,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid vesting shares format', 'INVALID_AMOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedAccount, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedAccount, 'active');
         return this._send(
             [['withdraw_vesting', {
                 account: normalizedAccount,
@@ -5752,7 +5945,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid vesting shares format', 'INVALID_AMOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedDelegator, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedDelegator, 'active');
         return this._send(
             [['delegate_vesting_shares', {
                 delegator: normalizedDelegator,
@@ -5780,7 +5973,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid amount format', 'INVALID_AMOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedFrom, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedFrom, 'active');
         return this._send(
             [['transfer_to_savings', {
                 from: normalizedFrom,
@@ -5809,7 +6002,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid amount format', 'INVALID_AMOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedFrom, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedFrom, 'active');
         return this._send(
             [['transfer_from_savings', {
                 from: normalizedFrom,
@@ -5833,7 +6026,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid account', 'INVALID_ACCOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedFrom, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedFrom, 'active');
         return this._send(
             [['cancel_transfer_from_savings', {
                 from: normalizedFrom,
@@ -5867,7 +6060,7 @@ class BroadcastAPI {
         const rewardPxs   = rawAccount.reward_pxs_balance     || '0.000 PXS';
         const rewardVests = rawAccount.reward_vesting_balance  || '0.000000 VESTS';
 
-        const key = await this.proxy.keyManager.requestKey(normalizedAccount, 'posting');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedAccount, 'posting');
         const op = {
             account: normalizedAccount,
             reward_pixa: translateAssetToChain(rewardPixa),
@@ -5893,7 +6086,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid account parameters', 'INVALID_ACCOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedFrom, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedFrom, 'active');
         return this._send(
             [['recurrent_transfer', {
                 from: normalizedFrom,
@@ -5917,7 +6110,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid account parameters', 'INVALID_ACCOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedFollower, 'posting');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedFollower, 'posting');
         return this._send(
             [['custom_json', {
                 required_auths: [],
@@ -5938,7 +6131,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid account parameters', 'INVALID_ACCOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedFollower, 'posting');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedFollower, 'posting');
         return this._send(
             [['custom_json', {
                 required_auths: [],
@@ -5962,7 +6155,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid account parameters', 'INVALID_ACCOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedFollower, 'posting');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedFollower, 'posting');
         return this._send(
             [['custom_json', {
                 required_auths: [],
@@ -5983,7 +6176,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid account parameters', 'INVALID_ACCOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedAccount, 'posting');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedAccount, 'posting');
         return this._send(
             [['custom_json', {
                 required_auths: [],
@@ -6001,6 +6194,15 @@ class BroadcastAPI {
      * @param {object} [auths] - Optional override keys. When provided, bypasses
      *   keyManager and uses the supplied WIF directly.
      *   Shape: { active: '<wif>', posting: '<wif>' }
+     *
+     * v4.5.1: when `id` is 'community' and the json is the hivemind
+     * `[action, payload]` shape, emits `community_updated` once the tx is in
+     * a block (or queued offline — `blockNum` is then null, mirroring
+     * `vote_done`). The payload is the caller's OWN outgoing op echoed back
+     * for optimistic UI; it has not been through the sanitizer, so listeners
+     * must render it with the same guards as any other user-supplied text.
+     * Hivemind indexes the block a second or two later — read the community
+     * back through communities.awaitPropsVisible(), not a single fetch.
      */
     async customJson(params, auths) {
         const { requiredAuths = [], requiredPostingAuths = [], id, json } = params;
@@ -6011,19 +6213,41 @@ class BroadcastAPI {
         if (auths && auths[keyType]) {
             key = auths[keyType];
         } else {
-            key = await this.proxy.keyManager.requestKey(normalizeAccount(signingAccount), keyType);
+            key = await this.proxy.keyManager.requestKeyBuffer(normalizeAccount(signingAccount), keyType);
         }
 
-        return this._send(
+        const jsonString = typeof json === 'string' ? json : JSON.stringify(json);
+
+        const result = await this._send(
             [['custom_json', {
                 required_auths: requiredAuths.map(a => normalizeAccount(a)),
                 required_posting_auths: requiredPostingAuths.map(a => normalizeAccount(a)),
                 id,
-                json: typeof json === 'string' ? json : JSON.stringify(json)
+                json: jsonString
             }]],
             key,
             { account: normalizeAccount(signingAccount), keyType }
         );
+
+        if (id === 'community' && this.proxy.eventEmitter) {
+            try {
+                const parsed = JSON.parse(jsonString);
+                if (Array.isArray(parsed) && typeof parsed[0] === 'string'
+                    && parsed[1] && typeof parsed[1] === 'object' && !Array.isArray(parsed[1])) {
+                    const payload = parsed[1];
+                    this.proxy.eventEmitter.emit('community_updated', {
+                        community: typeof payload.community === 'string' ? payload.community : null,
+                        action: parsed[0],
+                        payload,                 // outgoing op, NOT sanitized
+                        signer: normalizeAccount(signingAccount),
+                        result,
+                        blockNum: Number.isInteger(result?.block_num) ? result.block_num : null,
+                    });
+                }
+            } catch (_) { /* listener notification is best-effort */ }
+        }
+
+        return result;
     }
 
     async deleteComment(author, permlink) {
@@ -6033,7 +6257,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid author', 'INVALID_ACCOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedAuthor, 'posting');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedAuthor, 'posting');
         const result = await this._send(
             [['delete_comment', { author: normalizedAuthor, permlink }]], key,
             { account: normalizedAuthor, keyType: 'posting' });
@@ -6189,8 +6413,8 @@ class BroadcastAPI {
             title: '' + newTitle,
         };
 
-        const key = await this.proxy.keyManager.requestKey(normalizedAuthor, 'posting');
-        const result = await this.proxy.client.broadcast.comment(op, PrivateKey.fromString(key));
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedAuthor, 'posting');
+        const result = await this.proxy._broadcastOperations([['comment', op]], key);
 
         // ── Post-broadcast: cache hygiene + listener notification, mirroring
         //    the comment()/deleteComment() channels so pages can react. ──
@@ -6234,7 +6458,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid account parameters', 'INVALID_ACCOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedCreator, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedCreator, 'active');
         return this._send(
             [['account_create', {
                 fee: translateAssetToChain(fee),
@@ -6263,7 +6487,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid account parameters', 'INVALID_ACCOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedCreator, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedCreator, 'active');
         return this._send(
             [['account_create_with_delegation', {
                 fee: translateAssetToChain(fee),
@@ -6293,7 +6517,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid account parameters', 'INVALID_ACCOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedAccount, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedAccount, 'active');
         return this._send(
             [['account_witness_vote', {
                 account: normalizedAccount,
@@ -6314,7 +6538,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid account', 'INVALID_ACCOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedAccount, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedAccount, 'active');
         return this._send(
             [['account_witness_proxy', {
                 account: normalizedAccount,
@@ -6334,7 +6558,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid owner account', 'INVALID_ACCOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedOwner, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedOwner, 'active');
         const chainProps = props ? { ...props } : {};
         if (chainProps.account_creation_fee) {
             chainProps.account_creation_fee = translateAssetToChain(chainProps.account_creation_fee);
@@ -6363,7 +6587,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid account parameters', 'INVALID_ACCOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedFrom, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedFrom, 'active');
         return this._send(
             [['set_withdraw_vesting_route', {
                 from_account: normalizedFrom,
@@ -6387,7 +6611,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid owner account', 'INVALID_ACCOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedOwner, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedOwner, 'active');
         return this._send(
             [['limit_order_create', {
                 owner: normalizedOwner,
@@ -6412,7 +6636,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid owner account', 'INVALID_ACCOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedOwner, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedOwner, 'active');
         return this._send(
             [['limit_order_cancel', {
                 owner: normalizedOwner,
@@ -6436,7 +6660,7 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid amount format', 'INVALID_AMOUNT');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedOwner, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedOwner, 'active');
         return this._send(
             [['convert', {
                 owner: normalizedOwner,
@@ -6451,11 +6675,13 @@ class BroadcastAPI {
     /**
      * Send raw operations
      * @param {Array} operations - Array of [opType, opData] tuples
-     * @param {PrivateKey|string} key - Private key for signing
+     * @param {YOLOBuffer|PrivateKey|string} key - Private key for signing.
+     *        A WIF string used to be turned into a PrivateKey HERE and then
+     *        passed on as "caller-owned", so its `.secret` was never zeroed;
+     *        _send now derives (and zeros) it itself.
      */
     async sendOperations(operations, key) {
-        const privateKey = typeof key === 'string' ? PrivateKey.fromString(key) : key;
-        return this._send(operations, privateKey);
+        return this._send(operations, key);
     }
 
     // ========================================================================
@@ -6473,7 +6699,7 @@ class BroadcastAPI {
 
         const requiresOwner = !!owner;
         const keyType = requiresOwner ? 'owner' : 'active';
-        const key = await this.proxy.keyManager.requestKey(normalizedAccount, keyType);
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedAccount, keyType);
 
         const op = { account: normalizedAccount };
         if (owner) op.owner = owner;
@@ -6497,7 +6723,7 @@ class BroadcastAPI {
         const normalizedCreator = normalizeAccount(creator);
         if (!normalizedCreator) throw new PixaAPIError('Invalid creator', 'INVALID_ACCOUNT');
 
-        const key = await this.proxy.keyManager.requestKey(normalizedCreator, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedCreator, 'active');
         return this._send(
             [['claim_account', {
                 creator: normalizedCreator,
@@ -6520,7 +6746,7 @@ class BroadcastAPI {
         const normalizedNew = normalizeAccount(newAccountName);
         if (!normalizedCreator || !normalizedNew) throw new PixaAPIError('Invalid account parameters', 'INVALID_ACCOUNT');
 
-        const key = await this.proxy.keyManager.requestKey(normalizedCreator, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedCreator, 'active');
         return this._send(
             [['create_claimed_account', {
                 creator: normalizedCreator,
@@ -6547,7 +6773,7 @@ class BroadcastAPI {
         if (!normalizedOwner) throw new PixaAPIError('Invalid owner', 'INVALID_ACCOUNT');
         if (!VALIDATORS.safe_asset(amount)) throw new PixaAPIError('Invalid amount format', 'INVALID_AMOUNT');
 
-        const key = await this.proxy.keyManager.requestKey(normalizedOwner, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedOwner, 'active');
         return this._send(
             [['collateralized_convert', {
                 owner: normalizedOwner,
@@ -6569,7 +6795,7 @@ class BroadcastAPI {
         const normalizedOwner = normalizeAccount(owner);
         if (!normalizedOwner) throw new PixaAPIError('Invalid owner', 'INVALID_ACCOUNT');
 
-        const key = await this.proxy.keyManager.requestKey(normalizedOwner, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedOwner, 'active');
         return this._send(
             [['limit_order_create2', {
                 owner: normalizedOwner,
@@ -6597,7 +6823,7 @@ class BroadcastAPI {
         const normalizedPublisher = normalizeAccount(publisher);
         if (!normalizedPublisher) throw new PixaAPIError('Invalid publisher', 'INVALID_ACCOUNT');
 
-        const key = await this.proxy.keyManager.requestKey(normalizedPublisher, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedPublisher, 'active');
         return this._send(
             [['feed_publish', {
                 publisher: normalizedPublisher,
@@ -6684,17 +6910,10 @@ class BroadcastAPI {
         // Touch session activity so the auto-lock timer doesn't fire mid-broadcast.
         this.proxy.sessionManager?.touchActivity?.();
 
-        const wif = await this.proxy.keyManager.requestKey(normalizedOwner, 'active');
-        const privateKey = (typeof wif === 'string') ? PrivateKey.fromString(wif) : wif;
-
-        try {
-            return await this.proxy.client.broadcast.sendOperations([builtOp], privateKey);
-        } finally {
-            // Zero the 32-byte secret on the PrivateKey copy if dpixa exposes it.
-            if (privateKey && privateKey.secret && typeof privateKey.secret.fill === 'function') {
-                privateKey.secret.fill(0);
-            }
-        }
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedOwner, 'active');
+        // preferConvenience:false — the op is already built; the
+        // witnessSetProperties helper would re-process it.
+        return this.proxy._broadcastOperations([builtOp], key, { preferConvenience: false });
     }
 
     // --- Escrow Operations ---
@@ -6711,7 +6930,7 @@ class BroadcastAPI {
         const normalizedAgent = normalizeAccount(agent);
         if (!normalizedFrom || !normalizedTo || !normalizedAgent) throw new PixaAPIError('Invalid account parameters', 'INVALID_ACCOUNT');
 
-        const key = await this.proxy.keyManager.requestKey(normalizedFrom, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedFrom, 'active');
         return this._send(
             [['escrow_transfer', {
                 from: normalizedFrom,
@@ -6740,7 +6959,7 @@ class BroadcastAPI {
         const normalizedWho = normalizeAccount(who);
         if (!normalizedWho) throw new PixaAPIError('Invalid who parameter', 'INVALID_ACCOUNT');
 
-        const key = await this.proxy.keyManager.requestKey(normalizedWho, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedWho, 'active');
         return this._send(
             [['escrow_approve', {
                 from: normalizeAccount(from),
@@ -6765,7 +6984,7 @@ class BroadcastAPI {
         const normalizedWho = normalizeAccount(who);
         if (!normalizedWho) throw new PixaAPIError('Invalid who parameter', 'INVALID_ACCOUNT');
 
-        const key = await this.proxy.keyManager.requestKey(normalizedWho, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedWho, 'active');
         return this._send(
             [['escrow_dispute', {
                 from: normalizeAccount(from),
@@ -6789,7 +7008,7 @@ class BroadcastAPI {
         const normalizedWho = normalizeAccount(who);
         if (!normalizedWho) throw new PixaAPIError('Invalid who parameter', 'INVALID_ACCOUNT');
 
-        const key = await this.proxy.keyManager.requestKey(normalizedWho, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedWho, 'active');
         return this._send(
             [['escrow_release', {
                 from: normalizeAccount(from),
@@ -6819,7 +7038,7 @@ class BroadcastAPI {
         const normalizedReceiver = normalizeAccount(receiver);
         if (!normalizedCreator || !normalizedReceiver) throw new PixaAPIError('Invalid account parameters', 'INVALID_ACCOUNT');
 
-        const key = await this.proxy.keyManager.requestKey(normalizedCreator, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedCreator, 'active');
         return this._send(
             [['create_proposal', {
                 creator: normalizedCreator,
@@ -6866,7 +7085,7 @@ class BroadcastAPI {
             throw new PixaAPIError('proposalId is required', 'INVALID_PARAMS');
         }
 
-        const key = await this.proxy.keyManager.requestKey(normalizedCreator, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedCreator, 'active');
 
         // end_date travels in the op's extensions as variant tag 1
         // (update_proposal_end_date). Never as a top-level op field.
@@ -6900,7 +7119,7 @@ class BroadcastAPI {
         const normalizedVoter = normalizeAccount(voter);
         if (!normalizedVoter) throw new PixaAPIError('Invalid voter', 'INVALID_ACCOUNT');
 
-        const key = await this.proxy.keyManager.requestKey(normalizedVoter, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedVoter, 'active');
         return this._send(
             [['update_proposal_votes', {
                 voter: normalizedVoter,
@@ -6921,7 +7140,7 @@ class BroadcastAPI {
         const normalizedOwner = normalizeAccount(proposalOwner);
         if (!normalizedOwner) throw new PixaAPIError('Invalid owner', 'INVALID_ACCOUNT');
 
-        const key = await this.proxy.keyManager.requestKey(normalizedOwner, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedOwner, 'active');
         return this._send(
             [['remove_proposal', {
                 proposal_owner: normalizedOwner,
@@ -6945,7 +7164,7 @@ class BroadcastAPI {
         const normalizedTarget = normalizeAccount(accountToRecover);
         if (!normalizedRecovery || !normalizedTarget) throw new PixaAPIError('Invalid account parameters', 'INVALID_ACCOUNT');
 
-        const key = await this.proxy.keyManager.requestKey(normalizedRecovery, 'active');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedRecovery, 'active');
         return this._send(
             [['request_account_recovery', {
                 recovery_account: normalizedRecovery,
@@ -6968,7 +7187,7 @@ class BroadcastAPI {
         if (!normalizedTarget) throw new PixaAPIError('Invalid account', 'INVALID_ACCOUNT');
 
         // Recovery uses the NEW owner key
-        const key = await this.proxy.keyManager.requestKey(normalizedTarget, 'owner');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedTarget, 'owner');
         return this._send(
             [['recover_account', {
                 account_to_recover: normalizedTarget,
@@ -6990,7 +7209,7 @@ class BroadcastAPI {
         const normalizedRecovery = normalizeAccount(newRecoveryAccount);
         if (!normalizedTarget) throw new PixaAPIError('Invalid account', 'INVALID_ACCOUNT');
 
-        const key = await this.proxy.keyManager.requestKey(normalizedTarget, 'owner');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedTarget, 'owner');
         return this._send(
             [['change_recovery_account', {
                 account_to_recover: normalizedTarget,
@@ -7010,7 +7229,7 @@ class BroadcastAPI {
         const normalizedAccount = normalizeAccount(account);
         if (!normalizedAccount) throw new PixaAPIError('Invalid account', 'INVALID_ACCOUNT');
 
-        const key = await this.proxy.keyManager.requestKey(normalizedAccount, 'owner');
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedAccount, 'owner');
         return this._send(
             [['decline_voting_rights', {
                 account: normalizedAccount,
@@ -7234,13 +7453,34 @@ class BroadcastAPI {
      * @returns {object} tx clone with one extra signature.
      */
     signTransaction(tx, wif) {
-        if (!tx || !Array.isArray(tx.operations)) {
-            throw new PixaAPIError('signTransaction requires a prepared transaction', 'INVALID_TX');
-        }
         if (!PrivateKey || !cryptoUtils) {
             throw new PixaAPIError('dpixa crypto is not initialised yet', 'NOT_READY');
         }
         const key = PrivateKey.fromString(wif);
+        try {
+            return this._signPrepared(tx, key);
+        } finally {
+            zeroPrivateKey(key);
+        }
+    }
+
+    /**
+     * Sign a prepared transaction with a PrivateKey INSTANCE (not zeroed here —
+     * the caller owns it). Synchronous. Used by signTransaction() and by
+     * PixaProxyAPI#_broadcastOperations in SIGN_THEN_SEND mode.
+     *
+     * @param {object} tx — prepared transaction envelope
+     * @param {object} key — dpixa PrivateKey
+     * @returns {object} tx clone with one extra signature
+     * @private
+     */
+    _signPrepared(tx, key) {
+        if (!tx || !Array.isArray(tx.operations)) {
+            throw new PixaAPIError('signTransaction requires a prepared transaction', 'INVALID_TX');
+        }
+        if (!cryptoUtils) {
+            throw new PixaAPIError('dpixa crypto is not initialised yet', 'NOT_READY');
+        }
         const chainId = this.proxy.client && this.proxy.client.chainId;
         const clone = {
             ref_block_num: tx.ref_block_num,
@@ -7271,7 +7511,7 @@ class BroadcastAPI {
                 'NOT_SUPPORTED'
             );
         } finally {
-            if (key && key.secret && typeof key.secret.fill === 'function') key.secret.fill(0);
+            // Nothing to zero here: `key` belongs to the caller (see signTransaction()).
         }
     }
 
@@ -7322,26 +7562,34 @@ class AuthAPI {
     constructor(proxy) { this.proxy = proxy; }
 
     isWif(key) {
+        let pk = null;
         try {
-            PrivateKey.fromString(key);
+            pk = PrivateKey.fromString(key);
             return true;
         } catch (e) {
             return false;
+        } finally {
+            zeroPrivateKey(pk);
         }
     }
 
     toWif(username, password, role) {
-        return PrivateKey.fromLogin(username, password, role).toString();
+        const pk = PrivateKey.fromLogin(username, password, role);
+        try { return pk.toString(); } finally { zeroPrivateKey(pk); }
     }
 
     wifToPublic(wif) {
-        return PrivateKey.fromString(wif).createPublic().toString();
+        const pk = PrivateKey.fromString(wif);
+        try { return pk.createPublic().toString(); } finally { zeroPrivateKey(pk); }
     }
 
     signMessage(message, wif) {
         const privateKey = PrivateKey.fromString(wif);
-        const signature = privateKey.sign(cryptoUtils.sha256(message));
-        return signature.toString();
+        try {
+            return privateKey.sign(cryptoUtils.sha256(message)).toString();
+        } finally {
+            zeroPrivateKey(privateKey);
+        }
     }
 
     verifySignature(message, signature, publicKey) {
@@ -7363,7 +7611,8 @@ class AuthAPI {
      */
     encodeMemo(senderPrivateKey, recipientPublicKey, message) {
         const privateKey = PrivateKey.fromString(senderPrivateKey);
-        return Memo.encode(privateKey, recipientPublicKey, message);
+        try { return Memo.encode(privateKey, recipientPublicKey, message); }
+        finally { zeroPrivateKey(privateKey); }
     }
 
     /**
@@ -7374,7 +7623,8 @@ class AuthAPI {
      */
     decodeMemo(recipientPrivateKey, encryptedMemo) {
         const privateKey = PrivateKey.fromString(recipientPrivateKey);
-        return Memo.decode(privateKey, encryptedMemo);
+        try { return Memo.decode(privateKey, encryptedMemo); }
+        finally { zeroPrivateKey(privateKey); }
     }
 
     /**
@@ -7891,8 +8141,189 @@ class ResourceCreditsAPI {
 // Communities API Group
 // ============================================
 
+/**
+ * ISO 639-1 codes hivemind accepts for a community `lang`
+ * (hive/indexer/community.py, LANGS). Anything else fails
+ * `read_key_str(props, 'lang', 2, 'lang')` and the WHOLE updateProps op is
+ * discarded by the indexer.
+ */
+const COMMUNITY_LANGS = new Set((
+    'ab,aa,af,ak,sq,am,ar,an,hy,as,av,ae,ay,az,bm,ba,eu,be,bn,bh,bi,' +
+    'bs,br,bg,my,ca,ch,ce,ny,zh,cv,kw,co,cr,hr,cs,da,dv,nl,dz,en,eo,' +
+    'et,ee,fo,fj,fi,fr,ff,gl,ka,de,el,gn,gu,ht,ha,he,hz,hi,ho,hu,ia,' +
+    'id,ie,ga,ig,ik,io,is,it,iu,ja,jv,kl,kn,kr,ks,kk,km,ki,rw,ky,kv,' +
+    'kg,ko,ku,kj,la,lb,lg,li,ln,lo,lt,lu,lv,gv,mk,mg,ms,ml,mt,mi,mr,' +
+    'mh,mn,na,nv,nd,ne,ng,nb,nn,no,ii,nr,oc,oj,cu,om,or,os,pa,pi,fa,' +
+    'pl,ps,pt,qu,rm,rn,ro,ru,sa,sc,sd,se,sm,sg,sr,gd,sn,si,sk,sl,so,' +
+    'st,es,su,sw,ss,sv,ta,te,tg,th,ti,bo,tk,tl,tn,to,tr,ts,tt,tw,ty,' +
+    'ug,uk,ur,uz,ve,vi,vo,wa,cy,wo,fy,xh,yi,yo,za'
+).split(','));
+
+/**
+ * What the hivemind indexer will accept in an `updateProps` payload —
+ * transcribed from `CommunityOp._read_props` in hive/indexer/community.py
+ * (identical in the steemit and openhive-network trees; pixamind is a
+ * fork of one of them — IF THE FORK CHANGED `_read_props`, CHANGE IT HERE,
+ * this is the only place the client encodes those rules).
+ *
+ * The indexer validates with `assert`; the first failure aborts validation,
+ * the op is skipped, and the only trace is an `error` notification written
+ * to the actor (see getLastPropsRejection). hived has already included the
+ * tx, so from the client's side the broadcast "succeeded" and the edit just
+ * never appears — the classic "sometimes it works" symptom, because whether
+ * it works depends on the CONTENT:
+ *   - every string must equal its own strip(): a trailing space in the
+ *     title, or an Enter at the end of the description textarea, fails
+ *     'invalid padding';
+ *   - title 3–20 code points, not starting with '@' or '#';
+ *   - about ≤ 120, description ≤ 1000, flag_text ≤ 1000 (blank allowed);
+ *   - lang must be one of COMMUNITY_LANGS (exactly two lowercase letters);
+ *   - is_nsfw must be a JSON boolean;
+ *   - any key outside validKeys fails 'extraneous keys' — the op is dropped
+ *     with all of its valid fields;
+ *   - an empty props object fails 'props were blank'.
+ */
+const COMMUNITY_PROPS_RULES = Object.freeze({
+    validKeys:   Object.freeze(['title', 'about', 'lang', 'is_nsfw', 'description', 'flag_text', 'settings']),
+    title:       Object.freeze({ min: 3, max: 20, badPrefix: Object.freeze(['@', '#']) }),
+    about:       Object.freeze({ max: 120 }),
+    description: Object.freeze({ max: 1000 }),
+    flag_text:   Object.freeze({ max: 1000 }),
+    langs:       COMMUNITY_LANGS,
+});
+
 class CommunitiesAPI {
     constructor(proxy) { this.proxy = proxy; }
+
+    /** The indexer's updateProps rules — see COMMUNITY_PROPS_RULES. */
+    get PROPS_RULES() { return COMMUNITY_PROPS_RULES; }
+
+    /**
+     * Shape an updateProps payload the way the indexer will validate it, and
+     * report what would still make it discard the op.
+     *
+     * Trims every string (the indexer's padding rule), lowercases `lang`,
+     * coerces `is_nsfw` to a boolean, and REMOVES keys the indexer does not
+     * know — one unknown key would otherwise take the whole op down. Then it
+     * checks the length / prefix / language rules and lists every violation
+     * instead of stopping at the first, so a form can show them all.
+     *
+     * @param {object} props - what the form wants to send
+     * @param {object} [rules=COMMUNITY_PROPS_RULES]
+     * @returns {{ props: object, problems: Array<{key: string, reason: string}>, dropped: string[] }}
+     *   `props`    — normalized payload; broadcast THIS, and pass THIS to
+     *                awaitPropsVisible so the read-back compares like with like
+     *   `problems` — non-empty means the indexer would reject the op: do not
+     *                broadcast, show them to the user
+     *   `dropped`  — unknown keys that were removed (warn, the data is lost)
+     */
+    static normalizeProps(props, rules = COMMUNITY_PROPS_RULES) {
+        const out = {};
+        const problems = [];
+        const dropped = [];
+        if (!props || typeof props !== 'object' || Array.isArray(props)) {
+            return { props: out, problems: [{ key: 'props', reason: 'props must be an object' }], dropped };
+        }
+
+        const cp = (s) => Array.from(s).length;   // code points, like Python len()
+
+        for (const key of Object.keys(props)) {
+            if (props[key] === undefined) continue;
+            if (!rules.validKeys.includes(key)) { dropped.push(key); continue; }
+
+            if (key === 'is_nsfw') {
+                out.is_nsfw = !!props.is_nsfw;
+                continue;
+            }
+            if (key === 'settings') {
+                const s = props.settings;
+                if (!s || typeof s !== 'object' || Array.isArray(s) || Object.keys(s).length === 0) {
+                    problems.push({ key, reason: 'settings must be a non-empty object' });
+                } else {
+                    out.settings = s;
+                }
+                continue;
+            }
+
+            let v = props[key] == null ? '' : String(props[key]).trim();
+            if (key === 'lang') v = v.toLowerCase();
+            out[key] = v;
+        }
+
+        if (out.title !== undefined) {
+            const n = cp(out.title);
+            if (n < rules.title.min) problems.push({ key: 'title', reason: `title must be at least ${rules.title.min} characters` });
+            else if (n > rules.title.max) problems.push({ key: 'title', reason: `title must be at most ${rules.title.max} characters (${n} given)` });
+            else if (rules.title.badPrefix.includes(out.title[0])) problems.push({ key: 'title', reason: 'title cannot start with @ or #' });
+        }
+        for (const key of ['about', 'description', 'flag_text']) {
+            if (out[key] !== undefined && cp(out[key]) > rules[key].max) {
+                problems.push({ key, reason: `${key} must be at most ${rules[key].max} characters (${cp(out[key])} given)` });
+            }
+        }
+        if (out.lang !== undefined && !rules.langs.has(out.lang)) {
+            problems.push({ key: 'lang', reason: `lang "${out.lang}" is not a two-letter ISO 639-1 code the indexer accepts` });
+        }
+        if (Object.keys(out).length === 0) {
+            problems.push({ key: 'props', reason: 'nothing to update' });
+        }
+
+        return { props: out, problems, dropped };
+    }
+
+    /** Instance form of the static helper, for callers that only hold `api`. */
+    normalizeProps(props) { return CommunitiesAPI.normalizeProps(props, this.PROPS_RULES); }
+
+    /**
+     * Why did the indexer skip the last community op this account signed?
+     *
+     * When `CommunityOp.validate` fails, hivemind writes an `error`
+     * notification to the ACTOR (the account in required_posting_auths —
+     * for a portal editing itself, the portal) whose message carries the
+     * failed assertion, e.g. "error: exceeds max len: title" or
+     * "error: invalid padding: description". bridge.account_notifications
+     * is the only place that reason is visible. Best-effort: the row lands
+     * only once hivemind has processed the block, and a node may not expose
+     * min_score; returns null when nothing recent is found.
+     *
+     * @param {string} actor - the account that signed the custom_json
+     * @param {object} [options]
+     * @param {number} [options.sinceTs]         - epoch ms; ignore errors dated before this
+     *   (pass the time you broadcast, minus a minute of clock skew — an error
+     *   left over from an earlier attempt is not the answer to this one)
+     * @param {number} [options.sinceMs=300000] - used when sinceTs is absent
+     * @param {number} [options.limit=20]
+     * @returns {Promise<{reason: string, date: string}|null>}
+     */
+    async getLastPropsRejection(actor, options = {}) {
+        const { sinceTs = null, sinceMs = 5 * 60 * 1000, limit = 20 } = options;
+        const normalizedActor = normalizeAccount(actor);
+        if (!normalizedActor || !this.proxy.client?.pixamind?.getAccountNotifications) return null;
+
+        let rows = null;
+        try {
+            rows = await this.proxy.client.pixamind.getAccountNotifications({ account: normalizedActor, limit, min_score: 0 });
+        } catch (_) {
+            try {
+                rows = await this.proxy.client.pixamind.getAccountNotifications({ account: normalizedActor, limit });
+            } catch (e) {
+                console.warn('[CommunitiesAPI] getLastPropsRejection read failed:', e.message);
+                return null;
+            }
+        }
+        if (!Array.isArray(rows)) return null;
+
+        const cutoff = Number.isFinite(sinceTs) ? sinceTs : Date.now() - sinceMs;
+        for (const row of rows) {
+            if (!row || row.type !== 'error') continue;
+            const date = typeof row.date === 'string' ? row.date : '';
+            const ts = date ? Date.parse(date.endsWith('Z') ? date : date + 'Z') : NaN;
+            if (Number.isFinite(ts) && ts < cutoff) continue;
+            const msg = typeof row.msg === 'string' ? row.msg : '';
+            return { reason: msg.replace(/^error:\s*/i, '') || 'rejected by the indexer', date };
+        }
+        return null;
+    }
 
     /**
      * Resolve the active user for write operations. The synchronous
@@ -7947,7 +8378,14 @@ class CommunitiesAPI {
 
             // Long-form text — rendered at the description tier, not raw.
             description: raw.description ? cs.renderDescription(String(raw.description)) : '',
-            flag_text:   cs.safeString(raw.flag_text || '', 512) || '',
+            // v4.5.2: the same text as plain (HTML-stripped) source, for edit
+            // forms. Pre-filling a textarea with the RENDERED html and saving
+            // it back re-broadcasts markup as the description: it grows on
+            // every round trip, blows the indexer's 1000-char cap, and the
+            // renderer's trailing newline trips its padding rule — another
+            // way an edit is included on chain and never applied.
+            description_source: cs.safeString(String(raw.description || ''), 4000) || '',
+            flag_text:   cs.safeString(raw.flag_text || '', 1000) || '',
 
             // Counters
             type_id:      VALIDATORS.safe_number(raw.type_id) ?? 0,
@@ -7979,17 +8417,216 @@ class CommunitiesAPI {
         };
     }
 
+    /**
+     * bridge.get_community, unsanitized. INTERNAL ONLY — every public path
+     * runs the result through _sanitizeCommunity before it leaves this class.
+     * @private
+     */
+    async _fetchRawCommunity(name, observer = '') {
+        const params = { name };
+        if (observer) params.observer = observer;
+        return this.proxy.client.pixamind.getCommunity(params);
+    }
+
     async getCommunity(name, observer = '') {
         // bridge.get_community — canonical bridge API
         try {
-            const params = { name };
-            if (observer) params.observer = observer;
-            const raw = await this.proxy.client.pixamind.getCommunity(params);
+            const raw = await this._fetchRawCommunity(name, observer);
             return this._sanitizeCommunity(raw);
         } catch (e) {
             console.warn('[CommunitiesAPI] getCommunity failed:', e.message);
         }
         return null;
+    }
+
+    /**
+     * The subset of updateProps fields this class can verify by reading the
+     * community back, coerced to the shape hivemind stores them in.
+     * `settings` is deliberately excluded: hivemind merges it rather than
+     * replacing it, so the broadcast value is not what the row will hold.
+     * @private
+     */
+    static _comparableProps(props) {
+        const out = {};
+        if (!props || typeof props !== 'object') return out;
+        for (const k of ['title', 'about', 'lang', 'description', 'flag_text']) {
+            if (props[k] !== undefined) out[k] = props[k] == null ? '' : String(props[k]);
+        }
+        if (props.is_nsfw !== undefined) out.is_nsfw = !!props.is_nsfw;
+        return out;
+    }
+
+    /** @private */
+    static _propsMatch(raw, expected) {
+        if (!raw || typeof raw !== 'object') return false;
+        for (const [k, v] of Object.entries(expected)) {
+            if (k === 'is_nsfw') {
+                if (!!raw.is_nsfw !== v) return false;
+            } else if (String(raw[k] ?? '') !== v) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Wait until hivemind reports the community with the props that were
+     * broadcast.
+     *
+     * An `updateProps` custom_json is inclusion-confirmed by hived, but hived
+     * never interprets it: hivemind parses the op when it processes that
+     * block, a second or two later (longer on a small or distant node), and
+     * bridge.get_community is answered by hivemind. A single read right after
+     * the broadcast resolves can therefore still return the previous title,
+     * about or description — the exact symptom of "my edit does not show".
+     * This is the community-side twin of VotesAPI#awaitVoteVisible: it polls
+     * the raw bridge row until every comparable field in `props` matches,
+     * or gives up.
+     *
+     * The comparison is against the RAW row, before sanitization, because the
+     * caller's props are raw too and hivemind stores them verbatim; comparing
+     * sanitized output would never match on `description` (rendered to HTML).
+     * The community handed back is sanitized like every other public result.
+     *
+     * How long this takes is NOT "a second or two". hivemind's live sync
+     * trails hived's head by `trail_blocks` (default 2) for fork safety, so
+     * the block that holds the tx is processed only once two more blocks
+     * exist — six seconds on a three-second chain — plus its own polling
+     * cadence and, in front of it, jussi's response cache (3 s per
+     * bridge.* key in the stock config). Budget for 8–12 s in the normal
+     * case, hence the 20 s default; `visible: false` before that is almost
+     * always a rejected payload, not a slow indexer (see
+     * getLastPropsRejection and normalizeProps).
+     *
+     * Pass `props` exactly as broadcast — ideally the `props` returned by
+     * normalizeProps — so the comparison is like with like.
+     *
+     * `options.observer` should be the same account the page will query
+     * with: jussi keys its cache on the full params, so polling with the
+     * page's params is what leaves a FRESH row in the cache entry the page
+     * is about to hit; polling with different params can succeed while the
+     * page still gets a stale cached copy for the rest of the TTL.
+     *
+     * When `options.blockNum` (the `block_num` a synchronous broadcast
+     * returned) is given, hivemind's head block is polled first so the
+     * heavier bridge reads only start once the block is indexed; that gate
+     * falls through immediately when hive.db_head_state is not routed on the
+     * node (see TransactionStatusAPI#getHivemindHead), so the read-back below
+     * remains the ground truth either way. Both phases share one budget.
+     *
+     * @param {string} name - community account (e.g. "hive-123456")
+     * @param {object} props - the props object that was broadcast
+     * @param {object} [options]
+     * @param {number} [options.tries=20]        - total budget in reads (× intervalMs)
+     * @param {number} [options.intervalMs=1000] - delay between reads
+     * @param {number} [options.blockNum]        - block containing the tx, if known
+     * @param {string} [options.observer]        - the observer the page will use
+     * @returns {Promise<{visible: boolean, community: (object|null), tries: number}>}
+     *   `visible` false means hivemind had not applied the props within the
+     *   budget — NOT that the broadcast failed; the tx is in the block the
+     *   broadcast reported. (It is also what a props object hivemind's own
+     *   validation rejected looks like: on chain, never applied.) `community`
+     *   is the last sanitized row read, or null if every read failed.
+     */
+    async awaitPropsVisible(name, props, options = {}) {
+        const expected = CommunitiesAPI._comparableProps(props);
+        return this._awaitCommunityMatch(
+            name,
+            raw => CommunitiesAPI._propsMatch(raw, expected),
+            options,
+            'awaitPropsVisible'
+        );
+    }
+
+    /**
+     * Wait until hivemind reports `account` holding `role` in the community
+     * — and, implicitly, until hivemind knows the community exists at all.
+     *
+     * Needed right after a portal is created: the account_create and the
+     * first `setRole` are inclusion-confirmed by hived, but a follow-up
+     * `updateProps` sent before hivemind has registered the community is
+     * dropped silently (on chain, never applied). Polling the roster replaces
+     * a fixed sleep with the actual condition the next op depends on.
+     *
+     * `role` is matched against the raw `team` roster (`[account, role, …]`
+     * rows); 'admin' is also satisfied by the raw `admins` list.
+     *
+     * @param {string} name - community account (e.g. "hive-123456")
+     * @param {string} account
+     * @param {string} role - 'owner' | 'admin' | 'mod' | 'member' | 'guest' | 'muted'
+     * @param {object} [options] - same as awaitPropsVisible
+     * @returns {Promise<{visible: boolean, community: (object|null), tries: number}>}
+     */
+    async awaitRoleVisible(name, account, role, options = {}) {
+        const normalizedAccount = normalizeAccount(account);
+        const wantRole = String(role || '').toLowerCase();
+        return this._awaitCommunityMatch(
+            name,
+            raw => {
+                const inTeam = Array.isArray(raw.team) && raw.team.some(entry =>
+                    Array.isArray(entry) && entry[0] === normalizedAccount
+                    && String(entry[1] || '').toLowerCase() === wantRole);
+                const inAdmins = wantRole === 'admin' && Array.isArray(raw.admins)
+                    && raw.admins.includes(normalizedAccount);
+                return inTeam || inAdmins;
+            },
+            options,
+            'awaitRoleVisible'
+        );
+    }
+
+    /**
+     * Shared read-back loop behind awaitPropsVisible / awaitRoleVisible.
+     * `matches` is evaluated on the RAW bridge row; the community returned
+     * is sanitized. See awaitPropsVisible for the timing rationale and the
+     * blockNum gate.
+     * @private
+     */
+    async _awaitCommunityMatch(name, matches, options = {}, label = 'awaitCommunityMatch') {
+        const { tries = 20, intervalMs = 1000, blockNum = null, observer = '' } = options;
+
+        // One budget for both phases. The head-block gate is cheap and lets
+        // the bridge polling start only once the block is indexed, but it
+        // must not add its own budget on top: a stalled indexer would then
+        // hold the UI for twice as long.
+        const deadline = Date.now() + tries * intervalMs;
+        const gateTries = Math.max(1, Math.ceil(tries / 2));
+
+        if (Number.isInteger(blockNum) && blockNum > 0
+            && this.proxy.transaction && typeof this.proxy.transaction.awaitHivemindBlock === 'function') {
+            try {
+                await this.proxy.transaction.awaitHivemindBlock(blockNum, { tries: gateTries, intervalMs });
+            } catch (e) {
+                console.warn(`[CommunitiesAPI] ${label} head-block gate failed:`, e.message);
+            }
+        }
+
+        // Always at least a few real reads, even if the gate used the budget.
+        const minReads = Math.min(3, tries);
+        let community = null;
+        let attempt = 0;
+        for (;;) {
+            let raw = null;
+            try {
+                raw = await this._fetchRawCommunity(name, observer);
+            } catch (e) {
+                console.warn(`[CommunitiesAPI] ${label} read failed:`, e.message);
+            }
+            attempt++;
+
+            if (raw && typeof raw === 'object') {
+                community = this._sanitizeCommunity(raw);
+                let hit = false;
+                try { hit = !!matches(raw); } catch (_) { hit = false; }
+                if (hit) {
+                    return { visible: true, community, tries: attempt };
+                }
+            }
+
+            if (attempt >= tries || (attempt >= minReads && Date.now() >= deadline)) break;
+            await new Promise(resolve => setTimeout(resolve, intervalMs));
+        }
+        return { visible: false, community, tries: attempt };
     }
 
     async listCommunities(options = {}) {
@@ -8526,8 +9163,13 @@ class CommunitiesAPI {
 
     /**
      * Update community properties (Admin only)
+     *
+     * Resolves when the tx is in a block; hivemind applies the props a second
+     * or two later. Read the community back with awaitPropsVisible(community,
+     * props, { blockNum: result.block_num }) before re-rendering from bridge.
+     *
      * @param {string} community
-     * @param {object} props - { title, about, is_nsfw, description, flag_text }
+     * @param {object} props - { title, about, lang, is_nsfw, description, flag_text }
      * @returns {Promise<object>}
      */
     async updateCommunityProps(community, props) {
@@ -9805,9 +10447,6 @@ class KeyManager {
         /** @type {Promise|null} Active PIN unlock promise (prevents double-dialog) */
         this._pendingPinUnlock = null;
         this.unencrypted = null;
-        this.vaultDbReference = null;
-        this.vaultMaster = null;
-        this.vaultIndividual = null;
         this.activeAccount = null;
         this.pinVerified = false;
         this.pinVerificationTime = 0;
@@ -9848,105 +10487,16 @@ class KeyManager {
     }
 
     /**
-     * Migrate keys currently in sessionKeys (in-memory) and/or in the
-     * unencrypted collection into the encrypted vault.  Called after vault
-     * creation to ensure keys from a prior quickLogin are persisted.
-     * @param {string} account - normalized account name
+     * @deprecated v6.3 — no-op. The LacertaDB vault (vaultMaster /
+     * vaultIndividual collections) has had no writer since v6: setVault() had
+     * no external caller, so every vault branch in this class was dead code
+     * that stored WIF strings and could be resurrected by a single call. The
+     * persistence layer is SessionManager (device-wrapped, optionally
+     * PIN-sealed). Kept so old call sites don't throw.
+     * @param {string} _account
      */
-    async migrateKeysToVault(account) {
-        const normalizedAccount = normalizeAccount(account);
-        if (!normalizedAccount) return;
-
-        const types = ['posting', 'active', 'owner', 'memo'];
-        // Track which individual keys have already been written to vault
-        // to avoid double-writes (section 1 from unencrypted, section 2 from sessionKeys).
-        // LacertaDB's encrypted vault `update` path can fail with TurboSerial
-        // deserialization errors, so we use add-only and silently skip conflicts.
-        const writtenKeys = new Set();
-
-        // 1. Try to migrate from unencrypted DB → vault
-        if (this.unencrypted) {
-            // Master keys (all 4 derived from master password)
-            try {
-                const masterDoc = await this.unencrypted.get(normalizedAccount);
-                if (masterDoc && masterDoc.derived_keys) {
-                    if (this.vaultMaster) {
-                        try {
-                            await this.vaultMaster.add(
-                                { account: normalizedAccount, derived_keys: masterDoc.derived_keys, created_at: Date.now() },
-                                { id: normalizedAccount }
-                            );
-                            console.debug('[migrateKeysToVault] Keys migrated to vault');
-                        } catch (e) {
-                            // Already exists — skip (don't use update — it triggers TurboSerial errors)
-                            console.debug('[migrateKeysToVault] Master keys already in vault');
-                        }
-                        // Mark all types as written (master key derives all 4)
-                        types.forEach(t => writtenKeys.add(`${normalizedAccount}_${t}`));
-                    }
-                    // Also ensure they're in the in-memory cache
-                    await this.cacheKeys(normalizedAccount, masterDoc.derived_keys);
-                }
-            } catch (e) { /* no master doc */ }
-
-            // Individual keys
-            for (const type of types) {
-                const id = `${normalizedAccount}_${type}`;
-                if (writtenKeys.has(id)) continue; // Already handled by master keys
-                try {
-                    const doc = await this.unencrypted.get(id);
-                    if (doc && doc.key && this.vaultIndividual) {
-                        try {
-                            await this.vaultIndividual.add(
-                                { account: normalizedAccount, type, key: doc.key, created_at: Date.now() },
-                                { id }
-                            );
-                            console.debug(`[migrateKeysToVault] Keys migrated to vault`);
-                        } catch (e) {
-                            // Already exists — skip
-                        }
-                        writtenKeys.add(id);
-                    }
-                } catch (e) { /* no individual doc */ }
-            }
-        }
-
-        // 2. Migrate from sessionKeys → vault (keys that were only in-memory)
-        for (const type of types) {
-            const cacheKey = `${normalizedAccount}_${type}`;
-            if (writtenKeys.has(cacheKey)) continue; // Already migrated above
-
-            const entry = this.sessionKeys.get(cacheKey);
-            if (!entry) continue;
-
-            const plainKey = await this._decryptFromCache(entry);
-            if (!plainKey) continue;
-
-            if (this.vaultIndividual) {
-                try {
-                    await this.vaultIndividual.add(
-                        { account: normalizedAccount, type, key: plainKey, created_at: Date.now() },
-                        { id: cacheKey }
-                    );
-                    console.debug(`[migrateKeysToVault] Keys migrated to vault`);
-                } catch (e) {
-                    // Already exists — skip (add-only, no update)
-                }
-            }
-        }
-
-        // SECURITY FIX (v3.5.2): After successful migration, delete plaintext
-        // keys from the unencrypted collection. They are now safely in the vault.
-        if (this.unencrypted) {
-            try {
-                await this.unencrypted.delete(normalizedAccount);
-            } catch (e) { /* may not exist */ }
-            for (const type of types) {
-                try {
-                    await this.unencrypted.delete(`${normalizedAccount}_${type}`);
-                } catch (e) { /* may not exist */ }
-            }
-        }
+    async migrateKeysToVault(_account) {
+        console.warn('[KeyManager] migrateKeysToVault() is a no-op since v6.3 — SessionManager owns persistence');
     }
 
     /**
@@ -10138,11 +10688,11 @@ class KeyManager {
     async _decryptFromCacheAsBytes(blob) {
         if (!blob) return null;
         if (typeof blob === 'string') {
-            // SECURITY (v4.4): Legacy plaintext string in sessionKeys.
-            // Convert to bytes for the caller but log a warning — these
-            // should have been encrypted on storage.
-            console.warn('[KeyManager] Legacy plaintext key found in sessionKeys — should be migrated');
-            return new TextEncoder().encode(blob);
+            // v6.3: no writer produces plaintext entries anymore
+            // (_encryptForCache always encrypts), so this can only be an
+            // injected value — refuse it instead of serving it.
+            console.error('[KeyManager] Plaintext entry in sessionKeys refused');
+            return null;
         }
         if (!blob._enc) return null;
         if (!this._sessionCryptoKey) return null; // CryptoKey destroyed
@@ -10169,9 +10719,7 @@ class KeyManager {
      */
     async _decryptFromCache(blob) {
         if (!blob) return null;
-        // Legacy plaintext string passthrough (backward compat for existing cached entries)
-        if (typeof blob === 'string') return blob;
-        const bytes = await this._decryptFromCacheAsBytes(blob);
+        const bytes = await this._decryptFromCacheAsBytes(blob);   // v6.3: no plaintext passthrough
         if (!bytes) return null;
         const str = new TextDecoder().decode(bytes);
         bytes.fill(0); // Zero the byte copy — only the string survives
@@ -10208,23 +10756,23 @@ class KeyManager {
         this._pinLockoutStore = settingsDb.ensureCollection('pin_lockout');
     }
 
-    async setVault(vaultDb) {
-        this.vaultDbReference = vaultDb;
-        if (vaultDb) {
-            this.vaultMaster = vaultDb.ensureCollection('master_keys');
-            this.vaultIndividual = vaultDb.ensureCollection('individual_keys');
-        }
+    /** @deprecated v6.3 — no-op; see migrateKeysToVault(). */
+    async setVault(_vaultDb) {
+        console.warn('[KeyManager] setVault() is a no-op since v6.3 — SessionManager owns persistence');
     }
 
+    /**
+     * @deprecated v6.3 — delegates to PixaProxyAPI.unlockWithPin (lockout,
+     * Argon2 check, key sync). The old body marked the PIN as verified
+     * WITHOUT checking anything.
+     * @param {string} pin
+     * @returns {Promise<boolean>}
+     */
     async unlockVault(pin) {
+        if (typeof this._unlockWithPin !== 'function') return false;
         try {
-            if (!this._sessionCryptoKey) {
-                await this._generateSessionCryptoKey();
-            }
-            this.resetPinTimer();
-            // Reuse setVault to avoid duplicating collection creation logic
-            await this.setVault(this.vaultDbReference);
-            return true;
+            const r = await this._unlockWithPin(pin, {});
+            return !!(r && r.success);
         } catch (e) {
             this.pinVerified = false;
             this.pinVerificationTime = 0;
@@ -10234,8 +10782,6 @@ class KeyManager {
 
     async lock() {
         this._destroySessionCrypto(true);
-        this.vaultMaster = null;
-        this.vaultIndividual = null;
     }
 
     isPINValid() {
@@ -10245,13 +10791,22 @@ class KeyManager {
         // "PIN expired → _destroySessionCrypto" path. In persist/ephemeral
         // mode, keys are legitimately cached and should stay alive
         // indefinitely — no PIN countdown should ever nuke them.
-        if (this._sessionManager &&
-            this._sessionManager.currentMode !== 'pin') {
+        if (this._sessionManager) {
+            if (this._sessionManager.currentMode !== 'pin') return true;
+            // v6.3: in PIN mode SessionManager owns PIN validity — it enforces
+            // a wall-clock deadline (setTimeout pauses across sleep). This
+            // class kept a second clock that could disagree with it, and the
+            // signing path read whichever cache answered first.
+            if (this._sessionManager.isLocked) {
+                this._destroySessionCrypto(true);
+                return false;
+            }
             return true;
         }
 
+        // Standalone (no SessionManager wired): passive timestamp timer.
         if (!this.pinVerified || this.pinVerificationTime <= 0) return false;
-        const timeout = this.config.PIN_TIMEOUT || 15 * 60 * 1000;
+        const timeout = this.config.PIN_TIMEOUT || 30 * 60 * 1000;   // aligned with SessionManager's default
         if ((Date.now() - this.pinVerificationTime) >= timeout) {
             // PIN expired — destroy CryptoKey and wipe all cached keys
             this._destroySessionCrypto(true);
@@ -10298,6 +10853,14 @@ class KeyManager {
         const normalizedAccount = normalizeAccount(account);
         if (!normalizedAccount) throw new KeyNotFoundError(account, type);
 
+        // ── v6.3: SessionManager is the source of truth for the current
+        // account (its lock/expiry state is authoritative). Our encrypted
+        // cache serves other accounts and legacy flows.
+        const sm = this._sessionManager;
+        if (sm && sm.currentAccount === normalizedAccount && sm.hasKeysInMemory) {
+            try { return sm.getKeyAsYOLO(type); } catch (_) { /* KEY_NOT_FOUND etc. — fall through */ }
+        }
+
         // ── Fast path: try session cache directly as bytes ──
         const sessionEntry = this.sessionKeys.get(`${normalizedAccount}_${type}`);
         if (sessionEntry) {
@@ -10332,6 +10895,15 @@ class KeyManager {
         const normalizedAccount = normalizeAccount(account);
         if (!normalizedAccount) throw new KeyNotFoundError(account, type);
 
+        // v6.3: SessionManager first for the current account (see requestKeyBuffer).
+        const sm = this._sessionManager;
+        if (sm && sm.currentAccount === normalizedAccount && sm.hasKeysInMemory) {
+            try {
+                const bytes = sm.getKey(type);
+                try { return new TextDecoder().decode(bytes); } finally { bytes.fill(0); }
+            } catch (_) { /* fall through */ }
+        }
+
         const sessionEntry = this.sessionKeys.get(`${normalizedAccount}_${type}`);
         if (sessionEntry) {
             // If PIN was used but has expired, destroy crypto and deny
@@ -10345,34 +10917,9 @@ class KeyManager {
             }
         }
 
-        if (this.vaultMaster && this.isPINValid()) {
-            try {
-                const master = await this.vaultMaster.get(normalizedAccount);
-                if (master && master.derived_keys && master.derived_keys[type]) {
-                    await this.cacheKeys(normalizedAccount, master.derived_keys);
-                    return master.derived_keys[type];
-                }
-            } catch (e) {}
-        }
-
-        if (this.vaultIndividual && this.isPINValid()) {
-            try {
-                const indKey = await this.vaultIndividual.get(`${normalizedAccount}_${type}`);
-                if (indKey && indKey.key) {
-                    const stored = await this._encryptForCache(indKey.key);
-                    this.sessionKeys.set(`${normalizedAccount}_${type}`, stored);
-                    return indKey.key;
-                }
-            } catch (e) {}
-        }
-
-        // If vault is configured but PIN has expired, request PIN unlock
+        // If the session is PIN-protected and locked, request a PIN unlock
         // instead of asking for the raw private key.
-        // FIX (v4.1): Also detect PQ vault sessions via SessionManager PIN mode.
-        // The old LacertaDB vault path sets vaultDbReference; the new PQ vault path
-        // sets SessionManager.currentMode === 'pin'. Both should trigger PIN unlock.
-        const hasPinVault = this.vaultDbReference
-            || (this._sessionManager && this._sessionManager.currentMode === 'pin');
+        const hasPinVault = !!(this._sessionManager && this._sessionManager.currentMode === 'pin');
         if (hasPinVault && !this.isPINValid()) {
             // SECURITY FIX (v3.5.2): Queue concurrent PIN requests to prevent
             // double-dialog. If a PIN prompt is already active, wait for it.
@@ -10436,30 +10983,6 @@ class KeyManager {
                             resolve(decrypted);
                             return;
                         }
-                    }
-
-                    // Fallback: try vault read directly
-                    if (this.vaultMaster && this.isPINValid()) {
-                        try {
-                            const master = await this.vaultMaster.get(normalizedAccount);
-                            if (master && master.derived_keys && master.derived_keys[type]) {
-                                await this.cacheKeys(normalizedAccount, master.derived_keys);
-                                resolve(master.derived_keys[type]);
-                                return;
-                            }
-                        } catch (e) {}
-                    }
-
-                    if (this.vaultIndividual && this.isPINValid()) {
-                        try {
-                            const indKey = await this.vaultIndividual.get(`${normalizedAccount}_${type}`);
-                            if (indKey && indKey.key) {
-                                const stored = await this._encryptForCache(indKey.key);
-                                this.sessionKeys.set(`${normalizedAccount}_${type}`, stored);
-                                resolve(indKey.key);
-                                return;
-                            }
-                        } catch (e) {}
                     }
 
                     // PIN was correct but key not found — hard failure
@@ -10550,32 +11073,15 @@ class KeyManager {
 
         const derivedKeys = {};
         for (const type of allTypes) {
-            derivedKeys[type] = PrivateKey.fromLogin(normalizedAccount, masterPassword, type).toString();
+            const pk = PrivateKey.fromLogin(normalizedAccount, masterPassword, type);
+            derivedKeys[type] = pk.toString();   // WIF strings: unavoidable at login (createSession consumes them)
+            zeroPrivateKey(pk);
         }
 
         await this.cacheKeys(normalizedAccount, derivedKeys);
 
-        // SECURITY (v4.4): Vault-only persistence. Never store plaintext keys
-        // in IndexedDB. If no vault is available, keys live only in the
-        // in-memory session cache (AES-GCM encrypted). They die with the tab.
-        if (this.vaultMaster) {
-            // Store ONLY in encrypted vault
-            try {
-                await this.vaultMaster.add(
-                    { account: normalizedAccount, derived_keys: derivedKeys, created_at: Date.now() },
-                    { id: normalizedAccount }
-                );
-            } catch (e) {
-                // Already exists — skip (don't use update — encrypted vault update can fail)
-            }
-        } else {
-            // SECURITY (v4.4): No vault → ephemeral only.
-            // Keys live in sessionKeys (AES-GCM encrypted in-memory).
-            // They die with the tab. This is the correct security posture
-            // for a session that hasn't set up persistence.
-            console.debug('[KeyManager] No vault configured — keys are ephemeral only (in-memory cache)');
-        }
-
+        // Persistence is SessionManager's job (createSession → device-wrap /
+        // PIN-seal). Here the keys live only in the AES-GCM in-memory cache.
         return derivedKeys;
     }
 
@@ -10590,22 +11096,7 @@ class KeyManager {
 
         const stored = await this._encryptForCache(key);
         this.sessionKeys.set(`${normalizedAccount}_${type}`, stored);
-
-        // SECURITY (v4.4): Vault-only persistence. If no vault is available,
-        // the key lives only in the in-memory session cache (ephemeral).
-        if (this.vaultIndividual) {
-            const id = `${normalizedAccount}_${type}`;
-            try {
-                await this.vaultIndividual.add(
-                    { account: normalizedAccount, type, key, created_at: Date.now() },
-                    { id }
-                );
-            } catch (e) {
-                // Already exists — skip
-            }
-        } else {
-            console.debug(`[KeyManager] No vault — ${type} key is ephemeral only`);
-        }
+        // Persistence is SessionManager's job (createSession). In-memory only here.
     }
 
     /**
@@ -10616,11 +11107,10 @@ class KeyManager {
      * exists for backward compatibility with v4.3 sessions and will be
      * removed in v4.5.
      *
-     * If a vault is available, keys are also migrated there before deletion.
-     *
      * @param {string} account
      * @returns {Promise<boolean>} Whether any keys were found and migrated
-     * @deprecated Will be removed in v4.5. Use vault-based storage.
+     * @deprecated Kept only to purge v4.3-era plaintext documents; the
+     *   LacertaDB-vault branches it used to have were dead code (v6.3).
      */
     async loadUnencryptedKeys(account) {
         if (!this.unencrypted) return false;
@@ -10637,17 +11127,6 @@ class KeyManager {
                 await this.cacheKeys(normalizedAccount, data.derived_keys);
                 foundAny = true;
                 docsToDelete.push(normalizedAccount);
-
-                // Migrate to vault if available
-                if (this.vaultMaster) {
-                    try {
-                        await this.vaultMaster.add(
-                            { account: normalizedAccount, derived_keys: data.derived_keys, created_at: Date.now() },
-                            { id: normalizedAccount }
-                        );
-                        console.info('[KeyManager] Migrated master keys from unencrypted → vault');
-                    } catch (_) { /* already in vault — skip (add-only to avoid TurboSerial errors on encrypted update) */ }
-                }
             }
         } catch(e) {}
 
@@ -10662,17 +11141,6 @@ class KeyManager {
                     this.sessionKeys.set(id, stored);
                     foundAny = true;
                     docsToDelete.push(id);
-
-                    // Migrate to vault if available
-                    if (this.vaultIndividual) {
-                        try {
-                            await this.vaultIndividual.add(
-                                { account: normalizedAccount, type, key: data.key, created_at: Date.now() },
-                                { id }
-                            );
-                            console.info(`[KeyManager] Migrated ${type} key from unencrypted → vault`);
-                        } catch (_) { /* already in vault — skip (add-only to avoid TurboSerial errors on encrypted update) */ }
-                    }
                 }
             } catch(e) {}
         }
@@ -10696,8 +11164,6 @@ class KeyManager {
     async clearAllSessions(clearStorage = false) {
         this._destroySessionCrypto(true);
         this.activeAccount = null;
-        this.vaultMaster = null;
-        this.vaultIndividual = null;
 
         if (clearStorage && this.unencrypted) {
             try {
@@ -10737,6 +11203,15 @@ class KeyManager {
         const normalizedAccount = normalizeAccount(account);
         if (!normalizedAccount) return null;
 
+        // v6.3: SessionManager first for the current account (see requestKeyBuffer).
+        const sm = this._sessionManager;
+        if (sm && sm.currentAccount === normalizedAccount && sm.hasKeysInMemory) {
+            try {
+                const bytes = sm.getKey(type);
+                try { return new TextDecoder().decode(bytes); } finally { bytes.fill(0); }
+            } catch (_) { /* fall through */ }
+        }
+
         // Check PIN expiry
         if (this.pinVerificationTime > 0 && !this.isPINValid()) {
             return null;
@@ -10749,29 +11224,6 @@ class KeyManager {
             if (decrypted) return decrypted;
             // Decryption failed (CryptoKey gone) — clear stale entry
             this.sessionKeys.delete(`${normalizedAccount}_${type}`);
-        }
-
-        // 2. Try vault master keys (only if PIN is still valid — no prompting)
-        if (this.vaultMaster && this.isPINValid()) {
-            try {
-                const master = await this.vaultMaster.get(normalizedAccount);
-                if (master && master.derived_keys && master.derived_keys[type]) {
-                    await this.cacheKeys(normalizedAccount, master.derived_keys);
-                    return master.derived_keys[type];
-                }
-            } catch (e) {}
-        }
-
-        // 3. Try vault individual keys
-        if (this.vaultIndividual && this.isPINValid()) {
-            try {
-                const indKey = await this.vaultIndividual.get(`${normalizedAccount}_${type}`);
-                if (indKey && indKey.key) {
-                    const stored = await this._encryptForCache(indKey.key);
-                    this.sessionKeys.set(`${normalizedAccount}_${type}`, stored);
-                    return indKey.key;
-                }
-            } catch (e) {}
         }
 
         // Key not available — return null, do NOT prompt
@@ -10790,6 +11242,12 @@ class KeyManager {
         const normalizedAccount = normalizeAccount(account);
         if (!normalizedAccount) return null;
 
+        // v6.3: SessionManager first for the current account (see requestKeyBuffer).
+        const sm = this._sessionManager;
+        if (sm && sm.currentAccount === normalizedAccount && sm.hasKeysInMemory) {
+            try { return sm.getKeyAsYOLO(type); } catch (_) { /* fall through */ }
+        }
+
         if (this.pinVerificationTime > 0 && !this.isPINValid()) {
             return null;
         }
@@ -10799,28 +11257,6 @@ class KeyManager {
             const bytes = await this._decryptFromCacheAsBytes(sessionEntry);
             if (bytes) return new YOLOBuffer(bytes);
             this.sessionKeys.delete(`${normalizedAccount}_${type}`);
-        }
-
-        // Vault fallbacks return strings — wrap in YOLOBuffer
-        if (this.vaultMaster && this.isPINValid()) {
-            try {
-                const master = await this.vaultMaster.get(normalizedAccount);
-                if (master && master.derived_keys && master.derived_keys[type]) {
-                    await this.cacheKeys(normalizedAccount, master.derived_keys);
-                    return YOLOBuffer.fromString(master.derived_keys[type]);
-                }
-            } catch (e) {}
-        }
-
-        if (this.vaultIndividual && this.isPINValid()) {
-            try {
-                const indKey = await this.vaultIndividual.get(`${normalizedAccount}_${type}`);
-                if (indKey && indKey.key) {
-                    const stored = await this._encryptForCache(indKey.key);
-                    this.sessionKeys.set(`${normalizedAccount}_${type}`, stored);
-                    return YOLOBuffer.fromString(indKey.key);
-                }
-            } catch (e) {}
         }
 
         return null;

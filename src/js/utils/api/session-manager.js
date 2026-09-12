@@ -21,7 +21,40 @@
  *     (auto-tuned) before falling back to config/constants, so auto-tune
  *     actually reaches sealing.
  *
- * @version 6.2.0
+ * v6.3 changes (key-material lifecycle):
+ *   - Every assignment to #cachedKeys goes through #setCachedKeys(), which
+ *     zeros the previous map. createSession / resume / unlockWithPin /
+ *     importKeys used to orphan the old plaintext (double-submitted unlock,
+ *     re-login) unzeroed.
+ *   - PIN auto-lock is enforced against a WALL-CLOCK deadline, not only the
+ *     setTimeout: browsers pause timers across system sleep (macOS/Linux
+ *     monotonic clocks) and in frozen tabs, so a 30-minute lock could
+ *     survive a night with the lid closed. getKeys()/isLocked check the
+ *     deadline on every access; visibilitychange/pageshow/focus re-check it;
+ *     the timer remains as the eager path. The session's own expires_at is
+ *     enforced the same way — an expired persist-mode session no longer
+ *     serves keys until reload.
+ *   - unlockWithPin THROWS SessionError('DEVICE_UNWRAP_FAILED') when the
+ *     device-key unwrap fails, instead of returning false. `false` means
+ *     "wrong PIN" to PixaProxyAPI, which records a failed attempt — an
+ *     IndexedDB hiccup could walk a legitimate user into lockout or wipe.
+ *   - All key copies are off-heap (CryptoUtils.secureCopy): V8 keeps ≤ 64-byte
+ *     typed arrays on its moving heap where fill(0) is not final.
+ *   - Legacy hex+JSON records are migrated to v2 on the first successful
+ *     resume(), so their string round-trip happens one last time instead of
+ *     on every launch. DeviceKeyManager.wrap() now REQUIRES the serializer
+ *     (symmetric with unwrap) — a missing serializer is a wiring bug, not a
+ *     reason to silently write the legacy format.
+ *   - #verifyPin uses vault.verifyPinAgainstSealed() (commitment-tag check,
+ *     no plaintext) when available; unsealKeysBytes gets the account so the
+ *     AAD is recomputed rather than trusted from the record.
+ *   - createSession stops a leftover PIN timer from a previous session (it
+ *     used to fire later and wipe the new session's keys).
+ *   - dispose(): tear down timers/listeners and zero in-memory keys without
+ *     ending the persisted session (instance replacement).
+ *   - exportKeysAsStrings() is deprecated (no caller in pixaproxyapi.js).
+ *
+ * @version 6.3.0
  * @module SessionManager
  */
 
@@ -65,36 +98,41 @@ export class DeviceKeyManager {
 
     set serializer(s) { this.#serializer = s; }
 
+    /** Whether a stored record is in the legacy v6.1 hex+JSON format. */
+    static isLegacyRecord(wrapped) {
+        return typeof wrapped?.iv === 'string';
+    }
+
     async wrap(payload) {
+        if (!this.#serializer) {
+            // v6.3: symmetric with unwrap(). The legacy JSON write path went
+            // through JSON.stringify + Array.from — an unzeroable string holding
+            // every key byte — and produced records only the legacy reader can
+            // open. A missing serializer is a wiring bug; fail loudly.
+            throw new Error('DeviceKeyManager: serializer required to wrap (inject options.serializer)');
+        }
         const key = await this.#getOrCreate();
         const iv  = CryptoUtils.getRandomBytes(12);
 
-        let pt;
-        if (this.#serializer) {
-            // v6.2: TurboSerial path — payload → bytes with NO string/number-array
-            // intermediaries, so every plaintext copy is zeroable.
-            // serialize() may return a view into an internal memory pool: copy it,
-            // then zero the view so no key bytes linger in pooled memory (and a
-            // concurrent serialize() cannot clobber our buffer mid-encrypt).
-            const raw  = this.#serializer.serialize(payload);
-            const view = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
-            pt = view.slice();
-            view.fill(0);
-        } else {
-            // Legacy JSON path (no serializer injected) — unchanged v6.1 format.
-            const serializable = DeviceKeyManager.#toJson(payload);
-            pt = new TextEncoder().encode(JSON.stringify(serializable));
-        }
+        // TurboSerial path — payload → bytes with NO string/number-array
+        // intermediaries, so every plaintext copy is zeroable.
+        // serialize() may return a view into an internal memory pool: copy it
+        // (off-heap), then zero the view so no key bytes linger in pooled
+        // memory (and a concurrent serialize() cannot clobber our buffer
+        // mid-encrypt).
+        const raw  = this.#serializer.serialize(payload);
+        const view = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+        const pt   = CryptoUtils.secureCopy(view);
+        view.fill(0);
 
-        const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, pt);
-        pt.fill(0);
-
-        if (this.#serializer) {
+        try {
+            const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, pt);
             // v2 format: raw bytes. TurboSerial/LacertaDB persist Uint8Array
             // natively — hex encoding would only double the stored size.
             return { v: 2, iv, ct: new Uint8Array(ct) };
+        } finally {
+            pt.fill(0);
         }
-        return { iv: CryptoUtils.bytesToHex(iv), ct: CryptoUtils.bytesToHex(new Uint8Array(ct)) };
     }
 
     async unwrap(wrapped) {
@@ -123,36 +161,35 @@ export class DeviceKeyManager {
         return payload;
     }
 
-    /** Copy any Uint8Array values (one level deep) so callers own their bytes. */
+    /** Copy any Uint8Array values (one level deep) into off-heap buffers so
+     *  callers own their bytes and can zero them for real. */
     static #copyBytes(obj) {
-        if (obj instanceof Uint8Array) return obj.slice();
+        if (obj instanceof Uint8Array) return CryptoUtils.secureCopy(obj);
         if (obj === null || typeof obj !== 'object') return obj;
         const out = {};
         for (const [k, v] of Object.entries(obj)) {
-            out[k] = v instanceof Uint8Array ? v.slice() : v;
+            out[k] = v instanceof Uint8Array ? CryptoUtils.secureCopy(v) : v;
         }
         return out;
     }
 
     dispose() { this.#cryptoKey = null; }
 
-    // Uint8Array ↔ JSON: tagged { __b: true, d: [...] }
-    static #toJson(obj) {
-        if (obj instanceof Uint8Array) return { __b: true, d: Array.from(obj) };
-        if (obj === null || typeof obj !== 'object') return obj;
-        const out = {};
-        for (const [k, v] of Object.entries(obj)) {
-            out[k] = v instanceof Uint8Array ? { __b: true, d: Array.from(v) } : v;
-        }
+    // Legacy v6.1 JSON → bytes: tagged { __b: true, d: [...] }. Read-only since
+    // v6.3 (wrap() no longer produces this format); resume() migrates on read.
+    static #bytesFromNumbers(arr) {
+        const tmp = Uint8Array.from(arr);           // on-heap intermediate
+        const out = CryptoUtils.secureCopy(tmp);
+        tmp.fill(0);
         return out;
     }
     static #fromJson(obj) {
         if (obj === null || typeof obj !== 'object') return obj;
-        if (obj.__b && Array.isArray(obj.d)) return new Uint8Array(obj.d);
+        if (obj.__b && Array.isArray(obj.d)) return DeviceKeyManager.#bytesFromNumbers(obj.d);
         const out = {};
         for (const [k, v] of Object.entries(obj)) {
             out[k] = (v && typeof v === 'object' && v.__b && Array.isArray(v.d))
-                ? new Uint8Array(v.d) : v;
+                ? DeviceKeyManager.#bytesFromNumbers(v.d) : v;
         }
         return out;
     }
@@ -237,14 +274,19 @@ function normalizeAccount(account) {
 }
 
 function toKeyBytes(value) {
-    if (value instanceof Uint8Array) return value;
+    // v6.3: never alias the caller's array — copy off-heap so our zeroing is
+    // ours alone and final. (TextEncoder output is already a dedicated
+    // off-heap buffer that nobody else references.)
+    if (value instanceof Uint8Array) return CryptoUtils.secureCopy(value);
     if (typeof value === 'string') return new TextEncoder().encode(value);
     throw new TypeError('Key must be string or Uint8Array');
 }
 
 function cloneKeyMap(keys) {
     const out = {};
-    for (const [t, b] of Object.entries(keys)) out[t] = b.slice();
+    for (const [t, b] of Object.entries(keys)) {
+        if (b instanceof Uint8Array) out[t] = CryptoUtils.secureCopy(b);
+    }
     return out;
 }
 
@@ -264,7 +306,11 @@ const DEFAULT_PIN_TIMEOUT  = 30 * 60 * 1000;
 const DEFAULT_MAX_LIFETIME = 30 * 24 * 60 * 60 * 1000;
 const DEFAULT_ARGON2_MEM   = 32768;
 const DEFAULT_ARGON2_ITER  = 2;
-const DEFAULT_ARGON2_PAR   = 3;
+// v6.3: was 3, contradicting SecureVault's corrected DEFAULT_PARALLELISM (1).
+// Only reached when no vault is injected (which also means no PIN sealing),
+// but a stale constant next to the real one is a trap. See the rationale on
+// DEFAULT_PARALLELISM in pq-secure-vault.js.
+const DEFAULT_ARGON2_PAR   = 1;
 
 // ═════════════════════════════════════════════════════
 // SessionManager v6.1
@@ -284,6 +330,14 @@ export class SessionManager {
      *  of the sealed blob and is nulled on unlock, so it cannot answer this. */
     #pinProtected = false;
     #pinTimer = null; #emitter = null;
+    /** @type {number} wall-clock ms at which cached keys must be locked (0 = none) */
+    #pinDeadline = 0;
+    /** @type {number} wall-clock ms at which the session itself expires (0 = none) */
+    #sessionDeadline = 0;
+    /** @type {Function|null} bound visibilitychange/pageshow/focus handler */
+    #onVisibleBound = null;
+    /** @type {boolean} re-entrancy guard for the lock path */
+    #locking = false;
 
     constructor(db, config, options = {}) {
         this.#db = db; this.#config = config;
@@ -297,8 +351,8 @@ export class SessionManager {
 
     get currentAccount()  { return this.#currentAccount; }
     get isPersistent()    { return this.#persistent; }
-    get hasKeysInMemory() { return this.#cachedKeys !== null; }
-    get isLocked()        { return this.#pinProtected && this.#cachedKeys === null; }
+    get hasKeysInMemory() { this.#enforceDeadlines(); return this.#cachedKeys !== null; }
+    get isLocked()        { this.#enforceDeadlines(); return this.#pinProtected && this.#cachedKeys === null; }
     get isPinProtected()  { return this.#pinProtected; }
     /** The vault's instance-level Argon2 params are now only the DEVICE PROFILE
      *  (what autoTuneParams measured), used to pick params for new seals. Every
@@ -323,6 +377,20 @@ export class SessionManager {
 
     async initialize(eventEmitter) {
         this.#emitter = eventEmitter;
+        // v6.3: the PIN timer is setTimeout-based and browsers pause timers
+        // across system sleep and in frozen tabs. Re-check the wall-clock
+        // deadlines whenever the page comes back; getKeys() checks them on
+        // every access too, so the timer is only the eager path.
+        const g = globalThis;
+        if (!this.#onVisibleBound && typeof g.addEventListener === 'function') {
+            this.#onVisibleBound = () => {
+                if (g.document?.visibilityState === 'hidden') return;
+                this.#enforceDeadlines();
+            };
+            g.document?.addEventListener?.('visibilitychange', this.#onVisibleBound);
+            g.addEventListener('pageshow', this.#onVisibleBound);
+            g.addEventListener('focus', this.#onVisibleBound);
+        }
         if (this.#db) {
             try { await this.#db.createCollection('sessions'); } catch {}
             try { await this.#db.createCollection('preferences'); } catch {}
@@ -349,9 +417,10 @@ export class SessionManager {
         const persistent = options.persistent !== false;
 
         if (!persistent) {
-            this.#cachedKeys = keyBytes; this.#currentAccount = norm;
+            this.#stopPinTimer();           // a previous PIN session's timer must not wipe these keys later
+            this.#setCachedKeys(keyBytes); this.#currentAccount = norm;
             this.#persistent = false; this.#sealedData = null;
-            this.#pinProtected = false;
+            this.#pinProtected = false; this.#sessionDeadline = 0;
             this.#emit(PixaEvents.Session.CREATED, { account: norm, mode: 'ephemeral', persistent: false });
             return CryptoUtils.generateId(32);
         }
@@ -409,9 +478,11 @@ export class SessionManager {
         await this.#upsert(this.#sessions, norm, record);
         await this.#upsert(this.#preferences, 'active_account', { account: norm });
 
-        this.#cachedKeys = keyBytes; this.#currentAccount = norm;
+        this.#stopPinTimer();               // see the ephemeral branch
+        this.#setCachedKeys(keyBytes); this.#currentAccount = norm;
         this.#persistent = true; this.#sealedData = null;
         this.#pinProtected = hasPin;
+        this.#sessionDeadline = Math.min(record.expires_at, record.absolute_expires_at);
         if (hasPin) this.#startPinTimer(pinTimeout);
 
         this.#emit(PixaEvents.Session.CREATED, {
@@ -469,17 +540,34 @@ export class SessionManager {
             return null;
         }
 
+        // v6.3: migrate-on-read. A legacy hex+JSON record is only readable via
+        // JSON.parse of a decoded string, i.e. every key byte passes through an
+        // unzeroable string on every launch. Re-wrap it in the v2 raw-bytes
+        // format once, so that exposure happens one last time.
+        if (DeviceKeyManager.isLegacyRecord(session.encrypted_keys)) {
+            try {
+                const rewrapped = await this.#deviceKeys.wrap(payload);
+                await this.#sessions.update(account, { encrypted_keys: rewrapped });
+            } catch (e) {
+                console.warn('[SM.resume] Legacy record migration deferred:', e?.message || e);
+            }
+        }
+
+        this.#stopPinTimer();
         this.#currentAccount = account; this.#persistent = true;
+        this.#sessionDeadline = session.absolute_expires_at
+            ? Math.min(session.expires_at, session.absolute_expires_at)
+            : session.expires_at;
 
         if (payload._pin_sealed) {
-            this.#sealedData = payload.data; this.#cachedKeys = null;
+            this.#sealedData = payload.data; this.#setCachedKeys(null);
             this.#pinProtected = true;
             this.#emit(PixaEvents.PIN.LOCKED, { account });
             return { account, locked: true, persistent: true, pinProtected: true };
         }
 
-        // payload values are Uint8Array (restored by DeviceKeyManager.#fromJson)
-        this.#cachedKeys = payload; this.#sealedData = null;
+        // payload values are off-heap Uint8Array copies (DeviceKeyManager.unwrap)
+        this.#setCachedKeys(payload); this.#sealedData = null;
         this.#pinProtected = false;
         await this.#refreshTimeout(session);
         this.#emit(PixaEvents.Session.RESUMED, { account });
@@ -490,8 +578,14 @@ export class SessionManager {
     // KEY ACCESS — Byte-level API
     // ═════════════════════════════════════════════════
 
-    /** Get all cached keys. Values are Uint8Array. Returns internal reference. */
+    /** Get all cached keys. Values are Uint8Array. Returns the INTERNAL map:
+     *  do not retain it, and never zero its values yourself — use getKey() /
+     *  getKeyAsYOLO() for copies you own. */
     getKeys() {
+        // v6.3: wall-clock enforcement on every access (the timer alone is not
+        // reliable — see the header). Locks or expires synchronously.
+        const verdict = this.#enforceDeadlines();
+        if (verdict?.expired) throw new SessionExpiredError(verdict.account);
         if (!this.#cachedKeys) {
             // Keyed off #pinProtected, not #sealedData: if the re-unwrap in
             // #onPinTimeout failed, #sealedData stays null and the UI used to
@@ -503,35 +597,45 @@ export class SessionManager {
     }
 
     /**
-     * Get a single key as a NEW Uint8Array copy.
+     * Get a single key as a NEW off-heap Uint8Array copy.
      * Caller MUST zero it after use: `result.fill(0)`.
      */
     getKey(type) {
         const keys = this.getKeys();
         const val  = keys[type];
         if (!val) throw new SessionError(`Key '${type}' not found`, 'KEY_NOT_FOUND');
-        return val.slice();
+        return CryptoUtils.secureCopy(val);
     }
 
     /**
      * Get a single key as a YOLOBuffer (auto-zeroing, one-shot).
      *
-     * Usage:
-     *   await YOLOBuffer.use(sm.getKeyAsYOLO('posting'), async (wifBytes) => {
-     *       const pk = PrivateKey.from(new TextDecoder().decode(wifBytes));
-     *       try { return await sign(pk); }
-     *       finally { pk.secret.fill(0); }
+     * The bytes are the WIF's UTF-8 encoding (see the v6 header), so the
+     * consumer still has to decode to a string for dpixa's PrivateKey. Keep
+     * the lifetime to the signature — sign inside use(), broadcast outside:
+     *
+     *   const signed = await sm.getKeyAsYOLO('posting').use((wifBytes) => {
+     *       const pk = PrivateKey.fromString(new TextDecoder().decode(wifBytes));
+     *       try { return client.broadcast.sign(tx, pk); }   // sync
+     *       finally { zeroPrivateKey(pk); }                 // dpixa keeps the raw bytes in `.secret`
      *   });
+     *   await client.broadcast.send(signed);
+     *
+     * Throws PinRequiredError / SessionExpiredError / SessionNotFoundError
+     * synchronously (before any promise), so a try/catch around the call is
+     * enough to detect a locked session.
      */
     getKeyAsYOLO(type) {
         return new YOLOBuffer(this.getKey(type));
     }
 
     /**
-     * Export keys as string WIFs for external consumers (KeyManager sync).
-     * Caller receives transient string copies.
+     * @deprecated since 6.3 — no caller in pixaproxyapi.js, and every value
+     * it returns is an unzeroable WIF string. Use getKeyAsYOLO(type) for
+     * signing and exportKeysForSealing() for re-sealing. Will be removed.
      */
     exportKeysAsStrings() {
+        console.warn('[SessionManager] exportKeysAsStrings() is deprecated — it mints unzeroable WIF strings; use getKeyAsYOLO()/exportKeysForSealing()');
         if (!this.#cachedKeys) return null;
         const out = {};
         for (const [t, b] of Object.entries(this.#cachedKeys)) {
@@ -546,11 +650,11 @@ export class SessionManager {
         return this.#cachedKeys ? cloneKeyMap(this.#cachedKeys) : null;
     }
 
-    /** Import keys. Accepts string WIFs or Uint8Array. */
+    /** Import keys. Accepts string WIFs or Uint8Array (copied, never aliased). */
     importKeys(keys) {
         const bytes = {};
         for (const [t, v] of Object.entries(keys)) { if (v) bytes[t] = toKeyBytes(v); }
-        this.#cachedKeys = bytes;
+        this.#setCachedKeys(bytes);
     }
 
     // ═════════════════════════════════════════════════
@@ -570,7 +674,15 @@ export class SessionManager {
                 const payload = await this.#deviceKeys.unwrap(session.encrypted_keys);
                 if (!payload._pin_sealed) throw new SessionError('Not PIN-protected', 'NOT_PIN');
                 sealedData = payload.data;
-            } catch (e) { if (e instanceof SessionError) throw e; return false; }
+            } catch (e) {
+                if (e instanceof SessionError) throw e;
+                // v6.3: a device-unwrap failure is NOT a wrong PIN. Returning
+                // false here made PixaProxyAPI record a failed attempt, so an
+                // IndexedDB hiccup could walk a legitimate user into lockout or
+                // the 50-attempt wipe. Throw a distinct code instead — the
+                // proxy's catch path does not count exceptions.
+                throw new SessionError('Device-key unwrap failed: ' + (e?.message || e), 'DEVICE_UNWRAP_FAILED', { cause: String(e?.message || e) });
+            }
         }
 
         const p = session.pin;
@@ -579,8 +691,10 @@ export class SessionManager {
         try {
             // unsealKeysBytes → { type: Uint8Array } — byte-level, zeroable.
             // `p` carries this record's argon2_* params; no vault mutation.
-            const keyBytes = await this.#vault.unsealKeysBytes(pin, p.salt, sealedData, p);
-            this.#cachedKeys = keyBytes; this.#sealedData = null;
+            // The account is passed so the vault recomputes the AAD instead of
+            // trusting the record's own aad_account (v6.3).
+            const keyBytes = await this.#vault.unsealKeysBytes(pin, p.salt, sealedData, p, this.#currentAccount);
+            this.#setCachedKeys(keyBytes); this.#sealedData = null;
             this.#pinProtected = true;  // unlocked ≠ no longer PIN-protected
             this.#startPinTimer(session.pin_timeout_ms ?? DEFAULT_PIN_TIMEOUT);
             await this.#refreshTimeout(session);
@@ -715,9 +829,12 @@ export class SessionManager {
     /**
      * Authoritatively verify a PIN against the stored sealed record.
      *
-     * Unseals a throwaway copy and zeroes it immediately — this is the only
-     * way to prove a PIN without persisting a separate verification hash
-     * (which would be an offline oracle sitting next to the ciphertext).
+     * v6.3: uses vault.verifyPinAgainstSealed() — the record's commitment tag
+     * BLAKE3(key ‖ nonce) proves the PIN with no plaintext produced. (A stored
+     * verify hash would be an offline oracle of exactly the same strength as
+     * that tag, so its absence never protected anything; the point of this
+     * path is that nothing gets decrypted.) Older vaults without that method
+     * fall back to unsealing a throwaway copy and zeroing it immediately.
      *
      * @param {object} session — session record (must carry .pin)
      * @param {string} pin
@@ -740,13 +857,85 @@ export class SessionManager {
 
         let probe = null;
         try {
-            probe = await this.#vault.unsealKeysBytes(pin, p.salt, sealed, p);
+            if (typeof this.#vault.verifyPinAgainstSealed === 'function') {
+                return await this.#vault.verifyPinAgainstSealed(pin, p.salt, sealed, p);
+            }
+            probe = await this.#vault.unsealKeysBytes(pin, p.salt, sealed, p, this.#currentAccount);
             return true;
         } catch {
             return false;
         } finally {
             if (probe) zeroKeyMap(probe);  // the probe copy never outlives this call
         }
+    }
+
+    /**
+     * Public form of #verifyPin for callers that must prove the PIN before a
+     * sensitive export (e.g. a "show my keys" screen). Never records attempts
+     * — the caller (PixaProxyAPI) owns the lockout counter.
+     * @param {string} pin
+     * @returns {Promise<boolean>}
+     */
+    async verifyPin(pin) {
+        if (!this.#currentAccount) return false;
+        const session = await this.#safeGet(this.#sessions, this.#currentAccount);
+        if (!session?.pin) return false;
+        return this.#verifyPin(session, pin);
+    }
+
+    /**
+     * Wall-clock enforcement of the PIN deadline and the session expiry.
+     * Called from getKeys()/isLocked/hasKeysInMemory and from the page
+     * visibility listeners. Lock and logout both clear in-memory state
+     * synchronously; only the DB writes complete in the background.
+     *
+     * @returns {{expired: true, account: string}|{locked: true}|null}
+     */
+    #enforceDeadlines() {
+        const now = Date.now();
+        if (this.#currentAccount && this.#sessionDeadline > 0 && now >= this.#sessionDeadline) {
+            const account = this.#currentAccount;
+            this.#sessionDeadline = 0;
+            this.#fullLogout()
+                .then(() => this.#emit(PixaEvents.Session.EXPIRED, { account }))
+                .catch(() => {});
+            return { expired: true, account };
+        }
+        if (this.#cachedKeys && this.#pinDeadline > 0 && now >= this.#pinDeadline) {
+            this.#stopPinTimer();
+            this.#onPinTimeout().catch(() => {});   // wipes synchronously, re-caches the sealed blob in the background
+            return { locked: true };
+        }
+        return null;
+    }
+
+    /**
+     * Every assignment to #cachedKeys goes through here so the previous
+     * plaintext map is zeroed instead of orphaned (v6.3).
+     * @param {Object<string, Uint8Array>|null} map
+     */
+    #setCachedKeys(map) {
+        if (this.#cachedKeys && this.#cachedKeys !== map) zeroKeyMap(this.#cachedKeys);
+        this.#cachedKeys = map;
+    }
+
+    /**
+     * Tear down this instance WITHOUT ending the persisted session: stop the
+     * PIN timer, remove the page listeners, zero the in-memory keys. For
+     * instance replacement (API-node switch) — the replacement instance
+     * restores the session from the DB on its own. Idempotent.
+     */
+    dispose() {
+        this.#stopPinTimer();
+        const g = globalThis;
+        if (this.#onVisibleBound) {
+            g.document?.removeEventListener?.('visibilitychange', this.#onVisibleBound);
+            g.removeEventListener?.('pageshow', this.#onVisibleBound);
+            g.removeEventListener?.('focus', this.#onVisibleBound);
+            this.#onVisibleBound = null;
+        }
+        this.#wipeCachedKeys();
+        this.#sealedData = null;
     }
 
     /**
@@ -764,6 +953,7 @@ export class SessionManager {
         this.#stopPinTimer(); this.#wipeCachedKeys();
         this.#sealedData = null; this.#currentAccount = null;
         this.#persistent = false; this.#pinProtected = false;
+        this.#sessionDeadline = 0;
         return account;
     }
 
@@ -773,29 +963,46 @@ export class SessionManager {
 
     async #refreshTimeout(session) {
         const t = session.timeout_ms ?? DEFAULT_TIMEOUT;
-        try { await this.#sessions.update(session.account, { last_active: Date.now(), expires_at: Date.now() + t }); } catch {}
+        const expires_at = Date.now() + t;
+        this.#sessionDeadline = session.absolute_expires_at
+            ? Math.min(expires_at, session.absolute_expires_at)
+            : expires_at;
+        try { await this.#sessions.update(session.account, { last_active: Date.now(), expires_at }); } catch {}
     }
 
-    #startPinTimer(ms) { this.#stopPinTimer(); this.#pinTimer = setTimeout(() => this.#onPinTimeout(), ms); }
-    #stopPinTimer() { if (this.#pinTimer !== null) { clearTimeout(this.#pinTimer); this.#pinTimer = null; } }
+    #startPinTimer(ms) {
+        this.#stopPinTimer();
+        this.#pinDeadline = Date.now() + ms;          // wall-clock truth
+        this.#pinTimer = setTimeout(() => this.#onPinTimeout(), ms); // eager path
+    }
+    #stopPinTimer() {
+        if (this.#pinTimer !== null) { clearTimeout(this.#pinTimer); this.#pinTimer = null; }
+        this.#pinDeadline = 0;
+    }
 
     async #onPinTimeout() {
-        this.#pinTimer = null;
-        this.#wipeCachedKeys();
-        if (this.#currentAccount && this.#persistent) {
-            try {
-                const s = await this.#sessions.get(this.#currentAccount);
-                if (s?.pin) {
-                    // Keep the flag true regardless: if this unwrap throws, the
-                    // sealed blob is simply not cached and unlockWithPin will
-                    // re-read it from the DB. isLocked stays correct either way.
-                    this.#pinProtected = true;
-                    const p = await this.#deviceKeys.unwrap(s.encrypted_keys);
-                    if (p._pin_sealed) this.#sealedData = p.data;
-                }
-            } catch {}
+        if (this.#locking) return;                    // timer and lazy check can race
+        this.#locking = true;
+        this.#pinTimer = null; this.#pinDeadline = 0;
+        this.#wipeCachedKeys();                       // synchronous — before the first await
+        try {
+            if (this.#currentAccount && this.#persistent) {
+                try {
+                    const s = await this.#sessions.get(this.#currentAccount);
+                    if (s?.pin) {
+                        // Keep the flag true regardless: if this unwrap throws, the
+                        // sealed blob is simply not cached and unlockWithPin will
+                        // re-read it from the DB. isLocked stays correct either way.
+                        this.#pinProtected = true;
+                        const p = await this.#deviceKeys.unwrap(s.encrypted_keys);
+                        if (p._pin_sealed) this.#sealedData = p.data;
+                    }
+                } catch {}
+            }
+            this.#emit(PixaEvents.PIN.LOCKED, { account: this.#currentAccount });
+        } finally {
+            this.#locking = false;
         }
-        this.#emit(PixaEvents.PIN.LOCKED, { account: this.#currentAccount });
     }
 
     #wipeCachedKeys() {
@@ -806,7 +1013,7 @@ export class SessionManager {
         const account = this.#currentAccount;
         this.#stopPinTimer(); this.#wipeCachedKeys();
         this.#sealedData = null; this.#currentAccount = null; this.#persistent = false;
-        this.#pinProtected = false;
+        this.#pinProtected = false; this.#sessionDeadline = 0;
         if (account && this.#sessions) await this.#sessions.delete(account).catch(() => {});
         if (this.#preferences) await this.#preferences.delete('active_account').catch(() => {});
         return account;

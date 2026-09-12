@@ -603,20 +603,20 @@ export const UTC_OFFSET_PER_COUNTRIES = {
 // (GDDisruptions, GDVMProposals) and the post editor
 // (LexicalTextEditorDialog) — reads from here, so a literal `portal-…` id
 // never lives in a component again and the files cannot drift apart.
-export const PROPOSALS_PORTAL = Object.freeze({ name: "proposals", id: "portal-000000" });
+export const PROPOSALS_PORTAL = Object.freeze({ name: "proposals", id: "portal-156480" });
 
 // The eight topical portals, in display order: the drawer's governance grid
 // and the Disruptions grid render exactly this sequence, after the
 // proposals row.
 export const COMMUNITY_PORTALS = Object.freeze([
-    Object.freeze({ name: "discussions", id: "portal-000001" }),
-    Object.freeze({ name: "governance",  id: "portal-000002" }),
-    Object.freeze({ name: "marketing",   id: "portal-000003" }),
-    Object.freeze({ name: "legal",       id: "portal-000004" }),
-    Object.freeze({ name: "risks",       id: "portal-000005" }),
-    Object.freeze({ name: "security",    id: "portal-000006" }),
-    Object.freeze({ name: "bugs",        id: "portal-000007" }),
-    Object.freeze({ name: "community",   id: "portal-000008" }),
+    Object.freeze({ name: "discussions", id: "portal-130922" }),
+    Object.freeze({ name: "governance",  id: "portal-130022" }),
+    Object.freeze({ name: "marketing",   id: "portal-157543" }),
+    Object.freeze({ name: "legal",       id: "portal-121573" }),
+    Object.freeze({ name: "risks",       id: "portal-150607" }),
+    Object.freeze({ name: "security",    id: "portal-140520" }),
+    Object.freeze({ name: "bugs",        id: "portal-118883" }),
+    Object.freeze({ name: "community",   id: "portal-171204" }),
 ]);
 
 // ── Post overlay URL helpers ──────────────────────────────────────────

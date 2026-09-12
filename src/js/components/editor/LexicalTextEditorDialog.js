@@ -96,7 +96,7 @@ const sanitizeUrl = (raw) => {
 // community matches this id, the settings panel shows the "This is a
 // proposal" checkbox and the proposal-config fields.
 // Replace with the real on-chain community id once minted.
-const PROPOSAL_COMMUNITY_ID = "portal-183616";
+const PROPOSAL_COMMUNITY_ID = "portal-156480";
 
 // Default proposal timing: starts 3 days from now (giving the chain time
 // to confirm), runs for 30 days by default.

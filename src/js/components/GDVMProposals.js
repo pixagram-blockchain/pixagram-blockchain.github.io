@@ -621,6 +621,13 @@ const styles = theme => ({
 const _fmtDate = (d) =>
     d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
+// Amount of a legacy asset string ("245554.228 PXS" → 245554.228); 0 when the
+// value is missing or malformed. Shared by mapProposal and the treasury read.
+const assetAmount = (asset) => {
+    const n = parseFloat(String(asset == null ? '' : asset).split(' ')[0]);
+    return Number.isFinite(n) ? n : 0;
+};
+
 const mapProposal = (p) => {
     const start = new Date(String(p.start_date || '').replace(/Z?$/, 'Z'));
     const end = new Date(String(p.end_date || '').replace(/Z?$/, 'Z'));
@@ -631,8 +638,9 @@ const mapProposal = (p) => {
     const daysRemaining = Math.max(0, Math.round((end - now) / msPerDay));
     const daysElapsed = Math.max(0, durationDays - daysRemaining);
 
-    // daily_pay is NAI-form: { amount: "4800", precision: 3, nai: "@@..." }
-    const dp = parseFloat(String(p.daily_pay || "0.000 PXS").split(" ")[0]);
+    // daily_pay arrives as a legacy asset string from condenser_api.list_proposals
+    // ("1000.000 PXS" on api.pixagram.com), never as an NAI object.
+    const dp = assetAmount(p.daily_pay);
     const precision = 3;
     const dailyPay = dp.toFixed(precision);
 
@@ -860,8 +868,8 @@ const ProposalCard = ({
                             <span className={classes.proposalFundingFiat}>≈ {headerFiat}</span>
                         ) : null}
                         <span className={classes.proposalDaily}>{t("components.gdvmproposals.daily_pxs", {
-                                round: Math.round(proposal.dailyPay)
-                            })}</span>
+                            round: Math.round(proposal.dailyPay)
+                        })}</span>
                     </div>
                 </div>
                 <div className={classes.proposalVoteInfo}>
@@ -896,8 +904,8 @@ const ProposalCard = ({
                                     style={{ cursor: "pointer" }}
                                     onClick={(e) => goAuthor(e, proposal.receiver)}
                                 >{t("words.for_receiver", {
-                                        receiver: proposal.receiver
-                                    })}</span>
+                                    receiver: proposal.receiver
+                                })}</span>
                             )}
                         </div>
                     </div>
@@ -963,20 +971,61 @@ const ProposalCard = ({
 };
 
 // ──────────────────────────────────────────────────────────────
-// DpfStatsBox — DAO treasury summary + Create CTA. Placeholder figures
-// until the live DPF read lands; each shows its FIAT equivalent.
+// DpfStatsBox — DAO treasury summary + Create CTA, fed by the live DPF
+// read done in GDVMProposals._loadData (Branch C + computeDpfStats).
+// `dpf` is null until that read lands, or when it failed, in which case
+// the figures show a dash. Each figure carries its FIAT equivalent.
 // ──────────────────────────────────────────────────────────────
-const DPF_DAILY_FUNDED = 97100;
-const DPF_DAILY_BUDGET = 250000;
-const DPF_TOTAL_BUDGET = 51300000;
 
-const DpfStatsBox = ({ classes, fiatFor, onCreate }) => {
-    const dpfStat = (label, pxsText, amount) => {
-        const fiat = fiatFor ? fiatFor(amount) : null;
+// The DPF treasury account. Neither pixaproxyapi nor dpixa expose it; the
+// chain names it in every hourly `dhf_funding` virtual op and in the
+// `proposal_fee` op ({ treasury: "pixa.omnibus" }). Move it next to
+// PROPOSALS_PORTAL in utils/constants once another dialog needs it.
+const DPF_TREASURY_ACCOUNT = 'pixa.omnibus';
+
+// The chain releases 1/100 of the treasury's PXS balance per day, spread over
+// the hourly maintenance periods (dhf_processor's total_amount_divider).
+const DPF_DAILY_BUDGET_DIVIDER = 100;
+
+// Stats-box figure: "PXS 245.6K" / "PXS 2.5K" / "PXS 51.3M" / "PXS 812".
+const fmtPXSStat = (amount) => {
+    const a = Number(amount) || 0;
+    if (a >= 1e6) return `PXS ${(a / 1e6).toFixed(1)}M`;
+    if (a >= 1e3) return `PXS ${(a / 1e3).toFixed(1)}K`;
+    return `PXS ${Math.round(a)}`;
+};
+
+// Mirror of the chain's payout pass (dhf_processor::calculate_payments):
+// active proposals are paid in total_votes order while the daily budget
+// lasts, each receiving min(daily_pay, remaining). The return proposal
+// (id 0) absorbs whatever is left, so the walk stops there. `ordered` is
+// the mapped list_proposals result in by_total_votes/descending order;
+// `treasuryPxs` is the treasury's PXS balance, or null when unavailable.
+const computeDpfStats = (ordered, treasuryPxs) => {
+    if (!Number.isFinite(treasuryPxs)) return null;
+    const totalBudget = treasuryPxs;
+    const dailyBudget = totalBudget / DPF_DAILY_BUDGET_DIVIDER;
+    let remaining = dailyBudget;
+    let dailyFunded = 0;
+    for (const p of ordered) {
+        if (p.id === 0) break;
+        if (p.status !== 'active') continue;
+        if (remaining <= 0) break;
+        const pay = Math.min(Number(p.dailyPay) || 0, remaining);
+        dailyFunded += pay;
+        remaining -= pay;
+    }
+    return { totalBudget, dailyBudget, dailyFunded };
+};
+
+const DpfStatsBox = ({ classes, dpf, fiatFor, onCreate }) => {
+    const dpfStat = (label, amount) => {
+        const live = Number.isFinite(amount);
+        const fiat = (live && fiatFor) ? fiatFor(amount) : null;
         return (
             <div className={classes.dpfStatItem}>
                 <div className={classes.dpfStatLabel}>{label}</div>
-                <div className={classes.dpfStatValue}>{pxsText}</div>
+                <div className={classes.dpfStatValue}>{live ? fmtPXSStat(amount) : '—'}</div>
                 {fiat ? <div className={classes.dpfStatFiat}>≈ {fiat}</div> : null}
             </div>
         );
@@ -1001,9 +1050,9 @@ const DpfStatsBox = ({ classes, fiatFor, onCreate }) => {
                 </span>
             </div>
             <div className={classes.dpfStatsGrid}>
-                {dpfStat("Daily Funded", "PXS 97.1K", DPF_DAILY_FUNDED)}
-                {dpfStat("Daily Budget", "PXS 250.0K", DPF_DAILY_BUDGET)}
-                {dpfStat("Total Budget", "PXS 51.3M", DPF_TOTAL_BUDGET)}
+                {dpfStat("Daily Funded", dpf ? dpf.dailyFunded : null)}
+                {dpfStat("Daily Budget", dpf ? dpf.dailyBudget : null)}
+                {dpfStat("Total Budget", dpf ? dpf.totalBudget : null)}
             </div>
             <Button
                 className={classes.createProposalButton}
@@ -1069,7 +1118,7 @@ const renderEmptyState = (classes, onCreate) => (
 // conversion fed to every card and the treasury box.
 // ──────────────────────────────────────────────────────────────
 const ProposalsBody = ({
-                           classes, api, loading, active, pending, returnProposal,
+                           classes, api, loading, active, pending, returnProposal, dpf,
                            myVotes, currentAccount, avatars, expandedId,
                            onExpandChange, onToggleVote, onCreate
                        }) => {
@@ -1102,7 +1151,7 @@ const ProposalsBody = ({
 
     return (
         <>
-            <DpfStatsBox classes={classes} fiatFor={fiatFor} onCreate={onCreate} />
+            <DpfStatsBox classes={classes} dpf={dpf} fiatFor={fiatFor} onCreate={onCreate} />
             {loading ? (
                 renderLoadingSkeleton(classes)
             ) : !hasAny ? (
@@ -1142,6 +1191,7 @@ class GDVMProposals extends React.PureComponent {
             _active: [],
             _pending: [],
             _returnProposal: null,
+            _dpf: null,              // { totalBudget, dailyBudget, dailyFunded } once the treasury read lands
             _avatars: {},            // { accountName: imageUrl }
             _myVotes: new Set(),     // proposal ids voted for by current user
             _currentAccount: null,
@@ -1174,14 +1224,15 @@ class GDVMProposals extends React.PureComponent {
             null;
 
         try {
-            // Chain A (proposals → author/receiver avatars) and Branch B (the
-            // current user's proposal votes) are independent: B needs only
-            // `currentAccount`, resolved synchronously above. They were previously
-            // awaited back-to-back; now they run concurrently, so latency drops
-            // from (A + B) to max(A, B). Branch B can be several paginated
-            // round-trips for a heavy voter, so it was the bigger tail. Per-branch
-            // error handling is unchanged: only Chain A's root read (listProposals)
-            // can hard-fail the panel via the outer catch.
+            // Chain A (proposals → author/receiver avatars), Branch B (the
+            // current user's proposal votes) and Branch C (the DPF treasury
+            // balance) are independent: B needs only `currentAccount`, resolved
+            // synchronously above, and C needs nothing. They run concurrently,
+            // so latency is max(A, B, C) rather than the sum. Branch B can be
+            // several paginated round-trips for a heavy voter, so it is the
+            // bigger tail. Per-branch error handling: only Chain A's root read
+            // (listProposals) can hard-fail the panel via the outer catch; a
+            // failed Branch C just leaves the treasury figures dashed.
 
             // ── Chain A: all proposals → split → author/receiver avatars ────────
             const proposalsAndAvatars = (async () => {
@@ -1221,7 +1272,9 @@ class GDVMProposals extends React.PureComponent {
                         }
                     }
                 }
-                return { active, pending, returnProposal, avatars };
+                // `ordered` keeps the by_total_votes/descending order the payout
+                // pass in computeDpfStats depends on.
+                return { active, pending, returnProposal, avatars, ordered: mapped };
             })();
 
             // ── Branch B: current user's proposal votes (independent, paginated) ─
@@ -1283,9 +1336,25 @@ class GDVMProposals extends React.PureComponent {
                 return myVotes;
             })();
 
-            const [{ active, pending, returnProposal, avatars }, myVotes] = await Promise.all([
+            // ── Branch C: DPF treasury PXS balance (independent) ─────────────────
+            const treasuryPromise = (async () => {
+                if (typeof api.accounts.getAccounts !== 'function') return null;
+                try {
+                    // Sanitized account entity; pxs_balance is a display-symbol
+                    // asset string ("245554.228 PXS"). getAccounts returns [] on
+                    // its own failures, which lands here as `undefined` → null.
+                    const [treasury] = await api.accounts.getAccounts([DPF_TREASURY_ACCOUNT]);
+                    return treasury ? assetAmount(treasury.pxs_balance) : null;
+                } catch (e) {
+                    console.warn('[GDVMProposals] treasury getAccounts failed:', e?.message);
+                    return null;
+                }
+            })();
+
+            const [{ active, pending, returnProposal, avatars, ordered }, myVotes, treasuryPxs] = await Promise.all([
                 proposalsAndAvatars,
                 myVotesPromise,
+                treasuryPromise,
             ]);
 
             if (!this._mounted) return;
@@ -1294,6 +1363,7 @@ class GDVMProposals extends React.PureComponent {
                 _active: active,
                 _pending: pending,
                 _returnProposal: returnProposal,
+                _dpf: computeDpfStats(ordered, treasuryPxs),
                 _avatars: avatars,
                 _myVotes: myVotes,
                 _currentAccount: currentAccount
@@ -1338,7 +1408,7 @@ class GDVMProposals extends React.PureComponent {
     render() {
         const { classes, api } = this.props;
         const {
-            _loading, _active, _pending, _returnProposal,
+            _loading, _active, _pending, _returnProposal, _dpf,
             _myVotes, _currentAccount, _avatars, _expandedId
         } = this.state;
 
@@ -1351,6 +1421,7 @@ class GDVMProposals extends React.PureComponent {
                     active={_active}
                     pending={_pending}
                     returnProposal={_returnProposal}
+                    dpf={_dpf}
                     myVotes={_myVotes}
                     currentAccount={_currentAccount}
                     avatars={_avatars}

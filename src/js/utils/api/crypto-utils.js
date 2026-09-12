@@ -7,7 +7,13 @@
  *
  * All methods are static — no instantiation needed.
  *
- * @version 1.0.0
+ * v1.1.0:
+ *   - secureAlloc() / secureCopy(): buffers for key material are allocated
+ *     with an explicit ArrayBuffer so their backing store is off the JS
+ *     engine's moving heap (see secureAlloc for the why). getRandomBytes()
+ *     uses it, so YOLOBuffer.random() and friends are off-heap from byte 0.
+ *
+ * @version 1.1.0
  * @module CryptoUtils
  */
 
@@ -16,6 +22,64 @@ export class CryptoUtils {
     /** @private — prevent instantiation of static utility class */
     constructor() {
         throw new TypeError('CryptoUtils is a static class and cannot be instantiated');
+    }
+
+    // ── Secret-safe allocation ──────────────────────
+
+    /**
+     * Allocate a Uint8Array whose backing store lives OUTSIDE the engine's
+     * moving heap.
+     *
+     * V8 allocates typed arrays of ≤ 64 bytes (--typed_array_max_size_in_heap)
+     * inside its managed heap ("on-heap typed arrays"). A 32-byte key or a
+     * 51-byte WIF created with `new Uint8Array(n)`, `.slice()`, or by most
+     * libraries lives there, which defeats zeroing in two ways:
+     *   - the GC moves such objects (scavenge, compaction) and leaves unzeroed
+     *     copies behind in the space it evacuated;
+     *   - reading `.buffer` on one materialises an off-heap backing store by
+     *     memcpy and abandons the on-heap original without zeroing it.
+     * `.fill(0)` only ever reaches the copy that is live at that moment.
+     * SpiderMonkey has an analogous inline/nursery-storage optimisation.
+     *
+     * Constructing the ArrayBuffer explicitly forces an off-heap backing store
+     * from the first byte: the memory never moves, so `.fill(0)` is final.
+     * Use this for every buffer that will hold key material. Ordinary buffers
+     * (IVs, salts, ciphertext, ids) don't need it.
+     *
+     * Web-API outputs (TextEncoder.encode, SubtleCrypto results) already come
+     * with an explicit ArrayBuffer and are off-heap; JS-created arrays are not.
+     *
+     * @param {number} length — Byte length (≥ 0)
+     * @returns {Uint8Array} Zero-filled, off-heap
+     * @throws {RangeError} If length is not a non-negative integer
+     */
+    static secureAlloc(length) {
+        if (!Number.isInteger(length) || length < 0) {
+            throw new RangeError(`secureAlloc: length must be a non-negative integer (got ${length})`);
+        }
+        return new Uint8Array(new ArrayBuffer(length));
+    }
+
+    /**
+     * Copy bytes into a fresh off-heap buffer (see secureAlloc).
+     *
+     * Does NOT zero the source: the caller decides whether it owns it.
+     * The idiom for a source you own is
+     *   `const own = CryptoUtils.secureCopy(src); src.fill(0);`
+     * — note that `src.fill(0)` must come AFTER the copy and must not be
+     * preceded by any access to `src.buffer` (see secureAlloc).
+     *
+     * @param {Uint8Array} src
+     * @returns {Uint8Array} Off-heap copy of `src`
+     * @throws {TypeError} If src is not a Uint8Array
+     */
+    static secureCopy(src) {
+        if (!(src instanceof Uint8Array)) {
+            throw new TypeError('secureCopy requires a Uint8Array');
+        }
+        const out = CryptoUtils.secureAlloc(src.byteLength);
+        out.set(src);
+        return out;
     }
 
     // ── Random bytes ────────────────────────────────
@@ -28,6 +92,10 @@ export class CryptoUtils {
      * so `require` is not defined and the "fallback" threw ReferenceError
      * instead of degrading. Failing loudly is the only honest option —
      * silently returning weak or empty bytes here would be catastrophic.
+     *
+     * The output is allocated off-heap (secureAlloc) so callers that use it
+     * as key material can zero it reliably; for IVs and salts that costs
+     * nothing measurable.
      *
      * @param {number} length — Number of random bytes to generate
      * @returns {Uint8Array} Random bytes
@@ -47,7 +115,7 @@ export class CryptoUtils {
             );
         }
 
-        const out = new Uint8Array(length);
+        const out = CryptoUtils.secureAlloc(length);
 
         // getRandomValues throws QuotaExceededError above 65 536 bytes per call.
         const MAX_PER_CALL = 65_536;
@@ -62,6 +130,9 @@ export class CryptoUtils {
 
     /**
      * Encode a byte array to a lowercase hex string.
+     *
+     * Not for key material: the result is an immutable JS string that can
+     * never be zeroed.
      *
      * @param {Uint8Array} bytes — Bytes to encode
      * @returns {string} Hex-encoded string

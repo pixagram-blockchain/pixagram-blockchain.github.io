@@ -36,13 +36,13 @@ const styles = theme => ({
         textAlign: "center",
         pointerEvents: "none",
         "& h3": {
-            fontSize: "3rem",
+            fontSize: "2.1rem",
             fontWeight: 400,
             margin: 0,
             lineHeight: 1,
             filter: "drop-shadow(0px 0px 32px white)",
             [theme.breakpoints.down("sm")]: {
-                fontSize: "2.4rem",
+                fontSize: "1.6rem",
             },
         },
         "& span": {
@@ -65,6 +65,8 @@ const styles = theme => ({
     // hijack a nested <span>, so the monospace signed amount rides in a <b>.
     centerSecondary: {
         fontSize: "0.85rem",
+        display: "flow",
+        marginTop: "12px",
         fontWeight: 400,
         color: "#999",
         margin: "8px 0 0 0",

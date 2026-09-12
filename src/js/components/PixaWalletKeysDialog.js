@@ -24,6 +24,7 @@ import Tooltip from "@material-ui/core/Tooltip";
 import FileCopyOutlined from "@material-ui/icons/FileCopyOutlined";
 import InfoOutlined from "@material-ui/icons/InfoOutlined";
 import LockOpenRounded from "@material-ui/icons/LockOpenRounded";
+import LockRounded from "@material-ui/icons/LockRounded";
 import ChipInput from "./ChipInput";
 import SeedPhraseMenu from "./SeedPhraseMenu";
 import SeedPlus from "../icons/SeedPlus";
@@ -47,6 +48,33 @@ import * as actions from "../actions/utils";
 import { withLanguage } from "../utils/withLanguage";
 /** How long a private key is allowed to sit on the clipboard. */
 const CLIPBOARD_CLEAR_MS = 30000;
+
+/**
+ * v4.6 proxy contract for private keys (PixaProxyAPI#getWalletKeys):
+ *   - `requestPrivate` defaults to FALSE; this dialog is the one caller that
+ *     opts in.
+ *   - On a PIN-protected session the export needs `{ pin }`, verified against
+ *     the sealed record (no plaintext produced) before anything is returned;
+ *     a wrong PIN counts as a failed attempt and PIN_LOCKED carries
+ *     data.remainingSec.
+ * So the keys tab shows public keys immediately and gates the private ones
+ * behind a PIN field — the same fresh-confirmation a wallet asks for before
+ * exporting a key, even while the session itself is unlocked. The PIN is
+ * held in state only until the call returns.
+ *
+ * i18n keys under components.pixa_wallet_keys_dialog (added to every locale;
+ * English source shown — `{{seconds}}` is the locale interpolation syntax):
+ *   pin_gate_title            "Confirm your PIN to reveal your private keys"
+ *   pin_gate_hint             "Public keys are always shown. Private keys stay hidden until you confirm your PIN."
+ *   pin_label                 "PIN"
+ *   pin_reveal_button         "Reveal keys"
+ *   pin_incorrect             "Incorrect PIN"
+ *   pin_locked_retry          "Too many failed attempts. Try again in {{seconds}}s."
+ *   could_not_load_keys       "Your keys could not be loaded. Try again or log in again."
+ *   hidden_confirm_pin        "Hidden — confirm your PIN to reveal"
+ *   confirm_pin_to_reveal     "Confirm your PIN to reveal this key"
+ */
+const EMPTY_KEYS = Object.freeze({ posting: "", active: "", owner: "", memo: "" });
 
 const styles = (theme) => ({
     content: { padding: "16px 24px" },
@@ -173,6 +201,20 @@ const styles = (theme) => ({
         color: "#888",
         "&:hover": { color: "#fff" },
     },
+    pinGate: {
+        backgroundColor: "#101010", borderRadius: "21px", padding: "16px", marginBottom: "24px",
+        display: "flex", flexWrap: "wrap", alignItems: "center", gap: "12px 16px",
+    },
+    pinGateText: { flex: "1 1 260px", minWidth: 0 },
+    pinGateTitle: { color: "#fff", fontSize: "14px", fontWeight: 600, marginBottom: "4px", display: "flex", alignItems: "center", gap: "8px" },
+    pinGateHint: { color: "#9b9b9b", fontSize: "13px", lineHeight: "1.5" },
+    pinGateForm: { flex: "0 1 320px", display: "flex", alignItems: "flex-start", gap: "8px" },
+    pinGateInput: {
+        flex: 1,
+        "& .MuiOutlinedInput-root": { backgroundColor: "#111" },
+        "& .MuiOutlinedInput-input": { fontFamily: "monospace", letterSpacing: "0.2em" },
+    },
+    pinGateError: { color: "#f28b82", fontSize: "12px", marginTop: "6px" },
     recoveryPopper: { backgroundColor: "#242424ff !important" },
     recoveryWarning: {
         backgroundColor: "#1c1c1c",
@@ -239,7 +281,7 @@ const TAB_CONFIG = [
 // ─────────────────────────────────────────────────────────────────────────────
 // Key Section — supports "unknown" state with Reveal button
 // ─────────────────────────────────────────────────────────────────────────────
-const KeySection = memo(function KeySection({ classes, keyType, keyValue, publicKeyValue, isAvailable, isVisible, onToggleVisibility, onCopyKey, onRevealKey, isOwnProfile }) {
+const KeySection = memo(function KeySection({ classes, keyType, keyValue, publicKeyValue, isAvailable, isLocked, isVisible, onToggleVisibility, onCopyKey, onRevealKey, isOwnProfile }) {
     useLanguage();
     const config = KEY_CONFIG[keyType];
     const handleToggle = React.useCallback(() => onToggleVisibility(keyType), [keyType, onToggleVisibility]);
@@ -248,6 +290,17 @@ const KeySection = memo(function KeySection({ classes, keyType, keyValue, public
     const handleReveal = React.useCallback(() => onRevealKey(keyType), [keyType, onRevealKey]);
 
     const endAdornment = useMemo(() => {
+        if (isLocked) {
+            // Private keys are gated behind the PIN field above the list —
+            // the lock just takes the user there.
+            return (
+                <InputAdornment position="end" className={classes.inputEndAdornment}>
+                    <Tooltip title={t("components.pixa_wallet_keys_dialog.confirm_pin_to_reveal")}>
+                        <IconButton edge="end" onClick={handleReveal}><LockRounded /></IconButton>
+                    </Tooltip>
+                </InputAdornment>
+            );
+        }
         if (!isAvailable) {
             return (
                 <InputAdornment position="end" className={classes.inputEndAdornment}>
@@ -263,7 +316,7 @@ const KeySection = memo(function KeySection({ classes, keyType, keyValue, public
                 <Tooltip title={isVisible ? t("components.pixa_wallet_keys_dialog.hide_key") : t("components.pixa_wallet_keys_dialog.reveal_key")}><IconButton edge="end" onClick={handleToggle}>{isVisible ? <Visibility /> : <VisibilityOff />}</IconButton></Tooltip>
             </InputAdornment>
         );
-    }, [classes, isAvailable, isVisible, handleToggle, handleCopy, handleReveal]);
+    }, [classes, isAvailable, isLocked, isVisible, handleToggle, handleCopy, handleReveal]);
 
     const publicKeyEndAdornment = useMemo(() => (
         <InputAdornment position="end" className={classes.inputEndAdornment}>
@@ -279,10 +332,11 @@ const KeySection = memo(function KeySection({ classes, keyType, keyValue, public
     ), [classes, config]);
 
     const displayValue = useMemo(() => {
+        if (isLocked) return t("components.pixa_wallet_keys_dialog.hidden_confirm_pin");
         if (!isAvailable) return t("components.pixa_wallet_keys_dialog.unknown_not_in_current_session");
         if (!isVisible) return "••••••••••••••••••••••••••••••••••••••••••••••••••••";
         return keyValue;
-    }, [keyValue, isAvailable, isVisible]);
+    }, [keyValue, isAvailable, isLocked, isVisible]);
 
     return (
         <div className={classes.keySection}>
@@ -295,8 +349,8 @@ const KeySection = memo(function KeySection({ classes, keyType, keyValue, public
                     {config.descriptionKeys.map((desc, idx) => <Typography key={idx} className={classes.keyDescription} component="p">{t("components.pixa_wallet_keys_dialog." + desc)}</Typography>)}
                     {isOwnProfile !== false && <FormControl fullWidth variant="outlined" className={classes.keyInput}>
                         <InputLabel htmlFor={`key-input-${keyType}`}>{t("components.pixa_wallet_keys_dialog.private", {
-                                title: config.title
-                            })}</InputLabel>
+                            title: config.title
+                        })}</InputLabel>
                         <OutlinedInput
                             id={`key-input-${keyType}`}
                             type="text"
@@ -304,21 +358,21 @@ const KeySection = memo(function KeySection({ classes, keyType, keyValue, public
                             readOnly
                             endAdornment={endAdornment}
                             labelWidth={keyType === "posting" ? 120 : keyType === "active" ? 110 : keyType === "owner" ? 110 : 105}
-                            style={!isAvailable ? { opacity: 0.5, fontStyle: "italic" } : undefined}
+                            style={(isLocked || !isAvailable) ? { opacity: 0.5, fontStyle: "italic" } : undefined}
                         />
                     </FormControl>}
                     <FormControl fullWidth variant="outlined" className={classes.publicKeyInput}>
                         <InputLabel htmlFor={`public-key-input-${keyType}`}>{t("components.pixa_wallet_keys_dialog.public", {
-                                title: config.title
-                            })}</InputLabel>
+                            title: config.title
+                        })}</InputLabel>
                         <OutlinedInput disabled={true} id={`public-key-input-${keyType}`} type="text" value={publicKeyValue || t("components.pixa_wallet_keys_dialog.not_available")} readOnly endAdornment={publicKeyEndAdornment} labelWidth={keyType === "posting" ? 115 : keyType === "active" ? 105 : keyType === "owner" ? 105 : 100} />
                     </FormControl>
                 </div>
                 <div className={classes.keySectionRight}>
                     <div className={classes.permissionsTitle}><KeyIcon />{config.title}</div>
                     <Typography className={classes.permissionsSubtitle}>{t("components.pixa_wallet_keys_dialog.use_your_to", {
-                            title: config.title
-                        })}</Typography>
+                        title: config.title
+                    })}</Typography>
                     <ul className={classes.permissionsList}>{config.permissionKeys.map((p, i) => <li key={i}>{t("components.pixa_wallet_keys_dialog." + p)}</li>)}</ul>
                 </div>
             </div>
@@ -336,15 +390,23 @@ class PixaWalletKeysDialog extends React.PureComponent {
             classes: props.classes, keepMounted: props.keepMounted || false, open: props.open,
             _tab_value: 0,
             username: (props.account || {}).username || (props.account || {}).name || props.username || "",
-            keys: { posting: "", active: "", owner: "", memo: "" },
-            publicKeys: { posting: "", active: "", owner: "", memo: "" },
+            keys: { ...EMPTY_KEYS },
+            publicKeys: { ...EMPTY_KEYS },
             _keyVisibility: { posting: false, active: false, owner: false, memo: false },
+            // ── PIN gate (see header) ────────────────────────────────────
+            // _pinRequired: the session is PIN-protected → private keys need
+            //   a fresh PIN confirmation each time the dialog opens.
+            // _pinVerified: confirmed for this opening; reset on close.
+            // _pin lives in state only between keystrokes and the call.
+            _pinRequired: false, _pinVerified: false, _pin: "", _pinError: "", _pinBusy: false,
             _seed: [], _seed_menu_anchor: null,
             _seed_word_input: "", _seed_word_suggestion: [],
             _password: "", _showPassword: true,
             _backdropOpened: false, _downloaded: false, _applying: false,
             _newPublicKeys: { owner: "", active: "", posting: "", memo: "" },
-            _newPrivateKeys: { owner: "", active: "", posting: "", memo: "" },
+            // (_newPrivateKeys removed: generatePDF's private half was stored
+            // here and never read — the PDF is the backup, the state was a
+            // second copy of four fresh private keys for nothing.)
             // Single-step backup acknowledgement (matches CreateAccountDialog's
             // "you must download before continuing" pattern). User must (a) click
             // the DOWNLOAD button — which sets _downloaded — and (b) tick the
@@ -371,26 +433,97 @@ class PixaWalletKeysDialog extends React.PureComponent {
         };
         this._recoverySearchTimer = null;
         this._recoveryProfileCache = {};
+        this._pinInputRef = React.createRef();
     }
 
     componentDidMount() { window.addEventListener("resize", this._computeSize); this._load_keys(); this._load_recovery(); }
 
     /**
-     * Silently load keys via getWalletKeys.
-     * Only returns keys already in session/vault cache — never prompts.
+     * Load the PUBLIC keys (chain data, never prompts), then decide how the
+     * private ones are obtained:
+     *   - not our own profile → public keys only;
+     *   - PIN-protected session → show the PIN gate, wait for the user;
+     *   - otherwise → export silently (the WIF login was the credential).
      */
     _load_keys = async () => {
         const { api, account } = this.props;
         const username = (account || {}).username || (account || {}).name || this.state.username;
         if (!username || !api) return;
         try {
-            const result = await api.getWalletKeys(username);
+            const result = await api.getWalletKeys(username, { requestPrivate: false });
+            const isOwn = this.state._isOwnProfile;
+            let pinRequired = false;
+            if (isOwn) {
+                try {
+                    // Only meaningful for the session's own account.
+                    const sessionAccount = api.sessionManager?.currentAccount;   // normalized (lowercase)
+                    const mine = !sessionAccount || sessionAccount === String(username).trim().toLowerCase();
+                    pinRequired = mine && (await api.isPinEnabled?.()) === true;
+                } catch (_) { pinRequired = false; }
+            }
             this.setState({
-                keys: { ...this.state.keys, ...result.privateKeys },
+                keys: { ...EMPTY_KEYS },
                 publicKeys: { ...this.state.publicKeys, ...result.publicKeys },
                 username,
-            }, () => this.forceUpdate());
+                _pinRequired: pinRequired, _pinVerified: false, _pin: "", _pinError: "", _pinBusy: false,
+            }, () => {
+                this.forceUpdate();
+                // Private keys only while the dialog is actually open — a
+                // mounted-but-closed dialog must not hold them.
+                if (isOwn && !pinRequired && this.state.open) this._load_private_keys(null);
+            });
         } catch (e) { console.warn('[PixaWalletKeysDialog] _load_keys error:', e); }
+    };
+
+    /**
+     * Export the private keys that are in the session. With a PIN: a locked
+     * session is unlocked first (unlockWithPin enforces the lockout and syncs
+     * the keys), then getWalletKeys re-verifies the PIN before exporting.
+     * Both paths count a wrong PIN as a failed attempt.
+     *
+     * @param {string|null} pin — null for sessions without a PIN
+     */
+    _load_private_keys = async (pin) => {
+        const { api } = this.props;
+        const { username } = this.state;
+        if (!api || !username) return;
+        this.setState({ _pinBusy: true, _pinError: "" }, () => this.forceUpdate());
+        try {
+            if (pin != null && api.sessionManager?.isLocked) {
+                const r = await api.unlockWithPin(pin, { account: username });
+                if (!r || !r.success) { this._setPinError(r || {}); return; }
+            }
+            const result = await api.getWalletKeys(username, pin != null ? { requestPrivate: true, pin } : { requestPrivate: true });
+            this.setState({
+                keys: { ...EMPTY_KEYS, ...result.privateKeys },
+                publicKeys: { ...this.state.publicKeys, ...result.publicKeys },
+                _pinVerified: true, _pin: "", _pinError: "", _pinBusy: false,
+            }, () => this.forceUpdate());
+        } catch (e) {
+            this._setPinError(e);
+        }
+    };
+
+    _setPinError = (err) => {
+        const code = err && err.code;
+        const remaining = (err && err.data && err.data.remainingSec) ?? (err && err.remainingSec);
+        let message;
+        if (code === 'PIN_LOCKED') message = t("components.pixa_wallet_keys_dialog.pin_locked_retry", { seconds: remaining ?? '?' });
+        else if (code === 'PIN_REQUIRED' || code === 'AUTH_FAILED') message = t("components.pixa_wallet_keys_dialog.pin_incorrect");
+        else { console.warn('[PixaWalletKeysDialog] private key export failed:', err); message = t("components.pixa_wallet_keys_dialog.could_not_load_keys"); }
+        this.setState({ _pinError: message, _pin: "", _pinBusy: false }, () => this.forceUpdate());
+    };
+
+    _onPinChange = (e) => { this.setState({ _pin: e.target.value.toString(), _pinError: "" }, () => this.forceUpdate()); };
+    _onPinKeyDown = (e) => { if (e.key === 'Enter') { e.preventDefault(); this._submitPin(); } };
+    _submitPin = () => {
+        const { _pin, _pinBusy } = this.state;
+        if (_pinBusy || !_pin) return;
+        this._load_private_keys(_pin);
+    };
+    _focusPin = () => {
+        const node = this._pinInputRef && this._pinInputRef.current;
+        if (node && typeof node.focus === 'function') node.focus();
     };
 
     /**
@@ -433,8 +566,9 @@ class PixaWalletKeysDialog extends React.PureComponent {
      */
     _revealKey = async (keyType) => {
         const { api } = this.props;
-        const { username } = this.state;
+        const { username, _pinRequired, _pinVerified } = this.state;
         if (!api || !api.keyManager || !username) return;
+        if (_pinRequired && !_pinVerified) { this._focusPin(); return; }   // the gate, not the key manager
         try {
             const key = await api.keyManager.requestKey(username, keyType);
             if (key) {
@@ -491,13 +625,20 @@ class PixaWalletKeysDialog extends React.PureComponent {
         if (!new_props.open && wasOpen) {
             updates._tab_value = 0;
             updates._keyVisibility = { posting: false, active: false, owner: false, memo: false };
+            // Private keys must not outlive the dialog: the component stays
+            // mounted while closed, and state is visible to devtools. The next
+            // opening re-runs the PIN gate.
+            updates.keys = { ...EMPTY_KEYS };
+            updates._pinVerified = false;
+            updates._pin = "";
+            updates._pinError = "";
+            updates._pinBusy = false;
             updates._seed = [];
             updates._seed_word_input = "";
             updates._seed_word_suggestion = [];
             updates._password = "";
             updates._downloaded = false;
             updates._newPublicKeys = { owner: "", active: "", posting: "", memo: "" };
-            updates._newPrivateKeys = { owner: "", active: "", posting: "", memo: "" };
             updates._documentAcknowledged = false;
             // Recovery account fields — reset draft, keep nothing in flight
             updates._recoveryInput = "";
@@ -608,9 +749,31 @@ class PixaWalletKeysDialog extends React.PureComponent {
             // Firefox. This blob is the key-backup PDF, so the failure mode is
             // "user believes their keys are backed up and they are not".
             setTimeout(() => URL.revokeObjectURL(url), 2000);
-            this.setState({ _newPublicKeys: keys.pub, _newPrivateKeys: keys.priv, _downloaded: true, _backdropOpened: false }, () => this.forceUpdate());
+            // Only the public half is needed (updateAccount2 authorities); the
+            // private half lives in the downloaded PDF and nowhere else.
+            this.setState({ _newPublicKeys: keys.pub, _downloaded: true, _backdropOpened: false }, () => this.forceUpdate());
         };
         this.setState({ _backdropOpened: true }, () => { this.forceUpdate(() => { setTimeout(callback, 500); }); });
+    };
+
+    /**
+     * Make sure the owner key is unlocked and cached before an owner-signed
+     * broadcast, so the PIN/key-entry modal opens BEFORE the backdrop.
+     * The result is discarded: requestKeyBuffer() hands back a YOLOBuffer
+     * that is destroyed on the spot (no WIF string is minted for a prompt
+     * whose only purpose is the prompt). Falls back to requestKey() on
+     * proxies without the byte API.
+     */
+    _promptOwnerKey = async () => {
+        const { api } = this.props;
+        const { username } = this.state;
+        if (!api || !api.keyManager || !username) return;
+        if (typeof api.keyManager.requestKeyBuffer === 'function') {
+            const buf = await api.keyManager.requestKeyBuffer(username, 'owner');
+            if (buf && typeof buf.destroy === 'function') buf.destroy();
+        } else if (typeof api.keyManager.requestKey === 'function') {
+            await api.keyManager.requestKey(username, 'owner');
+        }
     };
 
     /**
@@ -629,9 +792,7 @@ class PixaWalletKeysDialog extends React.PureComponent {
         // method's internal requestKey call is a cache hit (no second prompt).
         this.setState({ _applying: true }, () => this.forceUpdate());
         try {
-            if (api.keyManager && typeof api.keyManager.requestKey === 'function') {
-                await api.keyManager.requestKey(username, 'owner');
-            }
+            await this._promptOwnerKey();
         } catch (err) {
             // User cancelled or entered an invalid key. Clear the applying
             // flag so the button becomes clickable again, but stay on the
@@ -775,8 +936,8 @@ class PixaWalletKeysDialog extends React.PureComponent {
             const accs = await api.accounts.getAccounts([_recoveryInput]);
             if (!accs || !accs[0]) {
                 this.setState({ _recovery_error: t("components.pixa_wallet_keys_dialog.account_does_not_exist", {
-                    _recoveryInput: _recoveryInput
-                }), _recovery_confirm_open: false }, () => this.forceUpdate());
+                        _recoveryInput: _recoveryInput
+                    }), _recovery_confirm_open: false }, () => this.forceUpdate());
                 return;
             }
         } catch (e) {
@@ -797,9 +958,7 @@ class PixaWalletKeysDialog extends React.PureComponent {
         //    cached key without prompting again.
         this.setState({ _recovery_error: "" }, () => this.forceUpdate());
         try {
-            if (api.keyManager && typeof api.keyManager.requestKey === 'function') {
-                await api.keyManager.requestKey(username, 'owner');
-            }
+            await this._promptOwnerKey();
         } catch (err) {
             // User dismissed the prompt or entered an invalid key. Stay in
             // the confirm dialog so they can retry without losing the typed
@@ -855,7 +1014,9 @@ class PixaWalletKeysDialog extends React.PureComponent {
         const { classes, open, _fullscreen, _isOwnProfile, _tab_value, username, keys, publicKeys, _keyVisibility, _seed, _seed_menu_anchor, _seed_word_input, _seed_word_suggestion, _password, _showPassword, _documentAcknowledged, _backdropOpened, _applying, _downloaded,
             _currentRecovery, _pendingRecovery, _recoveryInput, _recoveryAuthors, _recoverySelected, _recoverySearching,
             _recovery_loading, _recovery_confirm_open, _recovery_error,
+            _pinRequired, _pinVerified, _pin, _pinError, _pinBusy,
         } = this.state;
+        const keysLocked = _isOwnProfile && _pinRequired && !_pinVerified;
         // Apply Keys unlocks once the user has both downloaded the document AND
         // ticked the acknowledgement checkbox. Ticking implies downloading via
         // _handleDocumentAcknowledged, but the user can untick to revoke, so
@@ -887,6 +1048,7 @@ class PixaWalletKeysDialog extends React.PureComponent {
                 keyValue={keys[kt]}
                 publicKeyValue={publicKeys[kt]}
                 isAvailable={!!keys[kt]}
+                isLocked={keysLocked}
                 isVisible={_keyVisibility[kt]}
                 onToggleVisibility={this._toggleKeyVisibility}
                 onCopyKey={this._copyKey}
@@ -894,6 +1056,36 @@ class PixaWalletKeysDialog extends React.PureComponent {
                 isOwnProfile={_isOwnProfile}
             />
         ));
+        // PIN gate — sits above the key list while the private keys are hidden.
+        const pinGate = keysLocked ? (
+            <div className={classes.pinGate}>
+                <div className={classes.pinGateText}>
+                    <div className={classes.pinGateTitle}><LockRounded fontSize="small" />{t("components.pixa_wallet_keys_dialog.pin_gate_title")}</div>
+                    <Typography className={classes.pinGateHint} component="p">{t("components.pixa_wallet_keys_dialog.pin_gate_hint")}</Typography>
+                </div>
+                <div className={classes.pinGateForm}>
+                    <FormControl variant="outlined" size="small" className={classes.pinGateInput} error={!!_pinError}>
+                        <InputLabel htmlFor="wallet-keys-pin">{t("components.pixa_wallet_keys_dialog.pin_label")}</InputLabel>
+                        <OutlinedInput
+                            id="wallet-keys-pin"
+                            type="password"
+                            inputRef={this._pinInputRef}
+                            value={_pin}
+                            onChange={this._onPinChange}
+                            onKeyDown={this._onPinKeyDown}
+                            disabled={_pinBusy}
+                            autoComplete="off"
+                            inputProps={{ autoCapitalize: "off", autoCorrect: "off", spellCheck: "false" }}
+                            labelWidth={30}
+                        />
+                        {_pinError ? <span className={classes.pinGateError}>{_pinError}</span> : null}
+                    </FormControl>
+                    <Button variant="contained" className={classes.whiteButton} onClick={this._submitPin} disabled={_pinBusy || !_pin} style={{ marginTop: 2, whiteSpace: "nowrap" }}>
+                        {_pinBusy ? <CircularProgress size={18} color="inherit" /> : t("components.pixa_wallet_keys_dialog.pin_reveal_button", { TUC: true })}
+                    </Button>
+                </div>
+            </div>
+        ) : null;
 
         return (
             <React.Fragment>
@@ -940,6 +1132,7 @@ class PixaWalletKeysDialog extends React.PureComponent {
                     >
                         {/* ── Tab 0 — Wallet Keys ── */}
                         <DialogContent scroll={"paper"} className={classes.content} key={"tab-keys"}>
+                            {pinGate}
                             {keysView}
                         </DialogContent>
 
@@ -956,7 +1149,7 @@ class PixaWalletKeysDialog extends React.PureComponent {
                                 </Typography>
 
                                 <div className={classes.recoveryWarning}><T
-                                        k="components.pixa_wallet_keys_dialog.strong_30_day_waiting_period_strong_changing" /></div>
+                                    k="components.pixa_wallet_keys_dialog.strong_30_day_waiting_period_strong_changing" /></div>
 
                                 <div className={classes.recoveryCurrentBox}>
                                     <span style={{ color: "#777" }}>{t("components.pixa_wallet_keys_dialog.current_recovery_account")} </span>
@@ -971,8 +1164,8 @@ class PixaWalletKeysDialog extends React.PureComponent {
                                         to <span style={{ fontFamily: "monospace" }}>@{_pendingRecovery.recovery_account}</span>
                                         {recoveryDaysRemaining !== null && (
                                             <><T
-                                                    k="components.pixa_wallet_keys_dialog.effective_in_strong_strong_day"
-                                                    vars={{ day: { day: recoveryDaysRemaining } }} /></>
+                                                k="components.pixa_wallet_keys_dialog.effective_in_strong_strong_day"
+                                                vars={{ day: { day: recoveryDaysRemaining } }} /></>
                                         )}
                                         {recoveryEffectiveOn && (
                                             <> ({recoveryEffectiveOn.replace('T', ' ').replace(/\.\d+$/, '').replace(/Z$/, ' UTC')})</>
@@ -1082,8 +1275,8 @@ class PixaWalletKeysDialog extends React.PureComponent {
                                            endAdornment={<Tooltip title={t("components.pixa_wallet_keys_dialog.click_to_generate_a_new_seed_phrase")}><InputAdornment style={{ position: "absolute", right: "16px", bottom: "24px" }} position="end" className={classes.inputEndAdornment}><IconButton edge="end" style={{ marginTop: -8 }} onClick={(e) => this._set_seed_phrase_anchor(e.currentTarget)}><SeedPlus /></IconButton></InputAdornment></Tooltip>}
                                 />
                                 <Collapse in={_seed_word_suggestion.length > 0 && _seed_word_input.length > 0}><Typography style={{ fontSize: "13px", marginBottom: "12px", color: "#888", textAlign: "right" }}>{t("components.pixa_wallet_keys_dialog.suggestions", {
-                                        seed_word_suggestion: _seed_word_suggestion.join(", ")
-                                    })}</Typography></Collapse>
+                                    seed_word_suggestion: _seed_word_suggestion.join(", ")
+                                })}</Typography></Collapse>
 
                                 <FormControl variant="outlined" fullWidth style={{ marginTop: 8 }}>
                                     <InputLabel htmlFor="seed-password-input">{t("components.pixa_wallet_keys_dialog.password_optional_but_recommended")}</InputLabel>
@@ -1141,11 +1334,11 @@ class PixaWalletKeysDialog extends React.PureComponent {
                     <DialogTitle><Typography component="h2" variant="h6">{t("components.pixa_wallet_keys_dialog.confirm_recovery_account_change")}</Typography></DialogTitle>
                     <DialogContent>
                         <Typography variant="body2" style={{ color: "#bbb", marginBottom: 16 }}><T
-                                k="components.pixa_wallet_keys_dialog.you_are_about_to_request_a_change"
-                                vars={{
-                                    username: username
-                                }}
-                                slots={[<strong style={{ color: "#fff", fontFamily: "monospace" }} key="0" />]} /></Typography>
+                            k="components.pixa_wallet_keys_dialog.you_are_about_to_request_a_change"
+                            vars={{
+                                username: username
+                            }}
+                            slots={[<strong style={{ color: "#fff", fontFamily: "monospace" }} key="0" />]} /></Typography>
                         <div style={{ textAlign: "center", margin: "16px 0" }}>
                             <Fade in timeout={150}>
                                 <Avatar
@@ -1165,14 +1358,14 @@ class PixaWalletKeysDialog extends React.PureComponent {
                         </div>
                         {_currentRecovery && _recoveryInput === _currentRecovery ? (
                             <div className={classes.recoveryPendingBox}><T
-                                    k="components.pixa_wallet_keys_dialog.this_will_strong_cancel_any_pending_recovery" /></div>
+                                k="components.pixa_wallet_keys_dialog.this_will_strong_cancel_any_pending_recovery" /></div>
                         ) : (
                             <div className={classes.recoveryWarning}><T
-                                    k="components.pixa_wallet_keys_dialog.once_broadcast_the_chain_will_create_a"
-                                    vars={{
-                                        currentRecovery: _currentRecovery || 'none'
-                                    }}
-                                    slots={[<span style={{ fontFamily: "monospace" }} key="0" />]} /></div>
+                                k="components.pixa_wallet_keys_dialog.once_broadcast_the_chain_will_create_a"
+                                vars={{
+                                    currentRecovery: _currentRecovery || 'none'
+                                }}
+                                slots={[<span style={{ fontFamily: "monospace" }} key="0" />]} /></div>
                         )}
                         {_recovery_error && (
                             <Typography style={{ fontSize: 12, color: "#cccccc", fontStyle: "italic", margin: "8px 4px" }}>{_recovery_error}</Typography>

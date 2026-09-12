@@ -92,8 +92,8 @@ export const transform = async (file, step_n, fidelity, callback = () => {}, cal
         })
         var input_image = (file.size > 1000000) ? await resizeImageTo2MP(file) : file;
         var num_inference_steps = step_n;
-        var img2img_strength = (0.75 - Math.min(0.4, Math.max(0, fidelity)));
-        var guidance_scale = Math.max(1, 0.2+(step_n|0)/10);
+        var img2img_strength = (0.775 - Math.min(0.4, Math.max(0, fidelity)));
+        var guidance_scale = Math.max(1, 0.2+(step_n|0)/8);
 
         var dynamic_config = {
             ...PRESETS_TRANSFORM,

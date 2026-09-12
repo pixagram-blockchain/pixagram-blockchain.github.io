@@ -1,6 +1,10 @@
 // ============================================================================
 // EditCommunityDialog.js — Edit portal/community properties
-// On save, prompts for portal active key, broadcasts, then discards key.
+// On save, prompts for the portal's posting/active key, broadcasts, discards
+// the keys, then waits until hivemind has indexed the edit (via
+// api.communities.awaitPropsVisible) before reporting success and closing —
+// so a parent that re-fetches bridge.get_community on onSave/onClose sees
+// the new props instead of racing the indexer.
 // ============================================================================
 
 import * as React from "preact/compat";
@@ -44,6 +48,18 @@ import { ToxicityWatcher } from "./ToxicityHint";
 
 import { T } from "../utils/T";
 import { t, useLanguage } from "../utils/text";
+
+/**
+ * The indexer's updateProps limits. Read from api.communities.PROPS_RULES
+ * at runtime; this fallback (stock hivemind CommunityOp._read_props) only
+ * covers renders that happen before `api` is available. Note the title cap
+ * is 20, not 32 — 32 is the cap on a member's *user title* (setUserTitle),
+ * a different op; a 21–32 char community title is silently discarded by the
+ * indexer while hived reports the tx as included.
+ */
+const FALLBACK_PROPS_RULES = {
+    title: { min: 3, max: 20 }, about: { max: 120 }, description: { max: 1000 }, flag_text: { max: 1000 },
+};
 
 /**
  * A WIF private key is base58check: [0x80][32-byte key][4-byte SHA256d checksum].
@@ -170,30 +186,30 @@ const fileToBase64 = (file) => new Promise((resolve, reject) => {
 const AvatarZone = memo(({ classes, pictureUrl, onFileUpload, onRemove }) => {
     useLanguage();
     return (
-    <div className={classes.profilePictureContainer}>
-        {pictureUrl ? (
-            <React.Fragment>
-                <img src={pictureUrl} className={classes.profilePicture} alt={t("components.edit_community_dialog.avatar")} />
-                <IconButton className={classes.removeButton} onClick={onRemove} size="small">
-                    <CloseIcon fontSize="small" />
-                </IconButton>
-            </React.Fragment>
-        ) : (
-            <label htmlFor="community-avatar-input">
-                <div className={classes.dropZone}>
-                    <PersonIcon style={{ fontSize: 36, color: "#555", marginBottom: 8 }} />
-                    <Typography variant="caption" style={{ color: "#666", textAlign: "center" }}>
-                        {t("words.drop_image")}<br />{t("words.or_click")}
-                    </Typography>
-                </div>
-            </label>
-        )}
-        <Input onChange={onFileUpload} accept="image/*" style={{ display: "none" }} id="community-avatar-input" type="file" />
-        <div className={classes.infoTip}>
-            <Tooltip title={t("components.edit_community_dialog.avatar_must_be_pixel_art_under_48")}><InfoOutlinedIcon style={{ fontSize: 14 }} /></Tooltip>
-            <span>{t("words.base64")}</span>
+        <div className={classes.profilePictureContainer}>
+            {pictureUrl ? (
+                <React.Fragment>
+                    <img src={pictureUrl} className={classes.profilePicture} alt={t("components.edit_community_dialog.avatar")} />
+                    <IconButton className={classes.removeButton} onClick={onRemove} size="small">
+                        <CloseIcon fontSize="small" />
+                    </IconButton>
+                </React.Fragment>
+            ) : (
+                <label htmlFor="community-avatar-input">
+                    <div className={classes.dropZone}>
+                        <PersonIcon style={{ fontSize: 36, color: "#555", marginBottom: 8 }} />
+                        <Typography variant="caption" style={{ color: "#666", textAlign: "center" }}>
+                            {t("words.drop_image")}<br />{t("words.or_click")}
+                        </Typography>
+                    </div>
+                </label>
+            )}
+            <Input onChange={onFileUpload} accept="image/*" style={{ display: "none" }} id="community-avatar-input" type="file" />
+            <div className={classes.infoTip}>
+                <Tooltip title={t("components.edit_community_dialog.avatar_must_be_pixel_art_under_48")}><InfoOutlinedIcon style={{ fontSize: 14 }} /></Tooltip>
+                <span>{t("words.base64")}</span>
+            </div>
         </div>
-    </div>
     );
 });
 
@@ -281,9 +297,12 @@ function EditCommunityDialog(props) {
                     portalAvatar = (portalAccounts[0]._profile && portalAccounts[0]._profile.profile_image) || '';
                 }
 
+                // description_source is the plain text (what the indexer
+                // stores); community.description is rendered HTML for display
+                // and must never be fed back into the form.
                 const original = {
                     title: community.title || "", about: community.about || "",
-                    description: community.description || "", lang: community.lang || "en",
+                    description: (community.description_source ?? community.description) || "", lang: community.lang || "en",
                     isNsfw: !!community.is_nsfw, flagText: community.flag_text || "",
                     avatarUrl: portalAvatar,
                 };
@@ -371,15 +390,6 @@ function EditCommunityDialog(props) {
         setAvatarUrl(""); setAvatarFile(null);
     }, [avatarUrl]);
 
-    // ── Save click → open key dialog ─────────────────────────────────────
-    const handleSaveClick = useCallback(() => {
-        if (!hasChanges) { onClose(); return; }
-        setSaveError("");
-        setPostingKeyValue(""); setActiveKeyValue("");
-        setShowPostingKey(false); setShowActiveKey(false);
-        setKeyError(""); setKeyDialogOpen(true);
-    }, [hasChanges, onClose]);
-
     // ── QR scanner ───────────────────────────────────────────────────────
     const handleQRScanResult = useCallback((result) => {
         if (result) {
@@ -407,6 +417,37 @@ function EditCommunityDialog(props) {
 
     const needsPostingKey = propsChanged;
     const needsActiveKey = avatarChanged;
+
+    // ── Save click → validate → open key dialog ──────────────────────────
+    // Everything the indexer will validate, shaped the way it validates it.
+    // Only the normalized payload is ever broadcast or compared.
+    const rules = (api && api.communities && api.communities.PROPS_RULES) || FALLBACK_PROPS_RULES;
+    const normalized = useMemo(() => {
+        const raw = { title, about, description, lang, is_nsfw: isNsfw, flag_text: flagText };
+        if (api && api.communities && typeof api.communities.normalizeProps === "function") {
+            return api.communities.normalizeProps(raw);
+        }
+        // Old API build: at least apply the padding rule.
+        return {
+            props: { title: title.trim(), about: about.trim(), description: description.trim(), lang: String(lang).toLowerCase(), is_nsfw: !!isNsfw, flag_text: flagText.trim() },
+            problems: [], dropped: [],
+        };
+    }, [api, title, about, description, lang, isNsfw, flagText]);
+
+    const handleSaveClick = useCallback(() => {
+        if (!hasChanges) { onClose(); return; }
+        setSaveError("");
+        // hived would include this tx and the indexer would then throw the
+        // whole op away — refuse here, where the user can still fix it.
+        if (propsChanged && normalized.problems.length) {
+            setSaveError(normalized.problems.map((p) => p.reason).join(" · "));
+            return;
+        }
+        setPostingKeyValue(""); setActiveKeyValue("");
+        setShowPostingKey(false); setShowActiveKey(false);
+        setKeyError(""); setKeyDialogOpen(true);
+    }, [hasChanges, onClose, propsChanged, normalized]);
+
 
     const canConfirm = useMemo(() => {
         if (needsPostingKey && (!postingKeyValue.trim() || postingKeyValue.length < 50)) return false;
@@ -455,29 +496,95 @@ function EditCommunityDialog(props) {
         setBroadcasting(true); setKeyError("");
 
         try {
+            // Both broadcasts resolve once hived has the tx in a block (v4.5
+            // synchronous send) and return { id, block_num, … }. Keep the
+            // highest block: it is what the read-back below waits for.
+            let blockNum = null;
+            const broadcastStartedAt = Date.now();
+            const noteBlock = (res) => {
+                if (Number.isInteger(res?.block_num)) blockNum = Math.max(blockNum ?? 0, res.block_num);
+            };
+
             // ── Transaction 1: updateProps (community settings) — posting authority ──
+            // The NORMALIZED payload: trimmed, lang lowercased, unknown keys
+            // gone. Sending the raw form values is how a title with a
+            // trailing space or a description ending in a newline gets
+            // included by hived and then discarded by the indexer.
+            const portalProps = normalized.props;
             if (needsPostingKey) {
-                const portalProps = { title, about, description, lang, is_nsfw: isNsfw, flag_text: flagText };
-                await api.broadcast.customJson({
+                noteBlock(await api.broadcast.customJson({
                     requiredPostingAuths: [communityName],
                     id: "community",
                     json: JSON.stringify(["updateProps", { community: communityName, props: portalProps }]),
-                }, { posting: postingKeyValue.trim() });
+                }, { posting: postingKeyValue.trim() }));
             }
 
             // ── Transaction 2: update portal profile image — active authority ──
+            let finalAvatarUrl = avatarUrl;
             if (needsActiveKey) {
-                let finalAvatarUrl = avatarUrl;
                 if (avatarFile) finalAvatarUrl = await fileToBase64(avatarFile);
                 const profileData = { profile_image: finalAvatarUrl };
-                await api.broadcast.updateProfile(communityName, profileData, activeKeyValue.trim());
+                noteBlock(await api.broadcast.updateProfile(communityName, profileData, activeKeyValue.trim()));
             }
 
             _wipeKeys();
 
+            // ── Read-back: wait for hivemind before anyone re-fetches ──
+            // hived only records the updateProps custom_json; hivemind parses
+            // it when IT processes that block, a second or two later, and
+            // bridge.get_community (what every portal page reads) is answered
+            // by hivemind. Closing here and letting the page re-fetch lands in
+            // that window and shows the OLD title/about/description. So the
+            // spinner stays up until the raw bridge row carries the props we
+            // just broadcast (or the budget runs out — the tx is on chain
+            // either way, hivemind is just late). Avatar-only edits go
+            // through hived's get_accounts, which is fresh at inclusion, but
+            // bridge's copy of the profile is not — gate those on the block
+            // when the node can tell us hivemind's head.
+            let visible = true;
+            let rejection = null;
+            if (needsPostingKey && api.communities && typeof api.communities.awaitPropsVisible === "function") {
+                // observer = the account the page queries with, so the cache
+                // entry the page is about to hit is the one this loop refreshes.
+                const rb = await api.communities.awaitPropsVisible(communityName, portalProps, {
+                    blockNum, observer: loggedInUser || "",
+                });
+                visible = rb.visible;
+                if (!visible) {
+                    console.warn("[EditCommunityDialog] Portal props not indexed after", rb.tries, "reads; block", blockNum);
+                    // Slow indexer, or a payload it refused? Only the actor's
+                    // `error` notification can tell them apart.
+                    if (typeof api.communities.getLastPropsRejection === "function") {
+                        rejection = await api.communities.getLastPropsRejection(communityName, { sinceTs: broadcastStartedAt - 60000 });
+                    }
+                }
+            } else if (blockNum && api.transaction && typeof api.transaction.awaitHivemindBlock === "function") {
+                await api.transaction.awaitHivemindBlock(blockNum);
+            }
+
+            if (rejection) {
+                // On chain, never applied. Keep the key dialog open with the
+                // indexer's own reason so the user can fix the field and
+                // resubmit (keys were wiped above, they will be asked again).
+                console.error("[EditCommunityDialog] indexer rejected updateProps:", rejection);
+                setKeyError("The portal index rejected this update: " + rejection.reason);
+                return;
+            }
+
             setKeyDialogOpen(false);
             actions.trigger_snackbar(t("components.edit_community_dialog.community_settings_updated"));
-            if (onSave) onSave({ title, about, description, lang, is_nsfw: isNsfw, flag_text: flagText, name: communityName });
+            if (onSave) onSave({
+                ...portalProps,
+                name: communityName,
+                // Additive: lets the parent update its header without a
+                // fetch. profile_image is the value written on chain (base64
+                // data URI or '' for removal) and is only present when the
+                // avatar changed; visible=false means hivemind had not caught
+                // up within the budget, so a bridge re-fetch may still lag.
+                ...(needsActiveKey ? { profile_image: finalAvatarUrl } : {}),
+                block_num: blockNum,
+                visible,
+            });
             onClose();
         } catch (err) {
             console.error("[EditCommunityDialog] Broadcast failed:", err);
@@ -485,7 +592,7 @@ function EditCommunityDialog(props) {
                 message: (err.message || "Unknown error")
             }));
         } finally { setBroadcasting(false); }
-    }, [api, communityName, needsPostingKey, needsActiveKey, postingKeyValue, activeKeyValue, api, communityName, title, about, description, lang, isNsfw, flagText, avatarUrl, avatarFile, onSave, onClose]);
+    }, [api, communityName, needsPostingKey, needsActiveKey, postingKeyValue, activeKeyValue, normalized, loggedInUser, avatarUrl, avatarFile, onSave, onClose, _wipeKeys]);
 
     const handleCancel = useCallback(() => { if (!isSaving) onClose(); }, [onClose, isSaving]);
 
@@ -519,10 +626,10 @@ function EditCommunityDialog(props) {
                 <AvatarZone classes={classes} pictureUrl={avatarUrl} onFileUpload={handleFileUpload} onRemove={handleRemoveAvatar} />
                 <div className={classes.profileFields}>
                     <TextField label={t("components.edit_community_dialog.title")} variant="outlined" fullWidth value={title} onChange={(e) => setTitle(e.target.value)}
-                               placeholder={t("components.edit_community_dialog.community_display_name")} disabled={isSaving} inputProps={{ maxLength: 32 }} />
+                               placeholder={t("components.edit_community_dialog.community_display_name")} disabled={isSaving} inputProps={{ maxLength: rules.title.max }} />
                     <ToxicityWatcher text={title} label="title" />
                     <TextField label={t("components.edit_community_dialog.about")} variant="outlined" fullWidth value={about} onChange={(e) => setAbout(e.target.value)}
-                               placeholder={t("components.edit_community_dialog.short_blurb_120_chars")} disabled={isSaving} inputProps={{ maxLength: 120 }} />
+                               placeholder={t("components.edit_community_dialog.short_blurb_120_chars")} disabled={isSaving} inputProps={{ maxLength: rules.about.max }} />
                     <ToxicityWatcher text={about} label={t("components.edit_community_dialog.about_text")} />
                 </div>
             </div>
@@ -534,7 +641,7 @@ function EditCommunityDialog(props) {
                        placeholder={t(
                            "components.edit_community_dialog.describe_purpose_enumerate_rules_markdown_5000_c"
                        )}
-                       style={{ marginBottom: 16 }} disabled={isSaving} inputProps={{ maxLength: 5000 }} />
+                       style={{ marginBottom: 16 }} disabled={isSaving} inputProps={{ maxLength: rules.description.max }} />
             <ToxicityWatcher text={description} label="description" style={{ marginTop: -12, marginBottom: 16 }} />
 
             <div style={{ display: "flex", gap: 16, marginBottom: 16 }}>
@@ -553,7 +660,7 @@ function EditCommunityDialog(props) {
             <TextField label={t("components.edit_community_dialog.flag_report_text")} variant="outlined" fullWidth value={flagText}
                        onChange={(e) => setFlagText(e.target.value)} placeholder={t(
                 "components.edit_community_dialog.custom_text_shown_when_reporting_content"
-            )} disabled={isSaving} />
+            )} disabled={isSaving} inputProps={{ maxLength: rules.flag_text.max }} />
         </React.Fragment>
     );
 
@@ -583,11 +690,11 @@ function EditCommunityDialog(props) {
                 </DialogTitle>
                 <DialogContent>
                     <Typography variant="body2" style={{ color: "#b0b0b0", marginBottom: 16 }}><T
-                            k="components.edit_community_dialog.enter_the_private_keys_of_0_0"
-                            vars={{
-                                communityName: communityName
-                            }}
-                            slots={[<strong style={{ color: "#fff" }} key="0" />]} /></Typography>
+                        k="components.edit_community_dialog.enter_the_private_keys_of_0_0"
+                        vars={{
+                            communityName: communityName
+                        }}
+                        slots={[<strong style={{ color: "#fff" }} key="0" />]} /></Typography>
                     <Alert severity="info" style={{ marginBottom: 16 }}>
                         {t("components.edit_community_dialog.keys_will_only_be_used_for_this")}
                     </Alert>

@@ -255,15 +255,16 @@ const TAGS = ["selfies", "gaming", "fantasy", "landscape", "retro", "couples", "
 // by the eight topical portals as an icon-only grid (2 rows × 4). Ids and
 // order are owned by utils/constants (PROPOSALS_PORTAL, COMMUNITY_PORTALS) —
 // this map only attaches, per portal `name`, what the drawer adds on top of
-// `{ name, id }`: a themed fallback icon and the label (plus the one-line
-// hint of the proposals row). Labels are thunks over t(), resolved by the
-// tiles at render time — NOT inside the `governance` memo, which doesn't
-// re-run on a language switch; portal names live in `words` because the
-// Disruptions grid prints the same ones. The section is ALWAYS displayed
-// while logged in, even before the portals exist on-chain: tiles start as
-// themed-icon placeholders and are enriched with the real avatar + title
-// when a community whose chain name equals the portal id shows up in the
-// listCommunities result. Enriched or not, every tile links to its portal.
+// `{ name, id }`: the themed icon and the label (plus the one-line hint of
+// the proposals row). Labels are thunks over t(), resolved by the tiles at
+// render time — NOT inside the `governance` memo, which doesn't re-run on a
+// language switch; portal names live in `words` because the Disruptions
+// grid prints the same ones. The section is ALWAYS displayed while logged
+// in, even before the portals exist on-chain. A preset portal ALWAYS shows
+// its themed icon — never the community's avatar image — so the grid reads
+// the same before and after enrichment; the on-chain community, once it
+// shows up in the listCommunities result under the portal id, contributes
+// its title only. Enriched or not, every tile links to its portal.
 const PORTAL_PRESENTATION = {
     proposals:   { label: () => t("words.proposals"),   sublabel: () => t("components.menu_content.create_discuss_and_vote"), icon: BallotRounded },
     discussions: { label: () => t("words.discussion"),  icon: ForumRounded },
@@ -556,20 +557,20 @@ CommunityItem.displayName = "CommunityItem";
 const usePortalClick = (portal, onGoToCommunity) =>
     useCallback(() => onGoToCommunity(portal.id), [portal.id, onGoToCommunity]);
 
-// ----- Governance portal tile: avatar-only rounded square, no title or
-// description — the portal name lives in the tooltip. Tiles are rendered
-// even when the portal doesn't exist on-chain yet: those show their themed
-// fallback icon and still link to the portal's canonical id.
+// ----- Governance portal tile: icon-only rounded square, no title or
+// description — the portal name lives in the tooltip. A preset portal
+// always shows its themed icon, never the community's avatar image, so
+// the tile looks the same whether or not the portal exists on-chain yet;
+// either way it links to the portal's canonical id.
 const PortalIconTile = React.memo(({ classes, portal, onGoToCommunity }) => {
     useLanguage();
     const handleClick = usePortalClick(portal, onGoToCommunity);
-    const image = portal.image || "";
-    const FallbackIcon = portal.icon || Community;
+    const Icon = portal.icon || Community;
     return (
         <Tooltip title={portalTitle(portal)}>
             <ButtonBase className={classes.discoverTile} onClick={handleClick}>
-                <Avatar src={image || undefined} className={"pixelated " + classes.discoverTileAvatar}>
-                    {!image && <FallbackIcon />}
+                <Avatar className={classes.discoverTileAvatar}>
+                    <Icon />
                 </Avatar>
             </ButtonBase>
         </Tooltip>
@@ -578,20 +579,19 @@ const PortalIconTile = React.memo(({ classes, portal, onGoToCommunity }) => {
 PortalIconTile.displayName = "PortalIconTile";
 
 // ----- Proposals tile: the full-width row that leads the Governance grid,
-// above the eight portal tiles. Same anatomy as a portal tile (avatar
-// square, themed fallback icon, same click gate) stretched into a labelled
-// row, because proposals are the one governance portal that asks for an
-// action rather than a topic — so the label and its hint are printed
-// instead of tucked into a tooltip.
+// above the eight portal tiles. Same anatomy as a portal tile (icon
+// square — themed icon always, never the avatar image — same click gate)
+// stretched into a labelled row, because proposals are the one governance
+// portal that asks for an action rather than a topic — so the label and
+// its hint are printed instead of tucked into a tooltip.
 const ProposalsTile = React.memo(({ classes, portal, onGoToCommunity }) => {
     useLanguage();
     const handleClick = usePortalClick(portal, onGoToCommunity);
-    const image = portal.image || "";
-    const FallbackIcon = portal.icon || BallotRounded;
+    const Icon = portal.icon || BallotRounded;
     return (
         <ButtonBase className={classes.discoverTile + " " + classes.discoverWideTile} onClick={handleClick}>
-            <Avatar src={image || undefined} className={"pixelated " + classes.discoverTileAvatar}>
-                {!image && <FallbackIcon />}
+            <Avatar className={classes.discoverTileAvatar}>
+                <Icon />
             </Avatar>
             <span className={classes.discoverWideText}>
                 <span className={classes.discoverWideTitle}>{portalTitle(portal)}</span>
@@ -1354,12 +1354,14 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
     // Governance portals: logged-in users only — MainView drops the
     // section when the array is empty (same mechanism as Friends while
     // logged out). When logged in: ALWAYS the proposals row plus all eight
-    // portals, in utils/constants order. A tile starts as a themed-icon
-    // placeholder carrying its translated label (a thunk — see portalTitle)
-    // and is enriched with the real avatar + title once a fetched community
-    // whose chain name equals the portal id appears — so the grid is visible
-    // from the very first paint. Enrichment only changes what a tile shows,
-    // never where it links: every tile navigates to its canonical id.
+    // portals, in utils/constants order. A tile always shows its themed
+    // icon and carries its translated label (a thunk — see portalTitle);
+    // once a fetched community whose chain name equals the portal id
+    // appears, only its title is taken over — a preset portal never shows
+    // the community's avatar image — so the grid is visible and looks the
+    // same from the very first paint. Enrichment only changes what a tile
+    // is called, never where it links: every tile navigates to its
+    // canonical id.
     const governance = useMemo(() => {
         if (!isLoggedIn) return { proposals: null, portals: [] };
         const byId = new Map();
@@ -1375,7 +1377,6 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
                 title: (match && match.title) || null,
                 label: look.label || null,
                 sublabel: look.sublabel || null,
-                image: (match && (match.image || match.avatar_url || match.avatar)) || "",
                 icon: look.icon || Community
             };
         };
