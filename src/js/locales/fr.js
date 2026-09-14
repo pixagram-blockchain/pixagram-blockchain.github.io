@@ -234,7 +234,14 @@ export default {
             "image": "Image",
             "undo": "Annuler",
             "redo": "Rétablir",
-            "select_text_first": "Sélectionnez d’abord du texte"
+            "select_text_first": "Sélectionnez d’abord du texte",
+            "insert_row_above": "Insérer une ligne au-dessus",
+            "insert_row_below": "Insérer une ligne en dessous",
+            "delete_row": "Supprimer la ligne",
+            "insert_column_left": "Insérer une colonne à gauche",
+            "insert_column_right": "Insérer une colonne à droite",
+            "delete_column": "Supprimer la colonne",
+            "delete_table": "Supprimer le tableau"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Ne pas filtrer le contenu NSFW",
@@ -323,7 +330,8 @@ export default {
             "heading_3": "Titre 3",
             "paragraph": "Paragraphe",
             "bullet_list": "Liste à puces",
-            "numbered_list": "Liste numérotée"
+            "numbered_list": "Liste numérotée",
+            "table": "Tableau"
         },
         "profile_tabs": {
             "posts": "Publications",
@@ -360,6 +368,7 @@ export default {
             "add_someone": "Ajouter quelqu’un"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Ce portail n’a pas encore défini de règles.",
             "community_rules": "Règles de la communauté"
         },
         "error_boundary": {
@@ -1355,6 +1364,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "Les publications en chaîne ayant des votes ne peuvent jamais être totalement supprimées ; il s’agit de la suppression douce de la plateforme. Les votes et les versements ne sont pas affectés."
         },
         "edit_community_dialog": {
+            "rules": "Règles",
+            "rule": "Règle",
+            "add_rule": "Ajouter une règle",
+            "no_rules_added_yet": "Aucune règle ajoutée pour l’instant",
+            "eg_pixel_art_only_no_ai_upscales": "ex. : Pixel art uniquement — pas d’upscaling par IA",
+            "delete_rule": "Supprimer la règle",
+            "that_rule_is_already_in_the_list": "Cette règle figure déjà dans la liste.",
+            "no_room_left_delete_a_rule_to": "Plus de place. Supprimez une règle pour en ajouter une autre.",
+            "some_rules_did_not_fit_and_were": "Certaines règles n’entraient pas et ont été ignorées.",
             "avatar": "Avatar",
             "loading_community_data": "Chargement des données de la communauté…",
             "edit_portal_settings": "Modifier les paramètres du portail",

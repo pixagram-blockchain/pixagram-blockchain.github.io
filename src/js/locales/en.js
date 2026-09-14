@@ -590,6 +590,15 @@ export default {
             "new_draft": "New Draft"
         },
         "edit_community_dialog": {
+            "rules": "Rules",
+            "rule": "Rule",
+            "add_rule": "Add rule",
+            "no_rules_added_yet": "No rules added yet",
+            "eg_pixel_art_only_no_ai_upscales": "e.g., Pixel art only — no AI upscales",
+            "delete_rule": "Delete rule",
+            "that_rule_is_already_in_the_list": "That rule is already in the list.",
+            "no_room_left_delete_a_rule_to": "No room left. Delete a rule to add another.",
+            "some_rules_did_not_fit_and_were": "Some rules did not fit and were skipped.",
             "avatar": "Avatar",
             "avatar_must_be_pixel_art_under_48": "Avatar must be pixel art under 48 kB for metadata storage",
             "loading_community_data": "Loading community data...",
@@ -837,7 +846,8 @@ export default {
             "heading_3": "Heading 3",
             "paragraph": "Paragraph",
             "bullet_list": "Bullet List",
-            "numbered_list": "Numbered List"
+            "numbered_list": "Numbered List",
+            "table": "Table"
         },
         "gdattributes": {
             "with_transactions": "with {{txCount}} Transactions",
@@ -2316,9 +2326,17 @@ export default {
             "image": "Image",
             "undo": "Undo",
             "redo": "Redo",
-            "select_text_first": "Select text first"
+            "select_text_first": "Select text first",
+            "insert_row_above": "Insert row above",
+            "insert_row_below": "Insert row below",
+            "delete_row": "Delete row",
+            "insert_column_left": "Insert column left",
+            "insert_column_right": "Insert column right",
+            "delete_column": "Delete column",
+            "delete_table": "Delete table"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "This portal has not set any rules yet.",
             "community_rules": "Community Rules"
         },
         "seed_phrase_menu": {

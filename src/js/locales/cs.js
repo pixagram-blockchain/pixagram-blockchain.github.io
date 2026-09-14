@@ -234,7 +234,14 @@ export default {
             "image": "Obrázek",
             "undo": "Vrátit zpět",
             "redo": "Znovu",
-            "select_text_first": "Nejprve vyberte text"
+            "select_text_first": "Nejprve vyberte text",
+            "insert_row_above": "Vložit řádek nad",
+            "insert_row_below": "Vložit řádek pod",
+            "delete_row": "Smazat řádek",
+            "insert_column_left": "Vložit sloupec vlevo",
+            "insert_column_right": "Vložit sloupec vpravo",
+            "delete_column": "Smazat sloupec",
+            "delete_table": "Smazat tabulku"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Nefiltrovat obsah NSFW",
@@ -323,7 +330,8 @@ export default {
             "heading_3": "Nadpis 3",
             "paragraph": "Odstavec",
             "bullet_list": "Odrážkový seznam",
-            "numbered_list": "Číslovaný seznam"
+            "numbered_list": "Číslovaný seznam",
+            "table": "Tabulka"
         },
         "profile_tabs": {
             "posts": "Příspěvky",
@@ -360,6 +368,7 @@ export default {
             "add_someone": "Přidat někoho"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Tento portál zatím nestanovil žádná pravidla.",
             "community_rules": "Pravidla komunity"
         },
         "error_boundary": {
@@ -1354,6 +1363,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "Blockchainové příspěvky s hlasy nelze nikdy zcela odstranit; toto je soft-delete platformy. Hlasy a výplaty zůstávají nedotčeny."
         },
         "edit_community_dialog": {
+            "rules": "Pravidla",
+            "rule": "Pravidlo",
+            "add_rule": "Přidat pravidlo",
+            "no_rules_added_yet": "Zatím nebyla přidána žádná pravidla",
+            "eg_pixel_art_only_no_ai_upscales": "např. Pouze pixel art — žádné AI upscaly",
+            "delete_rule": "Odstranit pravidlo",
+            "that_rule_is_already_in_the_list": "Toto pravidlo už v seznamu je.",
+            "no_room_left_delete_a_rule_to": "Už není místo. Odstraňte jedno pravidlo, abyste mohli přidat další.",
+            "some_rules_did_not_fit_and_were": "Některá pravidla se nevešla a byla vynechána.",
             "avatar": "Avatar",
             "loading_community_data": "Načítají se data komunity...",
             "edit_portal_settings": "Upravit nastavení portálu",

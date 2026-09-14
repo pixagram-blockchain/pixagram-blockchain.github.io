@@ -234,7 +234,14 @@ export default {
             "image": "Kép",
             "undo": "Visszavonás",
             "redo": "Mégis",
-            "select_text_first": "Először jelölj ki szöveget"
+            "select_text_first": "Először jelölj ki szöveget",
+            "insert_row_above": "Sor beszúrása fölé",
+            "insert_row_below": "Sor beszúrása alá",
+            "delete_row": "Sor törlése",
+            "insert_column_left": "Oszlop beszúrása balra",
+            "insert_column_right": "Oszlop beszúrása jobbra",
+            "delete_column": "Oszlop törlése",
+            "delete_table": "Táblázat törlése"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Ne szűrje az NSFW tartalmat",
@@ -323,7 +330,8 @@ export default {
             "heading_3": "Címsor 3",
             "paragraph": "Bekezdés",
             "bullet_list": "Felsorolás",
-            "numbered_list": "Számozott lista"
+            "numbered_list": "Számozott lista",
+            "table": "Táblázat"
         },
         "profile_tabs": {
             "posts": "Bejegyzések",
@@ -360,6 +368,7 @@ export default {
             "add_someone": "Valaki hozzáadása"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Ez a portál még nem határozott meg szabályokat.",
             "community_rules": "Közösségi szabályok"
         },
         "error_boundary": {
@@ -1354,6 +1363,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "A szavazatokat kapott blokklánc-bejegyzések soha nem távolíthatók el teljesen; ez a platform lágy törlése. A szavazatokat és kifizetéseket nem érinti."
         },
         "edit_community_dialog": {
+            "rules": "Szabályok",
+            "rule": "Szabály",
+            "add_rule": "Szabály hozzáadása",
+            "no_rules_added_yet": "Még nincs hozzáadott szabály",
+            "eg_pixel_art_only_no_ai_upscales": "pl. Csak pixelart — nincs AI-felskálázás",
+            "delete_rule": "Szabály törlése",
+            "that_rule_is_already_in_the_list": "Ez a szabály már szerepel a listán.",
+            "no_room_left_delete_a_rule_to": "Nincs több hely. Törölj egy szabályt, hogy újat adhass hozzá.",
+            "some_rules_did_not_fit_and_were": "Néhány szabály nem fért el, ezért kimaradt.",
             "avatar": "Avatar",
             "loading_community_data": "Közösségi adatok betöltése…",
             "edit_portal_settings": "Portálbeállítások szerkesztése",

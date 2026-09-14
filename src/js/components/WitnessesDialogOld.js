@@ -29,7 +29,7 @@ import Accordion from "@material-ui/core/Accordion";
 import AccordionDetails from "@material-ui/core/AccordionDetails";
 import AccordionSummary from "@material-ui/core/AccordionSummary";
 import AccordionActions from "@material-ui/core/AccordionActions";
-import ExpandMoreIcon from "@material-ui/icons/ExpandMore";
+import ExpandMoreIcon from "@material-ui/icons/ExpandMoreRounded";
 import Chip from "@material-ui/core/Chip";
 import Divider from "@material-ui/core/Divider";
 import InfoIcon from "@material-ui/icons/Info";

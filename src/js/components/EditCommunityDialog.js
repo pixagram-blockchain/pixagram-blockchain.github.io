@@ -16,6 +16,11 @@ import DialogTitle from "@material-ui/core/DialogTitle";
 import Button from "@material-ui/core/Button";
 import Dialog from "@material-ui/core/Dialog";
 import Typography from "@material-ui/core/Typography";
+import Paper from "@material-ui/core/Paper";
+import Fade from "@material-ui/core/Fade";
+import List from "@material-ui/core/List";
+import ListItem from "@material-ui/core/ListItem";
+import ListItemSecondaryAction from "@material-ui/core/ListItemSecondaryAction";
 import Input from "@material-ui/core/Input";
 import TextField from "@material-ui/core/TextField";
 import IconButton from "@material-ui/core/IconButton";
@@ -31,6 +36,8 @@ import ListItemText from "@material-ui/core/ListItemText";
 import FormControlLabel from "@material-ui/core/FormControlLabel";
 import Checkbox from "@material-ui/core/Checkbox";
 import CloseIcon from "@material-ui/icons/Close";
+import AddIcon from "@material-ui/icons/Add";
+import GavelRounded from "@material-ui/icons/GavelRounded";
 import PersonIcon from "@material-ui/icons/Person";
 import InfoOutlinedIcon from "@material-ui/icons/InfoOutlined";
 import VpnKeyOutlined from "@material-ui/icons/VpnKeyOutlined";
@@ -45,6 +52,7 @@ import * as actions from "../actions/utils";
 import JSLoader from "../utils/JSLoader";
 import { CONTENT_LANGUAGES, LANGUAGE_NAME } from "../utils/locale-status";
 import { ToxicityWatcher } from "./ToxicityHint";
+import { parseRules, serializeRules, normalizeRule, appendRules, rulesPlainText, remainingRuleChars } from "../utils/community-rules";
 
 import { T } from "../utils/T";
 import { t, useLanguage } from "../utils/text";
@@ -172,7 +180,77 @@ const styles = theme => ({
         "&.MuiButton-contained": { backgroundColor: "#d0d0d0", color: "#151515", transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms" },
         "&.MuiButton-contained:hover": { backgroundColor: "#ffffff", color: "#000000" }
     },
+    // Verbatim from EditProfileDialog — the add-item dialog there is white on
+    // a black form, and the rule dialog is the same gesture on the same kind
+    // of list, so it is the same paper rather than a second look-alike.
+    whiteDialog: {
+        backgroundColor: "#fff !important",
+        color: "#000 !important",
+        boxShadow: "0px 11px 15px -7px rgb(255 255 255 / 20%), 0px 24px 38px 3px rgb(255 255 255 / 14%), 0px 9px 46px 8px rgb(255 255 255 / 12%) !important",
+        "& .MuiButton-textPrimary": {
+            color: "#222 !important",
+            "&:hover": { color: "#000 !important" }
+        },
+        "& .MuiButton-containedPrimary": {
+            color: "#fff !important",
+            backgroundColor: "#000 !important",
+            "&:hover": { color: "#ddd !important", backgroundColor: "#222 !important" }
+        },
+        "& .MuiInputBase-root.Mui-focused": { border: "1px solid #666" },
+        "& .MuiRadio-colorPrimary.Mui-checked, & .MuiCheckbox-colorPrimary.Mui-checked": { color: "#000 !important" },
+        "& .MuiRadio-root, & .MuiFormLabel-root.Mui-focused, .MuiTypography-root": { color: "#000 !important" },
+        "& .MuiOutlinedInput-root": {
+            "& fieldset": { borderColor: "#ccc" },
+            "&:hover": { borderColor: "#999" },
+            "&.Mui-focused fieldset": { borderColor: "#000" }
+        },
+        "& .MuiInputLabel-root": { color: "#666 !important" },
+        "& .MuiInputBase-input": { color: "#000 !important" }
+    },
     inputEndAdornment: { "& .MuiIconButton-root.Mui-disabled": { color: "#7b7b7b" } },
+    // ── Rules list ───────────────────────────────────────────────────────
+    // Same treatment as the links / crypto-address lists in
+    // EditProfileDialog: #171717 paper, 12px corners, hairline #252525
+    // dividers, hover lift, full-width text add button underneath. The
+    // nested selectors below target .MuiListItem-container, which MUI only
+    // emits when a row carries a ListItemSecondaryAction — so the rows must
+    // keep using it for the delete button, or the dividers disappear.
+    rulesBlock: { marginBottom: theme.spacing(2) },
+    rulesHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: theme.spacing(1) },
+    rulesTitle: { display: "flex", alignItems: "center", gap: theme.spacing(1), color: "#ccc", fontWeight: 500 },
+    rulesTitleIcon: { fontSize: 18 },
+    rulesCounter: { color: "#777", fontSize: "0.75rem", flexShrink: 0 },
+    rulesCounterOver: { color: "#f44336" },
+    rulesHint: { color: "#777", display: "block" },
+    rulesList: {
+        backgroundColor: "#171717", borderRadius: "12px", overflow: "hidden", marginTop: theme.spacing(2),
+    },
+    rulesListEmpty: { padding: theme.spacing(3), textAlign: "center", color: "#666" },
+    rulesListItems: {
+        "& .MuiListItem-container > .MuiListItem-root": {
+            backgroundColor: "#171717",
+            borderBottom: "1px solid #252525",
+            transition: "background-color 225ms cubic-bezier(0.4, 0, 0.2, 1) 5ms",
+        },
+        "& .MuiListItem-container:last-child > .MuiListItem-root": {
+            borderBottom: "none",
+        },
+        "& .MuiListItem-container > .MuiListItem-root:hover": {
+            backgroundColor: "#1f1f1f",
+            transition: "background-color 175ms cubic-bezier(0.4, 0, 0.2, 1) 5ms",
+        },
+    },
+    // Weight 400, not the 600 of a link's label: a rule is a sentence, and a
+    // column of semibold sentences reads as a wall.
+    ruleText: {
+        color: "#fff", fontSize: "0.9rem", lineHeight: 1.5,
+        overflowWrap: "anywhere", paddingRight: theme.spacing(4),
+    },
+
+    addButton: {
+        marginTop: theme.spacing(1), color: "#aaa", borderColor: "#444",
+        "&:hover": { borderColor: "#666", backgroundColor: "rgba(255,255,255,0.05)" },
+    },
     qrScanButton: { padding: "8px", color: "#9b9b9b", "&:hover": { color: "#ffffff", backgroundColor: "rgba(255,255,255,0.1)" } },
 });
 
@@ -224,7 +302,13 @@ function EditCommunityDialog(props) {
     // Form
     const [title, setTitle] = useState("");
     const [about, setAbout] = useState("");
-    const [description, setDescription] = useState("");
+    // The rules ARE the description: there is no `rules` prop on chain, so the
+    // list is serialized into `description` as a markdown bullet list on save
+    // and parsed back out on load. See utils/community-rules.
+    const [ruleList, setRuleList] = useState([]);
+    const [ruleDialogOpen, setRuleDialogOpen] = useState(false);
+    const [ruleDraft, setRuleDraft] = useState("");
+    const [ruleError, setRuleError] = useState("");
     const [lang, setLang] = useState("en");
     const [isNsfw, setIsNsfw] = useState(false);
     const [flagText, setFlagText] = useState("");
@@ -259,6 +343,11 @@ function EditCommunityDialog(props) {
     const [broadcasting, setBroadcasting] = useState(false);
     const [qrScannerOpen, setQrScannerOpen] = useState(false);
     const [qrTarget, setQrTarget] = useState("posting"); // "posting" | "active"
+
+    // Single source of truth for everything downstream — change detection, the
+    // normalized payload, the read-back comparison. Nothing else may build a
+    // description string, or the value compared is not the value broadcast.
+    const description = useMemo(() => serializeRules(ruleList), [ruleList]);
 
     // ── Load ─────────────────────────────────────────────────────────────
     useEffect(() => {
@@ -299,15 +388,24 @@ function EditCommunityDialog(props) {
 
                 // description_source is the plain text (what the indexer
                 // stores); community.description is rendered HTML for display
-                // and must never be fed back into the form.
+                // and must never be fed back into the form. parseRules copes
+                // with both, and with every pre-list format already on chain.
+                const loadedRules = parseRules((community.description_source ?? community.description) || "");
+
+                // The baseline stores the CANONICAL form (what this dialog
+                // would broadcast), not the raw string. A portal whose rules
+                // were typed as "1." or as loose prose therefore does not open
+                // showing unsaved changes it never made — reformatting alone
+                // is not an edit, and costs a posting-key prompt for nothing.
                 const original = {
                     title: community.title || "", about: community.about || "",
-                    description: (community.description_source ?? community.description) || "", lang: community.lang || "en",
+                    description: serializeRules(loadedRules), lang: community.lang || "en",
                     isNsfw: !!community.is_nsfw, flagText: community.flag_text || "",
                     avatarUrl: portalAvatar,
                 };
                 setOriginalData(original);
-                setTitle(original.title); setAbout(original.about); setDescription(original.description);
+                setTitle(original.title); setAbout(original.about);
+                setRuleList(loadedRules); setRuleDraft(""); setRuleError("");
                 setLang(original.lang); setIsNsfw(original.isNsfw); setFlagText(original.flagText);
                 setAvatarUrl(original.avatarUrl); setAvatarFile(null);
             } catch (err) {
@@ -322,7 +420,8 @@ function EditCommunityDialog(props) {
 
     useEffect(() => {
         if (!open) {
-            setOriginalData(null); setTitle(""); setAbout(""); setDescription(""); setLang("en");
+            setOriginalData(null); setTitle(""); setAbout(""); setLang("en");
+            setRuleList([]); setRuleDraft(""); setRuleError(""); setRuleDialogOpen(false);
             setIsNsfw(false); setFlagText(""); setAvatarUrl(""); setAvatarFile(null); setSaveError("");
             setWizardFile(null);
             _wipeKeys();
@@ -433,6 +532,66 @@ function EditCommunityDialog(props) {
             problems: [], dropped: [],
         };
     }, [api, title, about, description, lang, isNsfw, flagText]);
+
+    // ── Rules ────────────────────────────────────────────────────────────
+    // The cap is on the serialized description, not on the rule text, so the
+    // room left for the next rule shrinks as the list grows — compute it from
+    // the same function that writes the string, and cap the input with it. A
+    // rule that fits here cannot produce a payload the indexer will refuse.
+    const descriptionMax = (rules.description && rules.description.max) || FALLBACK_PROPS_RULES.description.max;
+    const ruleRemaining = remainingRuleChars(ruleList, descriptionMax);
+    const isAddRuleValid = !!normalizeRule(ruleDraft) && ruleRemaining > 0;
+
+    const handleOpenRuleDialog = useCallback(() => {
+        setRuleDraft(""); setRuleError(""); setRuleDialogOpen(true);
+    }, []);
+
+    const handleCloseRuleDialog = useCallback(() => {
+        setRuleDialogOpen(false); setRuleDraft(""); setRuleError("");
+    }, []);
+
+    const handleAddRule = useCallback(() => {
+        const rule = normalizeRule(ruleDraft);
+        if (!rule) return;
+        const result = appendRules(ruleList, [rule], descriptionMax);
+        if (result.duplicates) { setRuleError(t("components.edit_community_dialog.that_rule_is_already_in_the_list")); return; }
+        if (result.overflow) { setRuleError(t("components.edit_community_dialog.no_room_left_delete_a_rule_to")); return; }
+        setRuleList(result.list);
+        setRuleDialogOpen(false); setRuleDraft(""); setRuleError("");
+    }, [ruleList, ruleDraft, descriptionMax]);
+
+    const handleDeleteRule = useCallback((index) => {
+        setRuleList((prev) => prev.filter((_, i) => i !== index));
+        setRuleError("");
+    }, []);
+
+    // Enter commits; Shift+Enter is the newline the multiline field implies,
+    // and normalizeRule flattens it — a rule is one line by definition.
+    const handleRuleKeyDown = useCallback((e) => {
+        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleAddRule(); }
+    }, [handleAddRule]);
+
+    // A pasted list arrives as one blob. Splitting it here is the difference
+    // between importing a portal's existing rules in one gesture and pasting
+    // eight rules into a field that stores them as one.
+    const handleRulePaste = useCallback((e) => {
+        const pasted = (e.clipboardData && e.clipboardData.getData("text")) || "";
+        if (!/[\r\n]/.test(pasted)) return;               // one line: let the field handle it
+        e.preventDefault();
+        const incoming = parseRules(pasted);
+        if (!incoming.length) return;
+        const result = appendRules(ruleList, incoming, descriptionMax);
+        setRuleList(result.list); setRuleDraft("");
+        // Everything landed: close, as if they had pressed Add. Something did
+        // not: stay open and say so, rather than close on a half-import. The
+        // count is deliberately not interpolated — "1 rules" needs the %n
+        // plural forms, and the list on screen already shows what landed.
+        if (result.overflow) {
+            setRuleError(t("components.edit_community_dialog.some_rules_did_not_fit_and_were"));
+        } else {
+            setRuleDialogOpen(false); setRuleError("");
+        }
+    }, [ruleList, descriptionMax]);
 
     const handleSaveClick = useCallback(() => {
         if (!hasChanges) { onClose(); return; }
@@ -636,13 +795,71 @@ function EditCommunityDialog(props) {
 
             {saveError && <Typography color="error" variant="caption" style={{ display: "block", marginBottom: 16 }}>{saveError}</Typography>}
 
-            <TextField label={t("components.edit_community_dialog.description_rules")} variant="outlined" fullWidth multiline minRows={3} maxRows={8}
-                       value={description} onChange={(e) => setDescription(e.target.value)}
-                       placeholder={t(
-                           "components.edit_community_dialog.describe_purpose_enumerate_rules_markdown_5000_c"
-                       )}
-                       style={{ marginBottom: 16 }} disabled={isSaving} inputProps={{ maxLength: rules.description.max }} />
-            <ToxicityWatcher text={description} label="description" style={{ marginTop: -12, marginBottom: 16 }} />
+            <div className={classes.rulesBlock}>
+                <div className={classes.rulesHeader}>
+                    <Typography variant="subtitle2" className={classes.rulesTitle}>
+                        <GavelRounded className={classes.rulesTitleIcon} />
+                        {t("components.edit_community_dialog.rules")}
+                    </Typography>
+                    <span className={classes.rulesCounter + (description.length > descriptionMax ? " " + classes.rulesCounterOver : "")}>
+                        {description.length + "/" + descriptionMax}
+                    </span>
+                </div>
+
+                <Paper className={classes.rulesList} elevation={0}>
+                    {ruleList.length === 0 ? (
+                        <div className={classes.rulesListEmpty}>
+                            <GavelRounded style={{ fontSize: 32, color: "#444", marginBottom: 8 }} />
+                            <Typography variant="body2" style={{ color: "#666" }}>
+                                {t("components.edit_community_dialog.no_rules_added_yet")}
+                            </Typography>
+                        </div>
+                    ) : (
+                        <List disablePadding className={classes.rulesListItems}>
+                            {ruleList.map((rule, index) => (
+                                // The profile's 200ms × position stagger is fine for a
+                                // capped list of links; rules run longer, and an
+                                // uncapped stagger would still be fading in the last
+                                // row three seconds after the dialog opened.
+                                <Fade key={index + "-" + rule} in timeout={Math.min(200 * (index + 1), 800)}>
+                                    <ListItem>
+                                        <ListItemText
+                                            primary={
+                                                <Typography className={classes.ruleText}>
+                                                    {rule}
+                                                </Typography>
+                                            }
+                                        />
+                                        <ListItemSecondaryAction>
+                                            <IconButton
+                                                edge="end"
+                                                onClick={() => handleDeleteRule(index)}
+                                                disabled={isSaving}
+                                                aria-label={t("components.edit_community_dialog.delete_rule")}
+                                                style={{ color: "#666" }}
+                                            >
+                                                <CloseIcon />
+                                            </IconButton>
+                                        </ListItemSecondaryAction>
+                                    </ListItem>
+                                </Fade>
+                            ))}
+                        </List>
+                    )}
+                </Paper>
+
+                <Button variant="text" fullWidth startIcon={<AddIcon />} className={classes.addButton}
+                        onClick={handleOpenRuleDialog} disabled={isSaving || ruleRemaining === 0}>
+                    {t("components.edit_community_dialog.add_rule")}
+                </Button>
+
+                {ruleRemaining === 0 && (
+                    <Typography variant="caption" className={classes.rulesHint} style={{ marginTop: 4 }}>
+                        {t("components.edit_community_dialog.no_room_left_delete_a_rule_to")}
+                    </Typography>
+                )}
+            </div>
+            <ToxicityWatcher text={rulesPlainText(ruleList)} label="description" style={{ marginTop: 8, marginBottom: 16 }} />
 
             <div style={{ display: "flex", gap: 16, marginBottom: 16 }}>
                 <FormControl variant="outlined" style={{ flex: 1 }}>
@@ -679,6 +896,46 @@ function EditCommunityDialog(props) {
                         </Button>
                     </DialogActions>
                 )}
+            </Dialog>
+            {/* Add Rule dialog — same white paper as the profile's add-item dialog */}
+            <Dialog
+                PaperProps={{ classes: { root: classes.whiteDialog } }}
+                open={ruleDialogOpen}
+                maxWidth="sm"
+                fullWidth
+                disablePortal={false}
+                onClose={handleCloseRuleDialog}
+                keepMounted={false}
+            >
+                <DialogContent>
+                    <Typography style={{ marginTop: 8, marginBottom: 24 }} component="h2" variant="h6">
+                        {t("components.edit_community_dialog.add_rule")}
+                    </Typography>
+                    <TextField
+                        label={t("components.edit_community_dialog.rule")}
+                        variant="outlined"
+                        fullWidth
+                        multiline
+                        minRows={2}
+                        value={ruleDraft}
+                        onChange={(e) => { setRuleDraft(e.target.value); if (ruleError) setRuleError(""); }}
+                        onKeyDown={handleRuleKeyDown}
+                        onPaste={handleRulePaste}
+                        placeholder={t("components.edit_community_dialog.eg_pixel_art_only_no_ai_upscales")}
+                        error={!!ruleError}
+                        helperText={ruleError || (ruleDraft.length + "/" + ruleRemaining)}
+                        inputProps={{ maxLength: ruleRemaining }}
+                        autoFocus
+                    />
+                </DialogContent>
+                <DialogActions style={{ textAlign: "right" }}>
+                    <Button variant="text" color="primary" onClick={handleCloseRuleDialog}>
+                        {t("words.cancel")}
+                    </Button>
+                    <Button variant="contained" color="primary" onClick={handleAddRule} disabled={!isAddRuleValid}>
+                        {t("components.edit_community_dialog.add_rule")}
+                    </Button>
+                </DialogActions>
             </Dialog>
             {/* Portal key dialog — raised on save */}
             <Dialog className={classes.keyDialog} open={keyDialogOpen} onClose={broadcasting ? undefined : () => setKeyDialogOpen(false)} maxWidth="sm" fullWidth>

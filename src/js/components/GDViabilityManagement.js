@@ -9,7 +9,7 @@ import DescriptionIcon from "@material-ui/icons/Description";
 import HowToVoteIcon from "@material-ui/icons/HowToVote";
 
 // Import sub-views
-import GDVMWitnesses from "./GDVMWitnesses";
+import GDVMWitnesses from "../utils/lexical/GDVMWitnesses";
 import GDVMProposals from "./GDVMProposals";
 
 const styles = theme => ({

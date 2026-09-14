@@ -16,16 +16,17 @@ import {
     REDO_COMMAND,
 } from 'lexical';
 import { $createHeadingNode, $createQuoteNode } from '@lexical/rich-text';
-import { INSERT_UNORDERED_LIST_COMMAND, INSERT_ORDERED_LIST_COMMAND } from '@lexical/list';
+import { INSERT_UNORDERED_LIST_COMMAND, INSERT_ORDERED_LIST_COMMAND, REMOVE_LIST_COMMAND } from '@lexical/list';
 import { $createCodeNode } from '@lexical/code';
 import { TOGGLE_LINK_COMMAND } from '@lexical/link';
+import { INSERT_TABLE_COMMAND } from '@lexical/table';
 import { $convertToMarkdownString } from '@lexical/markdown';
 
 // Shared markdown loader (clears root, converts with GFM tables) and the
 // transformer set that includes images
-import { loadMarkdownIntoEditor, EDITOR_TRANSFORMERS, $setBlocksTypeSafe } from './lexicalConfig';
+import { loadMarkdownIntoEditor, EDITOR_TRANSFORMERS, $setBlocksTypeSafe, $getBlockTypeAtSelection } from './lexicalConfig';
 import { $createImageNode, isRenderableImageSrc } from '../../utils/lexical/ImageNode';
-import { storeImageOnArweave } from '../../utils/arweaveImage';
+import { storeImageOnArweave } from '../../utils/lexical/arweaveImage';
 
 // Micromark imports for preview
 import { micromark } from 'micromark';
@@ -1070,16 +1071,42 @@ class LexicalTextEditorDialog extends PureComponent {
             }
             if (!$isRangeSelection(selection)) return;
 
-            if (type === 'bullet') {
-                editor.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined);
-            } else if (type === 'number') {
-                editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined);
+            if (type === 'table') {
+                // Handled by <TablePlugin /> (already mounted in
+                // EditorSection). Dimensions are strings because older
+                // @lexical/table reads them straight out of a text field;
+                // every version Number()s them, so this is the safe shape.
+                editor.dispatchCommand(INSERT_TABLE_COMMAND, {
+                    columns: '3',
+                    rows: '3',
+                    includeHeaders: true,
+                });
+                return;
+            }
+
+            // Pressing the button for the type the caret is ALREADY in turns
+            // that type off, the way the inline format buttons have always
+            // behaved. Without this, Quote/H1/H2 and the list buttons were
+            // one-way: once a block was a heading there was no way back to a
+            // paragraph except the Paragraph entry buried in the heading menu.
+            const current = $getBlockTypeAtSelection(selection);
+            const clearing = current === type;
+
+            if (type === 'bullet' || type === 'number') {
+                if (clearing) {
+                    editor.dispatchCommand(REMOVE_LIST_COMMAND, undefined);
+                } else {
+                    editor.dispatchCommand(
+                        type === 'bullet' ? INSERT_UNORDERED_LIST_COMMAND : INSERT_ORDERED_LIST_COMMAND,
+                        undefined
+                    );
+                }
+            } else if (clearing || type === 'paragraph') {
+                $setBlocksTypeSafe(selection, () => $createParagraphNode());
             } else if (type === 'quote') {
                 $setBlocksTypeSafe(selection, () => $createQuoteNode());
             } else if (type === 'code') {
                 $setBlocksTypeSafe(selection, () => $createCodeNode());
-            } else if (type === 'paragraph') {
-                $setBlocksTypeSafe(selection, () => $createParagraphNode());
             } else if (type.startsWith('h')) {
                 $setBlocksTypeSafe(selection, () => $createHeadingNode(type));
             }

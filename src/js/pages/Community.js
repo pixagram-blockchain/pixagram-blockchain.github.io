@@ -15,6 +15,7 @@ import useVoteSync from "../hooks/useVoteSync";
 import { usePictureDialog } from "../hooks/usePictureDialog";
 import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto } from "../utils/voteSync";
 import { idle, cancelIdle } from "../utils/idle";
+import { parseRules } from "../utils/community-rules";
 import {
     EASE as EASE_STANDARD, TRANSITION_FAST, TRANSITION_MEDIUM, TRANSITION_ENTRY,
     RAINBOW_RIPPLE, RAINBOW_RIPPLE_SIMPLE,
@@ -1293,8 +1294,16 @@ const useCommunityData = (api, pathname) => {
                 created: communityData.created_at
                     ? new Date(communityData.created_at + (communityData.created_at.includes('Z') ? '' : 'Z')).getTime() : 0,
             };
-            const parsedRules = (communityData.description || '').split('\n')
-                .map(line => line.replace(/^\d+[\.\)]\s*/, '').trim()).filter(Boolean);
+            // The other half of the editor's contract: EditCommunityDialog
+            // writes this field as a markdown bullet list, older portals hold
+            // whatever was typed into a free textarea, and parseRules reads
+            // both (see utils/community-rules). The split() this replaces
+            // stripped "1." and "1)" only — so a "- " list rendered with its
+            // dashes showing, a "*" list with its asterisks, and every wrapped
+            // line became a rule of its own. description_source is the stored
+            // text; description is rendered HTML, which parseRules also copes
+            // with for the nodes that return no source.
+            const parsedRules = parseRules(communityData.description_source ?? communityData.description ?? '');
 
             // Cache raw team/admins so refreshViewerState (here and on session
             // events) can derive viewer state without refetching.

@@ -234,7 +234,14 @@ export default {
             "image": "Immagine",
             "undo": "Annulla",
             "redo": "Ripristina",
-            "select_text_first": "Seleziona prima del testo"
+            "select_text_first": "Seleziona prima del testo",
+            "insert_row_above": "Inserisci riga sopra",
+            "insert_row_below": "Inserisci riga sotto",
+            "delete_row": "Elimina riga",
+            "insert_column_left": "Inserisci colonna a sinistra",
+            "insert_column_right": "Inserisci colonna a destra",
+            "delete_column": "Elimina colonna",
+            "delete_table": "Elimina tabella"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Non filtrare i contenuti NSFW",
@@ -323,7 +330,8 @@ export default {
             "heading_3": "Titolo 3",
             "paragraph": "Paragrafo",
             "bullet_list": "Elenco puntato",
-            "numbered_list": "Elenco numerato"
+            "numbered_list": "Elenco numerato",
+            "table": "Tabella"
         },
         "profile_tabs": {
             "posts": "Post",
@@ -360,6 +368,7 @@ export default {
             "add_someone": "Aggiungi qualcuno"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Questo portale non ha ancora stabilito regole.",
             "community_rules": "Regole della community"
         },
         "error_boundary": {
@@ -1355,6 +1364,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "I post su blockchain con voti non possono mai essere rimossi del tutto; questa è l’eliminazione soft della piattaforma. Voti e pagamenti non ne risentono."
         },
         "edit_community_dialog": {
+            "rules": "Regole",
+            "rule": "Regola",
+            "add_rule": "Aggiungi regola",
+            "no_rules_added_yet": "Nessuna regola aggiunta",
+            "eg_pixel_art_only_no_ai_upscales": "es. Solo pixel art — nessun upscaling con IA",
+            "delete_rule": "Elimina regola",
+            "that_rule_is_already_in_the_list": "Questa regola è già nell’elenco.",
+            "no_room_left_delete_a_rule_to": "Spazio esaurito. Elimina una regola per aggiungerne un’altra.",
+            "some_rules_did_not_fit_and_were": "Alcune regole non entravano e sono state ignorate.",
             "avatar": "Avatar",
             "loading_community_data": "Caricamento dei dati della community…",
             "edit_portal_settings": "Modifica le impostazioni del portale",

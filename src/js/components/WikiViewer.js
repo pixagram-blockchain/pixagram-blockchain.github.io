@@ -3,7 +3,7 @@ import withStyles from "@material-ui/core/styles/withStyles";
 import Accordion from "@material-ui/core/Accordion";
 import AccordionSummary from "@material-ui/core/AccordionSummary";
 import AccordionDetails from "@material-ui/core/AccordionDetails";
-import ExpandMoreIcon from "@material-ui/icons/ExpandMore";
+import ExpandMoreIcon from "@material-ui/icons/ExpandMoreRounded";
 import Typography from "@material-ui/core/Typography";
 import JSLoader from "../utils/JSLoader";
 import { safeHTML } from "../utils/api/sanitizer";

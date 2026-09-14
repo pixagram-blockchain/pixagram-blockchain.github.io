@@ -238,7 +238,14 @@ export default {
             "image": "Görsel",
             "undo": "Geri al",
             "redo": "Yinele",
-            "select_text_first": "Önce metin seç"
+            "select_text_first": "Önce metin seç",
+            "insert_row_above": "Üste satır ekle",
+            "insert_row_below": "Alta satır ekle",
+            "delete_row": "Satırı sil",
+            "insert_column_left": "Sola sütun ekle",
+            "insert_column_right": "Sağa sütun ekle",
+            "delete_column": "Sütunu sil",
+            "delete_table": "Tabloyu sil"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "NSFW içeriği filtreleme",
@@ -327,7 +334,8 @@ export default {
             "heading_3": "Başlık 3",
             "paragraph": "Paragraf",
             "bullet_list": "Madde işaretli liste",
-            "numbered_list": "Numaralı liste"
+            "numbered_list": "Numaralı liste",
+            "table": "Tablo"
         },
         "profile_tabs": {
             "posts": "Gönderiler",
@@ -364,6 +372,7 @@ export default {
             "add_someone": "Birini ekle"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Bu portal henüz kural belirlemedi.",
             "community_rules": "Topluluk kuralları"
         },
         "error_boundary": {
@@ -1358,6 +1367,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "Oy almış blokzincir gönderileri asla tamamen kaldırılamaz; bu, platformun yumuşak silmesidir. Oylar ve ödemeler etkilenmez."
         },
         "edit_community_dialog": {
+            "rules": "Kurallar",
+            "rule": "Kural",
+            "add_rule": "Kural ekle",
+            "no_rules_added_yet": "Henüz kural eklenmedi",
+            "eg_pixel_art_only_no_ai_upscales": "ör. Yalnızca pixel art — yapay zekâ ile ölçekleme yok",
+            "delete_rule": "Kuralı sil",
+            "that_rule_is_already_in_the_list": "Bu kural zaten listede.",
+            "no_room_left_delete_a_rule_to": "Yer kalmadı. Yeni bir kural eklemek için birini silin.",
+            "some_rules_did_not_fit_and_were": "Bazı kurallar sığmadığı için atlandı.",
             "avatar": "Avatar",
             "loading_community_data": "Topluluk verisi yükleniyor…",
             "edit_portal_settings": "Portal Ayarlarını Düzenle",

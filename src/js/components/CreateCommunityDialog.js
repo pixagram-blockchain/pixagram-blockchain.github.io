@@ -31,7 +31,7 @@ import ListItemText from "@material-ui/core/ListItemText";
 import FileCopyOutlined from "@material-ui/icons/FileCopyOutlined";
 import TextField from "@material-ui/core/TextField";
 import Chip from "@material-ui/core/Chip";
-import ExpandMoreIcon from "@material-ui/icons/ExpandMore";
+import ExpandMoreIcon from "@material-ui/icons/ExpandMoreRounded";
 import Box from "@material-ui/core/Box";
 import AccountCheck from "../icons/AccountCheck";
 import AccountAlert from "../icons/AccountAlert";

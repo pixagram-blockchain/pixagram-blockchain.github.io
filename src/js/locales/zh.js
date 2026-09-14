@@ -235,7 +235,14 @@ export default {
             "image": "图片",
             "undo": "撤销",
             "redo": "重做",
-            "select_text_first": "请先选择文本"
+            "select_text_first": "请先选择文本",
+            "insert_row_above": "在上方插入行",
+            "insert_row_below": "在下方插入行",
+            "delete_row": "删除行",
+            "insert_column_left": "在左侧插入列",
+            "insert_column_right": "在右侧插入列",
+            "delete_column": "删除列",
+            "delete_table": "删除表格"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "不过滤 NSFW 内容",
@@ -324,7 +331,8 @@ export default {
             "heading_3": "标题 3",
             "paragraph": "正文",
             "bullet_list": "项目符号列表",
-            "numbered_list": "编号列表"
+            "numbered_list": "编号列表",
+            "table": "表格"
         },
         "profile_tabs": {
             "posts": "帖子",
@@ -361,6 +369,7 @@ export default {
             "add_someone": "添加成员"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "此门户尚未设定任何规则。",
             "community_rules": "社区规则"
         },
         "error_boundary": {
@@ -1356,6 +1365,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "已有投票的链上帖子永远无法彻底移除；这是本平台的软删除。投票和收益不受影响。"
         },
         "edit_community_dialog": {
+            "rules": "规则",
+            "rule": "规则",
+            "add_rule": "添加规则",
+            "no_rules_added_yet": "尚未添加规则",
+            "eg_pixel_art_only_no_ai_upscales": "例如：仅限像素画 — 不接受 AI 放大",
+            "delete_rule": "删除规则",
+            "that_rule_is_already_in_the_list": "该规则已在列表中。",
+            "no_room_left_delete_a_rule_to": "空间已满。请删除一条规则再添加新的。",
+            "some_rules_did_not_fit_and_were": "部分规则因空间不足被跳过。",
             "avatar": "头像",
             "loading_community_data": "正在加载社区数据…",
             "edit_portal_settings": "编辑门户设置",

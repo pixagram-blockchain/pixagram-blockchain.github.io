@@ -7,6 +7,7 @@ import ListItemText from "@material-ui/core/ListItemText";
 import FormatUnderlinedIcon from "@material-ui/icons/FormatUnderlined";
 import FormatStrikethroughIcon from "@material-ui/icons/FormatStrikethrough";
 import CodeIcon from "@material-ui/icons/Code";
+import TableChartIcon from "@material-ui/icons/TableChart";
 import FormatListBulletedIcon from "@material-ui/icons/FormatListBulleted";
 import FormatListNumberedIcon from "@material-ui/icons/FormatListNumbered";
 import H1Icon from "../../icons/H1";
@@ -156,6 +157,17 @@ const FormatMenus = React.memo(({
                 <MenuItem onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); onToggleInlineStyle('code'); onCloseFormatMenu(); }}>
                     <ListItemIcon><CodeIcon /></ListItemIcon>
                     <ListItemText primary={t("components.format_menus.code")} />
+                </MenuItem>
+                {/* Block insert rather than an inline style, but this is the
+                    catch-all menu and a table needs an entry point: the
+                    MarkdownShortcutPlugin can't build one by typing (a table
+                    is multi-line), so without this the only way to author a
+                    table is to switch to markdown mode. Goes through
+                    onToggleBlockType like every other block, so no new prop
+                    is threaded through the dialog. */}
+                <MenuItem onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); onToggleBlockType('table'); onCloseFormatMenu(); }}>
+                    <ListItemIcon><TableChartIcon /></ListItemIcon>
+                    <ListItemText primary={t("components.format_menus.table")} />
                 </MenuItem>
             </Menu>
             <Menu

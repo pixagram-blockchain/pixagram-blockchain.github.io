@@ -27,7 +27,7 @@ import Fade from "@material-ui/core/Fade";
 import Accordion from '@material-ui/core/Accordion';
 import AccordionSummary from '@material-ui/core/AccordionSummary';
 import AccordionDetails from '@material-ui/core/AccordionDetails';
-import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
+import ExpandMoreIcon from '@material-ui/icons/ExpandMoreRounded';
 import ErrorRounded from "@material-ui/icons/ErrorRounded";
 import CheckRounded from "@material-ui/icons/CheckRounded";
 import Tooltip from "@material-ui/core/Tooltip";

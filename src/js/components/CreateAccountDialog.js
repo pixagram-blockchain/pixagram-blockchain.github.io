@@ -38,7 +38,7 @@ import Fade from "@material-ui/core/Fade";
 import PhoneIcon from '@material-ui/icons/Phone';
 import CheckCircleOutlineIcon from '@material-ui/icons/CheckCircleOutline';
 import SendIcon from '@material-ui/icons/Send';
-import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
+import ExpandMoreIcon from '@material-ui/icons/ExpandMoreRounded';
 import Tooltip from "@material-ui/core/Tooltip";
 import Tab from "@material-ui/core/Tab";
 import Tabs from "@material-ui/core/Tabs";

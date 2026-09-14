@@ -237,7 +237,14 @@ export default {
             "image": "Зображення",
             "undo": "Скасувати",
             "redo": "Повторити",
-            "select_text_first": "Спочатку виділіть текст"
+            "select_text_first": "Спочатку виділіть текст",
+            "insert_row_above": "Вставити рядок вище",
+            "insert_row_below": "Вставити рядок нижче",
+            "delete_row": "Видалити рядок",
+            "insert_column_left": "Вставити стовпець ліворуч",
+            "insert_column_right": "Вставити стовпець праворуч",
+            "delete_column": "Видалити стовпець",
+            "delete_table": "Видалити таблицю"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Не фільтрувати NSFW-контент",
@@ -326,7 +333,8 @@ export default {
             "heading_3": "Заголовок 3",
             "paragraph": "Абзац",
             "bullet_list": "Маркований список",
-            "numbered_list": "Нумерований список"
+            "numbered_list": "Нумерований список",
+            "table": "Таблиця"
         },
         "profile_tabs": {
             "posts": "Дописи",
@@ -363,6 +371,7 @@ export default {
             "add_someone": "Додати когось"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Цей портал ще не встановив правил.",
             "community_rules": "Правила спільноти"
         },
         "error_boundary": {
@@ -1357,6 +1366,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "Блокчейн-дописи з голосами ніколи не можуть бути повністю видалені; це м’яке видалення платформи. Голоси й виплати не зачіпаються."
         },
         "edit_community_dialog": {
+            "rules": "Правила",
+            "rule": "Правило",
+            "add_rule": "Додати правило",
+            "no_rules_added_yet": "Правил ще не додано",
+            "eg_pixel_art_only_no_ai_upscales": "напр., Лише піксель-арт — без ШІ-апскейлу",
+            "delete_rule": "Видалити правило",
+            "that_rule_is_already_in_the_list": "Це правило вже є у списку.",
+            "no_room_left_delete_a_rule_to": "Місця більше немає. Видаліть одне правило, щоб додати інше.",
+            "some_rules_did_not_fit_and_were": "Частина правил не вмістилася й була пропущена.",
             "avatar": "Аватар",
             "loading_community_data": "Завантаження даних спільноти...",
             "edit_portal_settings": "Редагувати налаштування порталу",

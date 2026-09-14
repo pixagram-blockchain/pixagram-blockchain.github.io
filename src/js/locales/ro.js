@@ -237,7 +237,14 @@ export default {
             "image": "Imagine",
             "undo": "Anulează",
             "redo": "Refă",
-            "select_text_first": "Selectează mai întâi textul"
+            "select_text_first": "Selectează mai întâi textul",
+            "insert_row_above": "Inserează rând deasupra",
+            "insert_row_below": "Inserează rând dedesubt",
+            "delete_row": "Șterge rândul",
+            "insert_column_left": "Inserează coloană la stânga",
+            "insert_column_right": "Inserează coloană la dreapta",
+            "delete_column": "Șterge coloana",
+            "delete_table": "Șterge tabelul"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Nu filtra conținutul NSFW",
@@ -326,7 +333,8 @@ export default {
             "heading_3": "Titlu 3",
             "paragraph": "Paragraf",
             "bullet_list": "Listă cu marcatori",
-            "numbered_list": "Listă numerotată"
+            "numbered_list": "Listă numerotată",
+            "table": "Tabel"
         },
         "profile_tabs": {
             "posts": "Postări",
@@ -363,6 +371,7 @@ export default {
             "add_someone": "Adaugă pe cineva"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Acest portal nu a stabilit încă nicio regulă.",
             "community_rules": "Regulile comunității"
         },
         "error_boundary": {
@@ -1357,6 +1366,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "Postările blockchain cu voturi nu pot fi niciodată eliminate complet; aceasta e ștergerea soft a platformei. Voturile și plățile nu sunt afectate."
         },
         "edit_community_dialog": {
+            "rules": "Reguli",
+            "rule": "Regulă",
+            "add_rule": "Adaugă regulă",
+            "no_rules_added_yet": "Nicio regulă adăugată încă",
+            "eg_pixel_art_only_no_ai_upscales": "de ex., Doar pixel art — fără upscaling cu IA",
+            "delete_rule": "Șterge regula",
+            "that_rule_is_already_in_the_list": "Această regulă este deja în listă.",
+            "no_room_left_delete_a_rule_to": "Nu mai este loc. Șterge o regulă pentru a adăuga alta.",
+            "some_rules_did_not_fit_and_were": "Unele reguli nu au încăput și au fost omise.",
             "avatar": "Avatar",
             "loading_community_data": "Se încarcă datele comunității…",
             "edit_portal_settings": "Editează setările portalului",

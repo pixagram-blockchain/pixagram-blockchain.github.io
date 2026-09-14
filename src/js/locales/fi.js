@@ -234,7 +234,14 @@ export default {
             "image": "Kuva",
             "undo": "Kumoa",
             "redo": "Tee uudelleen",
-            "select_text_first": "Valitse ensin tekstiä"
+            "select_text_first": "Valitse ensin tekstiä",
+            "insert_row_above": "Lisää rivi yläpuolelle",
+            "insert_row_below": "Lisää rivi alapuolelle",
+            "delete_row": "Poista rivi",
+            "insert_column_left": "Lisää sarake vasemmalle",
+            "insert_column_right": "Lisää sarake oikealle",
+            "delete_column": "Poista sarake",
+            "delete_table": "Poista taulukko"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Älä suodata NSFW-sisältöä",
@@ -323,7 +330,8 @@ export default {
             "heading_3": "Otsikko 3",
             "paragraph": "Kappale",
             "bullet_list": "Luettelo",
-            "numbered_list": "Numeroitu luettelo"
+            "numbered_list": "Numeroitu luettelo",
+            "table": "Taulukko"
         },
         "profile_tabs": {
             "posts": "Julkaisut",
@@ -360,6 +368,7 @@ export default {
             "add_someone": "Lisää joku"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Tämä portaali ei ole vielä asettanut sääntöjä.",
             "community_rules": "Yhteisön säännöt"
         },
         "error_boundary": {
@@ -1354,6 +1363,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "Ääniä saaneita lohkoketjujulkaisuja ei voi koskaan poistaa täysin; tämä on alustan pehmeä poisto. Ääniin ja palkkioihin ei vaikuteta."
         },
         "edit_community_dialog": {
+            "rules": "Säännöt",
+            "rule": "Sääntö",
+            "add_rule": "Lisää sääntö",
+            "no_rules_added_yet": "Sääntöjä ei ole vielä lisätty",
+            "eg_pixel_art_only_no_ai_upscales": "esim. Vain pikselitaidetta — ei tekoälyskaalausta",
+            "delete_rule": "Poista sääntö",
+            "that_rule_is_already_in_the_list": "Tämä sääntö on jo listalla.",
+            "no_room_left_delete_a_rule_to": "Tila on täynnä. Poista sääntö, jotta voit lisätä uuden.",
+            "some_rules_did_not_fit_and_were": "Osa säännöistä ei mahtunut, ja ne ohitettiin.",
             "avatar": "Avatar",
             "loading_community_data": "Ladataan yhteisön tietoja…",
             "edit_portal_settings": "Muokkaa portaalin asetuksia",

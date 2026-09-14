@@ -9,13 +9,22 @@ import LinkIcon from "@material-ui/icons/Link";
 import ImageIcon from "@material-ui/icons/Image";
 import UndoIcon from "@material-ui/icons/Undo";
 import RedoIcon from "@material-ui/icons/Redo";
-import CloseRoundedIcon from "@material-ui/icons/CloseRounded";
+import VerticalAlignTopIcon from "@material-ui/icons/VerticalAlignTop";
+import VerticalAlignBottomIcon from "@material-ui/icons/VerticalAlignBottom";
+import RemoveIcon from "@material-ui/icons/Remove";
+import DeleteOutlineIcon from "@material-ui/icons/DeleteOutline";
 
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext.js';
+import * as LexicalTableModule from '@lexical/table';
+import { $isTableCellNode, $isTableNode } from '@lexical/table';
+
+import { $getBlockTypeAtSelection } from './lexicalConfig';
 
 import { t, useLanguage } from "../../utils/text";
 import {
+    $getNearestNodeFromDOMNode,
     $getSelection,
+    $createParagraphNode,
     $isRangeSelection,
     $isTextNode,
     FORMAT_TEXT_COMMAND,
@@ -25,21 +34,34 @@ import {
 
 /**
  * RadialContextMenu — right-click inside the visual editor opens a circular
- * menu of 8 actions blooming out from the cursor: Bold, Italic, Underline,
- * Quote, Link, Image, Undo, Redo, with a close button at the center.
+ * menu blooming out from the cursor.
+ *
+ * TWO menus, chosen by what was clicked:
+ *
+ *   • inside a table cell → row and column operations (insert above/below,
+ *     insert left/right, delete row, delete column, delete table). The
+ *     formatting ring would be the wrong tool there, and inline formatting
+ *     inside a cell is still one text-selection away via the floating bar.
+ *
+ *   • anywhere else → the formatting ring: Bold, Italic, Underline, Quote,
+ *     Link, Image, Undo, Redo.
+ *
+ * Formatting items that are ALREADY applied at the caret render inverted and
+ * turn themselves off when pressed — the same behaviour as the floating
+ * selection bar, rather than silently re-applying a format that is already on.
  *
  * Self-contained Lexical plugin (must live inside the LexicalComposer).
- * Formats and undo/redo are dispatched directly on the editor; Quote, Link
- * and Image go through the parent dialog's handlers (props). Link is
- * disabled unless text is selected — same rule as everywhere else.
+ * Formats, undo/redo and the table operations are dispatched directly on the
+ * editor; Quote, Link and Image go through the parent dialog's handlers
+ * (props). Link is disabled unless text is selected — same rule as everywhere
+ * else.
  *
- * All mousedowns inside the overlay preventDefault so the editor keeps
- * focus and the selection survives until an action runs.
+ * All mousedowns inside the overlay preventDefault so the editor keeps focus
+ * and the selection survives until an action runs.
  */
 
 const RADIUS = 84;        // distance from cursor to item centers
 const ITEM_SIZE = 44;     // action button diameter
-const CENTER_SIZE = 32;   // close button diameter
 // Keep the whole ring on-screen when right-clicking near an edge.
 const EDGE_MARGIN = RADIUS + ITEM_SIZE / 2 + 12;
 
@@ -67,16 +89,81 @@ const ITEM_BASE_STYLE = {
 };
 
 const ICON_STYLE = { fontSize: 20 };
-const CENTER_ICON_STYLE = { fontSize: 16 };
+
+// The ring is icon-only, and "insert column left" versus "delete column" is
+// not something an icon can carry on its own. The hovered item names itself in
+// the middle of the ring, where nothing else is competing for the space.
+const CENTER_LABEL_STYLE = {
+    position: 'absolute',
+    transform: 'translate(-50%, -50%)',
+    pointerEvents: 'none',
+    maxWidth: RADIUS * 2 - ITEM_SIZE,
+    padding: '4px 10px',
+    borderRadius: 12,
+    backgroundColor: 'rgba(16,16,16,0.92)',
+    color: '#ffffff',
+    fontSize: 12,
+    lineHeight: 1.3,
+    textAlign: 'center',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    boxShadow: '0 4px 14px rgba(0,0,0,0.4)',
+};
+
+// Rotations reuse one arrow-to-edge icon for all four inserts: the arrow
+// points at the edge the new row or column appears on. Same trick for the
+// minus: horizontal removes a row, vertical removes a column.
+const ROTATE_LEFT_STYLE = { fontSize: 20, transform: 'rotate(-90deg)' };
+const ROTATE_RIGHT_STYLE = { fontSize: 20, transform: 'rotate(90deg)' };
+const VERTICAL_MINUS_STYLE = { fontSize: 20, transform: 'rotate(90deg)' };
 
 const stopMouseDown = (e) => {
     e.preventDefault();
     e.stopPropagation();
 };
 
+// @lexical/table renamed these helpers (the `__EXPERIMENTAL` suffix was
+// dropped) without keeping the old names in every release, and a named import
+// of a missing export is a hard module-resolution error under strict bundlers
+// — so they are resolved off the namespace at call time instead. Same pattern
+// as $setBlocksTypeSafe's handling of @lexical/selection.
+const resolveTableFn = (names) => {
+    for (let i = 0; i < names.length; i++) {
+        const fn = LexicalTableModule[names[i]];
+        if (typeof fn === 'function') return fn;
+    }
+    return null;
+};
+
+const INSERT_ROW = ['$insertTableRowAtSelection', '$insertTableRow__EXPERIMENTAL'];
+const INSERT_COLUMN = ['$insertTableColumnAtSelection', '$insertTableColumn__EXPERIMENTAL'];
+const DELETE_ROW = ['$deleteTableRowAtSelection', '$deleteTableRow__EXPERIMENTAL'];
+const DELETE_COLUMN = ['$deleteTableColumnAtSelection', '$deleteTableColumn__EXPERIMENTAL'];
+
+/** Nearest enclosing table cell, or null. */
+const $cellForNode = (node) => {
+    let current = node;
+    while (current) {
+        if ($isTableCellNode(current)) return current;
+        current = current.getParent();
+    }
+    return null;
+};
+
+const $tableForNode = (node) => {
+    let current = node;
+    while (current) {
+        if ($isTableNode(current)) return current;
+        current = current.getParent();
+    }
+    return null;
+};
+
 const RadialContextMenu = ({ onLink, onImage, onToggleBlockType }) => {
+    useLanguage();
     const [editor] = useLexicalComposerContext();
-    // null when closed, else { x, y, canLink }
+    // null when closed, else { x, y, mode, canLink, formats, blockType }
     const [menu, setMenu] = React.useState(null);
     const [shown, setShown] = React.useState(false); // drives the bloom-in
     const [hovered, setHovered] = React.useState(-1);
@@ -87,13 +174,50 @@ const RadialContextMenu = ({ onLink, onImage, onToggleBlockType }) => {
         const handleContextMenu = (event) => {
             event.preventDefault();
 
+            const cellElement = event.target && event.target.closest
+                ? event.target.closest('td,th')
+                : null;
+
+            let mode = 'format';
             let canLink = false;
-            editor.getEditorState().read(() => {
+            let formats = { bold: false, italic: false, underline: false };
+            let blockType = 'paragraph';
+
+            // One update, not an update followed by a read: the selection may
+            // be moved below, and everything after has to see that move.
+            editor.update(() => {
+                if (cellElement) {
+                    const clicked = $cellForNode($getNearestNodeFromDOMNode(cellElement));
+                    if (clicked) {
+                        mode = 'table';
+                        // Firefox does not move the caret on right-click, and
+                        // Chrome does not move it when the click lands inside
+                        // an existing selection — so the caret can easily be
+                        // in a different cell than the one just clicked, and
+                        // "delete row" would take out the wrong row. Pull the
+                        // selection into the clicked cell when it isn't
+                        // already there.
+                        const selection = $getSelection();
+                        const anchorCell = $isRangeSelection(selection)
+                            ? $cellForNode(selection.anchor.getNode())
+                            : null;
+                        if (!anchorCell || anchorCell.getKey() !== clicked.getKey()) {
+                            clicked.selectStart();
+                        }
+                    }
+                }
+
                 const selection = $getSelection();
-                canLink =
-                    $isRangeSelection(selection) &&
-                    !selection.isCollapsed() &&
-                    selection.getNodes().some($isTextNode);
+                if ($isRangeSelection(selection)) {
+                    canLink = !selection.isCollapsed() &&
+                        selection.getNodes().some($isTextNode);
+                    formats = {
+                        bold: selection.hasFormat('bold'),
+                        italic: selection.hasFormat('italic'),
+                        underline: selection.hasFormat('underline'),
+                    };
+                    blockType = $getBlockTypeAtSelection(selection);
+                }
             });
 
             const x = Math.min(
@@ -107,7 +231,7 @@ const RadialContextMenu = ({ onLink, onImage, onToggleBlockType }) => {
 
             setShown(false);
             setHovered(-1);
-            setMenu({ x, y, canLink });
+            setMenu({ x, y, mode, canLink, formats, blockType });
         };
 
         return editor.registerRootListener((rootElement, prevRootElement) => {
@@ -142,29 +266,68 @@ const RadialContextMenu = ({ onLink, onImage, onToggleBlockType }) => {
 
     const close = React.useCallback(() => setMenu(null), []);
 
-    const items = React.useMemo(() => ([
+    // The table helpers read the selection themselves and throw when it is
+    // not in a table — which can happen if the document moved under us
+    // between opening the menu and pressing a button.
+    const runTableOp = React.useCallback((names, arg) => {
+        const fn = resolveTableFn(names);
+        if (!fn) {
+            console.error('Table operation unavailable in this @lexical/table build:', names[0]);
+            return;
+        }
+        editor.update(() => {
+            try {
+                fn(arg);
+            } catch (error) {
+                console.error('Table operation failed:', error);
+            }
+        });
+    }, [editor]);
+
+    const deleteTable = React.useCallback(() => {
+        editor.update(() => {
+            const selection = $getSelection();
+            if (!$isRangeSelection(selection)) return;
+            const table = $tableForNode(selection.anchor.getNode());
+            if (!table) return;
+            // Leave somewhere to put the caret, or the whole block disappears
+            // and the user is left with no insertion point where it was.
+            const paragraph = $createParagraphNode();
+            table.insertAfter(paragraph);
+            table.remove();
+            paragraph.select();
+        });
+    }, [editor]);
+
+    const formatItems = React.useMemo(() => ([
         {
             key: 'bold',
             label: t("components.radial_context_menu.bold"),
             Icon: FormatBoldIcon,
+            format: 'bold',
             run: () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'bold'),
         },
         {
             key: 'italic',
             label: t("components.radial_context_menu.italic"),
             Icon: FormatItalicIcon,
+            format: 'italic',
             run: () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'italic'),
         },
         {
             key: 'underline',
             label: t("components.radial_context_menu.underline"),
             Icon: FormatUnderlinedIcon,
+            format: 'underline',
             run: () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'underline'),
         },
         {
             key: 'quote',
             label: t("components.radial_context_menu.quote"),
             Icon: FormatQuoteIcon,
+            // toggleBlockType turns an already-applied block type back into a
+            // paragraph, so pressing an active Quote clears it.
+            block: 'quote',
             run: () => onToggleBlockType && onToggleBlockType('quote'),
         },
         {
@@ -194,7 +357,63 @@ const RadialContextMenu = ({ onLink, onImage, onToggleBlockType }) => {
         },
     ]), [editor, onLink, onImage, onToggleBlockType]);
 
+    const tableItems = React.useMemo(() => ([
+        {
+            key: 'row-above',
+            label: t("components.radial_context_menu.insert_row_above"),
+            Icon: VerticalAlignTopIcon,
+            run: () => runTableOp(INSERT_ROW, false),
+        },
+        {
+            key: 'row-below',
+            label: t("components.radial_context_menu.insert_row_below"),
+            Icon: VerticalAlignBottomIcon,
+            run: () => runTableOp(INSERT_ROW, true),
+        },
+        {
+            key: 'row-delete',
+            label: t("components.radial_context_menu.delete_row"),
+            Icon: RemoveIcon,
+            run: () => runTableOp(DELETE_ROW),
+        },
+        {
+            key: 'column-left',
+            label: t("components.radial_context_menu.insert_column_left"),
+            Icon: VerticalAlignTopIcon,
+            iconStyle: ROTATE_LEFT_STYLE,
+            run: () => runTableOp(INSERT_COLUMN, false),
+        },
+        {
+            key: 'column-right',
+            label: t("components.radial_context_menu.insert_column_right"),
+            Icon: VerticalAlignTopIcon,
+            iconStyle: ROTATE_RIGHT_STYLE,
+            run: () => runTableOp(INSERT_COLUMN, true),
+        },
+        {
+            key: 'column-delete',
+            label: t("components.radial_context_menu.delete_column"),
+            Icon: RemoveIcon,
+            iconStyle: VERTICAL_MINUS_STYLE,
+            run: () => runTableOp(DELETE_COLUMN),
+        },
+        {
+            key: 'table-delete',
+            label: t("components.radial_context_menu.delete_table"),
+            Icon: DeleteOutlineIcon,
+            run: deleteTable,
+        },
+    ]), [runTableOp, deleteTable]);
+
     if (!menu) return null;
+
+    const items = menu.mode === 'table' ? tableItems : formatItems;
+
+    const isActive = (item) => {
+        if (item.format) return Boolean(menu.formats[item.format]);
+        if (item.block) return menu.blockType === item.block;
+        return false;
+    };
 
     const handleOverlayMouseDown = (e) => {
         // Only the transparent backdrop dismisses; item mousedowns stop
@@ -211,6 +430,7 @@ const RadialContextMenu = ({ onLink, onImage, onToggleBlockType }) => {
     };
 
     const step = 360 / items.length;
+    const hoveredItem = hovered >= 0 && hovered < items.length ? items[hovered] : null;
 
     return createPortal(
         <div
@@ -224,7 +444,21 @@ const RadialContextMenu = ({ onLink, onImage, onToggleBlockType }) => {
                 const dy = Math.sin(angle) * RADIUS;
                 const disabled = Boolean(item.needsSelection) && !menu.canLink;
                 const isHovered = hovered === i && !disabled;
+                const active = !disabled && isActive(item);
                 const ItemIcon = item.Icon;
+
+                // Active = inverted, so "this is already on, pressing me turns
+                // it off" is readable at a glance.
+                let backgroundColor = '#e9e9e9';
+                let color = '#1d1d1d';
+                if (disabled) {
+                    color = '#b5b5b5';
+                } else if (active) {
+                    backgroundColor = isHovered ? '#000000' : '#1d1d1d';
+                    color = '#ffffff';
+                } else if (isHovered) {
+                    backgroundColor = '#ffffff';
+                }
 
                 return (
                     <button
@@ -244,8 +478,8 @@ const RadialContextMenu = ({ onLink, onImage, onToggleBlockType }) => {
                             left: menu.x - ITEM_SIZE / 2,
                             top: menu.y - ITEM_SIZE / 2,
                             cursor: disabled ? 'default' : 'pointer',
-                            backgroundColor: isHovered ? '#ffffff' : '#e9e9e9',
-                            color: disabled ? '#b5b5b5' : '#1d1d1d',
+                            backgroundColor,
+                            color,
                             opacity: shown ? (disabled ? 0.55 : 1) : 0,
                             transform: shown
                                 ? `translate(${dx}px, ${dy}px) scale(${isHovered ? 1.12 : 1})`
@@ -256,10 +490,15 @@ const RadialContextMenu = ({ onLink, onImage, onToggleBlockType }) => {
                                 'background-color 120ms ease',
                         }}
                     >
-                        <ItemIcon style={ICON_STYLE} />
+                        <ItemIcon style={item.iconStyle || ICON_STYLE} />
                     </button>
                 );
             })}
+            {hoveredItem && (
+                <div style={{ ...CENTER_LABEL_STYLE, left: menu.x, top: menu.y }}>
+                    {hoveredItem.label}
+                </div>
+            )}
         </div>,
         document.body
     );

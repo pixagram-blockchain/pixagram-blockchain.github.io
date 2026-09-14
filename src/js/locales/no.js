@@ -234,7 +234,14 @@ export default {
             "image": "Bilde",
             "undo": "Angre",
             "redo": "Gjør om",
-            "select_text_first": "Marker tekst først"
+            "select_text_first": "Marker tekst først",
+            "insert_row_above": "Sett inn rad over",
+            "insert_row_below": "Sett inn rad under",
+            "delete_row": "Slett rad",
+            "insert_column_left": "Sett inn kolonne til venstre",
+            "insert_column_right": "Sett inn kolonne til høyre",
+            "delete_column": "Slett kolonne",
+            "delete_table": "Slett tabell"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Ikke filtrer NSFW-innhold",
@@ -323,7 +330,8 @@ export default {
             "heading_3": "Overskrift 3",
             "paragraph": "Avsnitt",
             "bullet_list": "Punktliste",
-            "numbered_list": "Nummerert liste"
+            "numbered_list": "Nummerert liste",
+            "table": "Tabell"
         },
         "profile_tabs": {
             "posts": "Innlegg",
@@ -360,6 +368,7 @@ export default {
             "add_someone": "Legg til noen"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Denne portalen har ennå ikke fastsatt noen regler.",
             "community_rules": "Fellesskapsregler"
         },
         "error_boundary": {
@@ -1354,6 +1363,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "Blokkjedeinnlegg med stemmer kan aldri fjernes helt; dette er plattformens myke sletting. Stemmer og utbetalinger påvirkes ikke."
         },
         "edit_community_dialog": {
+            "rules": "Regler",
+            "rule": "Regel",
+            "add_rule": "Legg til regel",
+            "no_rules_added_yet": "Ingen regler lagt til ennå",
+            "eg_pixel_art_only_no_ai_upscales": "f.eks. Bare pikselkunst — ingen AI-oppskalering",
+            "delete_rule": "Slett regel",
+            "that_rule_is_already_in_the_list": "Den regelen står allerede på listen.",
+            "no_room_left_delete_a_rule_to": "Ikke mer plass. Slett en regel for å legge til en ny.",
+            "some_rules_did_not_fit_and_were": "Noen regler fikk ikke plass og ble hoppet over.",
             "avatar": "Avatar",
             "loading_community_data": "Laster fellesskapsdata …",
             "edit_portal_settings": "Rediger portalinnstillinger",

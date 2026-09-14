@@ -15,6 +15,7 @@ import {
 
 // Enhanced markdown imports with table support
 import { $convertMarkdownToNodes, IMAGE_TRANSFORMER } from '../../utils/lexical/stateFromMarkdown';
+import { TABLE_TRANSFORMER } from '../../utils/lexical/stateToMarkdown';
 import { TRANSFORMERS } from '@lexical/markdown';
 
 // Lexical nodes
@@ -87,7 +88,15 @@ export const lexicalNodes = [
 // `![alt](url)` converts live in the visual editor) and by
 // $convertToMarkdownString in the dialog (so ImageNodes serialize back to
 // `![alt](url)` on autosave / mode switch / preview instead of vanishing).
-export const EDITOR_TRANSFORMERS = [IMAGE_TRANSFORMER, ...TRANSFORMERS];
+//
+// TABLE_TRANSFORMER is export-only (its regExp can never match; table IMPORT
+// is the placeholder pre-pass in stateFromMarkdown). It has to be here, and
+// ahead of the stock TRANSFORMERS: @lexical/markdown ships no table
+// transformer at all, so without it a TableNode falls through to the generic
+// "element → export its children" path, which concatenates every cell with no
+// separators — `| A | B |` came back as `AB`. Every autosave, mode switch and
+// publish destroyed the table.
+export const EDITOR_TRANSFORMERS = [IMAGE_TRANSFORMER, TABLE_TRANSFORMER, ...TRANSFORMERS];
 
 // Lexical Editor Ref Plugin - provides ref to parent
 export function EditorRefPlugin({ editorRef }) {
@@ -288,6 +297,37 @@ export function $setBlocksTypeSafe(selection, createElement) {
 
 const TRACKED_FORMATS = ['bold', 'italic', 'underline', 'strikethrough', 'code'];
 
+/**
+ * The block type the caret is currently in: 'h1'…'h6', 'quote', 'code',
+ * 'bullet', 'number', or 'paragraph'.
+ *
+ * Shared on purpose. Three places need this exact answer and they must not
+ * drift apart: the toolbar's active highlighting (below), the radial context
+ * menu's active highlighting, and toggleBlockType's decision about whether a
+ * press should APPLY a type or clear it back to a paragraph. A second copy of
+ * the rules is a second chance to get "is this already a quote?" wrong.
+ *
+ * Note there is no special case for table cells: a TableCellNode is a shadow
+ * root, so getTopLevelElementOrThrow() stops at the block inside the cell
+ * rather than returning the table.
+ *
+ * Must be called within an editor.read() or editor.update() callback.
+ */
+export function $getBlockTypeAtSelection(selection) {
+    if (!$isRangeSelection(selection)) return 'paragraph';
+
+    const anchorNode = selection.anchor.getNode();
+    const element = anchorNode.getKey() === 'root'
+        ? anchorNode
+        : anchorNode.getTopLevelElementOrThrow();
+
+    if ($isHeadingNode(element)) return element.getTag();
+    if ($isQuoteNode(element)) return 'quote';
+    if ($isCodeNode(element)) return 'code';
+    if ($isListNode(element)) return element.getListType() === 'number' ? 'number' : 'bullet';
+    return 'paragraph';
+}
+
 // Tracks active inline formats and block type for the toolbar.
 // Listens to both selection changes (cursor moves) and content updates,
 // and fires onStateChange only when something actually changed, so the
@@ -318,15 +358,7 @@ export function ToolbarStatePlugin({ onStateChange }) {
                     if (formats[f] !== lastRef.current.formats[f]) changed = true;
                 }
 
-                let blockType = 'paragraph';
-                const anchorNode = selection.anchor.getNode();
-                const element = anchorNode.getKey() === 'root'
-                    ? anchorNode
-                    : anchorNode.getTopLevelElementOrThrow();
-                if ($isHeadingNode(element)) blockType = element.getTag();
-                else if ($isQuoteNode(element)) blockType = 'quote';
-                else if ($isCodeNode(element)) blockType = 'code';
-                else if ($isListNode(element)) blockType = element.getListType() === 'number' ? 'number' : 'bullet';
+                let blockType = $getBlockTypeAtSelection(selection);
                 if (blockType !== lastRef.current.blockType) changed = true;
 
                 // "Real" selection = non-collapsed range covering at least

@@ -234,7 +234,14 @@ export default {
             "image": "Bild",
             "undo": "Rückgängig",
             "redo": "Wiederholen",
-            "select_text_first": "Zuerst Text auswählen"
+            "select_text_first": "Zuerst Text auswählen",
+            "insert_row_above": "Zeile oberhalb einfügen",
+            "insert_row_below": "Zeile unterhalb einfügen",
+            "delete_row": "Zeile löschen",
+            "insert_column_left": "Spalte links einfügen",
+            "insert_column_right": "Spalte rechts einfügen",
+            "delete_column": "Spalte löschen",
+            "delete_table": "Tabelle löschen"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "NSFW-Inhalte nicht filtern",
@@ -323,7 +330,8 @@ export default {
             "heading_3": "Überschrift 3",
             "paragraph": "Absatz",
             "bullet_list": "Aufzählung",
-            "numbered_list": "Nummerierte Liste"
+            "numbered_list": "Nummerierte Liste",
+            "table": "Tabelle"
         },
         "profile_tabs": {
             "posts": "Beiträge",
@@ -360,6 +368,7 @@ export default {
             "add_someone": "Jemanden hinzufügen"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Dieses Portal hat noch keine Regeln festgelegt.",
             "community_rules": "Community-Regeln"
         },
         "error_boundary": {
@@ -1355,6 +1364,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "Blockchain-Beiträge mit Stimmen können nie vollständig entfernt werden; dies ist die Soft-Delete-Funktion der Plattform. Stimmen und Auszahlungen bleiben unberührt."
         },
         "edit_community_dialog": {
+            "rules": "Regeln",
+            "rule": "Regel",
+            "add_rule": "Regel hinzufügen",
+            "no_rules_added_yet": "Noch keine Regeln hinzugefügt",
+            "eg_pixel_art_only_no_ai_upscales": "z. B. Nur Pixel Art — kein KI-Upscaling",
+            "delete_rule": "Regel löschen",
+            "that_rule_is_already_in_the_list": "Diese Regel steht bereits in der Liste.",
+            "no_room_left_delete_a_rule_to": "Kein Platz mehr. Lösche eine Regel, um eine weitere hinzuzufügen.",
+            "some_rules_did_not_fit_and_were": "Einige Regeln haben nicht mehr gepasst und wurden übersprungen.",
             "avatar": "Avatar",
             "loading_community_data": "Community-Daten werden geladen…",
             "edit_portal_settings": "Portal-Einstellungen bearbeiten",

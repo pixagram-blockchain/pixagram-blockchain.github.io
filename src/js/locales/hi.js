@@ -235,7 +235,14 @@ export default {
             "image": "छवि",
             "undo": "पूर्ववत करें",
             "redo": "फिर से करें",
-            "select_text_first": "पहले टेक्स्ट चुनें"
+            "select_text_first": "पहले टेक्स्ट चुनें",
+            "insert_row_above": "ऊपर पंक्ति जोड़ें",
+            "insert_row_below": "नीचे पंक्ति जोड़ें",
+            "delete_row": "पंक्ति हटाएँ",
+            "insert_column_left": "बाईं ओर कॉलम जोड़ें",
+            "insert_column_right": "दाईं ओर कॉलम जोड़ें",
+            "delete_column": "कॉलम हटाएँ",
+            "delete_table": "तालिका हटाएँ"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "NSFW सामग्री फ़िल्टर न करें",
@@ -324,7 +331,8 @@ export default {
             "heading_3": "शीर्षक 3",
             "paragraph": "अनुच्छेद",
             "bullet_list": "बुलेट सूची",
-            "numbered_list": "क्रमांकित सूची"
+            "numbered_list": "क्रमांकित सूची",
+            "table": "तालिका"
         },
         "profile_tabs": {
             "posts": "पोस्ट",
@@ -361,6 +369,7 @@ export default {
             "add_someone": "किसी को जोड़ें"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "इस पोर्टल ने अभी तक कोई नियम तय नहीं किया है।",
             "community_rules": "समुदाय के नियम"
         },
         "error_boundary": {
@@ -1356,6 +1365,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "जिन ब्लॉकचेन पोस्ट पर वोट हैं उन्हें कभी पूरी तरह नहीं हटाया जा सकता; यह मंच का सॉफ़्ट-डिलीट है। वोट और भुगतान अप्रभावित रहते हैं।"
         },
         "edit_community_dialog": {
+            "rules": "नियम",
+            "rule": "नियम",
+            "add_rule": "नियम जोड़ें",
+            "no_rules_added_yet": "अभी तक कोई नियम नहीं जोड़ा गया",
+            "eg_pixel_art_only_no_ai_upscales": "जैसे, केवल पिक्सेल आर्ट — कोई AI अपस्केल नहीं",
+            "delete_rule": "नियम हटाएँ",
+            "that_rule_is_already_in_the_list": "यह नियम पहले से सूची में है।",
+            "no_room_left_delete_a_rule_to": "अब जगह नहीं बची। दूसरा जोड़ने के लिए कोई नियम हटाएँ।",
+            "some_rules_did_not_fit_and_were": "कुछ नियम जगह में नहीं आए और छोड़ दिए गए।",
             "avatar": "अवतार",
             "loading_community_data": "समुदाय डेटा लोड हो रहा है…",
             "edit_portal_settings": "पोर्टल सेटिंग्स संपादित करें",

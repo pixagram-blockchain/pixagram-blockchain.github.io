@@ -234,7 +234,14 @@ export default {
             "image": "Bild",
             "undo": "Ångra",
             "redo": "Gör om",
-            "select_text_first": "Markera text först"
+            "select_text_first": "Markera text först",
+            "insert_row_above": "Infoga rad ovanför",
+            "insert_row_below": "Infoga rad nedanför",
+            "delete_row": "Radera rad",
+            "insert_column_left": "Infoga kolumn till vänster",
+            "insert_column_right": "Infoga kolumn till höger",
+            "delete_column": "Radera kolumn",
+            "delete_table": "Radera tabell"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Filtrera inte NSFW-innehåll",
@@ -323,7 +330,8 @@ export default {
             "heading_3": "Rubrik 3",
             "paragraph": "Stycke",
             "bullet_list": "Punktlista",
-            "numbered_list": "Numrerad lista"
+            "numbered_list": "Numrerad lista",
+            "table": "Tabell"
         },
         "profile_tabs": {
             "posts": "Inlägg",
@@ -360,6 +368,7 @@ export default {
             "add_someone": "Lägg till någon"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Den här portalen har ännu inte fastställt några regler.",
             "community_rules": "Gemenskapens regler"
         },
         "error_boundary": {
@@ -1354,6 +1363,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "Blockkedjeinlägg med röster kan aldrig tas bort helt; detta är plattformens mjuka radering. Röster och utbetalningar påverkas inte."
         },
         "edit_community_dialog": {
+            "rules": "Regler",
+            "rule": "Regel",
+            "add_rule": "Lägg till regel",
+            "no_rules_added_yet": "Inga regler tillagda ännu",
+            "eg_pixel_art_only_no_ai_upscales": "t.ex. Endast pixelkonst — ingen AI-uppskalning",
+            "delete_rule": "Ta bort regel",
+            "that_rule_is_already_in_the_list": "Den regeln finns redan i listan.",
+            "no_room_left_delete_a_rule_to": "Inget utrymme kvar. Ta bort en regel för att lägga till en ny.",
+            "some_rules_did_not_fit_and_were": "Några regler fick inte plats och hoppades över.",
             "avatar": "Avatar",
             "loading_community_data": "Läser in gemenskapsdata …",
             "edit_portal_settings": "Redigera portalinställningar",

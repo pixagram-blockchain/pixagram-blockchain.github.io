@@ -235,7 +235,14 @@ export default {
             "image": "이미지",
             "undo": "실행 취소",
             "redo": "다시 실행",
-            "select_text_first": "먼저 텍스트를 선택하세요"
+            "select_text_first": "먼저 텍스트를 선택하세요",
+            "insert_row_above": "위에 행 삽입",
+            "insert_row_below": "아래에 행 삽입",
+            "delete_row": "행 삭제",
+            "insert_column_left": "왼쪽에 열 삽입",
+            "insert_column_right": "오른쪽에 열 삽입",
+            "delete_column": "열 삭제",
+            "delete_table": "표 삭제"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "NSFW 콘텐츠를 필터링하지 않음",
@@ -324,7 +331,8 @@ export default {
             "heading_3": "제목 3",
             "paragraph": "단락",
             "bullet_list": "글머리 기호 목록",
-            "numbered_list": "번호 매기기 목록"
+            "numbered_list": "번호 매기기 목록",
+            "table": "표"
         },
         "profile_tabs": {
             "posts": "게시물",
@@ -361,6 +369,7 @@ export default {
             "add_someone": "멤버 추가"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "이 포털은 아직 규칙을 정하지 않았습니다.",
             "community_rules": "커뮤니티 규칙"
         },
         "error_boundary": {
@@ -1356,6 +1365,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "투표가 있는 블록체인 게시물은 절대 완전히 삭제할 수 없습니다. 이것이 플랫폼의 소프트 삭제입니다. 투표와 지급에는 영향이 없습니다."
         },
         "edit_community_dialog": {
+            "rules": "규칙",
+            "rule": "규칙",
+            "add_rule": "규칙 추가",
+            "no_rules_added_yet": "아직 추가된 규칙이 없습니다",
+            "eg_pixel_art_only_no_ai_upscales": "예: 픽셀 아트만 — AI 업스케일 금지",
+            "delete_rule": "규칙 삭제",
+            "that_rule_is_already_in_the_list": "이미 목록에 있는 규칙입니다.",
+            "no_room_left_delete_a_rule_to": "공간이 없습니다. 다른 규칙을 추가하려면 하나를 삭제하세요.",
+            "some_rules_did_not_fit_and_were": "일부 규칙은 공간이 부족해 건너뛰었습니다.",
             "avatar": "아바타",
             "loading_community_data": "커뮤니티 데이터를 불러오는 중…",
             "edit_portal_settings": "포털 설정 편집",

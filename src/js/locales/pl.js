@@ -237,7 +237,14 @@ export default {
             "image": "Obraz",
             "undo": "Cofnij",
             "redo": "Ponów",
-            "select_text_first": "Najpierw zaznacz tekst"
+            "select_text_first": "Najpierw zaznacz tekst",
+            "insert_row_above": "Wstaw wiersz powyżej",
+            "insert_row_below": "Wstaw wiersz poniżej",
+            "delete_row": "Usuń wiersz",
+            "insert_column_left": "Wstaw kolumnę z lewej",
+            "insert_column_right": "Wstaw kolumnę z prawej",
+            "delete_column": "Usuń kolumnę",
+            "delete_table": "Usuń tabelę"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Nie filtruj treści NSFW",
@@ -326,7 +333,8 @@ export default {
             "heading_3": "Nagłówek 3",
             "paragraph": "Akapit",
             "bullet_list": "Lista punktowana",
-            "numbered_list": "Lista numerowana"
+            "numbered_list": "Lista numerowana",
+            "table": "Tabela"
         },
         "profile_tabs": {
             "posts": "Posty",
@@ -363,6 +371,7 @@ export default {
             "add_someone": "Dodaj kogoś"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Ten portal nie określił jeszcze żadnych zasad.",
             "community_rules": "Zasady społeczności"
         },
         "error_boundary": {
@@ -1357,6 +1366,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "Postów w blockchainie z oddanymi głosami nigdy nie da się całkowicie usunąć; to miękkie usuwanie platformy. Głosy i wypłaty pozostają nietknięte."
         },
         "edit_community_dialog": {
+            "rules": "Zasady",
+            "rule": "Zasada",
+            "add_rule": "Dodaj zasadę",
+            "no_rules_added_yet": "Nie dodano jeszcze żadnych zasad",
+            "eg_pixel_art_only_no_ai_upscales": "np. Tylko pixel art — bez skalowania przez AI",
+            "delete_rule": "Usuń zasadę",
+            "that_rule_is_already_in_the_list": "Ta zasada jest już na liście.",
+            "no_room_left_delete_a_rule_to": "Brak miejsca. Usuń jedną zasadę, aby dodać kolejną.",
+            "some_rules_did_not_fit_and_were": "Część zasad się nie zmieściła i została pominięta.",
             "avatar": "Awatar",
             "loading_community_data": "Wczytywanie danych społeczności…",
             "edit_portal_settings": "Edytuj ustawienia portalu",

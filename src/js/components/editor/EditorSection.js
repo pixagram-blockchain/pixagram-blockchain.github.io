@@ -127,26 +127,60 @@ export const editorSectionStyles = (theme) => ({
             resize: "none",
             padding: 0
         },
-        "& table": {
+        // ── Tables ──────────────────────────────────────────────────────
+        // Both selector families are listed on purpose: `table/th/td` covers
+        // markdown-mode and pasted markup, `.lexical-table*` covers what the
+        // theme (lexicalConfig) puts on the live nodes.
+        // borderCollapse must be `separate` with borderSpacing 0 — with
+        // `collapse` the border-radius below is ignored by every browser.
+        "& table, & .lexical-table": {
             width: "100%",
-            borderCollapse: "collapse",
+            tableLayout: "fixed",
+            borderCollapse: "separate",
+            borderSpacing: 0,
             margin: "1.5em 0",
-            backgroundColor: "rgba(255,255,255,0.02)",
-            borderRadius: 8,
+            backgroundColor: "#000000",
+            border: "1px solid rgba(255,255,255,0.14)",
+            borderRadius: 12,
             overflow: "hidden"
         },
-        "& th, & td": {
+        "& th, & td, & .lexical-table-cell, & .lexical-table-cell-header": {
+            backgroundColor: "#000000",
+            color: "#e0e0e0",
             padding: 12,
-            borderBottom: "1px solid rgba(255,255,255,0.1)",
-            textAlign: "left"
+            minWidth: 48,
+            verticalAlign: "top",
+            textAlign: "left",
+            position: "relative",
+            outline: "none",
+            border: "none",
+            borderRight: "1px solid rgba(255,255,255,0.1)",
+            borderBottom: "1px solid rgba(255,255,255,0.1)"
         },
-        "& th": {
+        "& th, & .lexical-table-cell-header": {
+            backgroundColor: "#0d0d0d",
             fontWeight: 600,
-            color: "#fff",
-            backgroundColor: "rgba(255,255,255,0.05)"
+            color: "#ffffff"
         },
-        "& tr:hover": {
-            backgroundColor: "rgba(255,255,255,0.03)"
+        // Interior rules only: the table's own border draws the outside.
+        "& tr > *:last-child": {
+            borderRight: "none"
+        },
+        "& tr:last-child > *": {
+            borderBottom: "none"
+        },
+        // Cell contents are paragraphs, and the theme gives every paragraph a
+        // 1em bottom margin — inside a cell that reads as dead space at the
+        // bottom of every row.
+        "& th > p, & td > p, & th > .public-DraftStyleDefault-block, & td > .public-DraftStyleDefault-block": {
+            margin: 0
+        },
+        // Presentational align attributes (pasted HTML) beat the left default.
+        "& th[align='center'], & td[align='center']": {
+            textAlign: "center"
+        },
+        "& th[align='right'], & td[align='right']": {
+            textAlign: "right"
         },
         // Lexical-specific styles that mimic Draft.js
         "& .lexical-editor-root": {

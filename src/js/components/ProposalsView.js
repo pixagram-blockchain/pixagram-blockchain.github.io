@@ -10,7 +10,7 @@ import Accordion from "@material-ui/core/Accordion";
 import AccordionDetails from "@material-ui/core/AccordionDetails";
 import AccordionSummary from "@material-ui/core/AccordionSummary";
 import AccordionActions from "@material-ui/core/AccordionActions";
-import ExpandMoreIcon from "@material-ui/icons/ExpandMore";
+import ExpandMoreIcon from "@material-ui/icons/ExpandMoreRounded";
 import InfoIcon from "@material-ui/icons/Info";
 import Pageview from "@material-ui/icons/Pageview";
 import { cssBackgroundImage, safeHttpUrl } from "../utils/safeUrl";

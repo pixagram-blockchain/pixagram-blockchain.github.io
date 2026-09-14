@@ -9,7 +9,14 @@ import { $isHeadingNode, $isQuoteNode } from '@lexical/rich-text';
 import { $isListNode, $isListItemNode } from '@lexical/list';
 import { $isCodeNode } from '@lexical/code';
 import { $isLinkNode } from '@lexical/link';
-import { $isTableNode, $isTableRowNode, $isTableCellNode } from '@lexical/table';
+import {
+    TableNode,
+    TableRowNode,
+    TableCellNode,
+    $isTableNode,
+    $isTableRowNode,
+    $isTableCellNode,
+} from '@lexical/table';
 import { $isHorizontalRuleNode } from '@lexical/react/LexicalHorizontalRuleNode.js';
 import { $isImageNode } from './ImageNode';
 
@@ -185,9 +192,143 @@ function getListDepth(node) {
     return Math.max(0, depth - 1);
 }
 
+// ═══════════════════════════════════════════════════════════
+// Tables
+// ═══════════════════════════════════════════════════════════
+//
+// A markdown table is a MULTI-LINE block, which @lexical/markdown's
+// line-oriented `element` transformers cannot parse on import — that is why
+// import runs as a pre-pass in stateFromMarkdown (placeholder substitution)
+// and this transformer only ever EXPORTS. Its regExp is deliberately one that
+// can never match, so the MarkdownShortcutPlugin doesn't try to fire it on
+// every `|` the user types.
+//
+// Without this transformer in the set handed to $convertToMarkdownString, a
+// TableNode falls through to the generic "element → export its children"
+// path: every cell is concatenated with no separators at all, so `| A | B |`
+// round-trips as `AB` and the table is destroyed on the first autosave.
+
+const ALIGNMENT_DELIMITERS = {
+    left:   ':---',
+    center: ':---:',
+    right:  '---:',
+};
+
+function normalizeAlignment(value) {
+    return (value === 'left' || value === 'center' || value === 'right') ? value : '';
+}
+
+/**
+ * Markdown carries ONE alignment per column; Lexical stores an element format
+ * on the cell, on the paragraph inside it, or on neither. Read whichever is
+ * set.
+ */
+function $cellAlignment(cell) {
+    const own = normalizeAlignment(typeof cell.getFormatType === 'function' ? cell.getFormatType() : '');
+    if (own) return own;
+
+    if (typeof cell.getChildren === 'function') {
+        const children = cell.getChildren();
+        for (let i = 0; i < children.length; i++) {
+            const child = children[i];
+            const inner = normalizeAlignment(typeof child.getFormatType === 'function' ? child.getFormatType() : '');
+            if (inner) return inner;
+        }
+    }
+    return '';
+}
+
+/**
+ * GFM cannot express a newline or a bare pipe inside a cell: a newline ends
+ * the row and a pipe starts the next cell. Flatten the first and escape the
+ * second; an empty cell still needs a character or the column collapses.
+ */
+function toCellSource(markdown) {
+    const flat = String(markdown == null ? '' : markdown)
+        .replace(/\r?\n+/g, ' ')
+        .replace(/\|/g, '\\|')
+        .trim();
+    return flat === '' ? ' ' : flat;
+}
+
+/**
+ * Serialize a TableNode to GFM. `exportCell` turns one TableCellNode into the
+ * markdown for its contents — the transformer passes @lexical/markdown's
+ * exportChildren (so inline formatting, links and images survive), the
+ * standalone generator passes its own walker.
+ */
+function $serializeTable(table, exportCell) {
+    const rows = table.getChildren().filter($isTableRowNode);
+    if (rows.length === 0) return '';
+
+    const grid = rows.map((row) => row.getChildren().filter($isTableCellNode));
+
+    // Ragged rows are legal in Lexical but not in markdown: every line has to
+    // carry the same number of columns or the renderer drops the surplus.
+    let columns = 0;
+    for (let i = 0; i < grid.length; i++) {
+        if (grid[i].length > columns) columns = grid[i].length;
+    }
+    if (columns === 0) return '';
+
+    const alignments = new Array(columns).fill('');
+    for (let c = 0; c < columns; c++) {
+        for (let r = 0; r < grid.length; r++) {
+            const cell = grid[r][c];
+            if (!cell) continue;
+            const align = $cellAlignment(cell);
+            if (align) {
+                alignments[c] = align;
+                break;
+            }
+        }
+    }
+
+    const renderRow = (cells) => {
+        const out = [];
+        for (let c = 0; c < columns; c++) {
+            out.push(cells[c] ? toCellSource(exportCell(cells[c])) : ' ');
+        }
+        return '| ' + out.join(' | ') + ' |';
+    };
+
+    const lines = [renderRow(grid[0])];
+    lines.push('| ' + alignments.map((a) => ALIGNMENT_DELIMITERS[a] || '---').join(' | ') + ' |');
+    for (let r = 1; r < grid.length; r++) {
+        lines.push(renderRow(grid[r]));
+    }
+    return lines.join('\n');
+}
+
+export const TABLE_TRANSFORMER = {
+    dependencies: [TableNode, TableRowNode, TableCellNode],
+    export: (node, exportChildren) => {
+        if (!$isTableNode(node)) return null;
+        return $serializeTable(node, (cell) => exportChildren(cell));
+    },
+    // Never matches. Import is handled by stateFromMarkdown's pre-pass.
+    regExp: /(?!)/,
+    replace: () => false,
+    type: 'element',
+};
+
+/**
+ * Convert a table node to a markdown string.
+ * @param {TableNode} node
+ * @param {(cell: TableCellNode) => string} [exportCell] — defaults to plain text
+ */
+function exportTableToMarkdown(node, exportCell) {
+    if (!$isTableNode(node)) return '';
+    const cellExporter = typeof exportCell === 'function'
+        ? exportCell
+        : (cell) => cell.getTextContent();
+    return $serializeTable(node, cellExporter);
+}
+
 // Extended transformers for GFM
 const GFM_EXPORT_TRANSFORMERS = [
     IMAGE_EXPORT,
+    TABLE_TRANSFORMER,
     HEADING_EXPORT,
     QUOTE_EXPORT,
     UNORDERED_LIST_EXPORT,
@@ -202,53 +343,6 @@ const GFM_EXPORT_TRANSFORMERS = [
     INLINE_CODE_EXPORT,
     ...TRANSFORMERS,
 ];
-
-/**
- * Convert a table node to markdown string
- */
-function exportTableToMarkdown(node) {
-    if (!$isTableNode(node)) return '';
-
-    const rows = node.getChildren().filter($isTableRowNode);
-    if (rows.length === 0) return '';
-
-    const lines = [];
-
-    // Process header row (first row)
-    const headerRow = rows[0];
-    const headerCells = headerRow.getChildren().filter($isTableCellNode);
-    const headers = headerCells.map(cell => {
-        const text = cell.getTextContent().trim();
-        return text || ' ';
-    });
-
-    if (headers.length === 0) return '';
-
-    lines.push('| ' + headers.join(' | ') + ' |');
-
-    // Generate separator
-    const separators = headers.map(() => '---');
-    lines.push('| ' + separators.join(' | ') + ' |');
-
-    // Process body rows
-    for (let i = 1; i < rows.length; i++) {
-        const row = rows[i];
-        const cells = row.getChildren().filter($isTableCellNode);
-        const cellTexts = cells.map(cell => {
-            const text = cell.getTextContent().trim();
-            return text || ' ';
-        });
-
-        // Pad with empty cells if necessary
-        while (cellTexts.length < headers.length) {
-            cellTexts.push(' ');
-        }
-
-        lines.push('| ' + cellTexts.join(' | ') + ' |');
-    }
-
-    return lines.join('\n');
-}
 
 /**
  * Custom markdown generator class for complex documents
@@ -281,7 +375,8 @@ class MarkdownGenerator {
     processNode(node) {
         // Handle tables specially
         if ($isTableNode(node)) {
-            return this.options.tables ? exportTableToMarkdown(node) : null;
+            if (!this.options.tables) return null;
+            return exportTableToMarkdown(node, (cell) => this.getChildrenText(cell));
         }
 
         // Handle headings
@@ -386,7 +481,10 @@ class MarkdownGenerator {
         }
 
         const children = node.getChildren();
-        return children.map(child => this.getNodeText(child)).join('');
+        // Several BLOCK children in one container (a table cell holding two
+        // paragraphs) would otherwise run together into a single word.
+        const separator = children.some(child => $isElementNode(child) && !child.isInline()) ? ' ' : '';
+        return children.map(child => this.getNodeText(child)).join(separator);
     }
 
     formatTextNode(node) {

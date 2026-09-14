@@ -235,7 +235,14 @@ export default {
             "image": "Gambar",
             "undo": "Urungkan",
             "redo": "Ulangi",
-            "select_text_first": "Pilih teks terlebih dahulu"
+            "select_text_first": "Pilih teks terlebih dahulu",
+            "insert_row_above": "Sisipkan baris di atas",
+            "insert_row_below": "Sisipkan baris di bawah",
+            "delete_row": "Hapus baris",
+            "insert_column_left": "Sisipkan kolom di kiri",
+            "insert_column_right": "Sisipkan kolom di kanan",
+            "delete_column": "Hapus kolom",
+            "delete_table": "Hapus tabel"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Jangan filter konten NSFW",
@@ -324,7 +331,8 @@ export default {
             "heading_3": "Judul 3",
             "paragraph": "Paragraf",
             "bullet_list": "Daftar berpoin",
-            "numbered_list": "Daftar bernomor"
+            "numbered_list": "Daftar bernomor",
+            "table": "Tabel"
         },
         "profile_tabs": {
             "posts": "Kiriman",
@@ -361,6 +369,7 @@ export default {
             "add_someone": "Tambahkan seseorang"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Portal ini belum menetapkan aturan apa pun.",
             "community_rules": "Aturan komunitas"
         },
         "error_boundary": {
@@ -1356,6 +1365,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "Kiriman blockchain yang sudah memiliki suara tidak pernah bisa dihapus sepenuhnya; ini adalah penghapusan lunak platform. Suara dan pembayaran tidak terpengaruh."
         },
         "edit_community_dialog": {
+            "rules": "Aturan",
+            "rule": "Aturan",
+            "add_rule": "Tambah aturan",
+            "no_rules_added_yet": "Belum ada aturan yang ditambahkan",
+            "eg_pixel_art_only_no_ai_upscales": "mis. Hanya pixel art — tanpa upscale AI",
+            "delete_rule": "Hapus aturan",
+            "that_rule_is_already_in_the_list": "Aturan itu sudah ada di daftar.",
+            "no_room_left_delete_a_rule_to": "Tidak ada ruang tersisa. Hapus satu aturan untuk menambah yang lain.",
+            "some_rules_did_not_fit_and_were": "Sebagian aturan tidak muat dan dilewati.",
             "avatar": "Avatar",
             "loading_community_data": "Memuat data komunitas…",
             "edit_portal_settings": "Edit pengaturan portal",

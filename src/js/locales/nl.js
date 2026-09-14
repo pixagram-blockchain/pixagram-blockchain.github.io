@@ -234,7 +234,14 @@ export default {
             "image": "Afbeelding",
             "undo": "Ongedaan maken",
             "redo": "Opnieuw",
-            "select_text_first": "Selecteer eerst tekst"
+            "select_text_first": "Selecteer eerst tekst",
+            "insert_row_above": "Rij hierboven invoegen",
+            "insert_row_below": "Rij hieronder invoegen",
+            "delete_row": "Rij verwijderen",
+            "insert_column_left": "Kolom links invoegen",
+            "insert_column_right": "Kolom rechts invoegen",
+            "delete_column": "Kolom verwijderen",
+            "delete_table": "Tabel verwijderen"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "NSFW-inhoud niet filteren",
@@ -323,7 +330,8 @@ export default {
             "heading_3": "Kop 3",
             "paragraph": "Alinea",
             "bullet_list": "Opsommingslijst",
-            "numbered_list": "Genummerde lijst"
+            "numbered_list": "Genummerde lijst",
+            "table": "Tabel"
         },
         "profile_tabs": {
             "posts": "Posts",
@@ -360,6 +368,7 @@ export default {
             "add_someone": "Iemand toevoegen"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Dit portaal heeft nog geen regels vastgesteld.",
             "community_rules": "Communityregels"
         },
         "error_boundary": {
@@ -1354,6 +1363,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "Blockchainposts met stemmen kunnen nooit volledig worden verwijderd; dit is de soft-delete van het platform. Stemmen en uitbetalingen blijven onaangetast."
         },
         "edit_community_dialog": {
+            "rules": "Regels",
+            "rule": "Regel",
+            "add_rule": "Regel toevoegen",
+            "no_rules_added_yet": "Nog geen regels toegevoegd",
+            "eg_pixel_art_only_no_ai_upscales": "bijv. Alleen pixelart — geen AI-upscaling",
+            "delete_rule": "Regel verwijderen",
+            "that_rule_is_already_in_the_list": "Die regel staat al in de lijst.",
+            "no_room_left_delete_a_rule_to": "Geen ruimte meer. Verwijder een regel om er een toe te voegen.",
+            "some_rules_did_not_fit_and_were": "Sommige regels pasten niet en zijn overgeslagen.",
             "avatar": "Avatar",
             "loading_community_data": "Communitygegevens laden…",
             "edit_portal_settings": "Portaalinstellingen bewerken",

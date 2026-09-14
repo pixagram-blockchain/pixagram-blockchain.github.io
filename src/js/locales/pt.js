@@ -234,7 +234,14 @@ export default {
             "image": "Imagem",
             "undo": "Anular",
             "redo": "Refazer",
-            "select_text_first": "Selecione texto primeiro"
+            "select_text_first": "Selecione texto primeiro",
+            "insert_row_above": "Inserir linha acima",
+            "insert_row_below": "Inserir linha abaixo",
+            "delete_row": "Eliminar linha",
+            "insert_column_left": "Inserir coluna à esquerda",
+            "insert_column_right": "Inserir coluna à direita",
+            "delete_column": "Eliminar coluna",
+            "delete_table": "Eliminar tabela"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Não filtrar conteúdo NSFW",
@@ -323,7 +330,8 @@ export default {
             "heading_3": "Título 3",
             "paragraph": "Parágrafo",
             "bullet_list": "Lista com marcas",
-            "numbered_list": "Lista numerada"
+            "numbered_list": "Lista numerada",
+            "table": "Tabela"
         },
         "profile_tabs": {
             "posts": "Publicações",
@@ -360,6 +368,7 @@ export default {
             "add_someone": "Adicionar alguém"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Este portal ainda não definiu regras.",
             "community_rules": "Regras da comunidade"
         },
         "error_boundary": {
@@ -1355,6 +1364,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "As publicações na blockchain com votos nunca podem ser totalmente removidas; isto é a eliminação suave da plataforma. Os votos e os pagamentos não são afetados."
         },
         "edit_community_dialog": {
+            "rules": "Regras",
+            "rule": "Regra",
+            "add_rule": "Adicionar regra",
+            "no_rules_added_yet": "Ainda não foram adicionadas regras",
+            "eg_pixel_art_only_no_ai_upscales": "por ex., Apenas pixel art — sem upscaling por IA",
+            "delete_rule": "Eliminar regra",
+            "that_rule_is_already_in_the_list": "Essa regra já está na lista.",
+            "no_room_left_delete_a_rule_to": "Sem espaço. Elimine uma regra para adicionar outra.",
+            "some_rules_did_not_fit_and_were": "Algumas regras não couberam e foram ignoradas.",
             "avatar": "Avatar",
             "loading_community_data": "A carregar os dados da comunidade…",
             "edit_portal_settings": "Editar definições do portal",

@@ -13,7 +13,7 @@ import Typography from "@material-ui/core/Typography";
 import Accordion from "@material-ui/core/Accordion";
 import AccordionSummary from "@material-ui/core/AccordionSummary";
 import AccordionDetails from "@material-ui/core/AccordionDetails";
-import ExpandMoreIcon from "@material-ui/icons/ExpandMore";
+import ExpandMoreIcon from "@material-ui/icons/ExpandMoreRounded";
 import SubdirectoryArrowRight from "@material-ui/icons/SubdirectoryArrowRight";
 import InfoOutlined from "@material-ui/icons/InfoOutlined";
 import Tooltip from "@material-ui/core/Tooltip";

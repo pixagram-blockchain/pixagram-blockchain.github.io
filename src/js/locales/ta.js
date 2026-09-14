@@ -234,7 +234,14 @@ export default {
             "image": "படம்",
             "undo": "செயல்தவிர்",
             "redo": "மீண்டும்செய்",
-            "select_text_first": "முதலில் உரையைத் தேர்ந்தெடுக்கவும்"
+            "select_text_first": "முதலில் உரையைத் தேர்ந்தெடுக்கவும்",
+            "insert_row_above": "மேலே வரிசையைச் செருகு",
+            "insert_row_below": "கீழே வரிசையைச் செருகு",
+            "delete_row": "வரிசையை நீக்கு",
+            "insert_column_left": "இடதுபுறம் நெடுவரிசையைச் செருகு",
+            "insert_column_right": "வலதுபுறம் நெடுவரிசையைச் செருகு",
+            "delete_column": "நெடுவரிசையை நீக்கு",
+            "delete_table": "அட்டவணையை நீக்கு"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "NSFW உள்ளடக்கத்தை வடிகட்ட வேண்டாம்",
@@ -323,7 +330,8 @@ export default {
             "heading_3": "தலைப்பு 3",
             "paragraph": "பத்தி",
             "bullet_list": "புள்ளி பட்டியல்",
-            "numbered_list": "எண் பட்டியல்"
+            "numbered_list": "எண் பட்டியல்",
+            "table": "அட்டவணை"
         },
         "profile_tabs": {
             "posts": "இடுகைகள்",
@@ -360,6 +368,7 @@ export default {
             "add_someone": "ஒருவரைச் சேர்"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "இந்த Portal இதுவரை விதிகள் எதையும் நிர்ணயிக்கவில்லை.",
             "community_rules": "சமூக விதிகள்"
         },
         "error_boundary": {
@@ -1354,6 +1363,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "வாக்குகள் பெற்ற பிளாக்செயின் இடுகைகளை ஒருபோதும் முழுமையாக அகற்ற முடியாது; இது தளத்தின் மென்-நீக்கம். வாக்குகளும் செலுத்தல்களும் பாதிக்கப்படாது."
         },
         "edit_community_dialog": {
+            "rules": "விதிகள்",
+            "rule": "விதி",
+            "add_rule": "விதியைச் சேர்",
+            "no_rules_added_yet": "இதுவரை விதிகள் எதுவும் சேர்க்கப்படவில்லை",
+            "eg_pixel_art_only_no_ai_upscales": "எ.கா., பிக்சல் ஆர்ட் மட்டும் — AI அப்ஸ்கேல் வேண்டாம்",
+            "delete_rule": "விதியை நீக்கு",
+            "that_rule_is_already_in_the_list": "இந்த விதி ஏற்கெனவே பட்டியலில் உள்ளது.",
+            "no_room_left_delete_a_rule_to": "இடம் இல்லை. மற்றொன்றைச் சேர்க்க ஒரு விதியை நீக்கவும்.",
+            "some_rules_did_not_fit_and_were": "சில விதிகள் இடம் போதாததால் விடப்பட்டன.",
             "avatar": "அவதாரம்",
             "loading_community_data": "சமூகத் தரவு ஏற்றப்படுகிறது…",
             "edit_portal_settings": "Portal அமைப்புகளைத் திருத்து",

@@ -234,7 +234,14 @@ export default {
             "image": "Billede",
             "undo": "Fortryd",
             "redo": "Gentag",
-            "select_text_first": "Markér tekst først"
+            "select_text_first": "Markér tekst først",
+            "insert_row_above": "Indsæt række over",
+            "insert_row_below": "Indsæt række under",
+            "delete_row": "Slet række",
+            "insert_column_left": "Indsæt kolonne til venstre",
+            "insert_column_right": "Indsæt kolonne til højre",
+            "delete_column": "Slet kolonne",
+            "delete_table": "Slet tabel"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Filtrér ikke NSFW-indhold",
@@ -323,7 +330,8 @@ export default {
             "heading_3": "Overskrift 3",
             "paragraph": "Afsnit",
             "bullet_list": "Punktopstilling",
-            "numbered_list": "Nummereret liste"
+            "numbered_list": "Nummereret liste",
+            "table": "Tabel"
         },
         "profile_tabs": {
             "posts": "Indlæg",
@@ -360,6 +368,7 @@ export default {
             "add_someone": "Tilføj nogen"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Denne portal har endnu ikke fastsat nogen regler.",
             "community_rules": "Fællesskabets regler"
         },
         "error_boundary": {
@@ -1354,6 +1363,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "Blockchain-indlæg med stemmer kan aldrig fjernes helt; dette er platformens soft-delete. Stemmer og udbetalinger berøres ikke."
         },
         "edit_community_dialog": {
+            "rules": "Regler",
+            "rule": "Regel",
+            "add_rule": "Tilføj regel",
+            "no_rules_added_yet": "Ingen regler tilføjet endnu",
+            "eg_pixel_art_only_no_ai_upscales": "f.eks. Kun pixel art — ingen AI-opskalering",
+            "delete_rule": "Slet regel",
+            "that_rule_is_already_in_the_list": "Den regel står allerede på listen.",
+            "no_room_left_delete_a_rule_to": "Der er ikke mere plads. Slet en regel for at tilføje en ny.",
+            "some_rules_did_not_fit_and_were": "Nogle regler kunne ikke være der og blev sprunget over.",
             "avatar": "Avatar",
             "loading_community_data": "Indlæser fællesskabsdata...",
             "edit_portal_settings": "Redigér portalindstillinger",

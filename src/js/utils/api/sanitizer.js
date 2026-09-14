@@ -1120,10 +1120,21 @@ const SanitizeConfigs = Object.freeze({
             // recognise them or it undoes its own pipeline's work.
             'a':          ['href', 'title', 'rel', 'class', 'target', 'data-username', 'data-external', 'data-domain'],
             'img':        ['src', 'alt', 'title', 'width', 'height', 'loading'],
-            'td':         ['colspan', 'rowspan', 'align'],
-            'th':         ['colspan', 'rowspan', 'align', 'scope'],
-            'col':        ['span'],
-            'colgroup':   ['span'],
+            // Column alignment is the ONE thing a markdown table carries that
+            // needs an attribute to survive: both marked and micromark emit it
+            // as align="left|center|right" on the cells. The row/section and
+            // column variants below are for hand-written HTML tables, which
+            // authors do paste in. All four are presentational only — no
+            // URI scheme, no scripting surface.
+            'td':         ['colspan', 'rowspan', 'align', 'valign'],
+            'th':         ['colspan', 'rowspan', 'align', 'valign', 'scope'],
+            'tr':         ['align', 'valign'],
+            'thead':      ['align', 'valign'],
+            'tbody':      ['align', 'valign'],
+            'tfoot':      ['align', 'valign'],
+            'caption':    ['align'],
+            'col':        ['span', 'align', 'valign'],
+            'colgroup':   ['span', 'align', 'valign'],
             'code':       ['data-language'],
             'pre':        ['data-language'],
             'time':       ['datetime'],

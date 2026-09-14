@@ -236,7 +236,14 @@ export default {
             "image": "ছবি",
             "undo": "পূর্বাবস্থা",
             "redo": "পুনরায় করুন",
-            "select_text_first": "আগে টেক্সট নির্বাচন করুন"
+            "select_text_first": "আগে টেক্সট নির্বাচন করুন",
+            "insert_row_above": "উপরে সারি যোগ করুন",
+            "insert_row_below": "নিচে সারি যোগ করুন",
+            "delete_row": "সারি মুছুন",
+            "insert_column_left": "বাঁয়ে কলাম যোগ করুন",
+            "insert_column_right": "ডানে কলাম যোগ করুন",
+            "delete_column": "কলাম মুছুন",
+            "delete_table": "টেবিল মুছুন"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "প্রাপ্তবয়স্ক কনটেন্ট ফিল্টার করবেন না",
@@ -325,7 +332,8 @@ export default {
             "heading_3": "শিরোনাম 3",
             "paragraph": "অনুচ্ছেদ",
             "bullet_list": "বুলেট তালিকা",
-            "numbered_list": "সংখ্যাযুক্ত তালিকা"
+            "numbered_list": "সংখ্যাযুক্ত তালিকা",
+            "table": "টেবিল"
         },
         "profile_tabs": {
             "posts": "পোস্ট",
@@ -362,6 +370,7 @@ export default {
             "add_someone": "কাউকে যোগ করুন"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "এই পোর্টাল এখনও কোনও নিয়ম নির্ধারণ করেনি।",
             "community_rules": "কমিউনিটির নিয়ম"
         },
         "error_boundary": {
@@ -1356,6 +1365,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "ভোট পড়া ব্লকচেইন পোস্ট কখনোই পুরোপুরি সরানো যায় না; এটিই প্ল্যাটফর্মের সফট-ডিলিট। ভোট ও পে-আউট অপ্রভাবিত থাকে।",
         },
         "edit_community_dialog": {
+            "rules": "নিয়মাবলী",
+            "rule": "নিয়ম",
+            "add_rule": "নিয়ম যোগ করুন",
+            "no_rules_added_yet": "এখনও কোনও নিয়ম যোগ করা হয়নি",
+            "eg_pixel_art_only_no_ai_upscales": "যেমন, শুধু পিক্সেল আর্ট — কোনও AI আপস্কেল নয়",
+            "delete_rule": "নিয়ম মুছুন",
+            "that_rule_is_already_in_the_list": "এই নিয়মটি ইতিমধ্যেই তালিকায় রয়েছে।",
+            "no_room_left_delete_a_rule_to": "আর জায়গা নেই। আরেকটি যোগ করতে একটি নিয়ম মুছুন।",
+            "some_rules_did_not_fit_and_were": "কিছু নিয়ম জায়গায় ধরেনি, তাই বাদ দেওয়া হয়েছে।",
             "avatar": "অ্যাভাটার",
             "loading_community_data": "কমিউনিটির ডেটা লোড হচ্ছে...",
             "edit_portal_settings": "পোর্টাল সেটিংস সম্পাদনা",

@@ -235,7 +235,14 @@ export default {
             "image": "画像",
             "undo": "元に戻す",
             "redo": "やり直す",
-            "select_text_first": "先にテキストを選択してください"
+            "select_text_first": "先にテキストを選択してください",
+            "insert_row_above": "上に行を挿入",
+            "insert_row_below": "下に行を挿入",
+            "delete_row": "行を削除",
+            "insert_column_left": "左に列を挿入",
+            "insert_column_right": "右に列を挿入",
+            "delete_column": "列を削除",
+            "delete_table": "表を削除"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "NSFWコンテンツをフィルターしない",
@@ -324,7 +331,8 @@ export default {
             "heading_3": "見出し 3",
             "paragraph": "段落",
             "bullet_list": "箇条書き",
-            "numbered_list": "番号付きリスト"
+            "numbered_list": "番号付きリスト",
+            "table": "表"
         },
         "profile_tabs": {
             "posts": "投稿",
@@ -361,6 +369,7 @@ export default {
             "add_someone": "メンバーを追加"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "このポータルはまだルールを設定していません。",
             "community_rules": "コミュニティのルール"
         },
         "error_boundary": {
@@ -1356,6 +1365,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "投票のあるブロックチェーン上の投稿を完全に削除することはできません。これは本プラットフォームのソフト削除です。投票と払い出しには影響しません。"
         },
         "edit_community_dialog": {
+            "rules": "ルール",
+            "rule": "ルール",
+            "add_rule": "ルールを追加",
+            "no_rules_added_yet": "ルールはまだ追加されていません",
+            "eg_pixel_art_only_no_ai_upscales": "例：ピクセルアートのみ — AIアップスケールは不可",
+            "delete_rule": "ルールを削除",
+            "that_rule_is_already_in_the_list": "そのルールはすでにリストにあります。",
+            "no_room_left_delete_a_rule_to": "空きがありません。別のルールを追加するには、いずれかを削除してください。",
+            "some_rules_did_not_fit_and_were": "一部のルールは入りきらなかったため、省略されました。",
             "avatar": "アバター",
             "loading_community_data": "コミュニティのデータを読み込んでいます…",
             "edit_portal_settings": "ポータル設定を編集",

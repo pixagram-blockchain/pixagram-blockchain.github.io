@@ -9,7 +9,7 @@ import { HeadingNode, QuoteNode, $createHeadingNode, $createQuoteNode } from '@l
 import { ListNode, ListItemNode, $createListNode, $createListItemNode } from '@lexical/list';
 import { CodeNode, CodeHighlightNode, $createCodeNode } from '@lexical/code';
 import { LinkNode, $createLinkNode, $isLinkNode } from '@lexical/link';
-import { TableNode, TableRowNode, TableCellNode, $createTableNode, $createTableRowNode, $createTableCellNode } from '@lexical/table';
+import { TableNode, TableRowNode, TableCellNode, TableCellHeaderStates, $createTableNode, $createTableRowNode, $createTableCellNode } from '@lexical/table';
 import { HorizontalRuleNode, $createHorizontalRuleNode } from '@lexical/react/LexicalHorizontalRuleNode.js';
 import { ImageNode, $createImageNode, $isImageNode, isRenderableImageSrc } from './ImageNode';
 
@@ -240,50 +240,227 @@ const defaultOptions = {
     preserveNewlines: false
 };
 
+// ═══════════════════════════════════════════════════════════
+// Tables
+// ═══════════════════════════════════════════════════════════
+//
+// A GFM table is a multi-line block, and @lexical/markdown's transformers are
+// line-oriented — none of them can consume "header line + delimiter line + n
+// body lines" as one unit. So tables are lifted OUT of the markdown before
+// $convertFromMarkdownString runs, replaced by a one-line placeholder, and
+// spliced back in as real TableNodes afterwards. The matching export side
+// lives in stateToMarkdown's TABLE_TRANSFORMER.
+
+// One delimiter cell: at least one dash, optional leading/trailing colon.
+const TABLE_DELIMITER_CELL_RE = /^:?-+:?$/;
+
+// The placeholder carries no markdown-significant characters: the original
+// `__TABLE_PLACEHOLDER_n__` had its outer `__` eaten as bold by the format
+// transformers, so the replacement regexp below never matched and every table
+// was silently dropped on import.
+const TABLE_PLACEHOLDER_RE = /^%%TABLE-PLACEHOLDER-(\d+)%%$/;
+
 /**
- * Parse markdown table and create Lexical table nodes
+ * Split one table row into raw cell sources.
+ *
+ * Per GFM, `\|` is the ONLY way to put a pipe inside a cell — a pipe is a cell
+ * boundary everywhere else, including inside code spans. Splitting on a plain
+ * `|` (what this used to do) turned `| a \| b |` into two cells and left the
+ * row wider than its header.
+ */
+function splitTableRow(line) {
+    const cells = [];
+    let current = '';
+
+    for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '\\' && i + 1 < line.length) {
+            const next = line[i + 1];
+            // `\|` is a literal pipe; every other escape is left intact for
+            // the inline parser below to deal with.
+            current += next === '|' ? '|' : ch + next;
+            i++;
+            continue;
+        }
+        if (ch === '|') {
+            cells.push(current);
+            current = '';
+            continue;
+        }
+        current += ch;
+    }
+    cells.push(current);
+
+    // A leading/trailing pipe produces an empty outer field. Drop it, but only
+    // when the row really did start/end with one.
+    if (cells.length > 1 && cells[0].trim() === '' && /^[ \t]*\|/.test(line)) cells.shift();
+    if (cells.length > 1 && cells[cells.length - 1].trim() === '' && /\|[ \t]*$/.test(line)) cells.pop();
+
+    return cells.map(cell => cell.trim());
+}
+
+/**
+ * Parse a delimiter line into per-column alignments, or null if the line is
+ * not a delimiter row.
+ */
+function parseTableAlignments(line) {
+    if (line.indexOf('|') === -1) return null;
+
+    const cells = splitTableRow(line);
+    if (cells.length === 0) return null;
+
+    const alignments = [];
+    for (let i = 0; i < cells.length; i++) {
+        const cell = cells[i];
+        if (!TABLE_DELIMITER_CELL_RE.test(cell)) return null;
+        const left = cell.charAt(0) === ':';
+        const right = cell.charAt(cell.length - 1) === ':';
+        alignments.push(left && right ? 'center' : right ? 'right' : left ? 'left' : '');
+    }
+    return alignments;
+}
+
+/**
+ * Parse markdown table source into { headers, alignments, rows }.
+ * Returns null when the source is not a table.
  */
 function parseTable(markdown) {
     const lines = markdown.trim().split('\n');
-    if (lines.length < 3) return null;
+    if (lines.length < 2) return null;
 
-    const headerLine = lines[0];
-    const separatorLine = lines[1];
+    const headers = splitTableRow(lines[0]);
+    const alignments = parseTableAlignments(lines[1]);
+    if (!alignments) return null;
 
-    if (!headerLine.includes('|') || !separatorLine.includes('|')) {
-        return null;
-    }
+    // GFM: the delimiter row MUST have the same number of cells as the header
+    // row, otherwise it is not a table at all. Enforcing it here keeps the
+    // editor's idea of "this is a table" identical to what marked/micromark
+    // will render in the preview and on the published post.
+    if (headers.length !== alignments.length) return null;
 
-    if (!/[-:]/.test(separatorLine)) {
-        return null;
-    }
-
-    const headers = headerLine
-        .replace(/^\||\|$/g, '')
-        .split('|')
-        .map(h => h.trim());
-
-    const alignments = separatorLine
-        .replace(/^\||\|$/g, '')
-        .split('|')
-        .map(sep => {
-            const trimmed = sep.trim();
-            if (trimmed.startsWith(':') && trimmed.endsWith(':')) return 'center';
-            if (trimmed.endsWith(':')) return 'right';
-            return 'left';
-        });
-
-    const bodyLines = lines.slice(2);
-    const rows = bodyLines
-        .filter(line => line.trim() && line.includes('|'))
-        .map(line =>
-            line
-                .replace(/^\||\|$/g, '')
-                .split('|')
-                .map(cell => cell.trim())
-        );
+    const rows = lines.slice(2)
+        .filter(line => line.trim() && line.indexOf('|') !== -1)
+        .map(splitTableRow);
 
     return { headers, alignments, rows };
+}
+
+// ── Inline markdown inside cells ────────────────────────────────────────
+// Cell contents never reach $convertFromMarkdownString (the whole table is a
+// placeholder by then), so the inline syntax has to be parsed here or it stays
+// literal — and then the exporter escapes it, turning `**bold**` into
+// `\*\*bold\*\*` permanently. Block syntax is intentionally not supported:
+// markdown tables can't carry it either.
+const INLINE_RULES = [
+    { re: /^!\[([^\]]*)\]\(([^()\s]+)(?:[ \t]+"[^"]*")?\)/, kind: 'image' },
+    { re: /^\[([^\]]*)\]\(([^()\s]+)(?:[ \t]+"[^"]*")?\)/, kind: 'link' },
+    { re: /^`([^`]+)`/,               kind: 'code' },
+    { re: /^\*\*([\s\S]+?)\*\*/,      kind: 'bold' },
+    { re: /^__([\s\S]+?)__/,          kind: 'bold' },
+    { re: /^~~([\s\S]+?)~~/,          kind: 'strikethrough' },
+    { re: /^\+\+([\s\S]+?)\+\+/,      kind: 'underline' },
+    { re: /^\*([\s\S]+?)\*/,          kind: 'italic' },
+    { re: /^_([\s\S]+?)_/,            kind: 'italic' },
+];
+
+function $createFormattedText(text, formats) {
+    const node = $createTextNode(text);
+    for (let i = 0; i < formats.length; i++) {
+        node.toggleFormat(formats[i]);
+    }
+    return node;
+}
+
+function $parseInline(source, formats) {
+    const nodes = [];
+    let plain = '';
+
+    const flush = () => {
+        if (plain === '') return;
+        nodes.push($createFormattedText(plain, formats));
+        plain = '';
+    };
+
+    let rest = source;
+    while (rest.length > 0) {
+        // A backslash escape always wins over the rules below.
+        if (rest.charAt(0) === '\\' && rest.length > 1) {
+            plain += rest.charAt(1);
+            rest = rest.slice(2);
+            continue;
+        }
+
+        let matched = false;
+        for (let i = 0; i < INLINE_RULES.length; i++) {
+            const rule = INLINE_RULES[i];
+            const match = rule.re.exec(rest);
+            if (!match) continue;
+
+            if (rule.kind === 'image') {
+                // Non-https sources are never rendered anywhere in the app —
+                // keep the syntax as literal text instead of a broken image.
+                if (!isRenderableImageSrc(match[2])) break;
+                flush();
+                nodes.push($createImageNode({ src: match[2], altText: match[1] }));
+            } else if (rule.kind === 'link') {
+                flush();
+                const link = $createLinkNode(match[2]);
+                const children = $parseInline(match[1], formats);
+                if (children.length === 0) children.push($createTextNode(match[2]));
+                link.append(...children);
+                nodes.push(link);
+            } else if (rule.kind === 'code') {
+                flush();
+                // Code spans are literal: no nested parsing, no other format.
+                nodes.push($createFormattedText(match[1], ['code']));
+            } else {
+                flush();
+                const inner = formats.indexOf(rule.kind) === -1
+                    ? formats.concat(rule.kind)
+                    : formats;
+                const children = $parseInline(match[1], inner);
+                for (let c = 0; c < children.length; c++) nodes.push(children[c]);
+            }
+
+            rest = rest.slice(match[0].length);
+            matched = true;
+            break;
+        }
+        if (matched) continue;
+
+        plain += rest.charAt(0);
+        rest = rest.slice(1);
+    }
+
+    flush();
+    return nodes;
+}
+
+/**
+ * Build one table cell: a TableCellNode wrapping a ParagraphNode.
+ *
+ * The paragraph is not optional. A TableCellNode is a block container, and
+ * appending a TextNode straight to it (what this used to do) leaves a tree
+ * Lexical has to repair on its own — with no paragraph to hold the caret,
+ * typing in an empty cell and selecting across cells misbehave.
+ */
+function $createCell(headerState, source, alignment) {
+    const cell = $createTableCellNode(headerState);
+    const paragraph = $createParagraphNode();
+
+    if (alignment) {
+        // Alignment is set on both: the paragraph is what actually renders it,
+        // the cell is where the exporter looks first and what survives a cell
+        // being emptied out.
+        paragraph.setFormat(alignment);
+        if (typeof cell.setFormat === 'function') cell.setFormat(alignment);
+    }
+
+    const children = $parseInline(source || '', []);
+    for (let i = 0; i < children.length; i++) paragraph.append(children[i]);
+
+    cell.append(paragraph);
+    return cell;
 }
 
 /**
@@ -292,27 +469,32 @@ function parseTable(markdown) {
 function createTableNode(tableData) {
     const { headers, alignments, rows } = tableData;
 
+    // TableCellHeaderStates.ROW is what makes a cell render as <th>. The
+    // literal `1` this used to pass happens to be that value, but only by
+    // coincidence of the enum's current ordering.
+    const HEADER = (TableCellHeaderStates && TableCellHeaderStates.ROW) || 1;
+    const BODY = (TableCellHeaderStates && TableCellHeaderStates.NO_STATUS) || 0;
+
+    const columns = headers.length;
     const tableNode = $createTableNode();
 
-    // Create header row
     const headerRow = $createTableRowNode();
-    headers.forEach((header, idx) => {
-        const cell = $createTableCellNode(1); // 1 = header
-        cell.append($createTextNode(header));
-        headerRow.append(cell);
-    });
+    for (let c = 0; c < columns; c++) {
+        headerRow.append($createCell(HEADER, headers[c], alignments[c]));
+    }
     tableNode.append(headerRow);
 
-    // Create body rows
-    rows.forEach(row => {
+    for (let r = 0; r < rows.length; r++) {
+        const row = rows[r];
         const rowNode = $createTableRowNode();
-        row.forEach((cellText, idx) => {
-            const cell = $createTableCellNode(0); // 0 = body
-            cell.append($createTextNode(cellText));
-            rowNode.append(cell);
-        });
+        // Pad short rows and drop surplus cells: Lexical's table model assumes
+        // a rectangular grid, and a ragged one breaks cell selection and
+        // column resizing.
+        for (let c = 0; c < columns; c++) {
+            rowNode.append($createCell(BODY, c < row.length ? row[c] : '', alignments[c]));
+        }
         tableNode.append(rowNode);
-    });
+    }
 
     return tableNode;
 }
@@ -327,37 +509,53 @@ function preprocessMarkdown(markdown, options) {
 
     const tables = [];
     const lines = markdown.split('\n');
-    let result = [];
+    const result = [];
     let i = 0;
+    let fence = null;
 
     while (i < lines.length) {
         const line = lines[i];
+        const fenceMatch = /^[ \t]{0,3}(`{3,}|~{3,})/.exec(line);
 
-        // Check for table start
-        if (line.includes('|') && i + 1 < lines.length && lines[i + 1].includes('|') && /[-:]/.test(lines[i + 1])) {
-            // Collect all table lines
+        // Inside a fenced code block nothing is a table — a ``` block showing
+        // markdown table syntax used to be eaten and turned into a real table.
+        if (fence !== null) {
+            result.push(line);
+            if (fenceMatch && fenceMatch[1].charAt(0) === fence.charAt(0) && fenceMatch[1].length >= fence.length) {
+                fence = null;
+            }
+            i++;
+            continue;
+        }
+        if (fenceMatch) {
+            fence = fenceMatch[1];
+            result.push(line);
+            i++;
+            continue;
+        }
+
+        if (line.indexOf('|') !== -1 && i + 1 < lines.length && parseTableAlignments(lines[i + 1]) !== null) {
             const tableLines = [line, lines[i + 1]];
             i += 2;
 
-            while (i < lines.length && lines[i].trim() && lines[i].includes('|')) {
+            while (i < lines.length && lines[i].trim() && lines[i].indexOf('|') !== -1) {
                 tableLines.push(lines[i]);
                 i++;
             }
 
-            const tableMarkdown = tableLines.join('\n');
-            const tableData = parseTable(tableMarkdown);
+            const tableData = parseTable(tableLines.join('\n'));
 
             if (tableData) {
-                // No markdown-significant characters in the placeholder: the
-                // previous `__TABLE_PLACEHOLDER_n__` had its outer `__`
-                // consumed as bold by the format transformers, so the
-                // replacement regex below never matched and tables were
-                // silently dropped on import.
-                const placeholder = `%%TABLE-PLACEHOLDER-${tables.length}%%`;
+                // The placeholder has to end up in a paragraph of its own, or
+                // it is swallowed by the preceding one and the table never
+                // comes back. Exactly one blank line on each side — adding a
+                // second on every load would make them accumulate.
+                if (result.length > 0 && result[result.length - 1].trim() !== '') result.push('');
+                result.push('%%TABLE-PLACEHOLDER-' + tables.length + '%%');
+                if (i < lines.length && lines[i].trim() !== '') result.push('');
                 tables.push(tableData);
-                result.push(placeholder);
             } else {
-                result.push(...tableLines);
+                for (let k = 0; k < tableLines.length; k++) result.push(tableLines[k]);
             }
         } else {
             result.push(line);
@@ -369,6 +567,35 @@ function preprocessMarkdown(markdown, options) {
         markdown: result.join('\n'),
         tables
     };
+}
+
+/**
+ * Swap the placeholder paragraphs back for real TableNodes.
+ * Must be called within an editor.update() callback.
+ */
+function $restoreTables(tables) {
+    const root = $getRoot();
+    const children = root.getChildren();
+
+    for (let i = 0; i < children.length; i++) {
+        const node = children[i];
+        if (typeof node.getTextContent !== 'function') continue;
+
+        const match = TABLE_PLACEHOLDER_RE.exec(node.getTextContent().trim());
+        if (!match) continue;
+
+        const tableData = tables[parseInt(match[1], 10)];
+        if (!tableData) continue;
+
+        node.replace(createTableNode(tableData));
+    }
+
+    // A table as the last block leaves nowhere to put the caret after it, so
+    // the user can't type past the table without reaching for markdown mode.
+    const last = root.getLastChild();
+    if (last && last.getType() === 'table') {
+        root.append($createParagraphNode());
+    }
 }
 
 /**
@@ -520,23 +747,7 @@ export function $convertMarkdownToNodes(markdown, options = {}) {
 
     // Replace table placeholders with actual table nodes
     if (tables.length > 0) {
-        const root = $getRoot();
-        const children = root.getChildren();
-
-        children.forEach(node => {
-            if (node.getType() === 'paragraph') {
-                const text = node.getTextContent();
-                const match = text.match(/%%TABLE-PLACEHOLDER-(\d+)%%/);
-                if (match) {
-                    const tableIndex = parseInt(match[1]);
-                    const tableData = tables[tableIndex];
-                    if (tableData) {
-                        const tableNode = createTableNode(tableData);
-                        node.replace(tableNode);
-                    }
-                }
-            }
-        });
+        $restoreTables(tables);
     }
 
     // Guarantee image nodes no matter how the installed @lexical/markdown

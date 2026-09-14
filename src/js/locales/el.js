@@ -244,7 +244,14 @@ export default {
             "image": "Εικόνα",
             "undo": "Αναίρεση",
             "redo": "Επανάληψη",
-            "select_text_first": "Επιλέξτε πρώτα κείμενο"
+            "select_text_first": "Επιλέξτε πρώτα κείμενο",
+            "insert_row_above": "Εισαγωγή γραμμής επάνω",
+            "insert_row_below": "Εισαγωγή γραμμής κάτω",
+            "delete_row": "Διαγραφή γραμμής",
+            "insert_column_left": "Εισαγωγή στήλης αριστερά",
+            "insert_column_right": "Εισαγωγή στήλης δεξιά",
+            "delete_column": "Διαγραφή στήλης",
+            "delete_table": "Διαγραφή πίνακα"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Να μη φιλτράρεται το περιεχόμενο NSFW",
@@ -333,7 +340,8 @@ export default {
             "heading_3": "Επικεφαλίδα 3",
             "paragraph": "Παράγραφος",
             "bullet_list": "Λίστα με κουκκίδες",
-            "numbered_list": "Αριθμημένη λίστα"
+            "numbered_list": "Αριθμημένη λίστα",
+            "table": "Πίνακας"
         },
         "profile_tabs": {
             "posts": "Δημοσιεύσεις",
@@ -370,6 +378,7 @@ export default {
             "add_someone": "Προσθήκη κάποιου"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Αυτό το Portal δεν έχει ορίσει κανόνες ακόμη.",
             "community_rules": "Κανόνες κοινότητας"
         },
         "error_boundary": {
@@ -1364,6 +1373,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "Οι δημοσιεύσεις blockchain με ψήφους δεν μπορούν ποτέ να αφαιρεθούν πλήρως· αυτή είναι η ήπια διαγραφή της πλατφόρμας. Οι ψήφοι και οι πληρωμές δεν επηρεάζονται."
         },
         "edit_community_dialog": {
+            "rules": "Κανόνες",
+            "rule": "Κανόνας",
+            "add_rule": "Προσθήκη κανόνα",
+            "no_rules_added_yet": "Δεν έχουν προστεθεί κανόνες ακόμη",
+            "eg_pixel_art_only_no_ai_upscales": "π.χ. Μόνο pixel art — χωρίς AI upscaling",
+            "delete_rule": "Διαγραφή κανόνα",
+            "that_rule_is_already_in_the_list": "Αυτός ο κανόνας υπάρχει ήδη στη λίστα.",
+            "no_room_left_delete_a_rule_to": "Δεν υπάρχει άλλος χώρος. Διαγράψτε έναν κανόνα για να προσθέσετε άλλον.",
+            "some_rules_did_not_fit_and_were": "Ορισμένοι κανόνες δεν χώρεσαν και παραλείφθηκαν.",
             "avatar": "Άβαταρ",
             "loading_community_data": "Φόρτωση δεδομένων κοινότητας…",
             "edit_portal_settings": "Επεξεργασία ρυθμίσεων Portal",

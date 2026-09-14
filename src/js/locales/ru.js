@@ -237,7 +237,14 @@ export default {
             "image": "Изображение",
             "undo": "Отменить",
             "redo": "Повторить",
-            "select_text_first": "Сначала выделите текст"
+            "select_text_first": "Сначала выделите текст",
+            "insert_row_above": "Вставить строку выше",
+            "insert_row_below": "Вставить строку ниже",
+            "delete_row": "Удалить строку",
+            "insert_column_left": "Вставить столбец слева",
+            "insert_column_right": "Вставить столбец справа",
+            "delete_column": "Удалить столбец",
+            "delete_table": "Удалить таблицу"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Не фильтровать контент NSFW",
@@ -326,7 +333,8 @@ export default {
             "heading_3": "Заголовок 3",
             "paragraph": "Абзац",
             "bullet_list": "Маркированный список",
-            "numbered_list": "Нумерованный список"
+            "numbered_list": "Нумерованный список",
+            "table": "Таблица"
         },
         "profile_tabs": {
             "posts": "Посты",
@@ -363,6 +371,7 @@ export default {
             "add_someone": "Добавить участника"
         },
         "rules_section": {
+            "this_portal_has_not_set_any_rules": "Этот портал ещё не установил правила.",
             "community_rules": "Правила сообщества"
         },
         "error_boundary": {
@@ -1358,6 +1367,15 @@ export default {
             "blockchain_posts_with_votes_can_never_be": "Посты в блокчейне, у которых есть голоса, невозможно удалить полностью; это «мягкое удаление» платформы. Голоса и выплаты не затрагиваются."
         },
         "edit_community_dialog": {
+            "rules": "Правила",
+            "rule": "Правило",
+            "add_rule": "Добавить правило",
+            "no_rules_added_yet": "Правила ещё не добавлены",
+            "eg_pixel_art_only_no_ai_upscales": "напр., Только пиксель-арт — без ИИ-апскейла",
+            "delete_rule": "Удалить правило",
+            "that_rule_is_already_in_the_list": "Это правило уже есть в списке.",
+            "no_room_left_delete_a_rule_to": "Места больше нет. Удалите одно правило, чтобы добавить другое.",
+            "some_rules_did_not_fit_and_were": "Часть правил не поместилась и была пропущена.",
             "avatar": "Аватар",
             "loading_community_data": "Загрузка данных сообщества…",
             "edit_portal_settings": "Изменить настройки портала",
