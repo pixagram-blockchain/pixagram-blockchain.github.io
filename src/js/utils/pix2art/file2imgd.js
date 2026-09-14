@@ -111,7 +111,7 @@ function buildDownscaleConfig(colors) {
     config.k_centroid_iterations = 2;
 
     // Rare / important color preservation (lips, eyes, highlights):
-    config.reserve_colors = Math.max(2, Math.round(colors / 8)); // hard guarantee: 32→4, 48→6, 64→8 slots
+    config.reserve_colors = Math.max(2, Math.round(colors / 6)); // hard guarantee: 32→4, 48→6, 64→8 slots
     config.detail_boost = 0.8;                    // saliency weighting toward detail-rich colors (replaces the previously-inert edge_weight)
     config.color_rarity = 0.35;                   // damp frequency vote so large flat areas don't monopolize the palette
 

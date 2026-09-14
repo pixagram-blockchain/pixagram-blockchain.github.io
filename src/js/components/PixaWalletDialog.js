@@ -4030,13 +4030,13 @@ class PixaWalletDialog extends React.PureComponent {
                             className={_tab_value === false ? classes.tabsDisactivated: classes.tabs}
                         >
                             <Fade in={open} timeout={600}>
-                                <Tab label={t("components.pixa_wallet_dialog.power")} icon={<PixaPower style={{transform: "scale(1.35)"}}/>} />
+                                <Tab label={t("components.pixa_wallet_dialog.power")} icon={<PixaPower style={{transform: "scale(1.125)"}}/>} />
                             </Fade>
                             <Fade in={open} timeout={800}>
-                                <Tab label={t("components.pixa_wallet_dialog.pixa")} icon={<PixaLiquid style={{transform: "scale(1.1)"}}/>} />
+                                <Tab label={t("components.pixa_wallet_dialog.pixa")} icon={<PixaLiquid style={{transform: "scale(1.125)"}}/>} />
                             </Fade>
                             <Fade in={open} timeout={1000}>
-                                <Tab label={t("components.pixa_wallet_dialog.supra")} icon={<PixaSupra style={{transform: "scale(0.85)"}} />} />
+                                <Tab label={t("components.pixa_wallet_dialog.supra")} icon={<PixaSupra style={{transform: "scale(1.125)"}} />} />
                             </Fade>
                             <Fade in={open} timeout={1200}>
                                 <Tab label={t("words.history")} icon={<HistoryRounded/>}  style={{marginLeft: _margin_last_tab}}/>
@@ -4102,13 +4102,13 @@ class PixaWalletDialog extends React.PureComponent {
                         className={_tab_value === false ? classes.tabsDisactivated: classes.tabs}
                     >
                         <Fade in={open} timeout={600}>
-                            <Tab label={t("components.pixa_wallet_dialog.power")} icon={<PixaPower style={{transform: "scale(1.35)"}}/>} />
+                            <Tab label={t("components.pixa_wallet_dialog.power")} icon={<PixaPower style={{transform: "scale(1.125)"}}/>} />
                         </Fade>
                         <Fade in={open} timeout={800}>
-                            <Tab label={t("components.pixa_wallet_dialog.pixa")} icon={<PixaLiquid style={{transform: "scale(1.1)"}}/>} />
+                            <Tab label={t("components.pixa_wallet_dialog.pixa")} icon={<PixaLiquid style={{transform: "scale(1).125"}}/>} />
                         </Fade>
                         <Fade in={open} timeout={1000}>
-                            <Tab label={t("components.pixa_wallet_dialog.supra")} icon={<PixaSupra style={{transform: "scale(0.85)"}} />} />
+                            <Tab label={t("components.pixa_wallet_dialog.supra")} icon={<PixaSupra style={{transform: "scale(1.125)"}} />} />
                         </Fade>
                         <Fade in={open} timeout={1200}>
                             <Tab label={t("words.history")} icon={<HistoryRounded/>}  style={{marginTop: _margin_last_tab}}/>
