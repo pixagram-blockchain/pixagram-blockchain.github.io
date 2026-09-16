@@ -64,7 +64,7 @@ import AccountBalanceRounded from "@material-ui/icons/AccountBalanceRounded";
 import WarningRounded from "@material-ui/icons/WarningRounded";
 import SecurityRounded from "@material-ui/icons/SecurityRounded";
 import BugReportRounded from "@material-ui/icons/BugReportRounded";
-import PeopleRounded from "@material-ui/icons/PeopleRounded";
+import CodeRounded from "@material-ui/icons/CodeRounded";
 import Community from "../icons/Community";
 import Avatar from "@material-ui/core/Avatar";
 import List from "@material-ui/core/List";
@@ -81,6 +81,7 @@ import Menu from "@material-ui/core/Menu";
 import MenuItem from "@material-ui/core/MenuItem";
 import ListItemIcon from "@material-ui/core/ListItemIcon";
 import { cssBackgroundImage } from "../utils/safeUrl";
+import { readFeedSeen, isFeedPostSeen, subscribeFeedSeen, toMs } from "../utils/feedSeen";
 
 import { t, useLanguage } from "../utils/text";
 
@@ -116,7 +117,15 @@ const styles = theme => ({
         contain: "layout style paint",
         "& .MuiChip-root": { transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms", backgroundColor: "#000 !important", color: "#ccc", flex: "auto", paddingBottom: 4 },
         "& .MuiChip-root:hover": { transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms", backgroundColor: "#000 !important", color: "#fff" },
-        "& .MuiChip-root > .MuiChip-label": { padding: "4px 6px 4px 6px", fontSize: "12px" }
+        "& .MuiChip-root > .MuiChip-label": { padding: "4px 6px 4px 6px", fontSize: "12px" },
+        // The home chip's icon (TagChipIcon). MUI gives .MuiChip-icon its own
+        // colour — grey 700 on a light-type theme, near-invisible on the
+        // black chip — and the icon used to carry an inline "… !important"
+        // colour, which React drops as an invalid value. Styled here instead,
+        // where it outranks MUI's rule: #ccc like the label chips, #fff on
+        // hover like them.
+        "& .MuiChip-root .MuiChip-icon": { transition: "color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms", color: "#ccc", fill: "#ccc" },
+        "& .MuiChip-root:hover .MuiChip-icon": { color: "#fff", fill: "#fff" }
     },
     CTAinfo: { position: "relative", backgroundColor: "#212121", borderRadius: "21px", overflow: "hidden", margin: "16px 16px 0px 16px", height: "144px" },
     loginButton: {
@@ -177,7 +186,7 @@ const styles = theme => ({
     communityInfo: { flex: 1, overflow: "hidden" },
     communityName: { fontWeight: 600, fontSize: "14px", color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
     communityMembers: { fontSize: "12px", color: "#888" },
-    metaListHeader: { fontSize: "14px", fontWeight: 600, color: "#777", lineHeight: "36px", backgroundColor: "transparent" },
+    metaListHeader: { fontSize: "14px", fontWeight: 600, color: "#ccc", lineHeight: "36px", backgroundColor: "transparent" },
     // ── Main view (discover sections) ──────────────────────────────────────────────────────
     discoverGrid: {
         display: "grid",
@@ -209,8 +218,10 @@ const styles = theme => ({
     discoverWideText: { display: "flex", flexDirection: "column", flex: 1, minWidth: 0 },
     discoverWideTitle: { fontWeight: 600, fontSize: "14px", lineHeight: "18px", color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
     discoverWideSub: { fontSize: "12px", lineHeight: "16px", color: "#888", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-    // The relocated feed button, leading the "Friends" row: same 56px rounded
-    // square as the friend tiles, carrying the old header-highlight treatment.
+    // The feed button leading the "Friends" row: a 56px rounded square like
+    // the friend tiles (carrying the old header-highlight treatment) when the
+    // row is full, stretched across the columns the friend tiles leave free
+    // otherwise — see FeedTile / FEED_TILE_SPAN_STYLES.
     feedTile: {
         width: 56, height: 56, color: "#fff", backgroundColor: "#dddddd1a",
         transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
@@ -219,6 +230,15 @@ const styles = theme => ({
             backgroundColor: "#dddddd19",
         }
     },
+    // The stretched form: same height and background, the icon kept in a
+    // 56px square at the left so it sits exactly where the square form's
+    // icon sits, the label beside it (discoverWideTitle) in the gained room.
+    feedWideTile: {
+        justifySelf: "stretch", width: "100%",
+        display: "flex", alignItems: "center", justifyContent: "flex-start", textAlign: "left",
+        gap: "12px", paddingRight: "16px"
+    },
+    feedTileIcon: { width: 56, height: 56, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" },
     friendBadge: {
         "& .MuiBadge-badge": {
             backgroundColor: "#c7c7c7", color: "#101010", fontWeight: 600,
@@ -274,7 +294,7 @@ const PORTAL_PRESENTATION = {
     risks:       { label: () => t("words.risks"),       icon: WarningRounded },
     security:    { label: () => t("words.security"),    icon: SecurityRounded },
     bugs:        { label: () => t("words.bug_reports"), icon: BugReportRounded },
-    community:   { label: () => t("words.community"),   icon: PeopleRounded },
+    development: { label: () => t("words.development"), icon: CodeRounded },
 };
 
 // A tile's display name: the on-chain community title once enriched, else
@@ -310,38 +330,28 @@ const MENU_APPS = [
 const APPS_MENU_ANCHOR_ORIGIN = { vertical: "bottom", horizontal: "right" };
 const APPS_MENU_TRANSFORM_ORIGIN = { vertical: "top", horizontal: "right" };
 
+const FRIENDS_ROW_COLUMNS = 4;  // the Friends grid (discoverGrid): the feed
+                                // tile plus up to FRIENDS_MAX author tiles;
+                                // the feed tile spans whatever the authors
+                                // leave free (see FeedTile)
 const FRIENDS_MAX = 3;          // recent-author tiles after the leading feed
-                                // tile — 1 + 3 fills one 4-column grid row
+                                // tile — 1 + 3 fills one row
 const FEED_PAGE_SIZE = 20;      // posts per feed page
 const FEED_MAX_PAGES = 3;       // hard cap: 3 × 20 = 60 posts scanned
 const DISCOVER_TAGS_MAX = 24;   // random trending tags shown in "Trending"
 const DISCOVER_PORTALS_MAX = 6; // random trending portals (must stay < 8)
 const COMMUNITIES_FETCH_LIMIT = 100; // listCommunities page size
 
-// When the Feed page was last seen, as a ms epoch. The Feed page owns this
-// value and writes it on view:
-//   localStorage.setItem("last_feed_check", String(Date.now()))
-// Accepts ms, seconds, or an ISO string; returns 0 when unset, in which case
-// every post inside the scan window counts as unseen (sane bootstrap).
-const getLastFeedCheck = () => {
-    try {
-        const raw = window.localStorage.getItem("last_feed_check");
-        if (!raw) return 0;
-        const n = Number(raw);
-        if (Number.isFinite(n) && n > 0) return n < 2e10 ? n * 1000 : n;
-        const t = Date.parse(/Z$|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : raw + "Z");
-        return Number.isFinite(t) ? t : 0;
-    } catch (e) { return 0; }
-};
+// Which feed posts count as seen — the floor and the scrolled-through ranges
+// FeedPersonal records as the reader rests on cards — is read through
+// utils/feedSeen (readFeedSeen / isFeedPostSeen); `toMs` comes from there
+// too, so both files read a post's `created` the same way.
 
-// Sanitized post entities already carry `created` as a ms number
-// (VALIDATORS.safe_timestamp), but tolerate strings/seconds defensively.
-const toMs = (c) => {
-    if (typeof c === "number" && Number.isFinite(c)) return c < 2e10 ? c * 1000 : c;
-    if (typeof c !== "string" || !c) return 0;
-    const t = Date.parse(/Z$|[+-]\d{2}:?\d{2}$/.test(c) ? c : c + "Z");
-    return Number.isFinite(t) ? t : 0;
-};
+// gridColumn spans of the feed tile, one frozen style per column count so
+// the prop identity is stable per span (index 0 is unused: a span is ≥ 1).
+const FEED_TILE_SPAN_STYLES = Array.from({ length: FRIENDS_ROW_COLUMNS + 1 }, (_, n) =>
+    Object.freeze({ gridColumn: `span ${Math.max(1, n)}` })
+);
 
 // Fisher–Yates over indices. Sampling INDICES keyed on source LENGTH keeps
 // the random pick stable across the async image-enrichment pass (which swaps
@@ -362,9 +372,15 @@ const sampleIndices = (length, count) => {
 // transition too, so the cascade plays once at startup).
 const SECTION_FADE_MS = 350;
 const SECTION_STAGGER_MS = 100;
-const SECTION_FADE_STYLES = Array.from({ length: 6 }, (_, i) =>
+const SECTION_FADE_STYLES = Array.from({ length: 4 }, (_, i) =>
     Object.freeze({ transitionDelay: (i * SECTION_STAGGER_MS) + "ms" })
 );
+
+// The home chip's icon, hoisted so the `icon` prop TagChipIcon's comparator
+// checks keeps one identity across MainView renders (an inline element was
+// a fresh one every time — a memo miss on each render). Its colour comes
+// from styles.chips (.MuiChip-icon), not from the element.
+const HOME_CHIP_ICON = <HomeRounded />;
 
 const CONTAINER_STYLE_BASE = { width: "100%", display: "flex", position: "relative", flexDirection: "column" };
 const TOP_CONTAINER_STYLE = { position: "relative", width: "100%" };
@@ -400,6 +416,18 @@ const shallowArrayEqual = (a, b) => {
     if (!a || !b || a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
     return true;
+};
+
+// The Friends row is re-derived on every seen-mark while the feed is read
+// (applyFriends). Reusing the previous element objects wherever a tile's
+// data didn't move keeps MainView's shallowArrayEqual bailing and the
+// untouched FriendTiles on their memo hit; the list identity only changes
+// when a tile actually changes.
+const sameFriend = (a, b) =>
+    !!a && !!b && a.name === b.name && a.unseen === b.unseen && a.permlink === b.permlink && a.image === b.image;
+const mergeFriends = (prev, next) => {
+    if (prev.length === next.length && next.every((f, i) => sameFriend(prev[i], f))) return prev;
+    return next.map((f, i) => (sameFriend(prev[i], f) ? prev[i] : f));
 };
 
 // ============================================================================
@@ -606,8 +634,11 @@ ProposalsTile.displayName = "ProposalsTile";
 // unseen-posts badge ("4+"). Clicking it opens the personal feed — the same
 // page as the feed tile leading the row, NOT the author's profile — scrolled
 // to this friend's NEWEST unseen post (`friend.permlink`, kept by
-// fetchFriends): the badge counts posts sitting unseen in /feed, so that is
+// applyFriends): the badge counts posts sitting unseen in /feed, so that is
 // where the click lands, with the older unseen ones reading on below it.
+// Both move as the reader reads: a viewed post leaves the count, the
+// permlink steps to the next unseen one, and a fully-read author's tile
+// leaves the row (the feed tile grows into its column).
 // The author name only survives in the tooltip. Bound with a stable data
 // prop, like TagChip, so the .map() in MainView returns stable children.
 const FriendTile = React.memo(({ classes, friend, onGoToFeedPost }) => {
@@ -639,40 +670,60 @@ FriendTile.displayName = "FriendTile";
 // it opens /feed — the personal feed, i.e. the `feedpersonal` page of
 // PAGE_ROUTES — at the top. Every button of the Friends row is an entry to
 // that one page; the friend tiles just add where in it to land.
-const FeedTile = React.memo(({ classes, onGoToFeed }) => {
+// `span` is the number of grid columns the tile takes: the row's
+// FRIENDS_ROW_COLUMNS minus the friend tiles beside it, so the feed button
+// always fills the remaining space of the row — a single 56px square (the
+// icon in a tooltip) when three friends sit next to it, a stretched row
+// carrying the icon square plus its label when fewer or none do. The row
+// re-lays out as friends are read (their tiles leave) and the tile grows
+// into the freed columns.
+const FeedTile = React.memo(({ classes, onGoToFeed, span }) => {
     useLanguage();
+    if (!(span > 1)) {
+        return (
+            <Tooltip title={t("components.menu_content.feed")}>
+                <ButtonBase className={classes.discoverTile + " " + classes.feedTile} onClick={onGoToFeed}>
+                    <NewspaperVariant />
+                </ButtonBase>
+            </Tooltip>
+        );
+    }
     return (
-        <Tooltip title={t("components.menu_content.feed")}>
-            <ButtonBase className={classes.discoverTile + " " + classes.feedTile} onClick={onGoToFeed}>
-                <NewspaperVariant />
-            </ButtonBase>
-        </Tooltip>
+        <ButtonBase
+            className={classes.discoverTile + " " + classes.feedTile + " " + classes.feedWideTile}
+            style={FEED_TILE_SPAN_STYLES[Math.min(span, FRIENDS_ROW_COLUMNS)]}
+            onClick={onGoToFeed}
+        >
+            <span className={classes.feedTileIcon}><NewspaperVariant /></span>
+            <span className={classes.discoverWideText}>
+                <span className={classes.discoverWideTitle}>{t("components.menu_content.feed")}</span>
+            </span>
+        </ButtonBase>
     );
-}, cmpKeys(["onGoToFeed"]));
+}, cmpKeys(["onGoToFeed", "span"]));
 FeedTile.displayName = "FeedTile";
 
 // ----- The main view: Friends row (led by the feed tile), random trending
-// tags (led by the home chip) and random trending portals, the Governance
-// grid (full-width proposals row, then the 2 × 4 portal icons), then the
-// two "Recommended" closers — the tags and
-// portals that the random trending samples did NOT pick, so together the
-// sections cover everything fetched. Every section carries its own <Fade> —
-// one shared duration, index-staggered transitionDelay — so they appear
-// TOP → BOTTOM once at startup. Sections with no data (e.g. Governance while
-// logged out) simply never render. The Friends section is the exception: it
-// hosts the relocated feed button, so it is gated on `feedEnabled` (logged
-// in), NOT on the friend count — the feed must stay reachable even when no
-// recent friend activity exists (friends is always empty while logged out).
-// Every button of that row leads to the personal feed (/feed): the feed
-// tile to its top (`onGoToFeed`), each badged friend tile to that friend's
-// newest unseen post in it (`onGoToFeedPost`).
+// tags (led by the home chip), random trending portals, then the Governance
+// grid (full-width proposals row, then the 2 × 4 portal icons). Every
+// section carries its own <Fade> — one shared duration, index-staggered
+// transitionDelay — so they appear TOP → BOTTOM once at startup. Sections
+// with no data (e.g. Governance while logged out) simply never render. The
+// Friends section is the exception: it hosts the relocated feed button, so
+// it is gated on `feedEnabled` (logged in), NOT on the friend count — the
+// feed must stay reachable even when no recent friend activity exists
+// (friends is always empty while logged out). Every button of that row
+// leads to the personal feed (/feed): the feed tile to its top
+// (`onGoToFeed`), each badged friend tile to that friend's newest unseen
+// post in it (`onGoToFeedPost`). The feed tile spans the columns the friend
+// tiles leave free, so the row is always full.
 const MainView = React.memo(({
                                  classes, proposalsPortal, governancePortals, friends, feedEnabled,
                                  trendingTags, trendingPortals,
-                                 recommendedTags, recommendedPortals,
                                  onGoToCommunity, onGoToFeed, onGoToFeedPost, onTagClick
                              }) => {
         useLanguage();
+        const feedSpan = Math.max(1, FRIENDS_ROW_COLUMNS - friends.length);
         return (
             <React.Fragment>
                 {feedEnabled && (
@@ -680,7 +731,7 @@ const MainView = React.memo(({
                         <div>
                             <ListSubheader disableSticky className={classes.metaListHeader}>{t("components.menu_content.friends")}</ListSubheader>
                             <div className={classes.discoverGrid}>
-                                <FeedTile classes={classes} onGoToFeed={onGoToFeed} />
+                                <FeedTile classes={classes} onGoToFeed={onGoToFeed} span={feedSpan} />
                                 {friends.map(f => (
                                     <FriendTile key={"friend-" + f.name} classes={classes} friend={f} onGoToFeedPost={onGoToFeedPost} />
                                 ))}
@@ -693,7 +744,8 @@ const MainView = React.memo(({
                         <div data-tour="menu-categories">
                             <ListSubheader disableSticky className={classes.metaListHeader}>{t("components.menu_content.trending_categories")}</ListSubheader>
                             <div className={classes.chips} style={{ paddingBottom: 8 }}>
-                                <TagChipIcon key={"disc-chiphome"} icon={<HomeRounded style={{color: "#c5c5c5 !important", fill: "#c5c5c5 !important"}}/>} tag={""} onClick={onTagClick} />
+                                {/* The icon's colour is styles.chips' .MuiChip-icon rule. */}
+                                <TagChipIcon key={"disc-chiphome"} icon={HOME_CHIP_ICON} tag={""} onClick={onTagClick} />
                                 {trendingTags.map(t => <TagChip key={"disc-chip-" + t} tag={t} onClick={onTagClick} />)}
                             </div>
                         </div>
@@ -724,26 +776,6 @@ const MainView = React.memo(({
                         </div>
                     </Fade>
                 )}
-                {recommendedTags.length > 0 && (
-                    <Fade in timeout={SECTION_FADE_MS} style={SECTION_FADE_STYLES[4]}>
-                        <div data-tour="menu-categories">
-                            <ListSubheader disableSticky className={classes.metaListHeader}>{t("components.menu_content.recommended_tags")}</ListSubheader>
-                            <div className={classes.chips}>
-                                {recommendedTags.map(t => <TagChip key={"rec-chip-" + t} tag={t} onClick={onTagClick} />)}
-                            </div>
-                        </div>
-                    </Fade>
-                )}
-                {recommendedPortals.length > 0 && (
-                    <Fade in timeout={SECTION_FADE_MS} style={SECTION_FADE_STYLES[5]}>
-                        <List dense className={classes.communitiesList} data-tour="menu-communities">
-                            <ListSubheader disableSticky className={classes.metaListHeader}>{t("components.menu_content.recommended_portals")}</ListSubheader>
-                            {recommendedPortals.map((c, i) => (
-                                <CommunityItem key={"rec-" + (c.name || i)} classes={classes} community={c} onGoToCommunity={onGoToCommunity} />
-                            ))}
-                        </List>
-                    </Fade>
-                )}
             </React.Fragment>
         );
     }, (prev, next) =>
@@ -756,9 +788,7 @@ const MainView = React.memo(({
         shallowArrayEqual(prev.governancePortals, next.governancePortals) &&
         shallowArrayEqual(prev.friends, next.friends) &&
         shallowArrayEqual(prev.trendingTags, next.trendingTags) &&
-        shallowArrayEqual(prev.trendingPortals, next.trendingPortals) &&
-        shallowArrayEqual(prev.recommendedTags, next.recommendedTags) &&
-        shallowArrayEqual(prev.recommendedPortals, next.recommendedPortals)
+        shallowArrayEqual(prev.trendingPortals, next.trendingPortals)
 );
 MainView.displayName = "MainView";
 
@@ -922,6 +952,11 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
     const accountDataRef = useRef(null);
     const notifAnchorRef = useRef(null);
     const appsButtonRef = useRef(null);
+    // Friends row (see fetchFriends / applyFriends below):
+    const feedScanRef = useRef(null);          // { account, head, posts: [{ author, permlink, created }] }
+    const friendsScanToken = useRef(0);        // retires a superseded scan
+    const rescanHeadRef = useRef(0);           // newest feed head a seen-mark already triggered a rescan for
+    const avatarCacheRef = useRef(new Map());  // author → profile image ("" when none), across scans
 
     useEffect(() => { accountDataRef.current = accountData; }, [accountData]);
 
@@ -1030,19 +1065,80 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
         }
     }, [pixaAPI]);
 
-    // ---- Fetch: friends (recent feed authors + unseen counts) ----
-    // Walks the personal feed newest → oldest in pages of FEED_PAGE_SIZE and
-    // stops at the first post published before last_feed_check (or at the
-    // FEED_MAX_PAGES cap = 3 × 20 posts, whichever comes first). Everything
-    // collected before that boundary is "unseen"; the FRIENDS_MAX most
-    // recently active authors are kept with their unseen-post counts and the
-    // permlink of their newest unseen post — the card the tile scrolls the
-    // feed to (see handleFeedFocus).
+    // ---- Friends: recent feed authors + unseen counts ----
+    // Two halves. fetchFriends (the scan) walks the personal feed newest →
+    // oldest in pages of FEED_PAGE_SIZE, down to the seen floor of
+    // utils/feedSeen or the FEED_MAX_PAGES cap (3 × 20 = 60 posts), whichever
+    // comes first, and keeps every post above the floor in feedScanRef:
+    // author, permlink, created. applyFriends then folds the CURRENT seen
+    // state over that scan — a post is unseen while it is above the floor and
+    // inside no range the reader scrolled through (isFeedPostSeen) — and keeps
+    // the FRIENDS_MAX most recently active authors with their unseen counts
+    // and the permlink of their newest unseen post: the card a tile scrolls
+    // the feed to (see handleFeedFocus). Splitting the two is what makes the
+    // row live: FeedPersonal marks posts seen as the reader rests on them,
+    // feedSeen notifies (the subscription below), and the row re-derives from
+    // the cached scan without another fetch. The scan itself is redone on
+    // session events, and when a mark reports a feed head newer than the one
+    // scanned — posts published since the scan ran.
+    const applyFriends = useCallback(async (username) => {
+        const scan = feedScanRef.current;
+        if (!scan || scan.account !== username) return;
+        const seen = readFeedSeen(username);
+
+        // Aggregate per author: unseen count + most recent activity, and
+        // which post that activity is.
+        const byAuthor = new Map();
+        for (const p of scan.posts) {
+            if (isFeedPostSeen(seen, p.created)) continue;
+            const entry = byAuthor.get(p.author);
+            if (entry) {
+                entry.unseen += 1;
+                if (p.created > entry.latest) { entry.latest = p.created; entry.permlink = p.permlink; }
+            } else {
+                byAuthor.set(p.author, { name: p.author, unseen: 1, latest: p.created, permlink: p.permlink });
+            }
+        }
+        const top = Array.from(byAuthor.values())
+            .sort((a, b) => b.latest - a.latest)
+            .slice(0, FRIENDS_MAX);
+
+        // Profile images (same path as portals/profile), cached per author so
+        // a re-derivation on a seen-mark never fetches; only a scan that
+        // surfaces a new author pays the round-trip — before its single
+        // paint, as before, so a tile never flashes its "@" placeholder.
+        const avatars = avatarCacheRef.current;
+        const commit = () => {
+            if (!isMounted.current || feedScanRef.current !== scan) return;
+            const next = top.map(f => ({ name: f.name, unseen: f.unseen, permlink: f.permlink, image: avatars.get(f.name) || "" }));
+            setFriends(prev => mergeFriends(prev, next));
+        };
+        const missing = top.map(f => f.name).filter(n => !avatars.has(n));
+        if (missing.length > 0 && pixaAPI && pixaAPI.accounts) {
+            try {
+                const accounts = await pixaAPI.accounts.getAccounts(missing, true);
+                (accounts || []).forEach(a => {
+                    if (a && a.name) avatars.set(a.name, (a._profile && a._profile.profile_image) || "");
+                });
+            } catch (e) {
+                console.log("[MenuContent] Friend avatar enrichment failed:", e.message);
+            }
+            // Not resolved (lookup failed, or the account came back empty):
+            // remembered as image-less, as a scan used to leave it, so a
+            // failing node isn't asked again on every seen-mark while the
+            // reader scrolls. The cache is dropped with the session.
+            missing.forEach(n => { if (!avatars.has(n)) avatars.set(n, ""); });
+        }
+        commit();
+    }, [pixaAPI]);
+
     const fetchFriends = useCallback(async (username) => {
         if (!pixaAPI || !username || !pixaAPI.content || !pixaAPI.content.getDiscussionsByFeed) return;
+        const token = ++friendsScanToken.current;
         try {
-            const lastCheck = getLastFeedCheck();
-            const unseen = [];
+            const floor = readFeedSeen(username).floor;
+            const scanned = [];
+            let head = 0;   // `created` of the newest post scanned
             let cursor = null;
 
             for (let pageNum = 0; pageNum < FEED_MAX_PAGES; pageNum++) {
@@ -1057,56 +1153,49 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
                 if (!Array.isArray(page) || page.length === 0) break;
 
                 const fresh = cursor ? page.slice(1) : page;
-                let reachedSeen = false;
+                let reachedFloor = false;
                 for (const post of fresh) {
                     if (!post || !post.author) continue;
                     const createdMs = toMs(post.created);
-                    if (lastCheck && createdMs && createdMs <= lastCheck) { reachedSeen = true; break; }
-                    unseen.push({ author: post.author, permlink: post.permlink || "", created: createdMs });
+                    if (!head && createdMs) head = createdMs;
+                    // At or below the floor: seen for good, and so is
+                    // everything older — the scan can stop here.
+                    if (floor && createdMs && createdMs <= floor) { reachedFloor = true; break; }
+                    scanned.push({ author: post.author, permlink: post.permlink || "", created: createdMs });
                 }
-                if (reachedSeen || fresh.length < FEED_PAGE_SIZE) break; // seen boundary or feed exhausted
+                if (reachedFloor || fresh.length < FEED_PAGE_SIZE) break; // floor or feed exhausted
                 cursor = page[page.length - 1];
                 if (!cursor || !cursor.author || !cursor.permlink) break;
             }
 
-            if (!isMounted.current) return;
-            if (unseen.length === 0) { setFriends([]); return; }
-
-            // Aggregate per author: unseen count + most recent activity, and
-            // which post that activity is.
-            const byAuthor = new Map();
-            for (const p of unseen) {
-                const entry = byAuthor.get(p.author);
-                if (entry) {
-                    entry.unseen += 1;
-                    if (p.created > entry.latest) { entry.latest = p.created; entry.permlink = p.permlink; }
-                } else {
-                    byAuthor.set(p.author, { name: p.author, unseen: 1, latest: p.created, permlink: p.permlink });
-                }
-            }
-            const top = Array.from(byAuthor.values())
-                .sort((a, b) => b.latest - a.latest)
-                .slice(0, FRIENDS_MAX);
-
-            // Enrich with profile images (same path as portals/profile).
-            const imageMap = {};
-            try {
-                const accounts = await pixaAPI.accounts.getAccounts(top.map(f => f.name), true);
-                (accounts || []).forEach(a => {
-                    if (a && a.name) imageMap[a.name] = (a._profile && a._profile.profile_image) || "";
-                });
-            } catch (e) {
-                console.log("[MenuContent] Friend avatar enrichment failed:", e.message);
-            }
-
-            if (isMounted.current) {
-                setFriends(top.map(f => ({ name: f.name, unseen: f.unseen, permlink: f.permlink, image: imageMap[f.name] || "" })));
-            }
+            if (!isMounted.current || token !== friendsScanToken.current) return;
+            feedScanRef.current = { account: username, head, posts: scanned };
+            await applyFriends(username);
         } catch (e) {
             console.log("[MenuContent] Failed to fetch friends:", e.message);
-            if (isMounted.current) setFriends([]);
+            if (isMounted.current && token === friendsScanToken.current) {
+                feedScanRef.current = null;
+                setFriends([]);
+            }
         }
-    }, [pixaAPI]);
+    }, [pixaAPI, applyFriends]);
+
+    // Live updates. A mark from FeedPersonal (the reader rested on some
+    // cards) re-derives the row from the cached scan — no fetch. A mark whose
+    // feed head is newer than the scanned one means posts were published
+    // since the scan: rescan, once per new head, so a scan that cannot see
+    // that head yet (a cached page) doesn't loop on every further mark.
+    useEffect(() => subscribeFeedSeen((account, state, meta) => {
+        const scan = feedScanRef.current;
+        if (!isMounted.current || !scan || scan.account !== account) return;
+        const head = (meta && meta.head) || 0;
+        if (head > scan.head && head > rescanHeadRef.current) {
+            rescanHeadRef.current = head;
+            fetchFriends(account);
+            return;
+        }
+        if (!meta || meta.changed) applyFriends(account);
+    }), [fetchFriends, applyFriends]);
 
     // ---- Session check ----
     const checkForActiveSession = useCallback(async () => {
@@ -1171,6 +1260,9 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
                     setProfileImage(null);
                     setCommunities([]);
                     setFriends([]);
+                    feedScanRef.current = null;   // the scan belongs to the outgoing account
+                    rescanHeadRef.current = 0;
+                    avatarCacheRef.current = new Map();
                     setTimeout(async () => {
                         if (isMounted.current) {
                             await Promise.all([
@@ -1205,6 +1297,8 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
                 setProfileImage(null);
                 setLoading(false);
                 setFriends([]);
+                feedScanRef.current = null;
+                rescanHeadRef.current = 0;
                 fetchedUsername.current = null;
                 fetchInProgress.current = false;
                 fetchCommunities();
@@ -1312,8 +1406,9 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
     const handleUnreadCountChange = useCallback((count) => setNotifCount(count), []);
     // The Friends row's navigation. Both push /feed, which PAGE_ROUTES
     // resolves to the `feedpersonal` page (the personal feed, never the
-    // public /created etc. feeds); that page writes `last_feed_check` on
-    // view, which is what clears the friend badges on the next fetch.
+    // public /created etc. feeds); that page marks the cards the reader
+    // rests on as seen (utils/feedSeen), which is what clears the friend
+    // badges — live, as the reader scrolls (see applyFriends).
     //   handleFeedOpen  — the feed tile: the top of the feed. Ignores its
     //                     arguments on purpose (handed straight to onClick).
     //   handleFeedFocus — a friend tile: "/feed#focus=<author/permlink>",
@@ -1388,32 +1483,22 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
     // Random samples for the two "Trending" sections. Indices are keyed on
     // LENGTH so the image-enrichment pass (new array identity, same length)
     // re-reads fresh objects without reshuffling the visible pick.
-    const trendingTagIdx = useMemo(() => sampleIndices(tags.length, DISCOVER_TAGS_MAX), [tags.length]);
+    // Tags fall back to the curated TAGS constant when the trending fetch
+    // returned nothing, so tag navigation (and the home chip leading it)
+    // never disappears — the fallback used to sit in the "Recommended tags"
+    // closer, which is gone along with "Recommended portals": the view shows
+    // the two random samples only, not the full fetched lists behind them.
+    const tagSource = tags.length > 0 ? tags : TAGS;
+    const trendingTagIdx = useMemo(() => sampleIndices(tagSource.length, DISCOVER_TAGS_MAX), [tagSource.length]);
     const discoverTags = useMemo(
-        () => trendingTagIdx.map(i => tags[i]).filter(Boolean),
-        [trendingTagIdx, tags]
+        () => trendingTagIdx.map(i => tagSource[i]).filter(Boolean),
+        [trendingTagIdx, tagSource]
     );
     const trendingPortalIdx = useMemo(() => sampleIndices(communities.length, DISCOVER_PORTALS_MAX), [communities.length]);
     const discoverPortals = useMemo(
         () => trendingPortalIdx.map(i => communities[i]).filter(Boolean),
         [trendingPortalIdx, communities]
     );
-
-    // "Recommended" closers: everything the random trending samples did NOT
-    // pick, so the single view covers the full fetched lists (what the old
-    // Portals and Tags tabs used to show). filter() preserves source order —
-    // communities arrive rank-sorted, so recommended portals list by rank.
-    // Tags fall back to the curated TAGS constant when the trending fetch
-    // returned nothing, so tag navigation never disappears.
-    const recommendedTags = useMemo(() => {
-        if (tags.length === 0) return TAGS;
-        const shown = new Set(trendingTagIdx);
-        return tags.filter((_, i) => !shown.has(i));
-    }, [trendingTagIdx, tags]);
-    const recommendedPortals = useMemo(() => {
-        const shown = new Set(trendingPortalIdx);
-        return communities.filter((_, i) => !shown.has(i));
-    }, [trendingPortalIdx, communities]);
 
     return (
         <React.Fragment>
@@ -1460,8 +1545,6 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
                         feedEnabled={isLoggedIn}
                         trendingTags={discoverTags}
                         trendingPortals={discoverPortals}
-                        recommendedTags={recommendedTags}
-                        recommendedPortals={recommendedPortals}
                         onGoToCommunity={handleGoToCommunity}
                         onGoToFeed={handleFeedOpen}
                         onGoToFeedPost={handleFeedFocus}

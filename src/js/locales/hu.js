@@ -204,7 +204,8 @@ export default {
         "legal": "Jogi",
         "risks": "Kockázatok",
         "bug_reports": "Hibajelentések",
-        "community": "Közösség"
+        "community": "Közösség",
+        "development": "Fejlesztés"
     },
 
     components: {
@@ -275,6 +276,14 @@ export default {
             "renounced": "Lemondó",
             "balanced": "Kiegyensúlyozott",
             "sovereign": "Szuverén",
+            "licensing": "Licencelés",
+            "the_default_license_is_the_starting_point_for": "Az alapértelmezett licenc minden új bejegyzés kiindulópontja. A feltételeket közzététel előtt továbbra is bejegyzésenként módosíthatod.",
+            "no_default_license_set_yet_new_posts": "Még nincs alapértelmezett licenc beállítva — az új bejegyzések a Pixa NFT-licenc szabványos feltételeiből indulnak ki.",
+            "holder_rights": "Birtokos jogai:",
+            "visitor_rights": "Látogató jogai:",
+            "configure_default_license": "Alapértelmezett licenc beállítása",
+            "edit_default_license": "Alapértelmezett licenc szerkesztése",
+            "reset_to_standard_terms": "Visszaállítás a szabványos feltételekre",
             "always_ask_before_voting": "Mindig kérdezzen szavazás előtt",
             "reset_custom_endpoint": "Egyéni végpont visszaállítása",
             "set_custom_endpoint": "Egyéni végpont beállítása",
@@ -777,6 +786,7 @@ export default {
             "convert_picture": "Kép konvertálása",
             "create_image": "Kép létrehozása",
             "description_optional": "Leírás (nem kötelező)",
+            "drop_an_image_here_or_paste_it_with": "Húzz ide egy képet, vagy illeszd be a {{shortcut}} billentyűkkel",
             "wizard_of_creation": "A teremtés varázslója",
             "back": "Vissza",
             "are_you_sure": "Biztos vagy benne?",
@@ -2038,6 +2048,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "A Decentralizált Pixa Alap (DPF) egy láncon működő, decentralizált autonóm szervezeti kincstár, amely lehetővé teszi a felhasználóknak, hogy finanszírozási javaslatokat nyújtsanak be, és szavazzanak arról, mely javaslatok kapjanak támogatást."
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "Akiknek korábban már küldtél",
             "what_is_this_transfer_for": "Mire szolgál ez az átutalás?",
             "make_this_a_recurring_transfer": "Legyen ez ismétlődő átutalás",
             "every_hours": "Minden (óra)",
@@ -2321,7 +2332,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "Kockázatértékelés, fenyegetéselemzés és kockázatcsökkentő stratégiák az ökoszisztéma biztonságáért.",
             "security_audits_vulnerability_reports_and_best_p": "Biztonsági auditok, sebezhetőségi jelentések és a biztonságos használat bevált gyakorlatai.",
             "report_bugs_technical_issues_and_track_their": "Jelents hibákat és technikai problémákat, és kövesd nyomon a megoldásuk állapotát.",
-            "community_events_meetups_collaborations_and_soci": "Közösségi események, találkozók, együttműködések és társadalmi kezdeményezések."
+            "development_roadmap_releases_code_contributions": "Fejlesztési ütemterv, kiadások, kódhozzájárulások és technikai dokumentáció."
         },
         "gdmetrics": {
             "key_metrics": "Kulcsmetrikák",

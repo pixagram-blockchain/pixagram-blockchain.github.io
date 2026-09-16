@@ -54,6 +54,15 @@ const LOCKED_CAPTION_STYLE = { color: "#666", display: "block", marginTop: 4 };
 const PROPOSAL_EDIT_FIELDS_STYLE = { display: "flex", flexDirection: "column", gap: 8 };
 const PROPOSAL_START_CAPTION_STYLE = { color: "#666" };
 
+// What the selector shows for a portal: its title from the subscription
+// row when there is one, else the title the dialog fetched on demand
+// (portalTitles — for portals that arrived as a bare id: initialCommunity
+// when the account hasn't joined it, an edited post's parent_permlink, a
+// draft's saved portal). The raw "portal-NNNNNN" is the last resort, shown
+// only while a lookup is in flight or when the portal has no title at all.
+const portalLabel = (name, title, portalTitles) =>
+    (title && title !== name) ? title : (portalTitles[name] || name);
+
 // Mirror of the wallet's NumberFormatCustom, pinned to PXS so the daily-pay
 // input feels identical to Pixagram's wallet UX. (Ported from the retired
 // TextEditorDialog.)
@@ -287,12 +296,11 @@ const SettingsPanel = React.memo(({
                                       payout,
                                       community,
                                       communities = [],
+                                      portalTitles = {},
                                       communityLocked,
                                       activeAccount,
                                       title,
                                       description,
-                                      fileInputRef,
-                                      onImageUpload,
                                       onRemoveImage,
                                       onOpenGradientEditor,
                                       onPayoutChange,
@@ -328,8 +336,6 @@ const SettingsPanel = React.memo(({
                 <CoverImageUpload
                     classes={classes}
                     gradient={gradient}
-                    fileInputRef={fileInputRef}
-                    onImageUpload={onImageUpload}
                     onRemoveImage={onRemoveImage}
                     onOpenGradientEditor={onOpenGradientEditor}
                 />
@@ -367,7 +373,7 @@ const SettingsPanel = React.memo(({
 
                 <div className={classes.settingsSection}>
                     <Typography variant={"subtitle2"} className={classes.subTitle2}>
-                        {t("components.settings_panel.community")}
+                        {t("components.settings_panel.portal")}
                         <Tooltip interactive
                                  enterTouchDelay={200}
                                  leaveTouchDelay={4000}
@@ -386,14 +392,22 @@ const SettingsPanel = React.memo(({
                             {!activeAccount && (
                                 <MenuItem value="" disabled>{t("components.settings_panel.log_in_to_select_a_community")}</MenuItem>
                             )}
-                            {/* Edit mode: the category (parent_permlink) is immutable on
-                            HIVE-style chains — surface it as a locked single option. */}
-                            {communityLocked && community && !communities.some(c => c.name === community) && (
-                                <MenuItem key={community} value={community}>{community}</MenuItem>
+                            {/* The selected portal when it isn't among the account's
+                            subscriptions — in EVERY mode, not just edit mode as before.
+                            Edit mode: the category (parent_permlink) is immutable on
+                            HIVE-style chains, so it's a locked single option. Create
+                            mode: a draft's saved portal, or a re-open's initialCommunity,
+                            may be one the account never joined or has since left; without
+                            this item the Select had a value with no option and rendered
+                            blank. Titled like every other item. */}
+                            {community && !communities.some(c => c.name === community) && (
+                                <MenuItem key={community} value={community}>
+                                    {portalLabel(community, '', portalTitles)}
+                                </MenuItem>
                             )}
                             {communities.map((c) => (
                                 <MenuItem key={c.name} value={c.name}>
-                                    {c.title || c.name}
+                                    {portalLabel(c.name, c.title, portalTitles)}
                                 </MenuItem>
                             ))}
                         </Select>

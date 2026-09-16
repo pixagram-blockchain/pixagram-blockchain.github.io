@@ -1,16 +1,24 @@
 import React from 'preact/compat';
 import Typography from "@material-ui/core/Typography";
 import Button from "@material-ui/core/Button";
-import Box from "@material-ui/core/Box";
 import Tooltip from "@material-ui/core/Tooltip";
 import IconButton from "@material-ui/core/IconButton";
 
 import DeleteIcon from "@material-ui/icons/Delete";
-import AddPhotoAlternateIcon from "@material-ui/icons/AddPhotoAlternate";
-import AddAPhotoRounded from "@material-ui/icons/AddAPhotoRounded";
+import GradientIcon from "@material-ui/icons/Gradient";
 import InfoOutlined from "@material-ui/icons/InfoOutlined";
 
 import { t, useLanguage } from "../../utils/text";
+
+// A post's cover is either nothing or an SVG gradient from
+// GradientEditorDialog — the only form the publish paths put on-chain.
+// This is the one definition every cover consumer shares (the dialog's
+// state accessors, the drafts list): anything else — raster data URLs left
+// in drafts by the retired upload path, foreign URLs in on-chain metadata —
+// counts as "no cover", so nothing is ever previewed that can't be
+// published.
+export const isGradientCover = (value) =>
+    typeof value === 'string' && value.startsWith('data:image/svg+xml');
 
 export const coverImageUploadStyles = (theme) => ({
     imageUploadArea: {
@@ -59,84 +67,80 @@ export const coverImageUploadStyles = (theme) => ({
 });
 
 // Hoisted static styles — were inline literals re-created per render.
-const HIDDEN_INPUT_STYLE = { display: "none" };
 const WHITE_TEXT_STYLE = { color: "#fff" };
-const UPLOAD_ICON_STYLE = { fontSize: 48, color: "#666" };
-const UPLOAD_HINT_STYLE = { color: "#999", marginTop: 8 };
-const POINTER_STYLE = { cursor: "pointer" };
+// Empty state fills the dashed area so the whole of it is the click target,
+// as the retired "click to upload" area was.
+const GENERATE_AREA_STYLE = {
+    width: "100%",
+    height: "100%",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    cursor: "pointer",
+};
+const GENERATE_ICON_STYLE = { fontSize: 48, color: "#666" };
+const GENERATE_BUTTON_STYLE = { color: "#fff", borderColor: "rgba(255,255,255,0.4)" };
 
+// The cover is either none or a generated gradient: the only way in is the
+// gradient editor, and the only way out is Remove. There is deliberately no
+// file input — a raster cover never went on-chain (the publish paths only
+// ever broadcast the SVG gradient), so uploading one showed a cover the
+// post would not actually have.
 const CoverImageUpload = React.memo(({
                                          classes,
                                          gradient,
-                                         fileInputRef,
-                                         onImageUpload,
                                          onRemoveImage,
                                          onOpenGradientEditor
                                      }) => {
     useLanguage();
 
-    // Stable: was an inline `() => fileInputRef.current?.click()` closure,
-    // re-created on every render. The ref object itself never changes.
-    const openFilePicker = React.useCallback(() => fileInputRef.current?.click(), [fileInputRef]);
-
     return (
-    <div className={classes.settingsSection}>
-        <Typography variant={"subtitle2"} className={classes.subTitle2}>
-            {t("components.cover_image_upload.cover_image")}
-            <Tooltip interactive
-                     enterTouchDelay={200}
-                     leaveTouchDelay={4000}
-                     classes={{ tooltip: classes.tooltipRoot }}
-                     title={<span className={classes.tooltip}>{t("components.cover_image_upload.the_cover_image_has_a_purpose_of")}</span>}>
-                <IconButton><InfoOutlined/></IconButton>
-            </Tooltip>
-        </Typography>
-        <div className={classes.imageUploadArea}>
-            <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                style={HIDDEN_INPUT_STYLE}
-                onChange={onImageUpload}
-            />
-            {gradient ? (
-                <div>
-                    <img src={gradient} alt={t("components.cover_image_upload.cover")} className={classes.uploadedImage} />
-                    <div className={classes.imageOverlay}>
-                        <Button
-                            size="small"
-                            startIcon={<DeleteIcon />}
-                            onClick={onRemoveImage}
-                            style={WHITE_TEXT_STYLE}
-                        >
-                            {t("components.cover_image_upload.remove")}
-                        </Button>
+        <div className={classes.settingsSection}>
+            <Typography variant={"subtitle2"} className={classes.subTitle2}>
+                {t("components.cover_image_upload.cover_image")}
+                <Tooltip interactive
+                         enterTouchDelay={200}
+                         leaveTouchDelay={4000}
+                         classes={{ tooltip: classes.tooltipRoot }}
+                         title={<span className={classes.tooltip}>{t("components.cover_image_upload.the_cover_image_has_a_purpose_of")}</span>}>
+                    <IconButton><InfoOutlined/></IconButton>
+                </Tooltip>
+            </Typography>
+            <div className={classes.imageUploadArea}>
+                {gradient ? (
+                    <div>
+                        <img src={gradient} alt={t("components.cover_image_upload.cover")} className={classes.uploadedImage} />
+                        <div className={classes.imageOverlay}>
+                            <Button
+                                size="small"
+                                startIcon={<DeleteIcon />}
+                                onClick={onRemoveImage}
+                                style={WHITE_TEXT_STYLE}
+                            >
+                                {t("components.cover_image_upload.remove")}
+                            </Button>
+                        </div>
                     </div>
-                </div>
-            ) : (
-                <Box
-                    textAlign="center"
-                    onClick={openFilePicker}
-                    style={POINTER_STYLE}
-                >
-                    <AddPhotoAlternateIcon style={UPLOAD_ICON_STYLE} />
-                    <Typography variant="body2" style={UPLOAD_HINT_STYLE}>
-                        {t("components.cover_image_upload.click_to_upload")}
-                    </Typography>
-                    <div className={classes.imageOverlay}>
+                ) : (
+                    <div style={GENERATE_AREA_STYLE} onClick={onOpenGradientEditor}>
+                        <GradientIcon style={GENERATE_ICON_STYLE} />
+                        {/* No handler of its own on purpose: the whole dashed
+                        area is the target, and a click on the button — or
+                        Enter/Space while it has keyboard focus — bubbles up
+                        to it. Wiring both would open the editor twice. */}
                         <Button
                             size="small"
-                            startIcon={<AddAPhotoRounded />}
-                            onClick={onOpenGradientEditor}
-                            style={WHITE_TEXT_STYLE}
+                            variant="outlined"
+                            style={GENERATE_BUTTON_STYLE}
                         >
                             {t("components.cover_image_upload.generate")}
                         </Button>
                     </div>
-                </Box>
-            )}
+                )}
+            </div>
         </div>
-    </div>
     );
 });
 

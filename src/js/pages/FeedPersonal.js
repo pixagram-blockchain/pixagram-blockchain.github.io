@@ -1,9 +1,9 @@
 import * as React from "preact/compat";
-import { useState, useEffect, useCallback, useMemo, useRef, memo } from "preact/compat";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, memo } from "preact/compat";
 // Coalesce co-arriving setState calls after an await into a single render
 // (Preact doesn't auto-batch across await / in promise continuations).
 import { unstable_batchedUpdates as batch } from "preact/compat";
-import { HISTORY, buildPostUrl, isPostUrl, parsePostUrl, isDeletedPost, POST_DRAWER_TAB_HASHES, parseFeedFocusHash } from "../utils/constants";
+import { HISTORY, buildPostUrl, isPostUrl, parsePostUrl, isCommunityPostUrl, isDeletedPost, POST_DRAWER_TAB_HASHES, parseFeedFocusHash } from "../utils/constants";
 import withStyles from "@material-ui/core/styles/withStyles";
 import * as actions from "../actions/utils";
 import { CellMeasurer } from "@pixagram/virtualized/dist/es/index";
@@ -14,10 +14,13 @@ import { idle, cancelIdle } from "../utils/idle";
 import viewCache, { postsSignature } from "../utils/viewCache";
 import useVoteSync from "../hooks/useVoteSync";
 import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto, votesSignature } from "../utils/voteSync";
+import { markFeedSeen, toMs } from "../utils/feedSeen";
 import { EASE } from "../theme/motion";
 import ImageMeasurer from "../components/ImageMeasurer";
 
 import PaperCard, { isArtworkBlurred } from "../components/PaperCard";
+import PaperCardBlog from "../components/PaperCardBlog";
+import { enrichPostForBlogCard, isPortalBlogPost, isBlogCard, buildPortalPostUrl } from "../utils/blogCard";
 import PaperCardMenuOption from "../components/PaperCardMenuOption";
 import PhotoCameraRounded from "@material-ui/icons/PhotoCameraRounded";
 import Fab from "@material-ui/core/Fab";
@@ -43,6 +46,14 @@ const LazyNewPost = React.lazy(loadNewPost);
 const loadPostDialog = () => import("../components/PostDialog");
 const LazyPostDialog = React.lazy(loadPostDialog);
 
+// BlogPostDialog is the portal-post viewer — the same one Community hosts.
+// The personal feed mixes portal blog posts in, and Index lets this page host
+// their /portal-N/@author/permlink URLs (OVERLAY_HOSTS_BY_POST_KIND), so a
+// blog card opens over the feed instead of switching to the portal page.
+// Warmed on idle only once a blog card is actually loaded.
+const loadBlogPostDialog = () => import("../components/BlogPostDialog");
+const LazyBlogPostDialog = React.lazy(loadBlogPostDialog);
+
 // Edit / delete share one module and are reached only from the card menu on
 // your own posts — warmed on idle for logged-in users only.
 const loadOwnPostDialogs = () => import("../components/EditPostDialog");
@@ -56,6 +67,10 @@ const LazyDeletePostDialog = React.lazy(() => loadOwnPostDialogs().then(m => ({ 
 const DIALOG_FALLBACK = (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1300 }} />
 );
+
+// What the viewer that is NOT holding the current post receives, so PostDialog
+// never sees a blog card and BlogPostDialog never sees an artwork.
+const NO_POST = Object.freeze({});
 
 
 // ╔══════════════════════════════════════════════════════════════════════╗
@@ -106,6 +121,64 @@ const styles = theme => ({
 const GET_ITEM_IMAGE = (item) => item.image;
 const GET_ITEM_ID = (item) => item.id;
 
+// ── Portal blog posts in the personal feed ─────────────────────────────
+// The followed-accounts feed returns portal blog posts alongside artworks.
+// They used to go through the artwork path: no body image → ImageMeasurer
+// never sized them → the cell rendered nothing (and one with an image in
+// its body showed up as a bogus artwork card). They now render as
+// PaperCardBlog. Their height is the card's own layout, not an image, so
+// they bypass ImageMeasurer: each gets a fixed placeholder entry (stable per
+// card object, so identity holds across renders) and CellMeasurer measures
+// the real card, exactly as on the portal page.
+const BLOG_ENTRY_CACHE = new WeakMap();
+const blogEntryOf = (card) => {
+    let entry = BLOG_ENTRY_CACHE.get(card);
+    if (!entry) {
+        entry = { item: card, size: { id: card.id, width: 1, height: 1 } };
+        BLOG_ENTRY_CACHE.set(card, entry);
+    }
+    return entry;
+};
+// An artwork the measurer hasn't listed yet: same "not sized" shape the
+// cellRenderer already skips (`!size.height`), so it keeps its index.
+const PENDING_ENTRY_CACHE = new WeakMap();
+const pendingEntryOf = (post) => {
+    let entry = PENDING_ENTRY_CACHE.get(post);
+    if (!entry) {
+        entry = { item: post, size: { id: post.id, width: 0, height: 0 } };
+        PENDING_ENTRY_CACHE.set(post, entry);
+    }
+    return entry;
+};
+
+// A blog card can't blur its cover the way PaperCard blurs an artwork, so
+// while "show NSFW" is off an nsfw-flagged blog card is shown without it.
+// Cached per card object for the same identity reason.
+const COVERLESS_CACHE = new WeakMap();
+const withoutCover = (card) => {
+    let copy = COVERLESS_CACHE.get(card);
+    if (!copy) { copy = { ...card, image: null }; COVERLESS_CACHE.set(card, copy); }
+    return copy;
+};
+
+const sameEntries = (a, b) => {
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+};
+
+// Which viewer a post URL opens in. The URL decides, exactly as it decides
+// the host page in Index (hostPageForPostUrl): a community-post URL
+// (/portal-N/@author/permlink) is a blog post → BlogPostDialog; any other
+// post URL is an artwork → PostDialog.
+const POST_KIND_ARTWORK = "artwork";
+const POST_KIND_BLOG = "blog";
+const postKindOfUrl = (pathname) => (isCommunityPostUrl(pathname) ? POST_KIND_BLOG : POST_KIND_ARTWORK);
+
+// The URL a card pushes when opened. Blog cards build theirs from the portal
+// slug they were classified with, so it always parses as a community post.
+const postUrlOf = (data) => (isBlogCard(data) ? buildPortalPostUrl(data) : buildPostUrl(data));
+
 // ── Blur-aware sibling walk (dialog prev/next) — see Feed.js ───────────
 // PaperCard owns the "is this card blurred" truth (author/server NSFW flag
 // OR the on-device detector's cached verdict, honoured only while the
@@ -118,7 +191,8 @@ const isSamePost = (p, cur) => !!p && !!cur
 const findNavigableIndex = (list, from, dir, nsfwEnabled, getPost) => {
     for (let i = from + dir; i >= 0 && i < list.length; i += dir) {
         const p = getPost ? getPost(list[i]) : list[i];
-        if (p && !isArtworkBlurred(p, p.id, nsfwEnabled)) return i;
+        // Blog cards open in BlogPostDialog, never in PostDialog — step over.
+        if (p && !isBlogCard(p) && !isArtworkBlurred(p, p.id, nsfwEnabled)) return i;
     }
     return -1;
 };
@@ -169,7 +243,20 @@ const isNsfwPost = (post) => {
 // dialogs need the same predicate against the enriched card shape. One
 // definition, no drift.
 
+// Portal blog post → the portal's own card shape (shared with Community),
+// with the feed's NSFW / soft-delete predicates so filtering stays uniform
+// across both card kinds.
+const enrichFeedBlogCard = (post, account, voterProfiles) => ({
+    ...enrichPostForBlogCard(post, account, voterProfiles),
+    nsfw: isNsfwPost(post), deleted: isDeletedPost(post), children: post.children ?? 0,
+    // Raw chain timestamp, read with the shared toMs (utils/feedSeen) by the
+    // seen tracking below — the same reading MenuContent's scan applies, so
+    // a card and the badge counting it agree on where it sits in the feed.
+    created: post.created ?? null,
+});
+
 const enrichPostForCard = (post, account, voterProfiles) => {
+    if (isPortalBlogPost(post)) return enrichFeedBlogCard(post, account, voterProfiles);
     const pp = parsePayout(post.pending_payout_value), tp = parsePayout(post.total_payout_value), cp = parsePayout(post.curator_payout_value);
     const payout = pp > 0 ? pp : tp + cp;
     const tags = post._tags || [], images = post._images || [], activeVotes = post.active_votes || [];
@@ -179,6 +266,7 @@ const enrichPostForCard = (post, account, voterProfiles) => {
         author: { username: account.name || '', name: resolveDisplayName(account), image: account.image || account._profile?.profile_image || '' },
         title: post.root_title || post.title || '', image: fi ? (typeof fi === 'string' ? fi : fi.src) : null,
         date: post.created ? new Date(post.created).getTime() : Date.now(), payout: `$${payout.toFixed(2)}`,
+        created: post.created ?? null, // raw, for the seen tracking (see enrichFeedBlogCard)
         upVotesNumber: Math.max(0, post.net_votes || activeVotes.filter(v => v?.weight >= 0).length || 0),
         downVotesNumber: Math.max(0, activeVotes.filter(v => v?.weight < 0).length || 0),
         active_votes: activeVotes, net_rshares: post.net_rshares != null ? String(post.net_rshares) : '0',
@@ -204,7 +292,9 @@ const hydrateContent = (content) => {
         let m; const re1 = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
         while ((m = re1.exec(body)) !== null) imgs.push({ src: m[1], alt: '', is_base64: m[1].startsWith('data:'), index: imgs.length });
         if (!imgs.length) { const re2 = /!\[([^\]]*)\]\(([^)]+)\)/g; while ((m = re2.exec(body)) !== null) imgs.push({ src: m[2], alt: m[1]||'', is_base64: m[2].startsWith('data:'), index: imgs.length }); }
-        if (!imgs.length) (meta.image||[]).forEach((src, i) => { if (src) imgs.push({ src, alt: '', is_base64: src.startsWith('data:'), index: i }); });
+        // Array only: a blog post's meta.image is a string (its cover), and
+        // `.forEach` on it threw — orphan blog posts resolve through here too.
+        if (!imgs.length && Array.isArray(meta.image)) meta.image.forEach((src, i) => { if (typeof src === 'string' && src) imgs.push({ src, alt: '', is_base64: src.startsWith('data:'), index: i }); });
         content._images = imgs;
     }
     if (!content._tags) content._tags = meta.tags || [];
@@ -228,7 +318,11 @@ const CONTENT_READ_FAILED = Symbol('content_read_failed');
 //   • a `_deleted` marker — the post is gone from the chain but its author
 //     exists, so the link was plausibly valid and the post was deleted
 //   • null — nothing we can resolve; the caller flips the stub to _notFound
-const fetchOrphanPost = async (api, author, permlink) => {
+// `kind` is the URL's post kind: a community-post URL is always handed the
+// blog-card shape (what BlogPostDialog reads — Community does the same for
+// every post it resolves by URL), anything else goes through the card
+// classifier as usual.
+const fetchOrphanPost = async (api, author, permlink, kind = POST_KIND_ARTWORK) => {
     if (!api?.content?.getContent || !author || !permlink) return null;
     try {
         // Both inputs (author, permlink) are known up front, so the content
@@ -275,12 +369,17 @@ const fetchOrphanPost = async (api, author, permlink) => {
                     name: resolveDisplayName(authorAccount, author),
                     image: authorAccount.image || '',
                 },
-                _content_type: 'pixel_art',
+                _content_type: kind === POST_KIND_BLOG ? 'blog' : 'pixel_art',
             };
         }
 
+        // hydrateContent defaults a missing type to 'pixel_art'; a post reached
+        // through a community-post URL is a blog post.
+        if (kind === POST_KIND_BLOG && !content._content_type) content._content_type = 'blog';
         hydrateContent(content);
-        return overlayPendingVote(enrichPostForCard(content, authorAccount, {}));
+        return overlayPendingVote(kind === POST_KIND_BLOG
+            ? enrichFeedBlogCard(content, authorAccount, {})
+            : enrichPostForCard(content, authorAccount, {}));
     } catch (e) {
         console.warn('[FeedPersonal] fetchOrphanPost failed:', e && e.message);
         return null;
@@ -466,7 +565,14 @@ const useFeedPersonalData = (api, pathname) => {
                     postsKeyRef.current = cacheKey;
                     setPosts(enriched);
                     viewCache.set(cacheKey, { posts: enriched });
-                    setDataVersion(v => v + 1);
+                    // dataVersion means "the loaded list was replaced": it
+                    // drives the masonry re-pack (the caches are index-keyed
+                    // — see the layout effect in the component) as well as
+                    // the cache-served scroll restore. An event refetch that
+                    // comes back with the same membership and order repaints
+                    // in place and must not re-measure the feed under the
+                    // reader, so only a real replacement bumps it.
+                    if (replaced) setDataVersion(v => v + 1);
                 } else if (votesSignature(enriched) !== votesSignature(postsRef.current)) {
                     // Same membership, fresher vote/payout rows: commit without
                     // the Masonry reset (heights don't depend on votes). The
@@ -505,6 +611,9 @@ const useFeedPersonalData = (api, pathname) => {
         pendingScrollRef.current = 0;
         return top;
     }, []);
+    // Non-consuming peek for the re-pack effect: while a cache-served
+    // offset is waiting to be applied, that restore owns the viewport.
+    const hasPendingScrollRestore = useCallback(() => pendingScrollRef.current > 0, []);
 
     const saveScrollPosition = useCallback((top) => {
         viewCache.patch(cacheKeyRef.current, { scrollTop: top });
@@ -556,12 +665,13 @@ const useFeedPersonalData = (api, pathname) => {
     }, [api, loggedInUser, loadPage]);
 
     // Pathname changes. Reload only on a true feed-identity change. Opening
-    // / closing PostDialog (and in-dialog next/prev navigation) only changes
-    // the URL by adding, removing, or swapping a `/<sort>/@author/permlink`
-    // suffix while FeedPersonal stays mounted as the post overlay's host
-    // (see OVERLAY_HOSTS_BY_POST_KIND in Index.js — `feedpersonal` hosts
-    // feed-kind post URLs). The underlying personal feed hasn't changed in
-    // that case, and loadPage would wipe scroll position, the `hasMore`
+    // / closing PostDialog or BlogPostDialog (and in-dialog next/prev
+    // navigation) only changes the URL by adding, removing, or swapping a
+    // `/<sort>/@author/permlink` or `/portal-N/@author/permlink` suffix while
+    // FeedPersonal stays mounted as the post overlay's host (see
+    // OVERLAY_HOSTS_BY_POST_KIND in Index.js — `feedpersonal` hosts both
+    // feed-kind and community-kind post URLs). The underlying personal feed
+    // hasn't changed in that case, and loadPage would wipe scroll position, the `hasMore`
     // flag, and any already-paginated extra pages, then refetch the same
     // data — and again on close (HISTORY.go(-1) triggers this effect a
     // second time). The post overlay's own URL listener lives in
@@ -611,7 +721,7 @@ const useFeedPersonalData = (api, pathname) => {
     return {
         posts, isLoading, loadingMore, hasMore, loggedInUser, dataVersion,
         handleVoteChange, loadMorePosts,
-        consumePendingScrollRestore, saveScrollPosition,
+        consumePendingScrollRestore, hasPendingScrollRestore, saveScrollPosition,
     };
 };
 
@@ -646,6 +756,10 @@ const usePostNavigation = ({ api, posts, masonryRef, scrollToIndex, setSelectedP
     const [originRect, setOriginRect] = useState(null);
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [isOrphan, setIsOrphan] = useState(false);
+    // Which viewer holds the post: POST_KIND_ARTWORK (PostDialog) or
+    // POST_KIND_BLOG (BlogPostDialog). Deliberately NOT reset on close, so
+    // the dialog that is closing keeps its `open` transition.
+    const [postKind, setPostKind] = useState(POST_KIND_ARTWORK);
     const historyDepthRef = useRef(0);
     const postClosedAtRef = useRef(0);
     // One-shot guard for the cold-entry history seed (see the URL effect).
@@ -707,6 +821,10 @@ const usePostNavigation = ({ api, posts, masonryRef, scrollToIndex, setSelectedP
                 });
                 return;
             }
+            // Portal post URL → BlogPostDialog, any other → PostDialog. Set
+            // before the bail-out below (a same-value set is a no-op).
+            const kind = postKindOfUrl(pathname);
+            setPostKind(kind);
             const cur = currentPostRef.current;
             const sameUrl =
                 cur && cur.permlink === parsed.permlink
@@ -791,7 +909,7 @@ const usePostNavigation = ({ api, posts, masonryRef, scrollToIndex, setSelectedP
                     setTimeout(attemptFetch, 250);
                     return;
                 }
-                const enriched = await fetchOrphanPost(apiNow, parsed.author, parsed.permlink);
+                const enriched = await fetchOrphanPost(apiNow, parsed.author, parsed.permlink, kind);
                 if (token !== orphanFetchTokenRef.current) return;
                 if (!enriched) {
                     setCurrentPost(prev => ({ ...prev, _loading: false, _notFound: true }));
@@ -810,20 +928,28 @@ const usePostNavigation = ({ api, posts, masonryRef, scrollToIndex, setSelectedP
     }, [posts]);
 
     // Push the post URL (optionally with a "#…" drawer-tab hash on the SAME
-    // history entry — PostDialog adopts HISTORY.location.hash when it opens)
-    // and seat the dialog. See Feed.js for the full note.
+    // history entry — PostDialog and BlogPostDialog both adopt
+    // HISTORY.location.hash when they open) and seat the dialog. Blog cards
+    // push their portal URL; Index keeps this page mounted for it, so the
+    // blog post opens over the feed exactly like an artwork. See Feed.js for
+    // the full note.
     const pushAndOpen = useCallback((data, rect, hash) => {
-        const u = buildPostUrl(data); if (u) HISTORY.push(hash ? u + hash : u);
+        const u = postUrlOf(data); if (u) HISTORY.push(hash ? u + hash : u);
         orphanFetchTokenRef.current += 1;
         setIsOrphan(false);
-        setArtworkOpen(true); setCurrentPost(data); setOriginRect(rect || null); historyDepthRef.current = 1;
+        const blog = isBlogCard(data);
+        setPostKind(blog ? POST_KIND_BLOG : POST_KIND_ARTWORK);
+        // originRect drives PostDialog's hero transition only.
+        setArtworkOpen(true); setCurrentPost(data); setOriginRect(blog ? null : (rect || null)); historyDepthRef.current = 1;
     }, []);
 
     // Plain open — card title / image click.
     const openPost = useCallback((data, rect) => pushAndOpen(data, rect), [pushAndOpen]);
 
     // Comment-button open — pushes "…/permlink#replies" so PostDialog lands
-    // on the comments tab (same deep-link scheme as Profile's comment links).
+    // on the comments tab (same deep-link scheme as Profile's comment links)
+    // and BlogPostDialog scrolls its comments column into view (the same
+    // intent Community's cards push).
     const openPostComments = useCallback(
         (data, rect) => pushAndOpen(data, rect, POST_DRAWER_TAB_HASHES[1]),
         [pushAndOpen],
@@ -876,21 +1002,22 @@ const usePostNavigation = ({ api, posts, masonryRef, scrollToIndex, setSelectedP
     // order to the measured items) so it can run during render; an
     // exhausted direction surfaces its callback as `undefined` (the orphan
     // convention) and the dialog unmounts that arrow.
+    // Artworks only: BlogPostDialog has no prev/next (as on the portal page).
     const canGoNext = useMemo(() => {
-        if (!artworkOpen || isOrphan) return false;
+        if (!artworkOpen || isOrphan || postKind !== POST_KIND_ARTWORK) return false;
         const list = posts || [];
         if (!list.length) return false;
         const ci = list.findIndex((p) => isSamePost(p, currentPost));
         return findNavigableIndex(list, ci, 1, nsfwEnabled) !== -1;
-    }, [artworkOpen, isOrphan, posts, currentPost, nsfwEnabled]);
+    }, [artworkOpen, isOrphan, postKind, posts, currentPost, nsfwEnabled]);
 
     const canGoPrev = useMemo(() => {
-        if (!artworkOpen || isOrphan) return false;
+        if (!artworkOpen || isOrphan || postKind !== POST_KIND_ARTWORK) return false;
         const list = posts || [];
         if (!list.length) return false;
         const ci = list.findIndex((p) => isSamePost(p, currentPost));
         return findNavigableIndex(list, ci, -1, nsfwEnabled) !== -1;
-    }, [artworkOpen, isOrphan, posts, currentPost, nsfwEnabled]);
+    }, [artworkOpen, isOrphan, postKind, posts, currentPost, nsfwEnabled]);
 
     // Live rect of the open post's card canvas (data-artwork-id stamp in
     // PaperCard) for PostDialog's reverse-hero close; null (no card
@@ -918,12 +1045,12 @@ const usePostNavigation = ({ api, posts, masonryRef, scrollToIndex, setSelectedP
     // lets those bail when nothing here moved. setCreateDialogOpen is a
     // stable useState setter, so it's intentionally not a dep.
     return useMemo(() => ({
-        artworkOpen, currentPost, originRect, isOrphan,
+        artworkOpen, currentPost, originRect, isOrphan, postKind,
         createDialogOpen, setCreateDialogOpen,
         openPost, openPostComments, closePost, onDrawerPush, onDrawerPop, getReturnRect,
         nextPost: (isOrphan || !canGoNext) ? undefined : nextPost,
         previousPost: (isOrphan || !canGoPrev) ? undefined : previousPost,
-    }), [artworkOpen, currentPost, originRect, isOrphan, createDialogOpen,
+    }), [artworkOpen, currentPost, originRect, isOrphan, postKind, createDialogOpen,
         openPost, openPostComments, closePost, onDrawerPush, onDrawerPop, getReturnRect,
         nextPost, previousPost, canGoNext, canGoPrev]);
 };
@@ -959,6 +1086,36 @@ const FOCUS_PAGE_WAIT_MS = 8000;    // one requested page that never lands
 const FOCUS_MAX_EXTRA_PAGES = 4;    // 20 + 4 × 20 = 100 posts deep — past the
                                     // drawer's 60-post scan window
 const FOCUS_STALL_TICKS = 50;       // ~6 s with nothing placed and nothing growing
+
+// ── Seen tracking (utils/feedSeen) ─────────────────────────────────────
+// The feed used to stamp `last_feed_check` = now on mount / hide / unmount,
+// so merely opening it marked every post read — the ones far below the fold
+// included — and the drawer's Friends badges only moved on their next full
+// scan. Now the page records the cards the reader actually rested on:
+// on every settled render of the masonry (isScrolling false — the library's
+// own scroll-end debounce, scrollingResetTimeInterval), each rendered cell
+// with at least SEEN_MIN_FRACTION of itself — of the viewport, for a card
+// taller than it — inside the viewport is collected (cellRenderer →
+// noteSeen), and the batch goes to markFeedSeen as one `created` range once
+// the render's cells are all in (SEEN_FLUSH_MS). Resting is the criterion,
+// not passing: a card flung past never settles in view and stays unseen.
+// Two things move the viewport without the reader looking: a focus seek
+// (useFeedFocus.pendingRef) and a cache-restored scroll offset, which lands
+// a few frames after the first, top-of-feed paint — batches taken under
+// either are dropped, the restore for SEEN_RESTORE_GRACE_MS at most, or
+// until the reader scrolls themselves. The mark carries the feed head
+// (`created` of the newest loaded post) so MenuContent can tell whether
+// posts were published since its scan, and `reachedEnd` when the feed's
+// last post is among the rested cards (nothing older left to see).
+const SEEN_MIN_FRACTION = 0.5;
+const SEEN_FLUSH_MS = 80;
+const SEEN_RESTORE_GRACE_MS = 3000;
+const SEEN_RESTORE_TOLERANCE_PX = 8;
+
+// `created` of a card, ms — raw chain value first (enrichPostForCard /
+// enrichFeedBlogCard pass it through), the derived `date` as a fallback for
+// a card shape that predates it (a view-cache entry from an older bundle).
+const cardCreatedMs = (card) => toMs(card && (card.created != null ? card.created : card.date));
 
 // The reader's own wheel / touch scrolling during a seek means they want
 // to be somewhere else: hand the scroll back to them at once. Programmatic
@@ -1155,17 +1312,29 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
     const {
         posts, isLoading, loadingMore, hasMore, loggedInUser, dataVersion,
         handleVoteChange, loadMorePosts,
-        consumePendingScrollRestore, saveScrollPosition,
+        consumePendingScrollRestore, hasPendingScrollRestore, saveScrollPosition,
     } = useFeedPersonalData(api, pathname);
     const grid = useFeedPersonalGrid({ windowWidth, windowHeight, isMobile, overscanByPixels, loadMoreThreshold, loadMorePosts, loadingMore });
 
     // NSFW filtering: when the filter is ON (_nsfw_filter truthy) drop posts
     // flagged nsfw before they reach the masonry. Blur of shown posts is handled
-    // by PaperCard via the separate _nsfw_enabled (blur) setting.
-    const visiblePosts = useMemo(
-        () => (posts || []).filter((p) => !p.deleted && (!settings._nsfw_filter || !p.nsfw)),
-        [posts, settings._nsfw_filter]
-    );
+    // by PaperCard via the separate _nsfw_enabled (blur) setting; blog cards
+    // can't blur, so they lose their cover instead (withoutCover).
+    // measurablePosts is what ImageMeasurer sizes — artworks only. It IS
+    // visiblePosts (same array) whenever the batch holds no blog card.
+    const { visiblePosts, measurablePosts } = useMemo(() => {
+        const visible = [], measurable = [];
+        for (const p of (posts || [])) {
+            if (p.deleted || (settings._nsfw_filter && p.nsfw)) continue;
+            if (isBlogCard(p)) {
+                visible.push(!settings._nsfw_enabled && p.nsfw && p.image ? withoutCover(p) : p);
+            } else {
+                visible.push(p);
+                measurable.push(p);
+            }
+        }
+        return { visiblePosts: visible, measurablePosts: measurable.length === visible.length ? visible : measurable };
+    }, [posts, settings._nsfw_filter, settings._nsfw_enabled]);
 
     const postNav = usePostNavigation({ api, posts: visiblePosts, masonryRef: grid.masonryRef, scrollToIndex: grid.scrollToIndex, setSelectedPostIndex: grid.setSelectedPostIndex, nsfwEnabled: settings._nsfw_enabled });
 
@@ -1194,14 +1363,35 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
         return () => cancelIdle(id);
     }, [postNav.createDialogOpen, loggedInUser]);
 
+    // The open post goes to exactly one viewer, picked by postNav.postKind.
+    const isBlogPostOpen = postNav.postKind === POST_KIND_BLOG;
+    const artworkDialogOpen = postNav.artworkOpen && !isBlogPostOpen;
+    const blogDialogOpen = postNav.artworkOpen && isBlogPostOpen;
+
     // Mount the (now-lazy) post viewer on first open and keep it mounted, so
     // close/reopen and in-dialog next/prev stay instant. On a deep-link entry
     // artworkOpen is already true, so this mounts on the first commit while the
     // orphan fetch runs in parallel.
     const [postDialogMounted, setPostDialogMounted] = useState(false);
     useEffect(() => {
-        if (postNav.artworkOpen) setPostDialogMounted(true);
-    }, [postNav.artworkOpen]);
+        if (artworkDialogOpen) setPostDialogMounted(true);
+    }, [artworkDialogOpen]);
+
+    // Same for the blog-post viewer (a portal post opened over the feed).
+    const [blogDialogMounted, setBlogDialogMounted] = useState(false);
+    useEffect(() => {
+        if (blogDialogOpen) setBlogDialogMounted(true);
+    }, [blogDialogOpen]);
+
+    // Warm its chunk on idle — but only once the feed actually holds a blog
+    // card (measurablePosts diverges from visiblePosts exactly then), so a
+    // feed of artworks never downloads it.
+    const hasBlogCards = measurablePosts !== visiblePosts;
+    useEffect(() => {
+        if (blogDialogMounted || !hasBlogCards) return;
+        const id = idle(() => { loadBlogPostDialog().catch(() => {}); });
+        return () => cancelIdle(id);
+    }, [blogDialogMounted, hasBlogCards]);
 
     // Warm the post-viewer chunk on idle for EVERYONE (anyone can view a post),
     // so the open-from-card transition isn't gated on a cold chunk fetch.
@@ -1215,6 +1405,70 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
     // Force masonry update when posts change
     useEffect(() => { const m = grid.masonryRef.current; if (m) m.forceUpdate(); }, [posts]);
 
+    // ── Seen tracking: the cards the reader rested on ───────────────────
+    // (See the SEEN_* constants for the model.) The collector is a ref the
+    // cell renderer writes into; the flush is scheduled from the renderer
+    // itself, not from an effect, because the settle render is the
+    // masonry's own (its isScrolling state flips on its scroll-end timer)
+    // and this page doesn't necessarily re-render with it.
+    const seenRef = useRef({ batch: null, timer: null, restore: null });
+    const seenLiveRef = useRef(null);
+    seenLiveRef.current = { account: loggedInUser, posts, grid };
+
+    const flushSeen = useCallback(() => {
+        const s = seenRef.current;
+        s.timer = null;
+        const batch = s.batch;
+        s.batch = null;
+        if (!batch || !batch.length) return;
+        const { account, posts: list, grid: liveGrid } = seenLiveRef.current;
+        if (!account) return;
+        // A focus seek walks the viewport down the feed: not the reader
+        // resting. Drop the batch.
+        if (feedFocus.pendingRef.current) return;
+        // A cache-restored offset owns the viewport until it is reached —
+        // for the grace period at most, and only while the reader hasn't
+        // taken over (watchUserScroll below clears it).
+        const restore = s.restore;
+        if (restore) {
+            const off = Math.abs(liveGrid.getScrollTop() - restore.top);
+            if (off > SEEN_RESTORE_TOLERANCE_PX && Date.now() - restore.at < SEEN_RESTORE_GRACE_MS) return;
+            s.restore = null;
+            if (restore.detach) restore.detach();
+        }
+        let from = Infinity, to = 0, reachedEnd = false;
+        for (let i = 0; i < batch.length; i++) {
+            const c = batch[i];
+            if (c.created < from) from = c.created;
+            if (c.created > to) to = c.created;
+            if (c.last) reachedEnd = true;
+        }
+        if (!to) return;
+        const head = (list && list.length) ? cardCreatedMs(list[0]) : 0;
+        markFeedSeen(account, { from, to, head, reachedEnd });
+    }, [feedFocus.pendingRef]);
+
+    // Called by the cell renderer for each cell of a settled render that
+    // meets SEEN_MIN_FRACTION. `last`: this is the feed's final post.
+    const noteSeen = useCallback((item, last) => {
+        const created = cardCreatedMs(item);
+        if (!created) return;
+        const s = seenRef.current;
+        (s.batch || (s.batch = [])).push({ created, last });
+        if (!s.timer) s.timer = setTimeout(flushSeen, SEEN_FLUSH_MS);
+    }, [flushSeen]);
+
+    // Unmount: a batch still on its timer belongs to a viewport that is
+    // gone; drop it (an 80 ms window) rather than flush over a torn-down
+    // grid, and let go of the restore guard's listeners.
+    useEffect(() => () => {
+        const s = seenRef.current;
+        if (s.timer) { clearTimeout(s.timer); s.timer = null; }
+        s.batch = null;
+        if (s.restore && s.restore.detach) s.restore.detach();
+        s.restore = null;
+    }, []);
+
     // ── View-cache scroll persistence ───────────────────────────────────
     // Restore the saved offset when a cache-served list lands (keyed on the
     // dataVersion bump; restoreScrollTop retries until the masonry has
@@ -1223,7 +1477,23 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
         const pending = consumePendingScrollRestore();
         // A focus seek owns the scroll position: the saved offset is still
         // consumed (so it can't resurface later) but not applied under it.
-        if (pending > 0 && !feedFocus.pendingRef.current) return grid.restoreScrollTop(pending);
+        if (pending > 0 && !feedFocus.pendingRef.current) {
+            // Until that offset is reached, the viewport is not where the
+            // reader left it: seen marks wait (flushSeen) — for the grace
+            // period at most, or until the reader scrolls themselves.
+            const s = seenRef.current;
+            if (s.restore && s.restore.detach) s.restore.detach();
+            const restore = { top: pending, at: Date.now(), detach: null };
+            const m = grid.masonryRef.current;
+            const container = m && m._scrollingContainer;
+            if (container) {
+                restore.detach = watchUserScroll(container, () => {
+                    if (s.restore === restore) { s.restore = null; restore.detach(); }
+                });
+            }
+            s.restore = restore;
+            return grid.restoreScrollTop(pending);
+        }
     }, [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // … and persist the live offset when the page unmounts (cross-page
@@ -1232,44 +1502,61 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
         saveScrollPosition(grid.getScrollTop());
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // ── last_feed_check ─────────────────────────────────────────────────
-    // Record when the personal feed was last seen. MenuContent's Discover
-    // tab treats feed posts newer than this timestamp as "unseen" (the
-    // "N+" badges on the Friends tiles). Stamped on mount (the feed is
-    // being seen right now), whenever the tab is hidden or the page is
-    // torn down (pagehide covers hard closes and mobile bfcache), and on
-    // unmount — so the stored value means "seen up to the moment of
-    // leaving", not just "opened at". The post-dialog overlay keeps this
-    // page mounted, so time spent reading a post from the feed counts too.
-    useEffect(() => {
-        const stamp = () => {
-            try {
-                window.localStorage.setItem("last_feed_check", String(Date.now()));
-            } catch (e) { /* storage unavailable — badges just stay generous */ }
-        };
-        const onVisibility = () => { if (document.visibilityState === "hidden") stamp(); };
-        stamp();
-        document.addEventListener("visibilitychange", onVisibility);
-        window.addEventListener("pagehide", stamp);
-        return () => {
-            document.removeEventListener("visibilitychange", onVisibility);
-            window.removeEventListener("pagehide", stamp);
-            stamp();
-        };
-    }, []);
+    // No `last_feed_check` stamping anymore: what the reader has seen is
+    // recorded card by card, above (utils/feedSeen), and the drawer's
+    // Friends badges follow it live. The legacy value is only read once, as
+    // the floor an account starts from.
 
-    // Full re-pack when the NSFW filter flips: the visible cell set (and its
-    // index→item mapping) changes, so the index-keyed CellMeasurerCache must be
-    // cleared and positions recomputed — mirrors the layout-change reset.
+    // Full re-pack: clear the index-keyed CellMeasurerCache and recompute
+    // positions — the hook's own layout-change reset, which also drops the
+    // tracked cell positions (getCellPosition must not answer for a layout
+    // that no longer exists).
+    const repackMasonry = () => grid.resetMasonry();
+
+    // ── Re-pack on list replacement ────────────────────────────────────
+    // The CellMeasurerCache and the masonry's position cache are keyed by
+    // INDEX: a measured height and a placed position belong to "the cell at
+    // index i", not to a post. An append (loadMorePosts) and an in-place
+    // vote patch keep every index → post mapping; a replacement does not.
+    // The fresh fetch landing after a cache-served paint with a post
+    // published since, or the 6 s refetch after an own publish / edit /
+    // delete: each shifts posts to new indices while the caches still hold
+    // the previous occupants' heights, so the masonry drew post i+1 in the
+    // slot measured for post i. In a single column of mixed-height cards
+    // that is an overlap wherever the newcomer is taller than the card it
+    // displaced (and a gap where it is shorter). resetMasonry exists for
+    // exactly this event (see its note in useMasonryGrid); this page only
+    // forced an update. dataVersion bumps exactly when the loaded list was
+    // replaced (loadPage): re-pack in a layout effect so the stale layout
+    // is cleared before that commit paints, then hand the reader's offset
+    // back the same best-effort way the cache-served path does, so a
+    // refetch re-packs under the viewport instead of dropping to the top.
+    // Not under a focus seek, which owns the scroll position.
+    const listVersionMountedRef = useRef(false);
+    useLayoutEffect(() => {
+        if (!listVersionMountedRef.current) { listVersionMountedRef.current = true; return; }
+        const top = grid.getScrollTop();
+        repackMasonry();
+        if (top > 0 && !hasPendingScrollRestore() && !feedFocus.pendingRef.current) return grid.restoreScrollTop(top);
+    }, [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // The NSFW filter flips: the visible cell set (and its index→item
+    // mapping) changes.
+    useEffect(() => { repackMasonry(); }, [settings._nsfw_filter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // "Show NSFW" flips: artworks only change blur (same height), but an
+    // nsfw blog card gains or loses its cover, and CellMeasurer never
+    // re-measures a cached cell — re-pack only when such a card is loaded.
+    const hasNsfwBlogCoverRef = useRef(false);
+    hasNsfwBlogCoverRef.current = useMemo(
+        () => (posts || []).some((p) => p.nsfw && p.image && isBlogCard(p)),
+        [posts]
+    );
+    const nsfwEnabledMountedRef = useRef(false);
     useEffect(() => {
-        const m = grid.masonryRef.current;
-        if (!m || !grid.cellMeasurerCache || !grid.cellPositioner) return;
-        grid.cellMeasurerCache.clearAll();
-        grid.cellMeasurerCache.visible_ids = {};
-        grid.cellPositioner.reset({ cellMeasurerCache: grid.cellMeasurerCache, columnCount: grid.columnCount, columnWidth: grid.columnWidth, spacer: GUTTER_SIZE });
-        m.clearCellPositions();
-        m.forceUpdate();
-    }, [settings._nsfw_filter]); // eslint-disable-line react-hooks/exhaustive-deps
+        if (!nsfwEnabledMountedRef.current) { nsfwEnabledMountedRef.current = true; return; }
+        if (hasNsfwBlogCoverRef.current) repackMasonry();
+    }, [settings._nsfw_enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const openCardMenu = useCallback((ev, data) => { setMenuCardXY(Int32Array.of(ev.x - 24, ev.y - 24)); setMenuCardData(data); }, []);
     const closeCardMenu = useCallback(() => { setMenuCardXY(Int32Array.of(0, 0)); setMenuCardData({}); }, []);
@@ -1307,6 +1594,35 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
         return () => cancelIdle(id);
     }, [ownPostDialogsMounted, loggedInUser]);
 
+    // ── Masonry entries: measured artworks + blog placeholders ─────────
+    // ImageMeasurer only sees artworks; this re-threads the blog entries in
+    // at their feed position. Every visible post keeps a fixed index — the
+    // CellMeasurerCache is index-keyed — so an artwork missing from the
+    // measurer's list (not listed yet) gets an unsized entry rather than
+    // being dropped, which would shift every blog card behind it. The result
+    // keeps its identity while nothing changed, so MasonryExtended isn't
+    // handed a fresh itemsWithSizes on every render. With no blog card loaded
+    // the measurer's own list passes through untouched.
+    const mergeCacheRef = useRef({ sized: null, visible: null, out: null });
+    const withBlogEntries = useCallback((sized) => {
+        if (measurablePosts === visiblePosts) return sized;
+        const cache = mergeCacheRef.current;
+        if (cache.sized === sized && cache.visible === visiblePosts) return cache.out;
+        const byId = new Map();
+        for (const entry of (sized || [])) {
+            const id = entry && (entry.size?.id ?? entry.item?.id);
+            if (id != null) byId.set(id, entry);
+        }
+        const next = [];
+        for (const p of visiblePosts) {
+            if (isBlogCard(p)) next.push(blogEntryOf(p));
+            else next.push(byId.get(p.id) || pendingEntryOf(p));
+        }
+        const out = sameEntries(cache.out, next) ? cache.out : next;
+        mergeCacheRef.current = { sized, visible: visiblePosts, out };
+        return out;
+    }, [visiblePosts, measurablePosts]);
+
     // ── Cell renderer ──────────────────────────────────────────────────
     // Depend on the SPECIFIC grid fields the renderer reads, not the whole
     // `grid` object: the shared masonry hook returns a fresh object whose
@@ -1324,7 +1640,7 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
         if (!parent?.props?.itemsWithSizes?.[index | 0]) return null;
         const { item, size } = parent.props.itemsWithSizes[index | 0]; if (!size.height) return null;
         const colIdx = index % columnCount, rowIdx = (index - colIdx) / columnCount;
-        const ih = Math.ceil(columnWidth * (size.height / size.width)) || 0; style.width = columnWidth;
+        style.width = columnWidth;
         trackElementPosition(index, +style.top, +style.height, rowIdx, colIdx);
 
         // Visibility — use container dimensions, 2× threshold (original uses 2*root_height)
@@ -1337,6 +1653,40 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
         const visible = threshold + bottom > st && top < st + viewH + threshold;
         cellMeasurerCache.visible_ids[size.id] = visible || (cellMeasurerCache.visible_ids[size.id] || false);
 
+        // Seen tracking — settled render only (see the SEEN_* constants):
+        // the part of the cell inside the viewport, against the smaller of
+        // the card and the viewport (a card taller than the viewport can
+        // never show more than the viewport). Logged in only: the anonymous
+        // fallback is trending, not a feed anyone's badges count.
+        if (!isScrolling && loggedInUser) {
+            const shown = Math.min(bottom, st + viewH) - Math.max(top, st);
+            if (shown > 0 && shown >= SEEN_MIN_FRACTION * Math.min(bottom - top, viewH)) {
+                noteSeen(item, !hasMore && index === parent.props.itemsWithSizes.length - 1);
+            }
+        }
+
+        if (isBlogCard(item)) {
+            // `stacked`: the column is capped at 720px, so the portal page's
+            // viewport breakpoint (side cover ≥ 1200px) would halve the card on
+            // wide screens — and change its height with no column-width change
+            // to trigger a re-measure. Stacked, the height tracks the column.
+            // `noMargin`: no outer margin in the feed — the masonry spacer is
+            // the only gap between cells. (A class, not style.marginTop: the
+            // masonry's style object belongs to the cell slot, not the card.)
+            const stats = item.stats || {};
+            return (
+                <CellMeasurer cache={cellMeasurerCache} index={index} key={key} parent={parent}>
+                    <PaperCardBlog stacked noMargin onOpen={openPost} onCommentsClick={openPostComments}
+                                   locales={locales} data={item} onMenuClick={openCardMenu} api={api}
+                                   voter={loggedInUser} onVoteChange={onVoteChange} is_scrolling={isScrolling}
+                                   selected={selectedPostIndex === index} visible={cellMeasurerCache.visible_ids[size.id]}
+                                   column_width={columnWidth} id={size.id} key={size.id} rowIndex={rowIdx} columnIndex={colIdx}
+                                   style={style} muted={Boolean(stats.hide || stats.gray)} />
+                </CellMeasurer>
+            );
+        }
+
+        const ih = Math.ceil(columnWidth * (size.height / size.width)) || 0;
         return (
             <CellMeasurer cache={cellMeasurerCache} index={index} key={key} parent={parent}>
                 <PaperCard onOpen={openPost} onCommentsClick={openPostComments} locales={locales} nsfw={settings._nsfw_enabled} data={item}
@@ -1349,14 +1699,14 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
         );
     }, [posts, columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
         selectedPostIndex, postListHeight, pageWidth, openPost, openPostComments,
-        locales, settings, openCardMenu, api, loggedInUser, onVoteChange]);
+        locales, settings, openCardMenu, api, loggedInUser, onVoteChange, hasMore, noteSeen]);
 
     // ── Render ─────────────────────────────────────────────────────────
     return (
         <React.Fragment>
             <div ref={grid.setRootElement}>
-                <ImageMeasurer className={classes.masonry} items={visiblePosts} image={GET_ITEM_IMAGE} keyMapper={GET_ITEM_ID}>
-                    {(itemsWithSizes) => (
+                <ImageMeasurer className={classes.masonry} items={measurablePosts} image={GET_ITEM_IMAGE} keyMapper={GET_ITEM_ID}>
+                    {(measured) => { const itemsWithSizes = withBlogEntries(measured); return (
                         <MasonryExtended
                             style={{ padding: `16px ${grid.paddingX}px 0px ${grid.paddingX}px` }}
                             key="masonry-extended-feed-personal"
@@ -1373,7 +1723,7 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
                             ref={grid.setMasonryElement}
                             width={grid.viewWidth}
                         />
-                    )}
+                    ); }}
                 </ImageMeasurer>
             </div>
 
@@ -1417,10 +1767,22 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
             {postDialogMounted && (
                 <React.Suspense fallback={DIALOG_FALLBACK}>
                     <LazyPostDialog renderer={settings._renderer} mode={settings._mode} nsfw={settings._nsfw_enabled}
-                                    format={settings._format} data={postNav.currentPost} open={postNav.artworkOpen} locales={locales}
+                                    format={settings._format} data={isBlogPostOpen ? NO_POST : postNav.currentPost} open={artworkDialogOpen} locales={locales}
                                     api={api} account={loggedInUser} originRect={postNav.originRect} onVoteChange={onVoteChange}
                                     onClose={postNav.closePost} getReturnRect={postNav.getReturnRect} onDrawerPush={postNav.onDrawerPush} onDrawerPop={postNav.onDrawerPop}
                                     onPrevious={postNav.previousPost} onNext={postNav.nextPost} />
+                </React.Suspense>
+            )}
+            {/* Portal blog post opened over the feed — same props as on the
+                portal page; no prev/next there either. */}
+            {blogDialogMounted && (
+                <React.Suspense fallback={DIALOG_FALLBACK}>
+                    <LazyBlogPostDialog
+                        data={isBlogPostOpen ? postNav.currentPost : NO_POST} open={blogDialogOpen}
+                        locales={locales} api={api} account={loggedInUser}
+                        onVoteChange={onVoteChange} onClose={postNav.closePost}
+                        onPrevious={undefined} onNext={undefined}
+                    />
                 </React.Suspense>
             )}
         </React.Fragment>

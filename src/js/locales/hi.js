@@ -205,7 +205,8 @@ export default {
         "legal": "कानूनी",
         "risks": "जोखिम",
         "bug_reports": "बग रिपोर्ट",
-        "community": "समुदाय"
+        "community": "समुदाय",
+        "development": "डेवलपमेंट"
     },
 
     components: {
@@ -276,6 +277,14 @@ export default {
             "renounced": "त्यागी",
             "balanced": "संतुलित",
             "sovereign": "संप्रभु",
+            "licensing": "लाइसेंसिंग",
+            "the_default_license_is_the_starting_point_for": "डिफ़ॉल्ट लाइसेंस हर नई पोस्ट का प्रारंभिक बिंदु है। प्रकाशित करने से पहले आप हर पोस्ट के लिए शर्तें अलग से बदल सकते हैं।",
+            "no_default_license_set_yet_new_posts": "अभी कोई डिफ़ॉल्ट लाइसेंस सेट नहीं है — नई पोस्ट Pixa NFT लाइसेंस की मानक शर्तों से शुरू होती हैं।",
+            "holder_rights": "धारक के अधिकार:",
+            "visitor_rights": "आगंतुक के अधिकार:",
+            "configure_default_license": "डिफ़ॉल्ट लाइसेंस कॉन्फ़िगर करें",
+            "edit_default_license": "डिफ़ॉल्ट लाइसेंस संपादित करें",
+            "reset_to_standard_terms": "मानक शर्तों पर रीसेट करें",
             "always_ask_before_voting": "वोट देने से पहले हमेशा पूछें",
             "reset_custom_endpoint": "कस्टम एंडपॉइंट रीसेट करें",
             "set_custom_endpoint": "कस्टम एंडपॉइंट सेट करें",
@@ -778,6 +787,7 @@ export default {
             "convert_picture": "चित्र रूपांतरित करें",
             "create_image": "छवि बनाएँ",
             "description_optional": "विवरण (वैकल्पिक)",
+            "drop_an_image_here_or_paste_it_with": "छवि यहाँ छोड़ें या {{shortcut}} से पेस्ट करें",
             "wizard_of_creation": "रचना विज़ार्ड",
             "back": "पीछे",
             "are_you_sure": "क्या आप निश्चित हैं?",
@@ -2040,6 +2050,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "Decentralized Pixa Fund (DPF) एक विकेंद्रीकृत स्वायत्त संगठन का ऑन-चेन कोष है, जिसमें उपयोगकर्ता वित्तपोषण के प्रस्ताव दे सकते हैं और मतदान कर सकते हैं कि किन्हें वित्तपोषित किया जाए।"
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "जिन लोगों को आपने पहले भेजा है",
             "what_is_this_transfer_for": "यह हस्तांतरण किसलिए है?",
             "make_this_a_recurring_transfer": "इसे आवर्ती हस्तांतरण बनाएँ",
             "every_hours": "प्रत्येक (घंटे)",
@@ -2323,7 +2334,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "इकोसिस्टम की सुरक्षा के लिए जोखिम आकलन, ख़तरों का विश्लेषण और शमन रणनीतियाँ।",
             "security_audits_vulnerability_reports_and_best_p": "सुरक्षा ऑडिट, कमज़ोरियों की रिपोर्ट और सुरक्षित उपयोग के सर्वोत्तम तरीक़े।",
             "report_bugs_technical_issues_and_track_their": "बग और तकनीकी समस्याएँ रिपोर्ट करें और उनके समाधान की स्थिति पर नज़र रखें।",
-            "community_events_meetups_collaborations_and_soci": "समुदाय के कार्यक्रम, मीटअप, सहयोग और सामाजिक पहल।"
+            "development_roadmap_releases_code_contributions": "डेवलपमेंट रोडमैप, रिलीज़, कोड में योगदान और तकनीकी दस्तावेज़ीकरण।"
         },
         "gdmetrics": {
             "key_metrics": "प्रमुख मापदंड",

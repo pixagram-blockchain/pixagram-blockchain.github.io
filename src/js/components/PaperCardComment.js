@@ -6,7 +6,6 @@ import withStyles from '@material-ui/core/styles/withStyles';
 import Card from '@material-ui/core/Card';
 import CardHeader from '@material-ui/core/CardHeader';
 import CardContent from '@material-ui/core/CardContent';
-import Avatar from '@material-ui/core/Avatar';
 import IconButton from '@material-ui/core/IconButton';
 import Tooltip from '@material-ui/core/Tooltip';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
@@ -16,6 +15,7 @@ import { HISTORY, COMMUNITY_TAG_REGEX, buildCommentFocusHash } from '../utils/co
 import { t, useLanguage } from '../utils/text';
 import * as actions from '../actions/utils';
 import PaperCardActions from './PaperCardActions';
+import FadeAvatar from './FadeAvatar';
 import { safeHTML } from '../utils/api/sanitizer';
 
 /**
@@ -435,10 +435,9 @@ function PaperCardCommentInner({
             <CardHeader
                 className={classes.cardHeader}
                 avatar={
-                    <Avatar
+                    <FadeAvatar
                         onClick={() => openAuthor(author.username)}
                         src={author.image}
-                        imgProps={{ decoding: 'async', loading: 'lazy' }}
                     />
                 }
                 action={

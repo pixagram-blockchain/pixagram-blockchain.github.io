@@ -9,6 +9,7 @@ import Chip from "@material-ui/core/Chip";
 import DeleteIcon from "@material-ui/icons/Delete";
 import AccessTimeIcon from "@material-ui/icons/AccessTime";
 
+import { isGradientCover } from './CoverImageUpload';
 import { t, useLanguage } from "../../utils/text";
 
 export const draftCardStyles = (theme) => ({
@@ -129,74 +130,77 @@ const DraftCard = React.memo(({ classes, draft, onLoad, onDelete, formatDate }) 
     }, [onDelete, draft._id, draft.title]);
 
     return (
-    <Card
-        className={classes.draftCard}
-        onClick={handleOpen}
-    >
-        <CardContent className={classes.draftCardContent}>
-            <div className={classes.draftCardLayout}>
-                {draft.gradient && (
-                    <div className={classes.draftCoverPreview}>
-                        <img src={draft.gradient} alt="" className={classes.draftCoverImage} />
-                    </div>
-                )}
-                <div className={classes.draftCardMain}>
-                    <div className={classes.draftHeader}>
-                        <Box flex={1}>
-                            <Typography className={classes.draftTitle}>
-                                {draft.title || t("components.draft_card.untitled_draft")}
+        <Card
+            className={classes.draftCard}
+            onClick={handleOpen}
+        >
+            <CardContent className={classes.draftCardContent}>
+                <div className={classes.draftCardLayout}>
+                    {/* Same rule as the editor: a raster left in an old draft by
+                    the retired upload path is not a cover — the dialog drops
+                    it on load, so the list must not advertise it either. */}
+                    {isGradientCover(draft.gradient) && (
+                        <div className={classes.draftCoverPreview}>
+                            <img src={draft.gradient} alt="" className={classes.draftCoverImage} />
+                        </div>
+                    )}
+                    <div className={classes.draftCardMain}>
+                        <div className={classes.draftHeader}>
+                            <Box flex={1}>
+                                <Typography className={classes.draftTitle}>
+                                    {draft.title || t("components.draft_card.untitled_draft")}
+                                </Typography>
+                            </Box>
+                            <IconButton
+                                className={classes.deleteButton}
+                                onClick={handleDelete}
+                            >
+                                <DeleteIcon />
+                            </IconButton>
+                        </div>
+
+                        {draft.description && (
+                            <Typography className={classes.draftDescription}>
+                                {draft.description}
                             </Typography>
-                        </Box>
-                        <IconButton
-                            className={classes.deleteButton}
-                            onClick={handleDelete}
-                        >
-                            <DeleteIcon />
-                        </IconButton>
+                        )}
+
+                        <div className={classes.draftMeta}>
+                            <div className={classes.draftMetaItem}>
+                                <AccessTimeIcon fontSize="small" />
+                                <span>{formatDate(draft.lastSaved)}</span>
+                            </div>
+                            <div className={classes.draftMetaItem}>
+                                <span>{t("components.draft_card.n_words", { count: draft.metadata?.wordCount || 0 })}</span>
+                            </div>
+                            <div className={classes.draftMetaItem}>
+                                <span>{t("components.draft_card.n_min_read", { count: draft.metadata?.readingTime || 0 })}</span>
+                            </div>
+                        </div>
+
+                        {draft.tags && draft.tags.length > 0 && (
+                            <div className={classes.draftTags}>
+                                {draft.tags.slice(0, 3).map((tag, index) => (
+                                    <Chip
+                                        key={index}
+                                        label={tag}
+                                        size="small"
+                                        className={classes.draftTag}
+                                    />
+                                ))}
+                                {draft.tags.length > 3 && (
+                                    <Chip
+                                        label={`+${draft.tags.length - 3}`}
+                                        size="small"
+                                        className={classes.draftTag}
+                                    />
+                                )}
+                            </div>
+                        )}
                     </div>
-
-                    {draft.description && (
-                        <Typography className={classes.draftDescription}>
-                            {draft.description}
-                        </Typography>
-                    )}
-
-                    <div className={classes.draftMeta}>
-                        <div className={classes.draftMetaItem}>
-                            <AccessTimeIcon fontSize="small" />
-                            <span>{formatDate(draft.lastSaved)}</span>
-                        </div>
-                        <div className={classes.draftMetaItem}>
-                            <span>{t("components.draft_card.n_words", { count: draft.metadata?.wordCount || 0 })}</span>
-                        </div>
-                        <div className={classes.draftMetaItem}>
-                            <span>{t("components.draft_card.n_min_read", { count: draft.metadata?.readingTime || 0 })}</span>
-                        </div>
-                    </div>
-
-                    {draft.tags && draft.tags.length > 0 && (
-                        <div className={classes.draftTags}>
-                            {draft.tags.slice(0, 3).map((tag, index) => (
-                                <Chip
-                                    key={index}
-                                    label={tag}
-                                    size="small"
-                                    className={classes.draftTag}
-                                />
-                            ))}
-                            {draft.tags.length > 3 && (
-                                <Chip
-                                    label={`+${draft.tags.length - 3}`}
-                                    size="small"
-                                    className={classes.draftTag}
-                                />
-                            )}
-                        </div>
-                    )}
                 </div>
-            </div>
-        </CardContent>
-    </Card>
+            </CardContent>
+        </Card>
     );
 });
 

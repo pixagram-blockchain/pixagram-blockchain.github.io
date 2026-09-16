@@ -205,7 +205,8 @@ export default {
         "legal": "法務",
         "risks": "リスク",
         "bug_reports": "バグ報告",
-        "community": "コミュニティ"
+        "community": "コミュニティ",
+        "development": "開発"
     },
 
     components: {
@@ -276,6 +277,14 @@ export default {
             "renounced": "放棄",
             "balanced": "バランス",
             "sovereign": "自己主権",
+            "licensing": "ライセンス",
+            "the_default_license_is_the_starting_point_for": "既定のライセンスは、すべての新しい投稿の出発点です。公開前に投稿ごとに条件を調整することもできます。",
+            "no_default_license_set_yet_new_posts": "既定のライセンスはまだ設定されていません — 新しい投稿はPixa NFTライセンスの標準条件から始まります。",
+            "holder_rights": "保有者の権利：",
+            "visitor_rights": "閲覧者の権利：",
+            "configure_default_license": "既定のライセンスを設定",
+            "edit_default_license": "既定のライセンスを編集",
+            "reset_to_standard_terms": "標準条件にリセット",
             "always_ask_before_voting": "投票前に必ず確認する",
             "reset_custom_endpoint": "カスタムエンドポイントをリセット",
             "set_custom_endpoint": "カスタムエンドポイントを設定",
@@ -778,6 +787,7 @@ export default {
             "convert_picture": "画像を変換",
             "create_image": "画像を作成",
             "description_optional": "説明（任意）",
+            "drop_an_image_here_or_paste_it_with": "ここに画像をドロップするか、{{shortcut}} で貼り付けてください",
             "wizard_of_creation": "作成ウィザード",
             "back": "戻る",
             "are_you_sure": "よろしいですか？",
@@ -2040,6 +2050,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "Decentralized Pixa Fund（DPF）は分散型自律組織のオンチェーン国庫で、ユーザーが資金提供の提案を行い、どの提案に資金を出すかを投票で決められます。"
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "以前に送金した相手",
             "what_is_this_transfer_for": "この送金の用途は何ですか？",
             "make_this_a_recurring_transfer": "定期送金にする",
             "every_hours": "間隔（時間）",
@@ -2323,7 +2334,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "エコシステムの安全のためのリスク評価、脅威分析、緩和戦略。",
             "security_audits_vulnerability_reports_and_best_p": "セキュリティ監査、脆弱性報告、安全な利用のためのベストプラクティス。",
             "report_bugs_technical_issues_and_track_their": "バグや技術的な問題を報告し、その解決状況を追跡します。",
-            "community_events_meetups_collaborations_and_soci": "コミュニティのイベント、ミートアップ、コラボレーション、社会的な取り組み。"
+            "development_roadmap_releases_code_contributions": "開発ロードマップ、リリース、コードへの貢献、技術ドキュメント。"
         },
         "gdmetrics": {
             "key_metrics": "主要指標",

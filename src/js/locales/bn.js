@@ -206,7 +206,8 @@ export default {
         "legal": "আইনি",
         "risks": "ঝুঁকি",
         "bug_reports": "বাগ রিপোর্ট",
-        "community": "কমিউনিটি"
+        "community": "কমিউনিটি",
+        "development": "ডেভেলপমেন্ট"
     },
 
     components: {
@@ -277,6 +278,14 @@ export default {
             "renounced": "পরিত্যাগী",
             "balanced": "ভারসাম্যপূর্ণ",
             "sovereign": "সার্বভৌম",
+            "licensing": "লাইসেন্সিং",
+            "the_default_license_is_the_starting_point_for": "ডিফল্ট লাইসেন্স প্রতিটি নতুন পোস্টের সূচনাবিন্দু। প্রকাশের আগে আপনি প্রতিটি পোস্টের জন্য শর্তগুলি আলাদাভাবে সামঞ্জস্য করতে পারেন।",
+            "no_default_license_set_yet_new_posts": "এখনও কোনো ডিফল্ট লাইসেন্স সেট করা হয়নি — নতুন পোস্টগুলি Pixa NFT লাইসেন্সের মানক শর্ত থেকে শুরু হয়।",
+            "holder_rights": "ধারকের অধিকার:",
+            "visitor_rights": "দর্শকের অধিকার:",
+            "configure_default_license": "ডিফল্ট লাইসেন্স কনফিগার করুন",
+            "edit_default_license": "ডিফল্ট লাইসেন্স সম্পাদনা করুন",
+            "reset_to_standard_terms": "মানক শর্তে রিসেট করুন",
             "always_ask_before_voting": "ভোটের আগে সবসময় জিজ্ঞেস করুন",
             "reset_custom_endpoint": "কাস্টম এন্ডপয়েন্ট রিসেট করুন",
             "set_custom_endpoint": "কাস্টম এন্ডপয়েন্ট সেট করুন",
@@ -779,6 +788,7 @@ export default {
             "convert_picture": "ছবি রূপান্তর করুন",
             "create_image": "ছবি তৈরি করুন",
             "description_optional": "বিবরণ (ঐচ্ছিক)",
+            "drop_an_image_here_or_paste_it_with": "ছবি এখানে ছাড়ুন বা {{shortcut}} দিয়ে পেস্ট করুন",
             "wizard_of_creation": "সৃষ্টির জাদুকর",
             "back": "পেছনে",
             "are_you_sure": "আপনি কি নিশ্চিত?",
@@ -2040,6 +2050,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "বিকেন্দ্রীকৃত Pixa তহবিল (DPF) এক অন-চেইন বিকেন্দ্রীকৃত স্বায়ত্তশাসিত সংস্থার কোষাগার, যেখানে ব্যবহারকারীরা তহবিলের জন্য প্রস্তাব জমা দিতে পারেন এবং কোন প্রস্তাবে অর্থায়ন হবে তাতে ভোট দিতে পারেন।",
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "যাদের আপনি আগে পাঠিয়েছেন",
             "what_is_this_transfer_for": "এই স্থানান্তর কীসের জন্য?",
             "make_this_a_recurring_transfer": "এটিকে পুনরাবৃত্ত স্থানান্তর করুন",
             "every_hours": "প্রতি (ঘণ্টা)",
@@ -2323,7 +2334,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "ইকোসিস্টেমের নিরাপত্তার জন্য ঝুঁকি মূল্যায়ন, হুমকি বিশ্লেষণ এবং প্রশমন কৌশল।",
             "security_audits_vulnerability_reports_and_best_p": "নিরাপত্তা অডিট, দুর্বলতার রিপোর্ট এবং নিরাপদ ব্যবহারের সেরা অনুশীলন।",
             "report_bugs_technical_issues_and_track_their": "বাগ ও কারিগরি সমস্যা রিপোর্ট করুন এবং সেগুলোর সমাধানের অগ্রগতি অনুসরণ করুন।",
-            "community_events_meetups_collaborations_and_soci": "কমিউনিটি ইভেন্ট, মিটআপ, সহযোগিতা এবং সামাজিক উদ্যোগ।"
+            "development_roadmap_releases_code_contributions": "ডেভেলপমেন্ট রোডম্যাপ, রিলিজ, কোডে অবদান এবং কারিগরি ডকুমেন্টেশন।"
         },
         "gdmetrics": {
             "key_metrics": "মূল মেট্রিক্স",

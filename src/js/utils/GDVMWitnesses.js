@@ -1,0 +1,1079 @@
+import * as React from "preact/compat";
+import timeAgo from './TimeAgo';
+import { NumericFormat } from 'react-number-format';
+
+import withStyles from "@material-ui/core/styles/withStyles";
+import DialogContent from "@material-ui/core/DialogContent";
+import Typography from "@material-ui/core/Typography";
+import Button from "@material-ui/core/Button";
+import Checkbox from '@material-ui/core/Checkbox';
+import TextField from "@material-ui/core/TextField";
+import ButtonBase from "@material-ui/core/ButtonBase";
+import CircularProgress from "@material-ui/core/CircularProgress";
+import Skeleton from "@material-ui/lab/Skeleton";
+import { cssBackgroundImage } from "./safeUrl";
+import { DEFAULT_NODES } from "./constants";
+
+import { T } from "./T";
+import { t } from "./text";
+
+import { withLanguage } from "./withLanguage";
+const styles = theme => ({
+    dialogContent: {
+        padding: "24px"
+    },
+    sectionTitle: {
+        fontSize: "18px",
+        fontWeight: 600,
+        color: "#fff",
+        fontFamily: "'Industry Book'",
+        marginBottom: "8px"
+    },
+    sectionDescription: {
+        fontSize: "14px",
+        color: "#888",
+        fontFamily: "'Normative Pro'",
+        marginBottom: "16px"
+    },
+    textFieldWrapper: {
+        width: "100%",
+        boxSizing: "border-box",
+        margin: "8px 0px 16px 0px"
+    },
+    buttonGroup: {
+        display: "flex",
+        gap: "12px",
+        justifyContent: "flex-end",
+        marginBottom: "32px"
+    },
+    witnessTableWrapper: {
+        overflowX: "auto",
+        touchAction: "manipulation",
+        contain: "style layout",
+        "-webkit-overflow-scrolling": "touch"
+    },
+    witnessTable: {
+        width: "100%",
+        minWidth: "700px",
+        borderCollapse: "collapse",
+        marginTop: theme.spacing(2),
+        marginBottom: theme.spacing(1),
+        fontSize: "0.875rem",
+        "& tr > th": {
+            backgroundColor: "#191919",
+            padding: theme.spacing(1.5),
+            textAlign: "left",
+            fontWeight: 600,
+            borderBottom: `0px solid #ffffff12`,
+            transition: "background-color 225ms cubic-bezier(0.4, 0, 0.2, 1) 75ms",
+        },
+        "& tr:hover > th": {
+            backgroundColor: "#222",
+            transition: "background-color 150ms cubic-bezier(0.4, 0, 0.2, 1) 5ms",
+        },
+        "& tr > th:first-child": {
+            borderRadius: "16px 0px 0px 0px"
+        },
+        "& tr > th:last-child": {
+            borderRadius: "0px 16px 0px 0px",
+        },
+        "& tr > td": {
+            backgroundColor: "transparent",
+            transition: "background-color 225ms cubic-bezier(0.4, 0, 0.2, 1) 75ms",
+        },
+        "& tr:hover > td": {
+            backgroundColor: "#171717",
+            transition: "background-color 150ms cubic-bezier(0.4, 0, 0.2, 1) 5ms",
+        },
+        "& tr:last-child > td:first-child": {
+            borderRadius: "0px 0px 0px 16px"
+        },
+        "& tr:last-child > td:last-child": {
+            borderRadius: "0px 0px 16px 0px",
+        },
+        "& td": {
+            padding: "4px 12px",
+            borderBottom: `1px solid #ffffff12`
+        },
+        "& tr:last-child td": {
+            borderBottom: "0px"
+        },
+        "& tbody": {
+            backgroundColor: "#101010"
+        }
+    },
+    witnessCell: {
+        display: "flex",
+        gap: 8,
+        alignItems: "center"
+    },
+    witnessAvatar: {
+        margin: "8px 8px 8px 0px",
+        borderRadius: "12px",
+        backgroundSize: "cover",
+        width: 42,
+        height: 42
+    },
+    witnessInfo: {
+        marginLeft: 8
+    },
+    witnessName: {
+        display: "block",
+        fontSize: "14px",
+        fontFamily: "'Industry Book'"
+    },
+    witnessDescription: {
+        marginTop: "4px",
+        color: "#999",
+        display: "block",
+        fontSize: "11px",
+        fontFamily: "'Normative Pro'"
+    },
+    // "API available" — the witness also operates one of the public API nodes
+    // (DEFAULT_NODES). Same pill as witnessBadge, sized to sit after the name.
+    apiBadge: {
+        display: "inline-block",
+        verticalAlign: "middle",
+        marginLeft: "8px",
+        padding: "1px 6px",
+        borderRadius: "8px",
+        backgroundColor: "#262626",
+        color: "#bbb",
+        fontSize: "10px",
+        lineHeight: "16px",
+        fontFamily: "'Geist Mono'",
+        fontWeight: "bold",
+        letterSpacing: "0.5px",
+        whiteSpace: "nowrap"
+    },
+    versionBadge: {
+        margin: "8px",
+        padding: "4px 8px",
+        borderRadius: "8px",
+        backgroundColor: "#262626",
+        color: "#fff",
+        fontWeight: "bold",
+        fontFamily: "'Geist Mono'",
+        display: "inline"
+    },
+    monoText: {
+        fontFamily: "'Geist Mono'"
+    },
+    blockInfo: {
+        fontSize: "12px",
+        fontFamily: "'Geist Mono'"
+    },
+    blockTime: {
+        fontSize: "8px",
+        color: "#666"
+    },
+    loadingWrap: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "32px 16px",
+        color: "#666"
+    },
+    emptyRow: {
+        padding: "24px !important",
+        textAlign: "center",
+        color: "#777",
+        fontFamily: "'Normative Pro'"
+    },
+    witnessPanel: {
+        marginTop: "32px",
+        marginBottom: "16px",
+        padding: "20px",
+        borderRadius: "16px",
+        backgroundColor: "#101010"
+    },
+    witnessPanelHeader: {
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        marginBottom: "8px"
+    },
+    witnessBadge: {
+        padding: "2px 8px",
+        borderRadius: "8px",
+        backgroundColor: "#262626",
+        color: "#bbb",
+        fontSize: "11px",
+        fontFamily: "'Geist Mono'",
+        fontWeight: "bold",
+        letterSpacing: "0.5px"
+    },
+    broadcastError: {
+        marginTop: "8px",
+        padding: "8px 12px",
+        borderRadius: "8px",
+        backgroundColor: "#1a1a1a",
+        color: "#bbb",
+        border: "1px solid #ffffff1f",
+        fontSize: "12px",
+        fontFamily: "'Geist Mono'"
+    },
+    broadcastSuccess: {
+        marginTop: "8px",
+        padding: "8px 12px",
+        borderRadius: "8px",
+        backgroundColor: "#1a1a1a",
+        color: "#bbb",
+        border: "1px solid #ffffff1f",
+        fontSize: "12px",
+        fontFamily: "'Geist Mono'"
+    }
+});
+
+// ──────────────────────────────────────────────────────────────
+// Currency input (mirrors PixaWalletSendDialog's NumberFormatCustom):
+// renders a numeric field with a chain-asset suffix, e.g. "1.000 PXS".
+// ──────────────────────────────────────────────────────────────
+function NumberFormatCustom(props) {
+    const { inputRef, onChange, currency, ...other } = props;
+    return (
+        <NumericFormat
+            {...other}
+            ref={inputRef}
+            onValueChange={(values) => {
+                onChange({
+                    target: {
+                        name: props.name,
+                        value: values.value,
+                    },
+                });
+            }}
+            thousandSeparator={" "}
+            decimalSeparator={"."}
+            allowedDecimalSeparators={[",", "."]}
+            thousandsGroupStyle={'thousand'}
+            decimalScale={3}
+            fixedDecimalScale={false}
+            allowNegative={false}
+            allowLeadingZeros={true}
+            suffix={" " + currency}
+            prefix={""}
+        />
+    );
+}
+
+// ──────────────────────────────────────────────────────────────
+// account_creation_fee bounds, in 0.001-PIXA units — the stock Hive
+// HIVE_MIN_ACCOUNT_CREATION_FEE / HIVE_MAX_ACCOUNT_CREATION_FEE. The node
+// rejects anything outside this range ("account_creation_fee smaller than
+// minimum account creation fee"), so the form enforces it before signing.
+// ──────────────────────────────────────────────────────────────
+const FEE_SYMBOL = 'PIXA';           // raw chain symbol (never the display "PXA")
+const FEE_PRECISION = 3;
+const FEE_MIN_UNITS = 1;             // 0.001 PIXA
+const FEE_MAX_UNITS = 1000000000;    // 1,000,000.000 PIXA
+
+// "0.001" → 1; "" / "abc" / negative → NaN
+const feeInputToUnits = (s) => {
+    const n = Number(String(s === null || s === undefined ? '' : s).trim());
+    return Number.isFinite(n) && n >= 0 ? Math.round(n * Math.pow(10, FEE_PRECISION)) : NaN;
+};
+const isValidFeeUnits = (u) =>
+    Number.isInteger(u) && u >= FEE_MIN_UNITS && u <= FEE_MAX_UNITS;
+// 1 → "0.001 PIXA" — the asset string dpixa's Types.Asset serializer expects
+const feeUnitsToAsset = (u) =>
+    `${(u / Math.pow(10, FEE_PRECISION)).toFixed(FEE_PRECISION)} ${FEE_SYMBOL}`;
+
+// ──────────────────────────────────────────────────────────────
+// A witness is considered "active" when it has a real signing
+// key. Disabled witnesses publish the null public key, which
+// is a long run of 1s regardless of chain address prefix
+// (STM / HIVE / PIX etc). Detecting a long 1-run is prefix-safe.
+// ──────────────────────────────────────────────────────────────
+const NULL_KEY_RUN_RE = /1{40,}/;
+const isActiveWitness = (w) =>
+    !!w && typeof w.signing_key === 'string' && !NULL_KEY_RUN_RE.test(w.signing_key);
+
+// ──────────────────────────────────────────────────────────────
+// Format helpers
+// ──────────────────────────────────────────────────────────────
+const formatVotes = (v) => {
+    const n = typeof v === 'string' ? Number(v) : (v || 0);
+    if (!isFinite(n) || n <= 0) return '0';
+    // VESTS are huge — collapse into readable magnitudes.
+    if (n >= 1e15) return `${(n / 1e15).toFixed(2)}P`;
+    if (n >= 1e12) return `${(n / 1e12).toFixed(2)}T`;
+    if (n >= 1e9)  return `${(n / 1e9).toFixed(2)}G`;
+    if (n >= 1e6)  return `${(n / 1e6).toFixed(2)}M`;
+    if (n >= 1e3)  return `${(n / 1e3).toFixed(1)}k`;
+    return String(Math.round(n));
+};
+
+// ──────────────────────────────────────────────────────────────
+// Price feed
+//
+// The fork renamed the HBD-era witness fields to PXS: the record carries
+// `pxs_exchange_rate` / `last_pxs_exchange_update` (the same `pxs_*` names the
+// proxy's witnessSetProperties() broadcasts). `hbd_*` / `sbd_*` are kept as
+// fallbacks only so a stock-named node still renders.
+//
+// The feed is a Price { base: "X PXS", quote: "Y PIXA" } and is read as a
+// ratio — how many PXA one PXS is worth (quote ÷ base, the same orientation
+// as PricesAPI's feedRatio) — and written that way: "1 PXS = 102 PXA".
+// There is no fiat on chain, so no dollar sign anywhere.
+// ──────────────────────────────────────────────────────────────
+const getWitnessPriceFeed = (w) =>
+    (w && (w.pxs_exchange_rate || w.hbd_exchange_rate || w.sbd_exchange_rate)) || null;
+
+const getWitnessFeedUpdatedAt = (w) =>
+    (w && (w.last_pxs_exchange_update || w.last_hbd_exchange_update || w.last_sbd_exchange_update)) || null;
+
+const parseFeedAsset = (a) => {
+    if (!a) return { amount: NaN, symbol: '' };
+    if (typeof a === 'string') {
+        const m = a.trim().match(/^([\d.]+)\s*([A-Za-z]*)$/);
+        return m ? { amount: Number(m[1]), symbol: m[2] || '' } : { amount: NaN, symbol: '' };
+    }
+    if (typeof a === 'object' && 'amount' in a) {
+        const p = Number(a.precision || 0);
+        return { amount: Number(a.amount) / Math.pow(10, p), symbol: '' };
+    }
+    return { amount: NaN, symbol: '' };
+};
+
+// Read-only display values of the witness's current on-chain parameters
+// (`witness.props`). `account_creation_fee` may arrive as a legacy asset
+// string ("0.001 PIXA") or an NAI object — `parseFeedAsset` reads both. The
+// fork renamed `hbd_interest_rate` → `pxs_interest_rate`; the stock names are
+// kept as fallbacks like the price-feed fields above (first *defined* value
+// wins — 0 is a legitimate rate, so no `||` chain here).
+const asPlainNumberString = (v) =>
+    (v === null || v === undefined || v === '' || !Number.isFinite(Number(v))) ? '' : String(Number(v));
+
+const getWitnessChainProps = (w) => {
+    const p = (w && w.props) || {};
+    const fee = parseFeedAsset(p.account_creation_fee);
+    const rate = [p.pxs_interest_rate, p.hbd_interest_rate, p.sbd_interest_rate]
+        .find((v) => v !== undefined && v !== null);
+    return {
+        baseFee: Number.isFinite(fee.amount) ? fee.amount.toFixed(FEE_PRECISION) : '',
+        maxBlockSize: asPlainNumberString(p.maximum_block_size),
+        interestRate: asPlainNumberString(rate)
+    };
+};
+
+// Human string of the raw feed as published, e.g. "1.000 PXS / 20.000 PIXA".
+const formatRawPriceFeed = (feed) => {
+    if (!feed || !feed.base || !feed.quote) return '';
+    const asText = (a) => (typeof a === 'string' ? a : `${parseFeedAsset(a).amount}`);
+    return `${asText(feed.base)} / ${asText(feed.quote)}`;
+};
+
+// Chain symbol → the symbol the app writes (PIXA is shown as PXA everywhere).
+const DISPLAY_SYMBOL = { PIXA: 'PXA', PXS: 'PXS', VESTS: 'PXP' };
+const displaySymbol = (sym, fallback) => DISPLAY_SYMBOL[sym] || sym || fallback;
+
+// 102.000 → "102", 101.500 → "101.5", 57.143 → "57.143"
+const formatRatio = (n) => n.toFixed(3).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+
+const formatPriceFeed = (feed) => {
+    if (!feed) return '—';
+    const base = parseFeedAsset(feed.base);    // PXS side
+    const quote = parseFeedAsset(feed.quote);  // PXA side
+    // A witness that never published a feed still carries a zero price
+    // (0/0, or 0 PXS over the default quote) — render as em-dash rather than
+    // a meaningless ratio.
+    if (!isFinite(base.amount) || !isFinite(quote.amount)) return '—';
+    if (base.amount <= 0 || quote.amount <= 0) return '—';
+    const ratio = quote.amount / base.amount;  // PXA per 1 PXS
+    return `1 ${displaySymbol(base.symbol, 'PXS')} = ${formatRatio(ratio)} ${displaySymbol(quote.symbol, 'PXA')}`;
+};
+
+// ──────────────────────────────────────────────────────────────
+// "API available"
+//
+// A witness is marked as running a public API node when it matches one of
+// the app's known nodes (utils/constants DEFAULT_NODES): either the node
+// entry names it explicitly (`witness: "<account>"`) or the host of the
+// witness's on-chain `url` is the node's host.
+// ──────────────────────────────────────────────────────────────
+const hostOf = (url) => {
+    if (!url || typeof url !== 'string') return '';
+    try {
+        const u = new URL(url.trim());
+        if (u.protocol !== 'https:' && u.protocol !== 'http:') return '';
+        return u.hostname.toLowerCase().replace(/^www\./, '');
+    } catch (e) {
+        return '';
+    }
+};
+
+const findApiNodeForWitness = (w) => {
+    if (!w || !Array.isArray(DEFAULT_NODES)) return null;
+    const owner = String(w.owner || '').toLowerCase();
+    const witnessHost = hostOf(w.url);
+    for (const node of DEFAULT_NODES) {
+        if (!node) continue;
+        if (node.witness && String(node.witness).toLowerCase() === owner) return node;
+        const nodeHost = hostOf(node.url);
+        if (witnessHost && nodeHost && witnessHost === nodeHost) return node;
+    }
+    return null;
+};
+
+// Was a hand-rolled English ladder ("3m ago", "2h ago"). utils/TimeAgo now
+// speaks every locale the browser knows, so the only thing worth keeping here
+// is the sentinel for a witness that has never produced a block.
+const formatTimeAgo = (iso) => {
+    if (!iso || String(iso).startsWith('1970')) return '—';
+    return timeAgo.format(iso, { labels: 'short' }) || '—';
+};
+
+class GDVMWitnesses extends React.PureComponent {
+    constructor(props) {
+        super(props);
+        this.state = {
+            customWitness: "",
+            _loading: true,
+            _witnesses: [],
+            _avatars: {},          // { witnessName: imageUrl }
+            _myVotes: new Set(),   // witness owner names the current user has voted for
+            _currentAccount: null,
+            // ── Witness self-administration ──
+            _selfWitness: null,    // full witness record for the current account, or null
+            // Chain parameters, all seeded from the witness's current on-chain
+            // `props` in _loadData. `account_creation_fee` and `url` are
+            // operator-editable and broadcast; maximum_block_size and
+            // pxs_interest_rate stay read-only in this release and are never
+            // sent (see _handleBroadcastWitnessProps).
+            _propsBaseFee: "",              // account_creation_fee as typed, e.g. "0.001"
+            _propsMaxBlockSize: "",         // maximum_block_size (bytes)
+            _propsInterestRate: "",         // pxs_interest_rate (basis points; 100 = 1%)
+            _propsUrl: "",                  // url — editable witness URL
+            _propsBroadcasting: false,
+            _propsError: "",
+            _propsSuccess: false
+        };
+        this._mounted = false;
+    }
+
+    componentDidMount() {
+        this._mounted = true;
+        this._loadData();
+    }
+
+    componentDidUpdate(prevProps) {
+        if (prevProps.api !== this.props.api) this._loadData();
+    }
+
+    componentWillUnmount() {
+        this._mounted = false;
+    }
+
+    _loadData = async () => {
+        const { api } = this.props;
+        if (!api?.witnesses) return;
+
+        const currentAccount =
+            api.sessionManager?.getCurrentAccountSync?.() ||
+            api.sessionManager?.currentAccount ||
+            null;
+
+        try {
+            // These three reads were previously awaited one after another, but
+            // only Chain A is internally dependent. Branch B and Branch C need
+            // nothing but `currentAccount` (resolved synchronously above), so we
+            // start all three in the same tick and await them together. Latency
+            // drops from (A + B + C) to max(A, B, C). Per-branch error handling
+            // is unchanged: B and C resolve to safe defaults on failure; only
+            // Chain A's root read can hard-fail the panel (outer catch below).
+
+            // ── Chain A: top witnesses → their profile avatars ───────────────
+            // getAccounts depends on the witness names, so this stays a 2-step
+            // chain — but it now overlaps with B and C.
+            const witnessesAndAvatars = (async () => {
+                // Pull top witnesses by vote (descending). condenser_api's
+                // get_witnesses_by_vote already returns the ordering we want.
+                const raw = await api.witnesses.getWitnessesByVote('', 60);
+                const list = Array.isArray(raw) ? raw : [];
+
+                // "Listing only active witnesses" → drop disabled ones.
+                // Cap at 30 since that's the max-votable set per the copy here.
+                const active = list.filter(isActiveWitness).slice(0, 30);
+
+                // Batch-fetch accounts to get profile images
+                let avatars = {};
+                if (active.length > 0 && api.accounts?.getAccounts) {
+                    try {
+                        const names = active.map(w => w.owner);
+                        const accs = await api.accounts.getAccounts(names);
+                        for (const acc of (accs || [])) {
+                            if (acc?.name && acc?._profile?.profile_image) {
+                                avatars[acc.name] = acc._profile.profile_image;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[GDVMWitnesses] getAccounts for avatars failed:', e?.message);
+                    }
+                }
+                return { active, avatars };
+            })();
+
+            // ── Branch B: current user's witness votes (independent) ─────────
+            // Used to check/uncheck checkboxes.
+            const myVotesPromise = (async () => {
+                const myVotes = new Set();
+                if (currentAccount && api.witnesses.listWitnessVotes) {
+                    try {
+                        const votes = await api.witnesses.listWitnessVotes({
+                            start: [currentAccount, ''],
+                            order: 'by_account_witness',
+                            limit: 100
+                        });
+                        for (const v of (votes || [])) {
+                            if (v?.account === currentAccount && v?.witness) {
+                                myVotes.add(v.witness);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[GDVMWitnesses] list_witness_votes failed:', e?.message);
+                    }
+                }
+                return myVotes;
+            })();
+
+            // ── Branch C: is the current user themselves a witness? ──────────
+            // Top-30 list might not include them (they could be ranked lower),
+            // so query the chain directly. A witness with the disabled/null
+            // signing key is treated as not-a-witness for this panel.
+            const selfWitnessPromise = (async () => {
+                let selfWitness = null;
+                if (currentAccount && api.witnesses?.getWitnessByAccount) {
+                    try {
+                        const w = await api.witnesses.getWitnessByAccount(currentAccount);
+                        if (w && isActiveWitness(w)) selfWitness = w;
+                    } catch (e) {
+                        console.warn('[GDVMWitnesses] getWitnessByAccount failed:', e?.message);
+                    }
+                }
+                return selfWitness;
+            })();
+
+            // Run all three concurrently.
+            const [{ active, avatars }, myVotes, selfWitness] = await Promise.all([
+                witnessesAndAvatars,
+                myVotesPromise,
+                selfWitnessPromise,
+            ]);
+
+            // Seed the editable URL field from the witness's current
+            // on-chain `url` so re-broadcasting "as is" doesn't accidentally
+            // blank out a previously-set value. The read-only parameters are
+            // seeded from the same record so the panel shows what is actually
+            // on chain.
+            const seedUrl = (selfWitness && typeof selfWitness.url === 'string') ? selfWitness.url : "";
+            const chainProps = getWitnessChainProps(selfWitness);
+
+            if (!this._mounted) return;
+            this.setState({
+                _loading: false,
+                _witnesses: active,
+                _avatars: avatars,
+                _myVotes: myVotes,
+                _currentAccount: currentAccount,
+                _selfWitness: selfWitness,
+                _propsBaseFee: chainProps.baseFee,
+                _propsMaxBlockSize: chainProps.maxBlockSize,
+                _propsInterestRate: chainProps.interestRate,
+                _propsUrl: seedUrl
+            }, () => this.forceUpdate());
+        } catch (e) {
+            console.warn('[GDVMWitnesses] failed to load witnesses:', e?.message);
+            if (!this._mounted) return;
+            this.setState({ _loading: false }, () => this.forceUpdate());
+        }
+    }
+
+    _handleTableTouchStart = (e) => {
+        e.stopPropagation();
+    }
+
+    _handleCustomWitnessChange = (e) => {
+        this.setState({ customWitness: e.target.value });
+    }
+
+    _cleanAccountInput = (raw) =>
+        String(raw || '').trim().replace(/^@/, '').toLowerCase();
+
+    _handleToggleVote = async (witnessName, shouldApprove) => {
+        const { api } = this.props;
+        const { _currentAccount, _myVotes } = this.state;
+        if (!api?.broadcast || !_currentAccount) return;
+
+        // Optimistic flip
+        const next = new Set(_myVotes);
+        if (shouldApprove) next.add(witnessName); else next.delete(witnessName);
+        this.setState({ _myVotes: next }, () => this.forceUpdate());
+
+        try {
+            await api.broadcast.accountWitnessVote(
+                _currentAccount, witnessName, !!shouldApprove
+            );
+        } catch (e) {
+            console.warn('[GDVMWitnesses] vote toggle failed:', e?.message);
+            if (!this._mounted) return;
+            this.setState({ _myVotes: _myVotes }, () => this.forceUpdate());
+        }
+    }
+
+    _handleVoteForAccount = async () => {
+        const { api } = this.props;
+        const { _currentAccount } = this.state;
+        const target = this._cleanAccountInput(this.state.customWitness);
+        if (!target || !api?.broadcast || !_currentAccount) return;
+        try {
+            await api.broadcast.accountWitnessVote(_currentAccount, target, true);
+            if (!this._mounted) return;
+            this.setState({ customWitness: "" }, () => {
+                this.forceUpdate();
+                this._loadData();
+            });
+        } catch (e) {
+            console.warn('[GDVMWitnesses] vote failed:', e?.message);
+        }
+    }
+
+    _handleDelegateVote = async () => {
+        const { api } = this.props;
+        const { _currentAccount } = this.state;
+        const target = this._cleanAccountInput(this.state.customWitness);
+        if (!target || !api?.broadcast || !_currentAccount) return;
+        try {
+            await api.broadcast.accountWitnessProxy(_currentAccount, target);
+            if (!this._mounted) return;
+            this.setState({ customWitness: "" }, () => this.forceUpdate());
+        } catch (e) {
+            console.warn('[GDVMWitnesses] proxy failed:', e?.message);
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Witness-properties helpers
+    // ──────────────────────────────────────────────────────────────
+
+    _handlePropsBaseFeeChange = (e) => {
+        const value = e.target.value;
+        // NumericFormat also reports prop-driven changes (the seed from
+        // chain); ignore those so they don't clear a fresh success/error.
+        if (value === this.state._propsBaseFee) return;
+        this.setState({
+            _propsBaseFee: value,
+            _propsError: "",
+            _propsSuccess: false
+        });
+    };
+
+    _handlePropsUrlChange = (e) => {
+        this.setState({
+            _propsUrl: e.target.value,
+            _propsError: "",
+            _propsSuccess: false
+        });
+    };
+
+    _handleBroadcastWitnessProps = async () => {
+        const { api } = this.props;
+        const { _currentAccount, _selfWitness, _propsBaseFee, _propsUrl } = this.state;
+
+        if (!_currentAccount || !_selfWitness || !api?.broadcast?.witnessUpdate) {
+            this.setState({ _propsError: "Missing account, witness record, or broadcast API." });
+            return;
+        }
+
+        // Broadcast witness_update, signed by the account's ACTIVE authority
+        // (BroadcastAPI.witnessUpdate requests 'active'). witness_set_properties
+        // is authorized instead by the block-signing key — which this account's
+        // active key is not — so it can't be used from a UI that only has the
+        // active key. witness_update is the active-key equivalent.
+        //
+        // The block-signing key goes in block_signing_key (passed through
+        // unchanged — no rotation), NOT as an authorizing key.
+        //
+        // witness_update is NOT sparse: owner/url/block_signing_key/props/fee
+        // are all set every time. So the two read-only parameters
+        // (maximum_block_size, interest rate) must be re-sent unchanged — we
+        // carry the witness record's current `props` forward verbatim and only
+        // override account_creation_fee.
+        const signingKey = _selfWitness.signing_key;
+        if (!signingKey) {
+            this.setState({
+                _propsError: "No signing key on the witness record — cannot broadcast."
+            });
+            return;
+        }
+
+        // Validate in integer 0.001-PIXA units so float noise can't push a
+        // typed "0.001" below the chain floor. This is the guard that stops
+        // the "account_creation_fee smaller than minimum" (min 0.001) reject.
+        const feeUnits = feeInputToUnits(_propsBaseFee);
+        if (!isValidFeeUnits(feeUnits)) {
+            this.setState({
+                _propsError: `Account creation fee must be between ${feeUnitsToAsset(FEE_MIN_UNITS)} and ${feeUnitsToAsset(FEE_MAX_UNITS)}.`
+            });
+            return;
+        }
+
+        // The chain rejects an empty url ("URL size must be greater than 0"),
+        // so fail fast here instead of round-tripping to the node.
+        const url = String(_propsUrl || "").trim();
+        if (!url) {
+            this.setState({ _propsError: "Witness URL cannot be empty." });
+            return;
+        }
+
+        // Preserve the record's current chain props (correct field names for
+        // this chain, including the interest-rate field) and change only the
+        // fee. account_creation_fee goes out as a display-symbol asset string;
+        // BroadcastAPI.witnessUpdate translates it to the chain symbol.
+        const currentProps = (_selfWitness.props && typeof _selfWitness.props === 'object' && !Array.isArray(_selfWitness.props))
+            ? _selfWitness.props
+            : {};
+        const props = {
+            ...currentProps,
+            account_creation_fee: feeUnitsToAsset(feeUnits)
+        };
+
+        this.setState({
+            _propsBroadcasting: true,
+            _propsError: "",
+            _propsSuccess: false
+        });
+
+        try {
+            await api.broadcast.witnessUpdate({
+                owner: _currentAccount,
+                url,
+                blockSigningKey: signingKey,
+                props,
+                fee: feeUnitsToAsset(0)   // "0.000 PIXA" — registration fee, unused for an existing witness
+            });
+            if (!this._mounted) return;
+            this.setState({
+                _propsBroadcasting: false,
+                _propsSuccess: true
+            }, () => this.forceUpdate());
+        } catch (e) {
+            console.warn('[GDVMWitnesses] witnessUpdate failed:', e?.message);
+            if (!this._mounted) return;
+            this.setState({
+                _propsBroadcasting: false,
+                _propsError: e?.message || "Broadcast failed."
+            }, () => this.forceUpdate());
+        }
+    };
+
+    // Placeholder rows matching the 8-column witness table (rank, avatar+name,
+    // version, votes, block info, two mono columns, vote checkbox) so the table
+    // doesn't resize or jump when real rows arrive. Skeleton provides its own
+    // theme-aware shimmer.
+    _renderLoadingSkeleton = () => {
+        const { classes } = this.props;
+        return [0, 1, 2, 3, 4, 5].map((i) => (
+            <tr key={`sk-${i}`} aria-busy="true">
+                <td className={classes.monoText}><Skeleton variant="text" width={20} /></td>
+                <td>
+                    <div className={classes.witnessCell}>
+                        <Skeleton variant="circle" width={32} height={32} style={{ marginRight: 8 }} />
+                        <div className={classes.witnessInfo}>
+                            <Skeleton variant="text" width={90} height={14} />
+                            <Skeleton variant="text" width={140} height={11} />
+                        </div>
+                    </div>
+                </td>
+                <td><Skeleton variant="rect" width={44} height={16} style={{ borderRadius: 4 }} /></td>
+                <td className={classes.monoText}><Skeleton variant="text" width={70} /></td>
+                <td>
+                    <Skeleton variant="text" width={60} height={12} />
+                    <Skeleton variant="text" width={40} height={10} />
+                </td>
+                <td className={classes.monoText}><Skeleton variant="text" width={48} /></td>
+                <td className={classes.monoText}><Skeleton variant="text" width={48} /></td>
+                <td><Skeleton variant="rect" width={18} height={18} style={{ borderRadius: 3 }} /></td>
+            </tr>
+        ));
+    };
+
+    _renderWitnessRow = (witness, index) => {
+        const { classes } = this.props;
+        const { _myVotes, _currentAccount, _avatars } = this.state;
+        const name = witness.owner;
+        const voted = _myVotes.has(name);
+        const labelId = `witness-vote-${name}`;
+        const avatarUrl = _avatars[name] || '';
+        const apiNode = findApiNodeForWitness(witness);
+        const feed = getWitnessPriceFeed(witness);
+        const feedUpdated = formatTimeAgo(getWitnessFeedUpdatedAt(witness));
+
+        return (
+            <tr key={name}>
+                <td className={classes.monoText} style={{ fontWeight: "bold" }}>
+                    #{index + 1}
+                </td>
+                <td>
+                    <div className={classes.witnessCell}>
+                        <ButtonBase style={{ borderRadius: "12px" }}>
+                            <div
+                                className={`pixelated ${classes.witnessAvatar}`}
+                                style={{ backgroundImage: cssBackgroundImage(avatarUrl) }}
+                            />
+                        </ButtonBase>
+                        <div className={classes.witnessInfo}>
+                            <strong className={classes.witnessName}>
+                                @{name}
+                                {apiNode && (
+                                    <span
+                                        className={classes.apiBadge}
+                                        title={apiNode.url}
+                                    >
+                                        {t("words.api_available")}
+                                    </span>
+                                )}
+                            </strong>
+                            <span className={classes.witnessDescription}>
+                                {witness.url || ''}
+                            </span>
+                        </div>
+                    </div>
+                </td>
+                <td>
+                    <div className={classes.versionBadge}>
+                        {witness.running_version || '—'}
+                    </div>
+                </td>
+                <td className={classes.monoText}>{formatVotes(witness.votes)}</td>
+                <td>
+                    <div className={classes.blockInfo}>
+                        #{witness.last_confirmed_block_num || '—'}
+                    </div>
+                    <div className={classes.blockTime}>
+                        ({formatTimeAgo(witness.last_aslot_time || witness.created)})
+                    </div>
+                </td>
+                <td className={classes.monoText}>
+                    {witness.total_missed != null ? witness.total_missed : '—'}
+                </td>
+                <td className={classes.monoText} title={formatRawPriceFeed(feed)}>
+                    <div className={classes.blockInfo}>
+                        {formatPriceFeed(feed)}
+                    </div>
+                    {feedUpdated !== '—' && (
+                        <div className={classes.blockTime}>
+                            ({feedUpdated})
+                        </div>
+                    )}
+                </td>
+                <td>
+                    <Checkbox
+                        edge="end"
+                        checked={voted}
+                        disabled={!_currentAccount}
+                        onChange={(_e, checked) => this._handleToggleVote(name, checked)}
+                        inputProps={{ 'aria-labelledby': labelId }}
+                    />
+                </td>
+            </tr>
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Witness self-administration panel
+    // Rendered only when the logged-in account is itself an active witness.
+    // `account_creation_fee` and `url` are operator-editable; maximum_block_size
+    // and the interest rate are shown read-only and re-sent unchanged. Broadcast
+    // as witness_update, signed by the account's active key.
+    // ──────────────────────────────────────────────────────────────
+    _renderWitnessAdminPanel = () => {
+        const { classes } = this.props;
+        const {
+            _selfWitness,
+            _currentAccount,
+            _propsBaseFee,
+            _propsMaxBlockSize,
+            _propsInterestRate,
+            _propsUrl,
+            _propsBroadcasting,
+            _propsError,
+            _propsSuccess
+        } = this.state;
+
+        if (!_currentAccount || !_selfWitness) return null;
+
+        // `account_creation_fee` and `url` are validated in the handler and
+        // the signing key is resolved by the API layer, so the broadcast
+        // button only blocks while a broadcast is in flight.
+        const canBroadcast = !_propsBroadcasting;
+        const feeOutOfRange = _propsBaseFee !== "" && !isValidFeeUnits(feeInputToUnits(_propsBaseFee));
+
+        return (
+            <div className={classes.witnessPanel}>
+                <div className={classes.witnessPanelHeader}>
+                    <Typography className={classes.sectionTitle} style={{ marginBottom: 0 }}>
+                        {t("components.gdvmwitnesses.witness_properties")}
+                    </Typography>
+                    <span className={classes.witnessBadge}>{t("components.gdvmwitnesses.you_are_a_witness")}</span>
+                </div>
+                <Typography className={classes.sectionDescription}><T
+                    k="components.gdvmwitnesses.broadcast_a_new_set_of_chain_parameters"
+                    vars={{
+                        currentAccount: _currentAccount
+                    }} /></Typography>
+                <TextField
+                    className={classes.textFieldWrapper}
+                    label={t("components.gdvmwitnesses.account_creation_fee")}
+                    variant="outlined"
+                    fullWidth
+                    value={_propsBaseFee}
+                    onChange={this._handlePropsBaseFeeChange}
+                    disabled={_propsBroadcasting}
+                    error={feeOutOfRange}
+                    InputLabelProps={{ shrink: true }}
+                    InputProps={{
+                        inputComponent: NumberFormatCustom,
+                        inputProps: { currency: FEE_SYMBOL }
+                    }}
+                />
+                <TextField
+                    className={classes.textFieldWrapper}
+                    label={t("components.gdvmwitnesses.maximum_block_size_bytes")}
+                    variant="outlined"
+                    fullWidth
+                    disabled
+                    value={String(_propsMaxBlockSize)}
+                    InputLabelProps={{ shrink: true }}
+                />
+                <TextField
+                    className={classes.textFieldWrapper}
+                    label={t("components.gdvmwitnesses.pxs_interest_rate_basis_points_100_1")}
+                    variant="outlined"
+                    fullWidth
+                    disabled
+                    value={String(_propsInterestRate)}
+                    InputLabelProps={{ shrink: true }}
+                />
+                <TextField
+                    className={classes.textFieldWrapper}
+                    label={t("components.gdvmwitnesses.witness_url")}
+                    placeholder="https://your-witness.example"
+                    variant="outlined"
+                    fullWidth
+                    value={_propsUrl}
+                    onChange={this._handlePropsUrlChange}
+                    disabled={_propsBroadcasting}
+                    InputLabelProps={{ shrink: true }}
+                />
+                {_propsError ? (
+                    <div className={classes.broadcastError}>{_propsError}</div>
+                ) : null}
+                {_propsSuccess ? (
+                    <div className={classes.broadcastSuccess}>
+                        {t("components.gdvmwitnesses.properties_broadcast_successfully")}
+                    </div>
+                ) : null}
+                <div className={classes.buttonGroup} style={{ marginTop: "16px", marginBottom: 0 }}>
+                    <Button
+                        variant="contained"
+                        onClick={this._handleBroadcastWitnessProps}
+                        disabled={!canBroadcast}
+                    >
+                        {_propsBroadcasting ? (
+                            <>
+                                <CircularProgress size={16} style={{ marginRight: 8, color: "inherit" }} />
+                                {t("words.broadcasting")}
+                            </>
+                        ) : "Broadcast Properties"}
+                    </Button>
+                </div>
+            </div>
+        );
+    };
+
+    render() {
+        const { classes } = this.props;
+        const { _loading, _witnesses, _currentAccount } = this.state;
+        const canAct = !!_currentAccount;
+
+        return (
+            <DialogContent className={classes.dialogContent}>
+                <Typography className={classes.sectionTitle}>
+                    {t("components.gdvmwitnesses.vote_for_witnesses")}
+                </Typography>
+                <Typography className={classes.sectionDescription}>
+                    {t("words.you_can_delegate_your_vote_if_you")}
+                </Typography>
+                <div className={classes.textFieldWrapper}>
+                    <TextField
+                        id="custom-witness"
+                        label={t("words.username_2")}
+                        variant="outlined"
+                        fullWidth
+                        value={this.state.customWitness}
+                        onChange={this._handleCustomWitnessChange}
+                    />
+                </div>
+                <div className={classes.buttonGroup}>
+                    <Button
+                        variant="outlined"
+                        onClick={this._handleVoteForAccount}
+                        disabled={!canAct || !this.state.customWitness.trim()}
+                    >
+                        {t("words.vote_for_account")}
+                    </Button>
+                    <Button
+                        variant="contained"
+                        onClick={this._handleDelegateVote}
+                        disabled={!canAct || !this.state.customWitness.trim()}
+                    >
+                        {t("words.delegate_my_vote")}
+                    </Button>
+                </div>
+                {this._renderWitnessAdminPanel()}
+                <Typography className={classes.sectionTitle}>
+                    {t("words.top_witnesses")}
+                </Typography>
+                <Typography className={classes.sectionDescription}>
+                    {t("components.gdvmwitnesses.you_can_vote_for_up_to_30")}
+                </Typography>
+                <div
+                    className={classes.witnessTableWrapper}
+                    onTouchStart={this._handleTableTouchStart}
+                    onTouchMove={this._handleTableTouchStart}
+                >
+                    <table className={classes.witnessTable}>
+                        <thead>
+                        <tr>
+                            <th>{t("words.rank")}</th>
+                            <th>{t("words.witness")}</th>
+                            <th>{t("words.version")}</th>
+                            <th>{t("words.votes")}</th>
+                            <th>{t("words.last_block")}</th>
+                            <th>{t("words.miss")}</th>
+                            <th>{t("words.price_feed")}</th>
+                            <th>{t("words.voted")}</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {_loading ? (
+                            this._renderLoadingSkeleton()
+                        ) : _witnesses.length === 0 ? (
+                            <tr>
+                                <td colSpan={8} className={classes.emptyRow}>
+                                    {t("components.gdvmwitnesses.no_active_witnesses_found")}
+                                </td>
+                            </tr>
+                        ) : (
+                            _witnesses.map((w, i) => this._renderWitnessRow(w, i))
+                        )}
+                        </tbody>
+                    </table>
+                </div>
+            </DialogContent>
+        );
+    }
+}
+
+export default withLanguage(withStyles(styles)(GDVMWitnesses));

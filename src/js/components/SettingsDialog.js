@@ -33,6 +33,10 @@ import * as actions from "../actions/utils";
 import fuzzy from "fuzzy";
 
 import Globe from "./Globe";
+import GavelIcon from "@material-ui/icons/Gavel";
+import LicenseCustomizationDialog from "./LicenseCustomizationDialog";
+import { PIXA_LICENSE_BASE } from "../utils/pixa_license";
+import { hasDefaultLicense, resolveDefaultLicense, summarizeLicense } from "../utils/default_license";
 
 
 const useStyles = makeStyles({
@@ -108,6 +112,31 @@ const useStyles = makeStyles({
         margin: "16px 0px 8px 0px",
         width: "100%",
         textAlign: "right"
+    },
+    // ── Licensing ────────────────────────────────────────────────────────────
+    // One caption line of figures (rights granted per side, royalty,
+    // jurisdiction) above the action row. Tabular digits keep the counts
+    // from shifting as the user toggles rights and comes back.
+    licenseSummary: {
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "4px 16px",
+        margin: "8px 0px 0px 0px",
+        fontSize: 12,
+        lineHeight: 1.4,
+        color: "#9d9d9d",
+        fontVariantNumeric: "tabular-nums"
+    },
+    licenseSummaryValue: {
+        marginLeft: 4,
+        color: "#ffffff"
+    },
+    licenseActions: {
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: 8,
+        margin: "12px 0px 0px 0px"
     }
 });
 
@@ -384,6 +413,42 @@ const SettingsDialog = (props) => {
 
     const _on18_close = useCallback(() => set_18_open(false), []);
 
+    // ── Default NFT license ──────────────────────────────────────────────────
+    // One setting, `default_license`: the customization object the license
+    // editor emits, or null for the standard terms. NewPost starts every draft
+    // from it (see components/NewPost.js). The editor is the same
+    // LicenseCustomizationDialog NewPost uses, so what the author configures
+    // here is exactly what they would configure per post.
+    const [licenseOpen, setLicenseOpen] = useState(false);
+
+    const _handle_default_license_open = useCallback(() => {
+        actions.trigger_sfx("state-change_confirm-down");
+        setLicenseOpen(true);
+    }, []);
+
+    const _handle_default_license_close = useCallback(() => {
+        actions.trigger_sfx("labactive");
+        setLicenseOpen(false);
+    }, []);
+
+    const _handle_default_license_save = useCallback((customization) => {
+        actions.trigger_sfx("ui_lock");
+        // Terms saved here are the author's own, so a post that starts from
+        // them counts as customized (NewPost shows the "configured" chip and
+        // offers "Edit License" rather than "Configure License").
+        const next = { ...customization, isCustomized: true };
+        setSettings(prev => ({ ...prev, _default_license: next }));
+        setLicenseOpen(false);
+        api.set_settings({ default_license: next }, _on_settings_changed);
+    }, [_on_settings_changed]);
+
+    // Back to the standard terms — the same starting point a fresh install has.
+    const _handle_default_license_reset = useCallback(() => {
+        actions.trigger_sfx("ui_lock");
+        setSettings(prev => ({ ...prev, _default_license: null }));
+        api.set_settings({ default_license: null }, _on_settings_changed);
+    }, [_on_settings_changed]);
+
     const {
         _voting,
         _payout,
@@ -396,8 +461,24 @@ const SettingsDialog = (props) => {
         _mode,
         _pdf_page_size,
         _selected_locales_code,
-        _api_node_url
+        _api_node_url,
+        _default_license
     } = settings;
+
+    // What the editor opens on and what the summary line describes: the stored
+    // default brought up to date against the current license base (a right
+    // added or removed since it was saved is reflected), or the standard terms
+    // when nothing is configured. Memoized: the editor re-initializes whenever
+    // its initialCustomization identity changes.
+    const defaultLicenseConfigured = hasDefaultLicense(_default_license);
+    const defaultLicenseSeed = useMemo(
+        () => resolveDefaultLicense(_default_license, PIXA_LICENSE_BASE),
+        [_default_license]
+    );
+    const defaultLicenseSummary = useMemo(
+        () => summarizeLicense(defaultLicenseSeed, PIXA_LICENSE_BASE),
+        [defaultLicenseSeed]
+    );
 
     // Active endpoint — always a URL; falls back to the default so the picker
     // never renders "nothing selected" during the pre-hydration window.
@@ -533,11 +614,11 @@ const SettingsDialog = (props) => {
                         />
                         {
                             /**<FormControlLabel
-                            value="tri"
-                            control={<Radio color="primary" />}
-                            label={t("components.settings_dialog.painting_fast")}
-                            labelPlacement="bottom"
-                            onClick={() => _handle_renderer_switch_change("tri")}**/
+                             value="tri"
+                             control={<Radio color="primary" />}
+                             label={t("components.settings_dialog.painting_fast")}
+                             labelPlacement="bottom"
+                             onClick={() => _handle_renderer_switch_change("tri")}**/
                         }
                     </RadioGroup>
                     <FormControlLabel
@@ -646,6 +727,55 @@ const SettingsDialog = (props) => {
                             onClick={() => _handle_payout_switch_change("power")}
                         />
                     </RadioGroup>
+                    <Typography component={"h2"} variant={"h6"} className={classes.subTitle}>{t("components.settings_dialog.licensing")}</Typography>
+                    <Typography variant="caption" component="p" style={{ color: "#9d9d9d", margin: "0px", lineHeight: 1.4 }}>
+                        {t("components.settings_dialog.the_default_license_is_the_starting_point_for")}
+                    </Typography>
+                    {defaultLicenseConfigured ? (
+                        <div className={classes.licenseSummary}>
+                            <span>
+                                {t("components.settings_dialog.holder_rights")}
+                                <span className={classes.licenseSummaryValue}>
+                                    {defaultLicenseSummary.holderGranted}/{defaultLicenseSummary.holderTotal}
+                                </span>
+                            </span>
+                            <span>
+                                {t("components.settings_dialog.visitor_rights")}
+                                <span className={classes.licenseSummaryValue}>
+                                    {defaultLicenseSummary.visitorGranted}/{defaultLicenseSummary.visitorTotal}
+                                </span>
+                            </span>
+                            <span>
+                                {t("words.royalty")}
+                                <span className={classes.licenseSummaryValue}>{defaultLicenseSummary.royaltyPercentage}%</span>
+                            </span>
+                            <span>
+                                {t("words.jurisdiction")}
+                                <span className={classes.licenseSummaryValue}>{defaultLicenseSummary.jurisdiction || "—"}</span>
+                            </span>
+                        </div>
+                    ) : (
+                        <Typography variant="caption" component="p" style={{ color: "#9d9d9d", margin: "8px 0px 0px 0px", lineHeight: 1.4 }}>
+                            {t("components.settings_dialog.no_default_license_set_yet_new_posts")}
+                        </Typography>
+                    )}
+                    <div className={classes.licenseActions}>
+                        <Button
+                            variant="contained"
+                            color="primary"
+                            startIcon={<GavelIcon />}
+                            onClick={_handle_default_license_open}
+                        >
+                            {defaultLicenseConfigured
+                                ? t("components.settings_dialog.edit_default_license")
+                                : t("components.settings_dialog.configure_default_license")}
+                        </Button>
+                        {defaultLicenseConfigured && (
+                            <Button variant="text" color="primary" onClick={_handle_default_license_reset}>
+                                {t("components.settings_dialog.reset_to_standard_terms")}
+                            </Button>
+                        )}
+                    </div>
                     <Typography component={"h2"} variant={"h6"} className={classes.subTitle}>{t("components.settings_dialog.voting_power")}</Typography>
                     <Slider
                         color={"secondary"}
@@ -737,6 +867,14 @@ const SettingsDialog = (props) => {
                     </Button>
                 </DialogActions>
             </Dialog>
+            {/* Default NFT license editor — the same one NewPost opens per post. */}
+            <LicenseCustomizationDialog
+                open={licenseOpen}
+                onClose={_handle_default_license_close}
+                onSave={_handle_default_license_save}
+                licenseBase={PIXA_LICENSE_BASE}
+                initialCustomization={defaultLicenseSeed}
+            />
         </>
     );
 };

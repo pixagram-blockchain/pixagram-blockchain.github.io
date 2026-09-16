@@ -91,6 +91,29 @@ const _merge_object = (obj1, obj2) => {
     return Object.assign({}, obj1, obj2);
 };
 
+const _plain_object_or_null = (value) =>
+    (value && typeof value === "object" && !Array.isArray(value)) ? value : null;
+
+/**
+ * True when two setting VALUES are the same. Primitives compare with ===;
+ * plain objects and arrays compare structurally. Needed because a setting
+ * can be an object (the default NFT license, attachment previews) and every
+ * read deserializes a fresh one: compared by identity, an unchanged document
+ * would look changed on every re-read and defeat the dedupe-by-value that
+ * keeps an unchanged bag a no-op in pages/Index.js.
+ */
+export const same_setting_value = (a, b) => {
+    if (a === b) return true;
+    if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    const keysA = Object.keys(a);
+    if (keysA.length !== Object.keys(b).length) return false;
+    for (const key of keysA) {
+        if (!Object.prototype.hasOwnProperty.call(b, key) || !same_setting_value(a[key], b[key])) return false;
+    }
+    return true;
+};
+
 // ── API node: the settings store the endpoint URL, and who chose it ──────────
 // A node is identified by its URL and nothing else: the URL is unique by
 // construction, so the old `api_node` id was a second name for the same thing.
@@ -240,6 +263,14 @@ const _normalize_patch = (info, base) => {
     } else if (patch.api_node_source !== undefined) {
         patch.api_node_source = _valid_source(patch.api_node_source);
     }
+    // The default NFT license travels as one object — the customization the
+    // license editor emits — or null for "standard terms". This store does not
+    // know the license shape (utils/default_license.js resolves it against
+    // the current license base on read); it only refuses to persist anything
+    // that is neither.
+    if (patch.default_license !== undefined) {
+        patch.default_license = _plain_object_or_null(patch.default_license);
+    }
     return patch;
 };
 
@@ -280,6 +311,10 @@ const _get_default_settings = () => {
         activation_enabled: true,
         api_node_url: DEFAULT_API_NODE_URL,
         api_node_source: API_NODE_SOURCE.DEFAULT,
+        // Default NFT license for new posts (Settings → Licensing). null means
+        // "the standard Pixa NFT License terms" — NewPost then starts from
+        // createDefaultCustomization(PIXA_LICENSE_BASE) exactly as before.
+        default_license: null,
         attachment_previews: {},
         _id: "main_settings", // Fixed ID for settings document
         lastModified: Date.now()

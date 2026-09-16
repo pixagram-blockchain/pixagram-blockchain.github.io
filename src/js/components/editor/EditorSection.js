@@ -17,6 +17,7 @@ import EditorHeader from './EditorHeader';
 import FloatingFormatBar from './FloatingFormatBar';
 import RadialContextMenu from './RadialContextMenu';
 import ImageDropPlugin from './ImageDropPlugin';
+import ImageMovePlugin from './ImageMovePlugin';
 
 import { t, useLanguage } from "../../utils/text";
 
@@ -225,7 +226,34 @@ export const editorSectionStyles = (theme) => ({
             maxWidth: "100%",
             height: "auto",
             borderRadius: 12,
-            margin: "0.5em 0"
+            margin: "0.5em 0",
+            // Images can be dragged to a new position (ImageMovePlugin):
+            // say so, over the wrapper's text cursor.
+            cursor: "grab"
+        },
+        "& .lexical-image img:active": {
+            cursor: "grabbing"
+        },
+        // The image being dragged, until it is dropped (or the drag is
+        // cancelled) — the ghost under the pointer is the moving copy.
+        "& .lexical-image.is-dragging": {
+            opacity: 0.35
+        },
+        // Drop-side marks while an image is dragged over another image (or
+        // any decorator, e.g. a horizontal rule): the browser draws no
+        // insertion caret over non-editable content, so ImageMovePlugin
+        // highlights the edge the image would land on instead.
+        "& .is-drop-before": {
+            boxShadow: "-3px 0 0 0 rgba(255,255,255,0.9)"
+        },
+        "& .is-drop-after": {
+            boxShadow: "3px 0 0 0 rgba(255,255,255,0.9)"
+        },
+        "& .is-drop-above": {
+            boxShadow: "0 -3px 0 0 rgba(255,255,255,0.9)"
+        },
+        "& .is-drop-below": {
+            boxShadow: "0 3px 0 0 rgba(255,255,255,0.9)"
         }
     },
 });
@@ -290,6 +318,7 @@ const EditorBody = React.memo(({
             <ImageAutoConvertPlugin />
             <FloatingFormatBar onLink={onLink} onToggleBlockType={onToggleBlockType} />
             <ImageDropPlugin onImageFiles={onImageFiles} />
+            <ImageMovePlugin />
             <RadialContextMenu
                 onLink={onLink}
                 onImage={onImage}

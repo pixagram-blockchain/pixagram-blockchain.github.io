@@ -204,7 +204,8 @@ export default {
         "legal": "சட்டம்",
         "risks": "இடர்கள்",
         "bug_reports": "பிழை அறிக்கைகள்",
-        "community": "சமூகம்"
+        "community": "சமூகம்",
+        "development": "மேம்பாடு"
     },
 
     components: {
@@ -275,6 +276,14 @@ export default {
             "renounced": "துறப்பு",
             "balanced": "சமநிலை",
             "sovereign": "இறையாண்மை",
+            "licensing": "உரிமம்",
+            "the_default_license_is_the_starting_point_for": "இயல்புநிலை உரிமம் ஒவ்வொரு புதிய இடுகைக்கும் தொடக்கப் புள்ளியாகும். வெளியிடும் முன் ஒவ்வொரு இடுகைக்கும் விதிமுறைகளைத் தனித்தனியாக மாற்றலாம்.",
+            "no_default_license_set_yet_new_posts": "இயல்புநிலை உரிமம் இன்னும் அமைக்கப்படவில்லை — புதிய இடுகைகள் Pixa NFT உரிமத்தின் நிலையான விதிமுறைகளிலிருந்து தொடங்கும்.",
+            "holder_rights": "வைத்திருப்பவர் உரிமைகள்:",
+            "visitor_rights": "பார்வையாளர் உரிமைகள்:",
+            "configure_default_license": "இயல்புநிலை உரிமத்தை அமை",
+            "edit_default_license": "இயல்புநிலை உரிமத்தைத் திருத்து",
+            "reset_to_standard_terms": "நிலையான விதிமுறைகளுக்கு மீட்டமை",
             "always_ask_before_voting": "வாக்களிக்கும் முன் எப்போதும் கேட்கவும்",
             "reset_custom_endpoint": "தனிப்பயன் எண்ட்பாயின்ட்டை மீட்டமை",
             "set_custom_endpoint": "தனிப்பயன் எண்ட்பாயின்ட்டை அமை",
@@ -777,6 +786,7 @@ export default {
             "convert_picture": "படத்தை மாற்று",
             "create_image": "படத்தை உருவாக்கு",
             "description_optional": "விளக்கம் (விருப்பத்தேர்வு)",
+            "drop_an_image_here_or_paste_it_with": "படத்தை இங்கே விடுங்கள் அல்லது {{shortcut}} மூலம் ஒட்டவும்",
             "wizard_of_creation": "படைப்பின் மந்திரவாதி",
             "back": "பின்செல்",
             "are_you_sure": "உறுதியாகவா?",
@@ -2038,6 +2048,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "பரவலாக்கப்பட்ட Pixa Fund (DPF) என்பது ஆன்-செயின் பரவலாக்கப்பட்ட தன்னாட்சி அமைப்புக் கருவூலம்; பயனர்கள் நிதிக்கான முன்மொழிவுகளைச் சமர்ப்பித்து, எவை நிதியளிக்கப்பட வேண்டும் என வாக்களிக்கலாம்."
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "நீங்கள் முன்பு அனுப்பியவர்கள்",
             "what_is_this_transfer_for": "இந்தப் பரிமாற்றம் எதற்காக?",
             "make_this_a_recurring_transfer": "இதைத் தொடர் பரிமாற்றமாக்கு",
             "every_hours": "ஒவ்வொரு (மணிநேரம்)",
@@ -2321,7 +2332,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "சூழலின் பாதுகாப்புக்கான இடர் மதிப்பீடு, அச்சுறுத்தல் பகுப்பாய்வு மற்றும் தணிப்பு உத்திகள்.",
             "security_audits_vulnerability_reports_and_best_p": "பாதுகாப்புத் தணிக்கைகள், பாதிப்பு அறிக்கைகள் மற்றும் பாதுகாப்பான பயன்பாட்டுக்கான சிறந்த நடைமுறைகள்.",
             "report_bugs_technical_issues_and_track_their": "பிழைகள் மற்றும் தொழில்நுட்பச் சிக்கல்களைப் புகாரளித்து, அவற்றின் தீர்வு நிலையைக் கண்காணியுங்கள்.",
-            "community_events_meetups_collaborations_and_soci": "சமூக நிகழ்வுகள், சந்திப்புகள், கூட்டுப் பணிகள் மற்றும் சமூக முயற்சிகள்."
+            "development_roadmap_releases_code_contributions": "மேம்பாட்டுத் திட்டவரைவு, வெளியீடுகள், குறியீட்டுப் பங்களிப்புகள் மற்றும் தொழில்நுட்ப ஆவணங்கள்."
         },
         "gdmetrics": {
             "key_metrics": "முக்கிய அளவீடுகள்",

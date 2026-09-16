@@ -6,6 +6,7 @@ import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext
 import { COMMAND_PRIORITY_LOW } from 'lexical';
 import { DRAG_DROP_PASTE } from '@lexical/rich-text';
 
+import { IMAGE_MOVE_MIME } from './ImageMovePlugin';
 import { t, useLanguage } from "../../utils/text";
 
 /**
@@ -23,6 +24,12 @@ import { t, useLanguage } from "../../utils/text";
  * 2. A purely visual overlay while a file drag hovers the editor. The
  *    overlay has pointer-events: none and we never preventDefault here —
  *    Lexical owns the actual drag/drop event handling.
+ *
+ * Dragging an image that is ALREADY in the post (ImageMovePlugin) is not a
+ * file drag, even though Chrome lists 'Files' in `dataTransfer.types` for
+ * every <img> drag: the move stamps IMAGE_MOVE_MIME on the DataTransfer and
+ * the overlay stays down for it. ImageMovePlugin also intercepts the drop
+ * ahead of rich-text, so DRAG_DROP_PASTE never sees the implicit file.
  */
 
 const OVERLAY_STYLE_BASE = {
@@ -77,10 +84,17 @@ const ImageDropPlugin = ({ onImageFiles }) => {
             }
             if (!rootElement) return;
 
+            // `types` is a DOMStringList in some browsers, an array in others —
+            // hence the indexOf.call. Only `types` is readable during a drag
+            // (getData() is empty until drop), which is why the move is
+            // detected by its MIME type being listed, not by its payload.
             const isFileDrag = (e) => {
                 const types = e.dataTransfer && e.dataTransfer.types;
-                return Boolean(types) &&
-                    Array.prototype.indexOf.call(types, 'Files') !== -1;
+                if (!types) return false;
+                // An image of the post being repositioned — Chrome lists
+                // 'Files' for that drag too, but it is not an upload.
+                if (Array.prototype.indexOf.call(types, IMAGE_MOVE_MIME) !== -1) return false;
+                return Array.prototype.indexOf.call(types, 'Files') !== -1;
             };
             const show = () => {
                 const r = rootElement.getBoundingClientRect();

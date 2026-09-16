@@ -204,7 +204,8 @@ export default {
         "legal": "Lakiasiat",
         "risks": "Riskit",
         "bug_reports": "Virheraportit",
-        "community": "Yhteisö"
+        "community": "Yhteisö",
+        "development": "Kehitys"
     },
 
     components: {
@@ -275,6 +276,14 @@ export default {
             "renounced": "Luopunut",
             "balanced": "Tasapainoinen",
             "sovereign": "Suvereeni",
+            "licensing": "Lisensointi",
+            "the_default_license_is_the_starting_point_for": "Oletuslisenssi on jokaisen uuden julkaisun lähtökohta. Voit silti muokata ehtoja julkaisukohtaisesti ennen julkaisemista.",
+            "no_default_license_set_yet_new_posts": "Oletuslisenssiä ei ole vielä asetettu — uudet julkaisut alkavat Pixa NFT -lisenssin vakioehdoista.",
+            "holder_rights": "Haltijan oikeudet:",
+            "visitor_rights": "Vierailijan oikeudet:",
+            "configure_default_license": "Määritä oletuslisenssi",
+            "edit_default_license": "Muokkaa oletuslisenssiä",
+            "reset_to_standard_terms": "Palauta vakioehdot",
             "always_ask_before_voting": "Kysy aina ennen äänestämistä",
             "reset_custom_endpoint": "Palauta mukautettu päätepiste",
             "set_custom_endpoint": "Aseta mukautettu päätepiste",
@@ -777,6 +786,7 @@ export default {
             "convert_picture": "Muunna kuva",
             "create_image": "Luo kuva",
             "description_optional": "Kuvaus (valinnainen)",
+            "drop_an_image_here_or_paste_it_with": "Pudota kuva tähän tai liitä se painamalla {{shortcut}}",
             "wizard_of_creation": "Luomisen velho",
             "back": "Takaisin",
             "are_you_sure": "Oletko varma?",
@@ -2038,6 +2048,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "Hajautettu Pixa-rahasto (DPF) on ketjussa toimiva hajautetun autonomisen organisaation kassa, jonka avulla käyttäjät voivat jättää rahoitusehdotuksia ja äänestää siitä, mitkä ehdotukset tulisi rahoittaa."
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "Henkilöt, joille olet lähettänyt aiemmin",
             "what_is_this_transfer_for": "Mitä varten tämä siirto on?",
             "make_this_a_recurring_transfer": "Tee tästä toistuva siirto",
             "every_hours": "Joka (tuntia)",
@@ -2321,7 +2332,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "Riskien arviointi, uhka-analyysi ja lieventämisstrategiat ekosysteemin turvallisuuden hyväksi.",
             "security_audits_vulnerability_reports_and_best_p": "Tietoturva-auditoinnit, haavoittuvuusraportit ja turvallisen käytön parhaat käytännöt.",
             "report_bugs_technical_issues_and_track_their": "Ilmoita bugeista ja teknisistä ongelmista ja seuraa niiden ratkaisun etenemistä.",
-            "community_events_meetups_collaborations_and_soci": "Yhteisön tapahtumat, tapaamiset, yhteistyöt ja sosiaaliset aloitteet."
+            "development_roadmap_releases_code_contributions": "Kehityssuunnitelma, julkaisut, koodikontribuutiot ja tekninen dokumentaatio."
         },
         "gdmetrics": {
             "key_metrics": "Avainmetriikat",

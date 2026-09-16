@@ -204,7 +204,8 @@ export default {
         "legal": "Juridisch",
         "risks": "Risico's",
         "bug_reports": "Bugmeldingen",
-        "community": "Community"
+        "community": "Community",
+        "development": "Ontwikkeling"
     },
 
     components: {
@@ -275,6 +276,14 @@ export default {
             "renounced": "Afgestaan",
             "balanced": "Evenwichtig",
             "sovereign": "Soeverein",
+            "licensing": "Licenties",
+            "the_default_license_is_the_starting_point_for": "De standaardlicentie is het uitgangspunt voor elke nieuwe post. Je kunt de voorwaarden per post nog steeds aanpassen voordat je publiceert.",
+            "no_default_license_set_yet_new_posts": "Nog geen standaardlicentie ingesteld — nieuwe posts beginnen met de standaardvoorwaarden van de Pixa NFT-licentie.",
+            "holder_rights": "Rechten van houders:",
+            "visitor_rights": "Rechten van bezoekers:",
+            "configure_default_license": "Standaardlicentie instellen",
+            "edit_default_license": "Standaardlicentie bewerken",
+            "reset_to_standard_terms": "Terugzetten naar standaardvoorwaarden",
             "always_ask_before_voting": "Altijd vragen vóór het stemmen",
             "reset_custom_endpoint": "Aangepast eindpunt resetten",
             "set_custom_endpoint": "Aangepast eindpunt instellen",
@@ -777,6 +786,7 @@ export default {
             "convert_picture": "Afbeelding converteren",
             "create_image": "Afbeelding maken",
             "description_optional": "Beschrijving (optioneel)",
+            "drop_an_image_here_or_paste_it_with": "Sleep een afbeelding hierheen of plak er een met {{shortcut}}",
             "wizard_of_creation": "Wizard van de Schepping",
             "back": "Terug",
             "are_you_sure": "Weet je het zeker?",
@@ -2038,6 +2048,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "Het Decentralized Pixa Fund (DPF) is de on-chain schatkist van een gedecentraliseerde autonome organisatie, waarmee gebruikers financieringsvoorstellen kunnen indienen en kunnen stemmen over welke voorstellen gefinancierd moeten worden."
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "Mensen naar wie je eerder hebt overgeboekt",
             "what_is_this_transfer_for": "Waarvoor is deze overboeking?",
             "make_this_a_recurring_transfer": "Maak hier een terugkerende overboeking van",
             "every_hours": "Elke (uren)",
@@ -2321,7 +2332,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "Risicobeoordeling, dreigingsanalyse en mitigatiestrategieën voor de veiligheid van het ecosysteem.",
             "security_audits_vulnerability_reports_and_best_p": "Beveiligingsaudits, kwetsbaarheidsmeldingen en best practices voor veilig gebruik.",
             "report_bugs_technical_issues_and_track_their": "Meld bugs en technische problemen en volg de status van hun oplossing.",
-            "community_events_meetups_collaborations_and_soci": "Community-evenementen, meetups, samenwerkingen en sociale initiatieven."
+            "development_roadmap_releases_code_contributions": "Ontwikkelingsroadmap, releases, codebijdragen en technische documentatie."
         },
         "gdmetrics": {
             "key_metrics": "Kernstatistieken",

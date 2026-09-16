@@ -31,7 +31,9 @@ import {isArtworkPixelart, normalizeUpload, processImageFile, quantizeImageData}
 import JSLoader from "../utils/JSLoader";
 import Fade from "@material-ui/core/Fade";
 import LicenseCustomizationDialog from "./LicenseCustomizationDialog";
-import { PIXA_LICENSE_BASE, createDefaultCustomization } from "../utils/pixa_license";
+import { PIXA_LICENSE_BASE } from "../utils/pixa_license";
+import { resolveDefaultLicense } from "../utils/default_license";
+import { get_cached_settings as getCachedSettings, subscribe as subscribeSettings, same_setting_value as sameSettingValue } from "../utils/settings";
 import Chip from "@material-ui/core/Chip";
 import GavelIcon from "@material-ui/icons/Gavel";
 import CheckCircleIcon from "@material-ui/icons/CheckCircle";
@@ -155,14 +157,14 @@ const validateTitle = (title) => {
     return { valid: true, error: null };
 };
 
+// The description is optional: a blank (or whitespace-only) description is
+// valid and is published as an empty string. Only the length ceiling applies.
 const validateDescription = (description) => {
-    if (!description || !description.trim()) {
-        return { valid: false, error: "Description is required" };
-    }
-    if (description.length > VALIDATION.DESCRIPTION_MAX_LENGTH) {
+    const value = description || "";
+    if (value.length > VALIDATION.DESCRIPTION_MAX_LENGTH) {
         return { valid: false, error: t("components.new_post.description_must_be_characters_or_less_currently", {
                 DESCRIPTION_MAX_LENGTH: VALIDATION.DESCRIPTION_MAX_LENGTH,
-                description_count: description.length
+                description_count: value.length
             }) };
     }
     return { valid: true, error: null };
@@ -852,6 +854,48 @@ const extractImageFile = (event) => {
     return inputFiles[0] || null;
 };
 
+// Image files the upload zone accepts, by extension. Only consulted for files
+// whose MIME type isn't an image/* one — e.g. HEIC photos copied in a file
+// manager, which browsers often hand over untyped (the file input's accept
+// list names .heic/.heif explicitly for the same reason).
+const IMAGE_FILE_NAME_PATTERN = /\.(png|jpe?g|gif|webp|bmp|avif|svg|heic|heif)$/i;
+
+const isImageFile = (file) => !!file && (
+    (typeof file.type === 'string' && file.type.startsWith('image/')) ||
+    (typeof file.name === 'string' && IMAGE_FILE_NAME_PATTERN.test(file.name))
+);
+
+// Extract an image file from a clipboard `paste` event, or null when the
+// clipboard holds no image (plain text, HTML, non-image files…). Unlike
+// extractImageFile (drop / file input) this never falls back to the first
+// non-image file: a paste is only taken over when it clearly is an image.
+const extractClipboardImageFile = (event) => {
+    const clipboard = event?.clipboardData;
+    if (!clipboard) return null;
+
+    // 1. items — a bitmap from a screenshot tool or a browser's "Copy image"
+    //    arrives here as a kind: 'file' entry (Chrome, Firefox, Safari)
+    const items = clipboard.items;
+    if (items && items.length > 0) {
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (item?.kind !== 'file') continue;
+            const file = item.getAsFile?.();
+            if (isImageFile(file)) return file;
+        }
+    }
+
+    // 2. files — an image file copied in the OS file manager (Explorer, Finder)
+    const files = clipboard.files;
+    if (files && files.length > 0) {
+        for (let i = 0; i < files.length; i++) {
+            if (isImageFile(files[i])) return files[i];
+        }
+    }
+
+    return null;
+};
+
 // ============================================================================
 // STATE REDUCER
 // ============================================================================
@@ -921,9 +965,10 @@ const initialState = {
     // chain reconstructs — the "Missing Posting Authority" error on publish.
     //
     // The mount effect then overwrites licenseCustomization with the real
-    // value from createDefaultCustomization() + every right toggled to true,
-    // but even if publish fires before that effect runs, the placeholder
-    // below is already a complete, serialisable object.
+    // value from resolveDefaultLicense() — the default license configured in
+    // Settings, or the base defaults when none is set — but even if publish
+    // fires before that effect runs, the placeholder below is already a
+    // complete, serialisable object.
     licenseBase: null,
     licenseCustomization: {
         version: '1.0',
@@ -1133,6 +1178,24 @@ const LOADER_STARS = [
 // Concave 4-point "sparkle" glyph (the AI-style twinkle), 0..24 viewBox.
 const STAR_PATH = "M12 0.5 Q13.2 10.8 23.5 12 Q13.2 13.2 12 23.5 Q10.8 13.2 0.5 12 Q10.8 10.8 12 0.5 Z";
 
+// ── Drop / paste hint under the upload button ──────────────────────────────
+// The shortcut label is interpolated verbatim into the translated sentence
+// (components.new_post.drop_an_image_here_or_paste_it_with), so it is never
+// translated: ⌘V on Apple platforms, Ctrl+V everywhere else. The hint is only
+// shown on keyboard-and-pointer devices — a Ctrl+V hint on a phone is noise.
+// Both are computed once at module load; neither can change mid-session.
+const IS_APPLE_PLATFORM = (() => {
+    if (typeof navigator === "undefined") return false;
+    const hints = [navigator.userAgentData?.platform, navigator.platform, navigator.userAgent]
+        .filter(Boolean)
+        .join(" ");
+    return /Mac|iPhone|iPad|iPod/i.test(hints);
+})();
+const PASTE_SHORTCUT_LABEL = IS_APPLE_PLATFORM ? "⌘V" : "Ctrl+V";
+const SHOW_DROP_PASTE_HINT = typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia("(hover: hover) and (pointer: fine)").matches
+    : false;
+
 // Upload Zone Component — visual only, drag/drop is handled by a Portal overlay
 const UploadZone = memo(({
                              classes,
@@ -1313,6 +1376,15 @@ const UploadZone = memo(({
                             <Fade in timeout={900}>
                                 <p style={{ textAlign: "center", color: "#a7a7a7" }}>{message}</p>
                             </Fade>
+                            {SHOW_DROP_PASTE_HINT && (
+                                <Fade in timeout={1200}>
+                                    <p style={{ textAlign: "center", color: "#777", fontSize: "0.8rem", marginTop: -8 }}>
+                                        {t("components.new_post.drop_an_image_here_or_paste_it_with", {
+                                            shortcut: PASTE_SHORTCUT_LABEL
+                                        })}
+                                    </p>
+                                </Fade>
+                            )}
                         </div>
                     </Fade>)
                 )}
@@ -1941,7 +2013,7 @@ const PublishForm = memo(({
                 </Box>
                 <TextField
                     style={{ marginTop: 16 }}
-                    label={t("words.description")}
+                    label={t("components.new_post.description_optional")}
                     multiline
                     minRows={6}
                     value={description}
@@ -2111,6 +2183,17 @@ function NewPost(props) {
     const currentStepRef = useRef(0);
     const inputFileRef = useRef(null);
     const processFileUploadRef = useRef(null);
+    // True from a clipboard paste until processFileUpload settles, so a quick
+    // double Ctrl+V can't start two conversions of the same image.
+    const pasteInFlightRef = useRef(false);
+    // Default NFT license (Settings → Licensing). `defaultLicenseRef` holds the
+    // stored value last applied — undefined until the first fill — so the
+    // settings stream is deduped by value (every read deserializes a fresh
+    // object). `licenseTouchedRef` is set once the user edits THIS draft's
+    // license by hand: from then on a default saved in Settings waits for the
+    // next draft (resetProps clears it) instead of overwriting their choice.
+    const defaultLicenseRef = useRef(undefined);
+    const licenseTouchedRef = useRef(false);
 
     // Drag overlay state
     const [isDraggingFile, setIsDraggingFile] = useState(false);
@@ -2164,27 +2247,45 @@ function NewPost(props) {
     // EFFECTS
     // ========================================================================
 
-    // Initialize license on mount
+    // Initialize the license on mount and keep it on the default from Settings.
+    //
+    // This component stays mounted between posts, so a one-shot init would
+    // miss a default license configured after boot (and, on a cold settings
+    // cache, the one already stored). The draft therefore follows the settings
+    // stream: the stored `default_license` (null = standard terms) is resolved
+    // against the current license base — see utils/default_license.js — and
+    // applied whenever it changes by value, unless the user has already edited
+    // this draft's license by hand.
     useEffect(() => {
         mountedRef.current = true;
 
-        const initLicense = () => {
-            const base = PIXA_LICENSE_BASE;
-            const defaultCustomization = createDefaultCustomization(base);
+        const applyDefaultLicense = (stored) => {
+            if (defaultLicenseRef.current !== undefined && sameSettingValue(defaultLicenseRef.current, stored)) return;
+            defaultLicenseRef.current = stored;
+            if (licenseTouchedRef.current) return; // their edits win; next draft picks it up
 
             dispatch({
                 type: actionTypes.SET_MULTIPLE,
                 payload: {
-                    licenseBase: base,
-                    licenseCustomization: defaultCustomization,
+                    licenseBase: PIXA_LICENSE_BASE,
+                    licenseCustomization: resolveDefaultLicense(stored, PIXA_LICENSE_BASE),
                 },
             });
         };
 
-        initLicense();
+        // Synchronous first fill (standard terms while the cache is cold or
+        // nothing is configured), then the live stream — subscribe() replays
+        // the current bag at once when the cache is warm, and every later
+        // write, the Settings dialog saving a default license included, lands
+        // here.
+        applyDefaultLicense(getCachedSettings().default_license);
+        const unsubscribe = subscribeSettings((bag) => {
+            if (mountedRef.current && bag) applyDefaultLicense(bag.default_license);
+        });
 
         return () => {
             mountedRef.current = false;
+            unsubscribe();
         };
     }, []);
 
@@ -2387,6 +2488,53 @@ function NewPost(props) {
             dragCounterRef.current = 0;
         };
     }, []);
+
+    // Clipboard paste on the first step: copy an image (a screenshot, a picture
+    // copied from another app or web page, or an image file copied in the file
+    // manager) and press Ctrl/Cmd+V anywhere in the dialog to use it as the
+    // upload. Only image payloads are intercepted, so pasting text into the
+    // description field keeps working. Mirrors the drop path: same guards
+    // (step 0, nothing loaded yet) and the same processFileUpload entry point,
+    // reached through the refs so the listener never goes stale. The listener
+    // only exists while the dialog is open — this component stays mounted
+    // between posts, so `open` is what scopes it.
+    useEffect(() => {
+        if (!open) return;
+
+        const onDocPaste = (e) => {
+            if (currentStepRef.current !== 0 || inputFileRef.current) return;
+            if (pasteInFlightRef.current) return;
+
+            const imageFile = extractClipboardImageFile(e);
+            if (!imageFile || !processFileUploadRef.current) return;
+
+            // It's an image for us: keep the browser from also pasting its
+            // text/HTML alternative into a focused text field.
+            e.preventDefault();
+
+            // Show the "Convert picture" tab — the one with the upload zone,
+            // its preview and the conversion progress — in case the user was
+            // on the "Create image" tab when pasting.
+            dispatch({ type: actionTypes.SET_FIELD, field: 'tabValue', value: 0 });
+
+            pasteInFlightRef.current = true;
+            (async () => {
+                try {
+                    await processFileUploadRef.current(imageFile);
+                } catch (_) {
+                    // processFileUpload reports its own errors (snackbar)
+                } finally {
+                    pasteInFlightRef.current = false;
+                }
+            })();
+        };
+
+        document.addEventListener('paste', onDocPaste);
+        return () => {
+            document.removeEventListener('paste', onDocPaste);
+            pasteInFlightRef.current = false;
+        };
+    }, [open]);
 
     // Quantize source: the full-resolution ImageData the quantize dialog and
     // handlers operate on.
@@ -2710,11 +2858,16 @@ function NewPost(props) {
         if (preloadTimeoutRef.current) clearTimeout(preloadTimeoutRef.current);
         if (debounceTimeoutRef.current) clearTimeout(debounceTimeoutRef.current);
 
-        const defaultCustomization = licenseBase ? createDefaultCustomization(licenseBase) : null;
+        // A fresh draft starts from the default license configured in Settings
+        // (standard terms when none is set). Read live from the settings cache
+        // so a default saved while this dialog was open — and held back because
+        // the user had edited the license by hand — applies now.
+        licenseTouchedRef.current = false;
+        const base = licenseBase || PIXA_LICENSE_BASE;
         dispatch({
             type: actionTypes.RESET,
-            licenseBase,
-            defaultCustomization
+            licenseBase: base,
+            defaultCustomization: resolveDefaultLicense(getCachedSettings().default_license, base)
         });
     }, [inputFileUrl, licenseBase]);
 
@@ -2955,7 +3108,7 @@ function NewPost(props) {
                 format: 'image',
                 tags: tags,
                 image: [],
-                description: description || '',
+                description: (description || '').trim(),
                 nsfw: !!nsfw,
                 license: licensePayload,
             };
@@ -3088,6 +3241,9 @@ function NewPost(props) {
     }, []);
 
     const handleSaveLicense = useCallback((customization) => {
+        // This draft's terms are the user's own now: a default license saved
+        // in Settings from here on waits for the next draft (see resetProps).
+        licenseTouchedRef.current = true;
         dispatch({
             type: actionTypes.SET_MULTIPLE,
             payload: {

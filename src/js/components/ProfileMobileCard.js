@@ -62,6 +62,15 @@ const ProfileMobileCard = React.memo(({
         onTabChange(e, v);
     }, [onTabChange]);
 
+    // Tabs.onChange is (event, value) but SwipeableViews.onChangeIndex is
+    // (index, indexLatest, meta). Wiring handleTabChange straight into
+    // onChangeIndex handed the parent the PREVIOUS index as the value, so a
+    // swipe moved the slide but the tab never followed. Same shape as
+    // MetadataPanel's (v) => handleTabChange({}, v).
+    const handleSwipeIndexChange = React.useCallback((index) => {
+        handleTabChange({}, index);
+    }, [handleTabChange]);
+
     // The Edit button sits INSIDE the big picture; its click must not bubble
     // into the picture's ButtonBase and open the viewer as well.
     const handleEditClick = React.useCallback((e) => {
@@ -193,7 +202,7 @@ const ProfileMobileCard = React.memo(({
                                             resistance={true}
                                             springConfig={{tension: 450, friction: 60, duration: '120ms', easeFunction: 'cubic-bezier(0.280, 0.840, 0.420, 1)', delay: '5ms'}}
                                             index={tabValue}
-                                            onChangeIndex={handleTabChange}
+                                            onChangeIndex={handleSwipeIndexChange}
                                             disabled={false}
                                             key={"swipe-able-view-profile"}>
                                 <div key={"communities"} className={classes.metadataSwipeableViews}>

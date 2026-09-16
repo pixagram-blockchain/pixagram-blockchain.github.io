@@ -6,7 +6,6 @@ import withStyles from '@material-ui/core/styles/withStyles';
 import Card from '@material-ui/core/Card';
 import CardHeader from '@material-ui/core/CardHeader';
 import CardContent from '@material-ui/core/CardContent';
-import Avatar from '@material-ui/core/Avatar';
 import IconButton from '@material-ui/core/IconButton';
 import Tooltip from '@material-ui/core/Tooltip';
 import Typography from '@material-ui/core/Typography';
@@ -20,6 +19,7 @@ import { voteSign } from '../utils/voteValue';
 import { votesWithLocalVote } from '../utils/voteSync';
 import PaperCardActions from './PaperCardActions';
 import ProfileHoverAnchor from './ProfileHoverCard';
+import FadeAvatar from './FadeAvatar';
 
 import { t, useLanguage } from "../utils/text";
 
@@ -63,6 +63,11 @@ const styles = theme => ({
             transition: 'filter 175ms cubic-bezier(0.4, 0, 0.2, 1) !important',
         },
     },
+    // `noMargin`: drops the card's own spacing for hosts whose masonry spacer
+    // already separates the cells. Declared after `card` so it wins.
+    cardNoMargin: {
+        margin: 0,
+    },
     cardLayout: {
         display: 'flex',
         minHeight: '200px',
@@ -84,17 +89,26 @@ const styles = theme => ({
             display: 'none',
         },
     },
-    imageContainerMobile: {
-        display: 'none',
-        width: '100%',
-        height: '180px',
-        marginRight: 0,
-        marginLeft: 0,
-        marginTop: 0,
-        marginBottom: 16,
+    // Cover between the header and the excerpt. It takes over from the side
+    // cover exactly where the side cover's media query hides it (< 1200px),
+    // or at every width when the card is `stacked`. The width is explicit
+    // because a <button> (ButtonBase) does not stretch to its container, and
+    // aspect-ratio gives the box its height before the image has loaded —
+    // CellMeasurer reads the card height once, so it must not grow on load.
+    imageContainerInline: {
+        display: 'block',
+        width: 'calc(100% - 32px)',
+        aspectRatio: '2 / 1',
+        maxHeight: 240,
+        margin: '8px 16px',
         flexShrink: 0,
         position: 'relative',
         cursor: 'pointer',
+    },
+    // Must stay declared AFTER imageContainerInline so `display: none` wins
+    // over its `display: block` above the breakpoint.
+    imageContainerInlineResponsive: {
+        display: 'none',
         '@media (max-width: 1199px)': {
             display: 'block',
         },
@@ -107,6 +121,19 @@ const styles = theme => ({
         '@media (max-width: 1199px)': {
             minHeight: 'auto',
         },
+    },
+    // `stacked`: the column layout at EVERY width. A masonry host measures
+    // the card once and never again unless its column width changes, and
+    // the personal feed's column is capped at 720px, so a viewport crossing
+    // the 1200px breakpoint would otherwise flip the min-heights above with
+    // no re-measure to follow. Declared after cardLayout / contentContainer
+    // so they win at equal specificity.
+    cardLayoutStacked: {
+        flexDirection: 'column',
+        minHeight: 'auto',
+    },
+    contentContainerStacked: {
+        minHeight: 'auto',
     },
     cardHeader: {
         padding: "16px 16px 8px 16px",
@@ -275,6 +302,12 @@ function PaperCardBlog({
                            api,
                            onVoteChange,
                            muted = false,
+                           // Always put the cover between header and excerpt instead of
+                           // switching on the viewport — for narrow fixed-width columns
+                           // (the personal feed caps its column at 720px).
+                           stacked = false,
+                           // No outer margin (the card's default 24px top margin is removed).
+                           noMargin = false,
                        }) {
     // Behind memo(withStyles(...)(PaperCardBlog)) — a language swap changes no
     // prop, so without this the reading-time line keeps its old wording.
@@ -475,18 +508,17 @@ function PaperCardBlog({
         <Card
             ref={rootRef}
             key={id}
-            className={`${classes.card}${muted ? ' ' + classes.cardMuted : ''}`}
+            className={`${classes.card}${muted ? ' ' + classes.cardMuted : ''}${noMargin ? ' ' + classes.cardNoMargin : ''}`}
             style={style}
         >
-            <div className={classes.cardLayout}>
-                <div className={classes.contentContainer}>
+            <div className={stacked ? `${classes.cardLayout} ${classes.cardLayoutStacked}` : classes.cardLayout}>
+                <div className={stacked ? `${classes.contentContainer} ${classes.contentContainerStacked}` : classes.contentContainer}>
                     <CardHeader
                         className={classes.cardHeader}
                         avatar={
-                            <Avatar
+                            <FadeAvatar
                                 onClick={() => openAuthor(author.username)}
                                 src={author.image}
-                                imgProps={{ decoding: 'async', loading: 'lazy' }}
                             />
                         }
                         action={
@@ -537,10 +569,13 @@ function PaperCardBlog({
                         }
                     />
 
-                    {/* Mobile image - appears below header */}
-                    {false && data.image && (
+                    {/* Inline cover — below the header, above the excerpt. Shown when
+                        the side cover is hidden (< 1200px), or always when stacked. */}
+                    {data.image && (
                         <ButtonBase
-                            className={classes.imageContainerMobile}
+                            className={stacked
+                                ? classes.imageContainerInline
+                                : `${classes.imageContainerInline} ${classes.imageContainerInlineResponsive}`}
                             onClick={handleOpen}
                             disableRipple
                         >
@@ -586,8 +621,8 @@ function PaperCardBlog({
                     />
                 </div>
 
-                {/* Desktop image - appears on the side */}
-                {data.image && (
+                {/* Side cover — hidden below 1200px by its media query */}
+                {!stacked && data.image && (
                     <ButtonBase
                         className={classes.imageContainer}
                         onClick={handleOpen}
@@ -601,6 +636,23 @@ function PaperCardBlog({
     );
 }
 
+// Same shallow style compare PaperCard uses: the masonry hands every cell a
+// fresh style object per render, so identity would re-render on each
+// scroll tick, while ignoring it (as this comparator did) is the opposite
+// bug — see below.
+function shallowEqual(a, b) {
+    if (a === b) return true;
+    if (typeof a !== 'object' || typeof b !== 'object' || !a || !b) return false;
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) return false;
+    for (let i = 0; i < keysA.length; i++) {
+        const k = keysA[i];
+        if (a[k] !== b[k]) return false;
+    }
+    return true;
+}
+
 export default memo(withStyles(styles)(PaperCardBlog), (prev, next) => {
     // Always re-render if vote-related data changed
     if (prev.voter !== next.voter) return false;
@@ -610,5 +662,9 @@ export default memo(withStyles(styles)(PaperCardBlog), (prev, next) => {
     if (prev.column_width !== next.column_width) return false;
     if (prev.selected !== next.selected) return false;
     if (prev.visible !== next.visible) return false;
+    if (prev.stacked !== next.stacked) return false;
+    if (prev.noMargin !== next.noMargin) return false;
+    if (prev.muted !== next.muted) return false;
+    if (!shallowEqual(prev.style, next.style)) return false;
     return true;
 });

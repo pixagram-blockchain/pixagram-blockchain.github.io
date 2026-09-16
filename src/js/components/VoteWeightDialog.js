@@ -101,7 +101,7 @@ function labelAnchor(angle) {
 const styles = () => ({
     paper: {
         backgroundColor: "#fff !important",
-        borderRadius: "64px !important",
+        borderRadius: "48px !important",
         overflow: "visible !important",
         color: "#000 !important",
     },
@@ -153,8 +153,8 @@ const styles = () => ({
     closeIcon: {
         color: "#000000",
         position: "absolute",
-        top: 24,
-        right: 24
+        top: 16,
+        right: 16
     },
     svgWrapper: {
         width: "100%",
@@ -169,16 +169,16 @@ const styles = () => ({
         height: "auto",
     },
     blackButton: {
-        width: "72px",
-        height: "72px",
+        width: "160px",
+        height: "64px",
         borderRadius: "100px !important",
         marginTop: "-56px",
-        backgroundColor: "#000 !important",
+        backgroundColor: "#171717 !important",
         color: "#fff !important",
         filter: "drop-shadow(0px 0px 0px #00000000)",
         transition: "filter 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,box-shadow 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,border 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
         "&:hover": {
-            backgroundColor: "#222",
+            backgroundColor: "#000",
             color: "#fff",
             filter: "drop-shadow(0px 0px 6px #00000088)",
             transition: "filter 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,box-shadow 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,border 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms"

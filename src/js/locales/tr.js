@@ -208,7 +208,8 @@ export default {
         "legal": "Hukuk",
         "risks": "Riskler",
         "bug_reports": "Hata Raporları",
-        "community": "Topluluk"
+        "community": "Topluluk",
+        "development": "Geliştirme"
     },
 
     components: {
@@ -279,6 +280,14 @@ export default {
             "renounced": "Feragat",
             "balanced": "Dengeli",
             "sovereign": "Egemen",
+            "licensing": "Lisanslama",
+            "the_default_license_is_the_starting_point_for": "Varsayılan lisans, her yeni gönderinin başlangıç noktasıdır. Yayınlamadan önce koşulları her gönderi için ayrıca düzenleyebilirsin.",
+            "no_default_license_set_yet_new_posts": "Henüz varsayılan lisans ayarlanmadı — yeni gönderiler Pixa NFT Lisansı'nın standart koşullarıyla başlar.",
+            "holder_rights": "Sahip hakları:",
+            "visitor_rights": "Ziyaretçi hakları:",
+            "configure_default_license": "Varsayılan lisansı yapılandır",
+            "edit_default_license": "Varsayılan lisansı düzenle",
+            "reset_to_standard_terms": "Standart koşullara sıfırla",
             "always_ask_before_voting": "Oy vermeden önce daima sor",
             "reset_custom_endpoint": "Özel uç noktayı sıfırla",
             "set_custom_endpoint": "Özel uç nokta ayarla",
@@ -781,6 +790,7 @@ export default {
             "convert_picture": "Resim dönüştür",
             "create_image": "Görsel oluştur",
             "description_optional": "Açıklama (isteğe bağlı)",
+            "drop_an_image_here_or_paste_it_with": "Görseli buraya bırak veya {{shortcut}} ile yapıştır",
             "wizard_of_creation": "Yaratım Sihirbazı",
             "back": "Geri",
             "are_you_sure": "Emin misin?",
@@ -2042,6 +2052,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "Merkeziyetsiz Pixa Fund (DPF), kullanıcıların fonlama önerileri sunup hangi önerilerin fonlanacağına oy verebildiği, zincir üstü merkeziyetsiz otonom bir organizasyon hazinesidir."
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "Daha önce gönderdiğin kişiler",
             "what_is_this_transfer_for": "Bu transfer ne için?",
             "make_this_a_recurring_transfer": "Bunu yinelenen transfer yap",
             "every_hours": "Her (saat)",
@@ -2325,7 +2336,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "Ekosistem güvenliği için risk değerlendirmesi, tehdit analizi ve azaltma stratejileri.",
             "security_audits_vulnerability_reports_and_best_p": "Güvenlik denetimleri, güvenlik açığı raporları ve güvenli kullanım için en iyi uygulamalar.",
             "report_bugs_technical_issues_and_track_their": "Hataları ve teknik sorunları bildir, çözüm durumlarını takip et.",
-            "community_events_meetups_collaborations_and_soci": "Topluluk etkinlikleri, buluşmalar, iş birlikleri ve sosyal girişimler."
+            "development_roadmap_releases_code_contributions": "Geliştirme yol haritası, sürümler, kod katkıları ve teknik dokümantasyon."
         },
         "gdmetrics": {
             "key_metrics": "Temel Metrikler",

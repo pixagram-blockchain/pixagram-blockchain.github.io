@@ -207,7 +207,8 @@ export default {
         "legal": "Juridic",
         "risks": "Riscuri",
         "bug_reports": "Rapoarte de erori",
-        "community": "Comunitate"
+        "community": "Comunitate",
+        "development": "Dezvoltare"
     },
 
     components: {
@@ -278,6 +279,14 @@ export default {
             "renounced": "Renunțat",
             "balanced": "Echilibrat",
             "sovereign": "Suveran",
+            "licensing": "Licențiere",
+            "the_default_license_is_the_starting_point_for": "Licența implicită este punctul de plecare pentru fiecare postare nouă. Poți ajusta în continuare condițiile pentru fiecare postare înainte de publicare.",
+            "no_default_license_set_yet_new_posts": "Nu este setată încă o licență implicită — postările noi pornesc de la condițiile standard ale Licenței NFT Pixa.",
+            "holder_rights": "Drepturile deținătorului:",
+            "visitor_rights": "Drepturile vizitatorului:",
+            "configure_default_license": "Configurează licența implicită",
+            "edit_default_license": "Editează licența implicită",
+            "reset_to_standard_terms": "Resetează la condițiile standard",
             "always_ask_before_voting": "Întreabă mereu înainte de vot",
             "reset_custom_endpoint": "Resetează endpointul personalizat",
             "set_custom_endpoint": "Setează un endpoint personalizat",
@@ -780,6 +789,7 @@ export default {
             "convert_picture": "Convertește o poză",
             "create_image": "Creează o imagine",
             "description_optional": "Descriere (opțional)",
+            "drop_an_image_here_or_paste_it_with": "Trage o imagine aici sau lipește-o cu {{shortcut}}",
             "wizard_of_creation": "Vrăjitorul creației",
             "back": "Înapoi",
             "are_you_sure": "Confirmi?",
@@ -2041,6 +2051,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "Decentralized Pixa Fund (DPF) este o trezorerie on-chain de organizație autonomă descentralizată, care le permite utilizatorilor să depună propuneri de finanțare și să voteze ce propuneri ar trebui finanțate."
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "Persoane cărora le-ai mai trimis",
             "what_is_this_transfer_for": "Pentru ce este acest transfer?",
             "make_this_a_recurring_transfer": "Fă din acesta un transfer recurent",
             "every_hours": "La fiecare (ore)",
@@ -2324,7 +2335,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "Evaluarea riscurilor, analiza amenințărilor și strategii de atenuare pentru securitatea ecosistemului.",
             "security_audits_vulnerability_reports_and_best_p": "Audituri de securitate, rapoarte de vulnerabilități și bune practici pentru o utilizare sigură.",
             "report_bugs_technical_issues_and_track_their": "Raportează erori și probleme tehnice și urmărește stadiul rezolvării lor.",
-            "community_events_meetups_collaborations_and_soci": "Evenimente ale comunității, întâlniri, colaborări și inițiative sociale."
+            "development_roadmap_releases_code_contributions": "Plan de dezvoltare, lansări, contribuții la cod și documentație tehnică."
         },
         "gdmetrics": {
             "key_metrics": "Metrici-cheie",

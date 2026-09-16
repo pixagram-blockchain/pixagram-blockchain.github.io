@@ -205,7 +205,8 @@ export default {
         "legal": "법률",
         "risks": "리스크",
         "bug_reports": "버그 신고",
-        "community": "커뮤니티"
+        "community": "커뮤니티",
+        "development": "개발"
     },
 
     components: {
@@ -276,6 +277,14 @@ export default {
             "renounced": "포기",
             "balanced": "균형",
             "sovereign": "자기주권",
+            "licensing": "라이선스",
+            "the_default_license_is_the_starting_point_for": "기본 라이선스는 모든 새 게시물의 출발점입니다. 게시하기 전에 게시물마다 약관을 조정할 수도 있습니다.",
+            "no_default_license_set_yet_new_posts": "아직 기본 라이선스가 설정되지 않았습니다 — 새 게시물은 Pixa NFT 라이선스의 표준 약관으로 시작합니다.",
+            "holder_rights": "보유자 권리:",
+            "visitor_rights": "방문자 권리:",
+            "configure_default_license": "기본 라이선스 설정",
+            "edit_default_license": "기본 라이선스 편집",
+            "reset_to_standard_terms": "표준 약관으로 초기화",
             "always_ask_before_voting": "투표 전에 항상 확인",
             "reset_custom_endpoint": "사용자 지정 엔드포인트 초기화",
             "set_custom_endpoint": "사용자 지정 엔드포인트 설정",
@@ -778,6 +787,7 @@ export default {
             "convert_picture": "이미지 변환",
             "create_image": "이미지 만들기",
             "description_optional": "설명(선택)",
+            "drop_an_image_here_or_paste_it_with": "여기에 이미지를 놓거나 {{shortcut}} 키로 붙여 넣으세요",
             "wizard_of_creation": "제작 마법사",
             "back": "뒤로",
             "are_you_sure": "정말인가요?",
@@ -2040,6 +2050,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "Decentralized Pixa Fund(DPF)는 탈중앙 자율조직의 온체인 금고로, 사용자가 지원 제안을 제출하고 어떤 제안을 지원할지 투표할 수 있습니다."
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "이전에 이체한 사람",
             "what_is_this_transfer_for": "이 이체는 어떤 용도인가요?",
             "make_this_a_recurring_transfer": "정기 이체로 설정",
             "every_hours": "간격(시간)",
@@ -2323,7 +2334,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "생태계 보안을 위한 리스크 평가, 위협 분석, 완화 전략.",
             "security_audits_vulnerability_reports_and_best_p": "보안 감사, 취약점 보고, 안전한 사용을 위한 모범 사례.",
             "report_bugs_technical_issues_and_track_their": "버그와 기술적 문제를 신고하고 해결 상태를 추적하세요.",
-            "community_events_meetups_collaborations_and_soci": "커뮤니티 행사, 밋업, 협업, 사회적 활동."
+            "development_roadmap_releases_code_contributions": "개발 로드맵, 릴리스, 코드 기여, 기술 문서."
         },
         "gdmetrics": {
             "key_metrics": "주요 지표",

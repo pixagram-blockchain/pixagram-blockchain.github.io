@@ -18,7 +18,7 @@ import {
     $isTableCellNode,
 } from '@lexical/table';
 import { $isHorizontalRuleNode } from '@lexical/react/LexicalHorizontalRuleNode.js';
-import { $isImageNode } from './ImageNode';
+import { $isImageNode } from '../ImageNode';
 
 const defaultOptions = {
     gfm: true,

@@ -207,7 +207,8 @@ export default {
         "legal": "Юридичні питання",
         "risks": "Ризики",
         "bug_reports": "Звіти про помилки",
-        "community": "Спільнота"
+        "community": "Спільнота",
+        "development": "Розробка"
     },
 
     components: {
@@ -278,6 +279,14 @@ export default {
             "renounced": "Відречений",
             "balanced": "Збалансований",
             "sovereign": "Суверенний",
+            "licensing": "Ліцензування",
+            "the_default_license_is_the_starting_point_for": "Типова ліцензія — відправна точка для кожного нового допису. Перед публікацією ви можете змінити умови для кожного допису окремо.",
+            "no_default_license_set_yet_new_posts": "Типову ліцензію ще не задано — нові дописи починаються зі стандартних умов NFT-ліцензії Pixa.",
+            "holder_rights": "Права власника:",
+            "visitor_rights": "Права відвідувача:",
+            "configure_default_license": "Налаштувати типову ліцензію",
+            "edit_default_license": "Редагувати типову ліцензію",
+            "reset_to_standard_terms": "Скинути до стандартних умов",
             "always_ask_before_voting": "Завжди питати перед голосуванням",
             "reset_custom_endpoint": "Скинути власний ендпоінт",
             "set_custom_endpoint": "Задати власний ендпоінт",
@@ -780,6 +789,7 @@ export default {
             "convert_picture": "Конвертувати зображення",
             "create_image": "Створити зображення",
             "description_optional": "Опис (необов’язково)",
+            "drop_an_image_here_or_paste_it_with": "Перетягніть зображення сюди або вставте його за допомогою {{shortcut}}",
             "wizard_of_creation": "Майстер створення",
             "back": "Назад",
             "are_you_sure": "Ви впевнені?",
@@ -2041,6 +2051,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "Децентралізований фонд Pixa (DPF) — це блокчейн-скарбниця децентралізованої автономної організації, яка дає користувачам подавати пропозиції на фінансування та голосувати, які пропозиції фінансувати."
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "Люди, яким ви вже надсилали",
             "what_is_this_transfer_for": "Для чого цей переказ?",
             "make_this_a_recurring_transfer": "Зробити цей переказ регулярним",
             "every_hours": "Кожні (годин)",
@@ -2324,7 +2335,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "Оцінка ризиків, аналіз загроз і стратегії їх зменшення для безпеки екосистеми.",
             "security_audits_vulnerability_reports_and_best_p": "Аудити безпеки, звіти про вразливості та рекомендації щодо безпечного використання.",
             "report_bugs_technical_issues_and_track_their": "Повідомляйте про помилки й технічні проблеми та відстежуйте стан їх вирішення.",
-            "community_events_meetups_collaborations_and_soci": "Події спільноти, зустрічі, співпраця та соціальні ініціативи."
+            "development_roadmap_releases_code_contributions": "Дорожня карта розробки, релізи, внесок у код і технічна документація."
         },
         "gdmetrics": {
             "key_metrics": "Ключові метрики",

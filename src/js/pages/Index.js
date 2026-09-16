@@ -21,6 +21,7 @@ import IconButton from "@material-ui/core/IconButton";
 import MoreVertIcon from "@material-ui/icons/MoreVert";
 import CloseIcon from "@material-ui/icons/Close";
 import MenuIcon from "@material-ui/icons/Menu";
+import Avatar from "@material-ui/core/Avatar";
 
 import dispatcher from "../dispatcher";
 import * as actions from "../actions/utils";
@@ -156,16 +157,22 @@ const SETTINGS_DEFAULTS = {
     // The node is stored as its URL plus who chose it — see utils/settings.js.
     api_node_url: api.DEFAULT_API_NODE_URL,
     api_node_source: api.API_NODE_SOURCE.DEFAULT,
+    // Default NFT license for new posts, one object or null (= standard
+    // terms). An object-valued setting: settingsChanged compares it by value.
+    default_license: null,
 };
 
 // Which already-mounted page is allowed to host a post URL as an overlay
 // without being unmounted. Feed/FeedPersonal/Profile render <PostDialog>;
-// Community renders <BlogPostDialog>. A community-post URL pushed from inside
-// any of feed/feedpersonal/profile must unmount that page and mount Community
-// so the correct dialog can take over (and vice versa).
+// Community renders <BlogPostDialog>. FeedPersonal renders BOTH — the
+// personal feed mixes portal blog posts in between artworks — so it hosts
+// community-post URLs too and a blog card opened there stays on the feed.
+// A community-post URL pushed from inside feed/profile must still unmount
+// that page and mount Community so the correct dialog can take over (and a
+// regular post URL pushed from Community swaps back to Feed).
 const OVERLAY_HOSTS_BY_POST_KIND = {
     feed: ["feed", "feedpersonal", "profile"],
-    community: ["community"],
+    community: ["community", "feedpersonal"],
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -416,11 +423,14 @@ function normalizeSettings(raw) {
     return s;
 }
 
+// By VALUE, not identity: `_default_license` is an object and every settings
+// read deserializes a fresh one, so `!==` would report a change on each
+// re-read and processedSettings would lose its stable identity for nothing.
 function settingsChanged(prev, next) {
     if (!prev || !next) return true;
     for (const key of Object.keys(next)) {
         if (key === "_know_the_settings") continue;
-        if (prev[key] !== next[key]) return true;
+        if (!api.same_setting_value(prev[key], next[key])) return true;
     }
     return false;
 }
@@ -1360,6 +1370,72 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// §9b — useSessionAvatar: the active account's profile image
+// ═════════════════════════════════════════════════════════════════════════════
+// Drives the compact toolbar's drawer opener (ToolbarMenuButton): the profile
+// image while an account that has one is logged in, the hamburger otherwise.
+// Mirrors the session tracking MenuContent does for its own header — events
+// first, then the account already active when this subscribed (a session
+// restored before the apiReady render committed is only caught that way) —
+// but keeps a single string, not the account. One getAccounts per session
+// change; the API layer caches it, and MenuContent asks for the same row.
+// Re-armed on every api generation: a node switch retires the emitter this
+// listens on.
+function useSessionAvatar(apiRef, apiReady, apiGeneration) {
+    const [avatar, setAvatar] = useState(null);
+
+    useEffect(() => {
+        const api = apiRef.current;
+        if (!apiReady || !api?.eventEmitter) { setAvatar(null); return undefined; }
+
+        let cancelled = false;
+        let token = 0;        // retires a lookup overtaken by a newer session event
+        let account = null;   // the account the shown avatar belongs to (set on success)
+
+        const resolve = async (name, force) => {
+            if (!name || (name === account && !force)) return;
+            const mine = ++token;
+            let url = null;
+            try {
+                const rows = await api.accounts.getAccounts([name], true);
+                url = rows?.[0]?._profile?.profile_image || null;
+            } catch (e) { url = null; }
+            if (cancelled || mine !== token) return;
+            account = name;
+            setAvatar(typeof url === "string" && url ? url : null);
+        };
+        const clear = () => { token += 1; account = null; setAvatar(null); };
+        const accountOf = (data) => data?.account || data?.session?.account || (typeof data === "string" ? data : null);
+
+        const onSession = (data) => resolve(accountOf(data), false);
+        const onEnded = () => clear();
+        // Own profile edited (avatar changed): refetch the same row.
+        const onProfile = (data) => { if (data?.account && data.account === account) resolve(data.account, true); };
+
+        api.eventEmitter.on("session_created", onSession);
+        api.eventEmitter.on("session_restored", onSession);
+        api.eventEmitter.on("session_ended", onEnded);
+        api.eventEmitter.on("profile_updated", onProfile);
+
+        // Already logged in when this ran: the events above never fire for it.
+        Promise.resolve()
+            .then(() => api.sessionManager?.getActiveAccount?.())
+            .then((name) => { if (!cancelled && name) resolve(name, false); })
+            .catch(() => {});
+
+        return () => {
+            cancelled = true;
+            api.eventEmitter.off("session_created", onSession);
+            api.eventEmitter.off("session_restored", onSession);
+            api.eventEmitter.off("session_ended", onEnded);
+            api.eventEmitter.off("profile_updated", onProfile);
+        };
+    }, [apiRef, apiReady, apiGeneration]);
+
+    return avatar;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // §10 — Memoized sub-components with comparison functions
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -1539,11 +1615,49 @@ const SearchResults = React.memo(
         prev.history === next.history,
 );
 
+// ── ToolbarMenuButton ────────────────────────────────────────────────────────
+// The drawer opener of the compact layout (styles.toolbarMenu hides it on
+// desktop). Logged in with a profile image: that image, icon-sized, in the
+// hamburger's place — the same button, class, position and tour anchor.
+// Logged out, no profile image yet, or the image failing to load: the
+// hamburger. The image is chain data and goes through <Avatar src>, the way
+// the drawer's own friend and portal tiles show theirs. MUI's own load-error
+// fallback renders the children — the hamburger again, on the transparent
+// background styles.toolbarMenuAvatar gives that state — and imgProps.onError
+// covers the <img> path too, so a dead URL can never leave a broken image.
+const ToolbarMenuButton = React.memo(
+    ({ classes, avatar, onClick }) => {
+        const [failed, setFailed] = useState(null); // the src that failed to load, if any
+        const onError = useCallback(() => setFailed(avatar), [avatar]);
+        const imgProps = useMemo(() => ({ onError }), [onError]);
+        const showImage = !!avatar && failed !== avatar;
+        return (
+            <Fade in timeout={200}>
+                <IconButton
+                    className={showImage ? classes.toolbarMenu + " " + classes.toolbarMenuHasAvatar : classes.toolbarMenu}
+                    onClick={onClick}
+                    data-tour="nav-menu-button"
+                >
+                    {showImage ? (
+                        <Avatar src={avatar} imgProps={imgProps} className={"pixelated " + classes.toolbarMenuAvatar}>
+                            <MenuIcon />
+                        </Avatar>
+                    ) : <MenuIcon />}
+                </IconButton>
+            </Fade>
+        );
+    },
+    (prev, next) =>
+        prev.avatar === next.avatar &&
+        prev.onClick === next.onClick &&
+        prev.classes === next.classes,
+);
+
 // ── ToolbarComponent ─────────────────────────────────────────────────────────
 
 const ToolbarComponent = React.memo(
     ({
-         classes, compact, wordmark,
+         classes, compact, wordmark, menuAvatar,
          searchOpen, searchInputText, searchBarPlaceholder,
          searchInput, searchResults, searchLoading, history,
          onOpenMenuDrawer, onResetSearch, onSearchChange,
@@ -1554,11 +1668,7 @@ const ToolbarComponent = React.memo(
         useLanguage();
         return (
             <div className={classes.toolbar}>
-                <Fade in timeout={200}>
-                    <IconButton className={classes.toolbarMenu} onClick={onOpenMenuDrawer} data-tour="nav-menu-button">
-                        <MenuIcon />
-                    </IconButton>
-                </Fade>
+                <ToolbarMenuButton classes={classes} avatar={menuAvatar} onClick={onOpenMenuDrawer} />
                 {compact ? null : wordmark}
                 <ClickAwayListener onClickAway={onResetSearch}>
                     <div className={classes.searchBarWrapper}>
@@ -1645,6 +1755,7 @@ const ToolbarComponent = React.memo(
     },
     (prev, next) =>
         prev.compact === next.compact &&
+        prev.menuAvatar === next.menuAvatar &&
         prev.searchOpen === next.searchOpen &&
         prev.searchInputText === next.searchInputText &&
         prev.searchBarPlaceholder === next.searchBarPlaceholder &&
@@ -1998,6 +2109,17 @@ const styles = (theme) => {
                 left: 8, top: 8, position: "absolute", display: "inherit",
             },
         },
+        // The profile image standing in for the hamburger (compact, logged
+        // in): icon-sized, so with the tighter padding below the button keeps
+        // the hamburger's 48px footprint and position. Rounded square like
+        // every other avatar tile of the app.
+        toolbarMenuAvatar: {
+            width: 32, height: 32, borderRadius: 10,
+            // MUI's image-failed fallback (children = the hamburger) would
+            // sit in a grey box; make that state read as the plain icon.
+            "&.MuiAvatar-colorDefault": { backgroundColor: "transparent", color: "inherit" },
+        },
+        toolbarMenuHasAvatar: { padding: 8 },
         toolbarMenuVert: {
             display: "none",
             [theme.breakpoints.down("sm")]: {
@@ -2229,6 +2351,9 @@ function Index({ classes, history, settings: rawSettings }) {
 
     // ── API lifecycle (populates apiRef) ─────────────────────────────────
     const { apiReady, apiGeneration } = usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, apiNodeUrl);
+
+    // ── Active account's profile image → compact drawer opener ───────────
+    const menuAvatar = useSessionAvatar(apiRef, apiReady, apiGeneration);
 
     // ── Live settings stream ─────────────────────────────────────────────
     // utils/settings emits every resolved bag (init / get / set). Feeding it
@@ -2811,6 +2936,7 @@ function Index({ classes, history, settings: rawSettings }) {
                             classes={classes}
                             compact={compact}
                             wordmark={wordmark}
+                            menuAvatar={menuAvatar}
                             searchOpen={search.isOpen}
                             searchInputText={search.query}
                             searchBarPlaceholder={searchBarPlaceholder}

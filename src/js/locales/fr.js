@@ -204,7 +204,8 @@ export default {
         "legal": "Juridique",
         "risks": "Risques",
         "bug_reports": "Rapports de bugs",
-        "community": "Communauté"
+        "community": "Communauté",
+        "development": "Développement"
     },
 
     components: {
@@ -275,6 +276,14 @@ export default {
             "renounced": "Renoncé",
             "balanced": "Équilibré",
             "sovereign": "Souverain",
+            "licensing": "Licence",
+            "the_default_license_is_the_starting_point_for": "La licence par défaut est le point de départ de chaque nouvelle publication. Vous pouvez toujours ajuster les conditions pour chaque publication avant de publier.",
+            "no_default_license_set_yet_new_posts": "Aucune licence par défaut définie pour l’instant — les nouvelles publications partent des conditions standard de la Licence NFT Pixa.",
+            "holder_rights": "Droits du détenteur :",
+            "visitor_rights": "Droits du visiteur :",
+            "configure_default_license": "Configurer la licence par défaut",
+            "edit_default_license": "Modifier la licence par défaut",
+            "reset_to_standard_terms": "Rétablir les conditions standard",
             "always_ask_before_voting": "Toujours demander avant de voter",
             "reset_custom_endpoint": "Réinitialiser le point d’accès personnalisé",
             "set_custom_endpoint": "Définir un point d’accès personnalisé",
@@ -777,6 +786,7 @@ export default {
             "convert_picture": "Convertir l’image",
             "create_image": "Créer une image",
             "description_optional": "Description (facultative)",
+            "drop_an_image_here_or_paste_it_with": "Déposez une image ici ou collez-la avec {{shortcut}}",
             "wizard_of_creation": "Assistant de création",
             "back": "Retour",
             "are_you_sure": "Êtes-vous sûr ?",
@@ -2039,6 +2049,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "Le Decentralized Pixa Fund (DPF) est la trésorerie en chaîne d’une organisation autonome décentralisée qui permet aux utilisateurs de soumettre des demandes de financement et de voter sur celles qui doivent être financées."
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "Personnes à qui vous avez déjà envoyé des fonds",
             "what_is_this_transfer_for": "À quoi correspond ce transfert ?",
             "make_this_a_recurring_transfer": "En faire un transfert récurrent",
             "every_hours": "Tous les (heures)",
@@ -2322,7 +2333,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "Évaluation des risques, analyse des menaces et stratégies d’atténuation pour la sécurité de l’écosystème.",
             "security_audits_vulnerability_reports_and_best_p": "Audits de sécurité, rapports de vulnérabilités et bonnes pratiques pour un usage sûr.",
             "report_bugs_technical_issues_and_track_their": "Signalez des bugs et des problèmes techniques, et suivez l’avancement de leur résolution.",
-            "community_events_meetups_collaborations_and_soci": "Événements communautaires, rencontres, collaborations et initiatives sociales."
+            "development_roadmap_releases_code_contributions": "Feuille de route du développement, versions, contributions au code et documentation technique."
         },
         "gdmetrics": {
             "key_metrics": "Indicateurs clés",

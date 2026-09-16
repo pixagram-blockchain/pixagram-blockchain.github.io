@@ -87,6 +87,50 @@ const styles = theme => ({
         "& div.MuiLinearProgress-barColorPrimary": {
             backgroundColor: "#666"
         }
+    },
+    // "People you've sent to before" quick-pick strip under the username field
+    recipientsRow: {
+        display: "flex",
+        flexWrap: "nowrap",
+        gap: "0px",
+        overflowX: "auto",
+        overflowY: "hidden",
+        padding: "8px 0px 16px 0px",
+        "&::-webkit-scrollbar": {
+            height: 4,
+        },
+        "&::-webkit-scrollbar-thumb": {
+            backgroundColor: "#444",
+            borderRadius: 2,
+        }
+    },
+    recipient: {
+        flex: "0 0 auto",
+        width: 64,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        cursor: "pointer",
+        outline: "none",
+        transition: "opacity 150ms ease",
+        "&:hover $recipientAvatar, &:focus-visible $recipientAvatar": {
+            boxShadow: "0px 0px 0px 0px rgba(0, 0, 0, 0.55)",
+        }
+    },
+    recipientAvatar: {
+        transition: "box-shadow 150ms ease",
+    },
+    recipientName: {
+        marginTop: 6,
+        maxWidth: "100%",
+        fontSize: 10,
+        lineHeight: "14px",
+        color: "#fff",
+        textAlign: "center",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        fontFamily: '"Industry Book", "Normative Pro"',
     }
 });
 
@@ -128,7 +172,11 @@ class PixaWalletSendDialog extends React.PureComponent {
             keepMounted: props.keepMounted || false,
             open: props.open,
             type: props.type,
-            _username: "",
+            // Seed the recipient here, not only in componentWillReceiveProps:
+            // lazyDialog mounts this component only once `open` is already
+            // truthy, so the closed→open branch below never runs on the first
+            // open and the prefill (viewing someone else's wallet) was lost.
+            _username: props.initialUsername || "",
             _confirm_open: false,
             _confirm_locked: true,
             _confirm_success: 0,
@@ -144,6 +192,9 @@ class PixaWalletSendDialog extends React.PureComponent {
             _searching: false,        // Loading indicator while searching
             _memo: "",
             _lockedUsername: props.lockedUsername || false,
+            // Accounts this wallet already sent to, newest first — from the
+            // parent's history scan. [{ username, image, name }]
+            _recentRecipients: Array.isArray(props.recentRecipients) ? props.recentRecipients : [],
             _recurrent: false,        // recurring-transfer toggle
             _recurrence: "24",        // hours between payments (min 24)
             _executions: "12",        // number of payments (min 2)
@@ -160,7 +211,13 @@ class PixaWalletSendDialog extends React.PureComponent {
     }
 
     componentDidMount() {
-        // No static author load — search is live via API
+        // No static author load — search is live via API.
+        // Mounted already open with a prefilled recipient (see constructor):
+        // resolve its profile now so the avatar / display name show up.
+        const { open, initialUsername } = this.props;
+        if (open && initialUsername) {
+            this._resolveUsername(initialUsername);
+        }
     }
 
     componentWillUnmount() {
@@ -214,6 +271,7 @@ class PixaWalletSendDialog extends React.PureComponent {
         if (new_props.maxPXA !== undefined) updates._maxPXA = new_props.maxPXA;
         if (new_props.maxPXS !== undefined) updates._maxPXS = new_props.maxPXS;
         if (new_props.lockedUsername !== undefined) updates._lockedUsername = new_props.lockedUsername;
+        if (new_props.recentRecipients !== undefined) updates._recentRecipients = Array.isArray(new_props.recentRecipients) ? new_props.recentRecipients : [];
 
         this.setState(updates, () => {
             this.forceUpdate();
@@ -347,6 +405,34 @@ class PixaWalletSendDialog extends React.PureComponent {
     };
 
     /**
+     * Tap on a recent recipient: fill the username field with it and treat it
+     * as the resolved author right away (its image/name came with the parent's
+     * profile fetch), so the field adornment and the confirm dialog avatar show
+     * up without another lookup. Any pending search for what was typed before
+     * is dropped so it can't overwrite the pick.
+     */
+    _pick_recent_recipient = (recipient) => {
+        if (!recipient || !recipient.username || this.state._lockedUsername) return;
+        const username = recipient.username;
+
+        if (this._searchTimer) clearTimeout(this._searchTimer);
+
+        const entry = this._profileCache[username] || {
+            username,
+            image: recipient.image || '',
+            name: recipient.name || username,
+        };
+        this._profileCache[username] = entry;
+
+        this.setState({
+            _username: username,
+            _selected_author: entry,
+            _authors: [],
+            _searching: false,
+        }, () => { this.forceUpdate(); });
+    };
+
+    /**
      * Resolve a single username to get its profile (for the confirm dialog avatar).
      */
     _resolveUsername = async (username) => {
@@ -467,10 +553,15 @@ class PixaWalletSendDialog extends React.PureComponent {
             type,
             _memo,
             _lockedUsername,
+            _recentRecipients,
             _recurrent,
             _recurrence,
             _executions
         } = this.state;
+
+        // Quick-pick strip: only when the recipient is free to choose and
+        // there is someone to suggest.
+        const showRecentRecipients = !_lockedUsername && Array.isArray(_recentRecipients) && _recentRecipients.length > 0;
 
         // Resolved avatar for the current input
         const resolvedImage = (_selected_author && _selected_author.username === _username)
@@ -574,6 +665,53 @@ class PixaWalletSendDialog extends React.PureComponent {
                                 )}
                                 style={{ marginBottom: 8 }}
                             />
+                            {/* People this wallet already sent to — tap one to fill the field */}
+                            <Collapse in={showRecentRecipients && !_username}>
+                                <div style={{margin: "8px 0px 0px 0px"}}>
+                                    <Typography variant="caption" color="textSecondary" component="p" style={{fontFamily: '"Industry Book", "Normative Pro"', fontSize: "16px", margin: "4px 0px 8px 0px"}}>
+                                        {t("components.pixa_wallet_send_dialog.people_youve_sent_to_before")}
+                                    </Typography>
+                                    <div className={classes.recipientsRow}>
+                                        {(_recentRecipients || []).map((r) => {
+                                            const active = r.username === _username;
+                                            const dimmed = Boolean(_username) && !active;
+                                            return (
+                                                <div
+                                                    key={r.username}
+                                                    className={classes.recipient}
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    aria-label={`@${r.username}`}
+                                                    aria-pressed={active}
+                                                    title={r.name && r.name !== r.username ? `${r.name} (@${r.username})` : `@${r.username}`}
+                                                    style={{opacity: dimmed ? 0.33 : 1}}
+                                                    onClick={() => this._pick_recent_recipient(r)}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === "Enter" || e.key === " ") {
+                                                            e.preventDefault();
+                                                            this._pick_recent_recipient(r);
+                                                        }
+                                                    }}
+                                                >
+                                                    <Avatar
+                                                        src={r.image || ''}
+                                                        alt={r.username}
+                                                        className={`pixelated ${classes.recipientAvatar}`}
+                                                        style={{
+                                                            width: 48,
+                                                            height: 48,
+                                                            borderRadius: "12px",
+                                                            backgroundColor: "#000",
+                                                            ...(active ? {boxShadow: "0px 0px 0px 0px rgba(0, 0, 0, 0.55)"} : null)
+                                                        }}
+                                                    />
+                                                    <span className={classes.recipientName}>@{r.username}</span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </Collapse>
                             <TextField
                                 style={{margin: "16px 0px 8px 0px"}}
                                 fullWidth={true}
@@ -645,9 +783,9 @@ class PixaWalletSendDialog extends React.PureComponent {
                                     />
                                 </div>
                                 <Typography variant="body2" color="textSecondary" component="p" style={{margin: "8px 21px 0px 21px"}}>{t("components.pixa_wallet_send_dialog.the_first_payment_is_sent_now_then", {
-                                        Number: formatInteger(Number(_recurrence) || 24),
-                                        Number_2: formatInteger(Number(_executions) || 0)
-                                    })}</Typography>
+                                    Number: formatInteger(Number(_recurrence) || 24),
+                                    Number_2: formatInteger(Number(_executions) || 0)
+                                })}</Typography>
                             </Collapse>
                         </div>
                         <Typography variant="body2" color="textSecondary" component="p" style={{margin: "16px 0px 24px 0px"}}>{fiatValue ? t("components.pixa_wallet_dialog.worth_about", { fiat: fiatValue }) : ""}</Typography>

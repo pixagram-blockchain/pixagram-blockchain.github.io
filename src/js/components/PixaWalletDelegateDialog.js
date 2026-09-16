@@ -87,7 +87,11 @@ class PixaWalletDelegateDialog extends React.PureComponent {
         this.state = {
             classes: props.classes,
             open: props.open,
-            _username: "",
+            // Seed the delegatee here, not only in componentWillReceiveProps:
+            // lazyDialog mounts this component only once `open` is already
+            // truthy, so the closed→open branch below never runs on the first
+            // open and the prefill (viewing someone else's wallet) was lost.
+            _username: props.initialDelegatee || "",
             _confirm_open: false,
             _confirm_locked: true,
             _confirm_success: 0,
@@ -107,6 +111,15 @@ class PixaWalletDelegateDialog extends React.PureComponent {
     }
 
     shouldComponentUpdate() { return false; }
+
+    componentDidMount() {
+        // Mounted already open with a prefilled delegatee (see constructor):
+        // resolve its profile now so the avatar / display name show up.
+        const { open, initialDelegatee } = this.props;
+        if (open && initialDelegatee) {
+            this._resolveUsername(initialDelegatee);
+        }
+    }
 
     componentWillUnmount() {
         if (this._searchTimer) clearTimeout(this._searchTimer);

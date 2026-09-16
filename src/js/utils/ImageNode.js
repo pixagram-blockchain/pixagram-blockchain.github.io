@@ -11,9 +11,23 @@
  * every plain-text projection (table-cell export in stateToMarkdown,
  * clipboard copy as text, any getTextContent()-based fallback) then
  * round-trips the image instead of dropping it.
+ *
+ * The <img> is draggable; ImageMovePlugin turns that drag into a move of
+ * the node within the document (and keeps the browser's own copy-flavoured
+ * handling, plus Chrome's implicit-File upload path, out of it).
  */
 
-import { DecoratorNode } from 'lexical';
+import { DecoratorNode, $createTextNode } from 'lexical';
+
+/**
+ * Single source of truth for "does this src get to render as an image?".
+ * Only https sources render as actual <img> anywhere in the editor.
+ * http still round-trips (kept as literal markdown text, see importDOM);
+ * data:/blob:/javascript:/relative paths are refused outright.
+ */
+export function isRenderableImageSrc(src) {
+    return typeof src === 'string' && /^https:\/\//i.test(src.trim());
+}
 
 export class ImageNode extends DecoratorNode {
     static getType() {
@@ -31,19 +45,24 @@ export class ImageNode extends DecoratorNode {
         });
     }
 
-    // Pasted HTML containing <img> becomes an ImageNode too.
+    // Pasted HTML containing <img> becomes an ImageNode too — https only.
     static importDOM() {
         return {
             img: () => ({
                 conversion: (domNode) => {
                     const src = domNode.getAttribute('src') || '';
                     if (!src) return null;
-                    return {
-                        node: $createImageNode({
-                            src,
-                            altText: domNode.getAttribute('alt') || '',
-                        }),
-                    };
+                    const altText = domNode.getAttribute('alt') || '';
+                    if (isRenderableImageSrc(src)) {
+                        return { node: $createImageNode({ src, altText }) };
+                    }
+                    // http: keep the reference as literal markdown so nothing
+                    // is silently lost — it just doesn't render.
+                    if (/^http:\/\//i.test(src.trim())) {
+                        return { node: $createTextNode(`![${altText}](${src})`) };
+                    }
+                    // data:/blob:/anything else: drop.
+                    return null;
                 },
                 priority: 0,
             }),
@@ -79,7 +98,10 @@ export class ImageNode extends DecoratorNode {
         const img = document.createElement('img');
         img.src = this.__src;
         img.alt = this.__altText;
-        img.draggable = false;
+        // Dragging the picture moves the node — ImageMovePlugin owns the
+        // drag; without it a drag falls back to the browser's contenteditable
+        // handling, which Lexical routes through its paste pipeline (a copy).
+        img.draggable = true;
         span.appendChild(img);
         return span;
     }

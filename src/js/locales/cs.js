@@ -204,7 +204,8 @@ export default {
         "legal": "Právní",
         "risks": "Rizika",
         "bug_reports": "Hlášení chyb",
-        "community": "Komunita"
+        "community": "Komunita",
+        "development": "Vývoj"
     },
 
     components: {
@@ -275,6 +276,14 @@ export default {
             "renounced": "Zdrženlivý",
             "balanced": "Vyvážený",
             "sovereign": "Suverénní",
+            "licensing": "Licencování",
+            "the_default_license_is_the_starting_point_for": "Z výchozí licence vychází každý nový příspěvek. Podmínky můžete před publikováním u každého příspěvku ještě upravit.",
+            "no_default_license_set_yet_new_posts": "Zatím není nastavena žádná výchozí licence — nové příspěvky vycházejí ze standardních podmínek licence Pixa NFT.",
+            "holder_rights": "Práva držitele:",
+            "visitor_rights": "Práva návštěvníka:",
+            "configure_default_license": "Nastavit výchozí licenci",
+            "edit_default_license": "Upravit výchozí licenci",
+            "reset_to_standard_terms": "Obnovit standardní podmínky",
             "always_ask_before_voting": "Před hlasováním se vždy zeptat",
             "reset_custom_endpoint": "Resetovat vlastní koncový bod",
             "set_custom_endpoint": "Nastavit vlastní koncový bod",
@@ -777,6 +786,7 @@ export default {
             "convert_picture": "Převést obrázek",
             "create_image": "Vytvořit obrázek",
             "description_optional": "Popis (volitelný)",
+            "drop_an_image_here_or_paste_it_with": "Přetáhněte sem obrázek nebo ho vložte pomocí {{shortcut}}",
             "wizard_of_creation": "Čaroděj tvorby",
             "back": "Zpět",
             "are_you_sure": "Opravdu?",
@@ -2038,6 +2048,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "Decentralized Pixa Fund (DPF) je on-chain pokladna decentralizované autonomní organizace, která uživatelům umožňuje podávat návrhy na financování a hlasovat o tom, které návrhy mají být financovány."
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "Lidé, kterým jste již posílali",
             "what_is_this_transfer_for": "K čemu tento převod slouží?",
             "make_this_a_recurring_transfer": "Nastavit jako opakovaný převod",
             "every_hours": "Každých (hodin)",
@@ -2321,7 +2332,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "Hodnocení rizik, analýza hrozeb a strategie jejich zmírnění pro bezpečnost ekosystému.",
             "security_audits_vulnerability_reports_and_best_p": "Bezpečnostní audity, hlášení zranitelností a osvědčené postupy pro bezpečné používání.",
             "report_bugs_technical_issues_and_track_their": "Hlaste chyby a technické problémy a sledujte stav jejich řešení.",
-            "community_events_meetups_collaborations_and_soci": "Komunitní akce, setkání, spolupráce a společenské iniciativy."
+            "development_roadmap_releases_code_contributions": "Plán vývoje, vydání, příspěvky do kódu a technická dokumentace."
         },
         "gdmetrics": {
             "key_metrics": "Klíčové metriky",

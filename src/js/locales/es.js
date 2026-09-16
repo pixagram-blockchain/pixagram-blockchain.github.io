@@ -204,7 +204,8 @@ export default {
         "legal": "Legal",
         "risks": "Riesgos",
         "bug_reports": "Informes de errores",
-        "community": "Comunidad"
+        "community": "Comunidad",
+        "development": "Desarrollo"
     },
 
     components: {
@@ -275,6 +276,14 @@ export default {
             "renounced": "Renunciante",
             "balanced": "Equilibrado",
             "sovereign": "Soberano",
+            "licensing": "Licencias",
+            "the_default_license_is_the_starting_point_for": "La licencia predeterminada es el punto de partida de cada nueva publicación. Puedes seguir ajustando las condiciones en cada publicación antes de publicar.",
+            "no_default_license_set_yet_new_posts": "Aún no hay una licencia predeterminada — las nuevas publicaciones parten de las condiciones estándar de la Licencia NFT de Pixa.",
+            "holder_rights": "Derechos del poseedor:",
+            "visitor_rights": "Derechos del visitante:",
+            "configure_default_license": "Configurar licencia predeterminada",
+            "edit_default_license": "Editar licencia predeterminada",
+            "reset_to_standard_terms": "Restablecer las condiciones estándar",
             "always_ask_before_voting": "Preguntar siempre antes de votar",
             "reset_custom_endpoint": "Restablecer el endpoint personalizado",
             "set_custom_endpoint": "Definir un endpoint personalizado",
@@ -777,6 +786,7 @@ export default {
             "convert_picture": "Convertir imagen",
             "create_image": "Crear imagen",
             "description_optional": "Descripción (opcional)",
+            "drop_an_image_here_or_paste_it_with": "Suelta una imagen aquí o pégala con {{shortcut}}",
             "wizard_of_creation": "Asistente de creación",
             "back": "Atrás",
             "are_you_sure": "¿Seguro?",
@@ -2039,6 +2049,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "El Decentralized Pixa Fund (DPF) es la tesorería en cadena de una organización autónoma descentralizada que permite a los usuarios presentar propuestas de financiación y votar cuáles deben financiarse."
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "Personas a las que ya has enviado",
             "what_is_this_transfer_for": "¿Para qué es esta transferencia?",
             "make_this_a_recurring_transfer": "Convertirla en transferencia recurrente",
             "every_hours": "Cada (horas)",
@@ -2322,7 +2333,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "Evaluación de riesgos, análisis de amenazas y estrategias de mitigación para la seguridad del ecosistema.",
             "security_audits_vulnerability_reports_and_best_p": "Auditorías de seguridad, informes de vulnerabilidades y buenas prácticas para un uso seguro.",
             "report_bugs_technical_issues_and_track_their": "Informa de errores y problemas técnicos, y sigue el estado de su resolución.",
-            "community_events_meetups_collaborations_and_soci": "Eventos de la comunidad, encuentros, colaboraciones e iniciativas sociales."
+            "development_roadmap_releases_code_contributions": "Hoja de ruta de desarrollo, versiones, contribuciones de código y documentación técnica."
         },
         "gdmetrics": {
             "key_metrics": "Métricas clave",

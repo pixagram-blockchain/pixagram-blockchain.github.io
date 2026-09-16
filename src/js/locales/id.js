@@ -205,7 +205,8 @@ export default {
         "legal": "Hukum",
         "risks": "Risiko",
         "bug_reports": "Laporan bug",
-        "community": "Komunitas"
+        "community": "Komunitas",
+        "development": "Pengembangan"
     },
 
     components: {
@@ -276,6 +277,14 @@ export default {
             "renounced": "Melepas",
             "balanced": "Seimbang",
             "sovereign": "Berdaulat",
+            "licensing": "Lisensi",
+            "the_default_license_is_the_starting_point_for": "Lisensi bawaan adalah titik awal setiap kiriman baru. Anda tetap dapat menyesuaikan ketentuannya untuk setiap kiriman sebelum menerbitkan.",
+            "no_default_license_set_yet_new_posts": "Belum ada lisensi bawaan yang ditetapkan — kiriman baru dimulai dari ketentuan standar Lisensi NFT Pixa.",
+            "holder_rights": "Hak pemegang:",
+            "visitor_rights": "Hak pengunjung:",
+            "configure_default_license": "Atur lisensi bawaan",
+            "edit_default_license": "Edit lisensi bawaan",
+            "reset_to_standard_terms": "Setel ulang ke ketentuan standar",
             "always_ask_before_voting": "Selalu tanya sebelum memilih",
             "reset_custom_endpoint": "Setel ulang endpoint kustom",
             "set_custom_endpoint": "Atur endpoint kustom",
@@ -778,6 +787,7 @@ export default {
             "convert_picture": "Konversi gambar",
             "create_image": "Buat gambar",
             "description_optional": "Deskripsi (opsional)",
+            "drop_an_image_here_or_paste_it_with": "Letakkan gambar di sini atau tempelkan dengan {{shortcut}}",
             "wizard_of_creation": "Panduan pembuatan",
             "back": "Kembali",
             "are_you_sure": "Anda yakin?",
@@ -2040,6 +2050,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "Decentralized Pixa Fund (DPF) adalah kas on-chain sebuah organisasi otonom terdesentralisasi yang memungkinkan pengguna mengajukan proposal pendanaan dan memilih proposal mana yang layak didanai."
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "Orang yang pernah Anda kirimi",
             "what_is_this_transfer_for": "Untuk apa transfer ini?",
             "make_this_a_recurring_transfer": "Jadikan transfer berulang",
             "every_hours": "Setiap (jam)",
@@ -2323,7 +2334,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "Penilaian risiko, analisis ancaman, dan strategi mitigasi untuk keamanan ekosistem.",
             "security_audits_vulnerability_reports_and_best_p": "Audit keamanan, laporan kerentanan, dan praktik terbaik untuk penggunaan yang aman.",
             "report_bugs_technical_issues_and_track_their": "Laporkan bug dan masalah teknis, lalu pantau status penyelesaiannya.",
-            "community_events_meetups_collaborations_and_soci": "Acara komunitas, pertemuan, kolaborasi, dan inisiatif sosial."
+            "development_roadmap_releases_code_contributions": "Peta jalan pengembangan, rilis, kontribusi kode, dan dokumentasi teknis."
         },
         "gdmetrics": {
             "key_metrics": "Metrik utama",

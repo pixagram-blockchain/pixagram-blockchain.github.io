@@ -6,10 +6,14 @@ import { useState, useEffect } from "preact/hooks";
  *
  *  1. `t()` MUST stay synchronous. It is called inline inside render() in
  *     ~178 components. Any async signature would require touching every call
- *     site. So: `en` is statically imported as the guaranteed baseline, and
- *     every other locale is fetched with a dynamic `import()` that produces
- *     its own webpack chunk. Until the chunk lands, `t()` answers from the
- *     baseline and notifies subscribers when the real bundle arrives.
+ *     site. So every locale — `en` included — is fetched with a dynamic
+ *     `import()` that produces its own webpack chunk, and nothing is fetched
+ *     until the language is known: a French user never downloads en.js just
+ *     to have it replaced a moment later. Until the first catalogue lands,
+ *     `t()` answers "" (blank beats a flash of the wrong language, or of bare
+ *     key names) and subscribers are notified the moment the bundle arrives.
+ *     `en` keeps its role as the baseline for keys a locale lacks, but it is
+ *     fetched lazily, on the first miss — a complete locale never pays for it.
  *
  *  2. No JSON.stringify -> string replace -> JSON.parse round trip. That was
  *     both the hot-path cost and the injection primitive (see report).
@@ -46,7 +50,6 @@ import { useState, useEffect } from "preact/hooks";
  *     memoised per locale code instead of being built per plural resolution.
  */
 
-import en from "../locales/en";
 import { RTL } from "./locale-status";
 
 /**
@@ -130,12 +133,31 @@ let currentCode = "en-US";
  */
 let langChain = [BASE_FALLBACK];
 
+/**
+ * True until a catalogue on the active chain is live. While cold, t() answers
+ * "" (see the header). Recomputed wherever the chain or the loaded set changes
+ * — rebuildLangChain() and loadLocale() — so the hot path reads one boolean
+ * instead of probing up to three Maps per call.
+ */
+let cold = true;
+
+const refreshCold = () => {
+    for (let i = 0; i < langChain.length; i++) {
+        if (bundles.has(langChain[i])) { cold = false; return; }
+    }
+    cold = true;
+};
+
 const rebuildLangChain = () => {
-    if (currentLang === BASE_FALLBACK) { langChain = [BASE_FALLBACK]; return; }
-    const cut = currentLang.indexOf("_");
-    langChain = cut === -1
-        ? [currentLang, BASE_FALLBACK]
-        : [currentLang, currentLang.slice(0, cut), BASE_FALLBACK];
+    if (currentLang === BASE_FALLBACK) {
+        langChain = [BASE_FALLBACK];
+    } else {
+        const cut = currentLang.indexOf("_");
+        langChain = cut === -1
+            ? [currentLang, BASE_FALLBACK]
+            : [currentLang, currentLang.slice(0, cut), BASE_FALLBACK];
+    }
+    refreshCold();
 };
 
 /**
@@ -217,14 +239,28 @@ const indexFor = (lang) => {
 
 /* ─────────────────────────────── loading ───────────────────────────────── */
 
-bundles.set(BASE_FALLBACK, unwrapLocale(en));
-
-if (!bundles.get(BASE_FALLBACK) || !bundles.get(BASE_FALLBACK).components) {
-    // Baseline never resolved: every t() call is about to return its own key.
-    console.error("[i18n] baseline locale failed to load - check locales/en.js exports", en);
-}
+// Nothing is seeded here. The old `bundles.set("en", en)` made English the
+// price of admission for every user; the first catalogue now arrives through
+// loadLocale(), for whichever language setLanguage() is first told about.
 
 const notify = () => { for (const fn of listeners) { try { fn(currentCode); } catch (_) {} } };
+
+/**
+ * A chunk that could not be FETCHED is retried — the network failed, not the
+ * content, and with no English in the main bundle a lost locale chunk would
+ * otherwise leave the app blank. A file that does not exist is not retried:
+ * webpack rejects that from the context map without a request (its error has
+ * no `ChunkLoadError` name), and asking again cannot make pt_br.js appear.
+ */
+const LOCALE_RETRIES = 3;
+
+const fetchLocale = (lang, attempt) =>
+    import(/* webpackChunkName: "locale-[request]" */ `../locales/${lang}.js`)
+        .catch((err) => {
+            if (attempt >= LOCALE_RETRIES || !err || err.name !== "ChunkLoadError") throw err;
+            return new Promise((r) => setTimeout(r, 1000 << attempt))   // 1 s, 2 s, 4 s
+                .then(() => fetchLocale(lang, attempt + 1));
+        });
 
 /**
  * Fetch `../locales/<lang>.js` as its own chunk. Idempotent and de-duplicated.
@@ -236,11 +272,20 @@ export const loadLocale = (lang) => {
     if (bundles.has(lang)) return Promise.resolve(true);
     if (inflight.has(lang)) return inflight.get(lang);
 
-    const p = import(/* webpackChunkName: "locale-[request]" */ `../locales/${lang}.js`)
+    const p = fetchLocale(lang, 0)
         .then((mod) => {
-            bundles.set(lang, unwrapLocale(mod));
+            const bundle = unwrapLocale(mod);
+            if (!bundle || typeof bundle !== "object") {
+                // Not a catalogue: it would index to nothing and turn every
+                // t() into its own key. Counted as a failed load so the caller
+                // falls back instead of rendering identifiers.
+                console.error(`[i18n] locale "${lang}" did not export a catalogue - check locales/${lang}.js exports`, mod);
+                return false;
+            }
+            bundles.set(lang, bundle);
             indexes.delete(lang);
             resetCaches();     // answers computed against the fallback are stale
+            refreshCold();
             return true;
         })
         .catch(() => false)
@@ -248,6 +293,27 @@ export const loadLocale = (lang) => {
 
     inflight.set(lang, p);
     return p;
+};
+
+/**
+ * The baseline, fetched on demand. `en` used to be in the main bundle so that
+ * a key missing from the active locale could still render in English. It
+ * keeps that job — but it is only fetched the first time a lookup actually
+ * misses, so a complete locale never downloads it. Misses answer with the key
+ * tail while it is in flight; when it lands, notify() re-renders them in
+ * English. One attempt per session: a failed fetch leaves misses as they are.
+ */
+let fallbackTried = false;
+
+const ensureFallback = () => {
+    if (fallbackTried || bundles.has(BASE_FALLBACK)) return;
+    fallbackTried = true;
+    loadLocale(BASE_FALLBACK).then((ok) => {
+        if (ok) notify();          // loadLocale already dropped the caches
+        else if (process.env.NODE_ENV !== "production") {
+            console.warn("[i18n] baseline locale failed to load - missing keys will render as their key");
+        }
+    });
 };
 
 /** The SVG catalog is large and rarely needed — always its own chunk. */
@@ -266,11 +332,37 @@ const loadSvgCatalog = () => {
  * ("pt"); regional variants fall back to their base file until a dedicated
  * one exists. Also fixes <html lang> and <html dir>, which nothing else set.
  */
-export const setLanguage = async (code) => {
+/*
+ * Boot asks for the same code up to three times within a few milliseconds —
+ * the localStorage hint in client.js, then the settings callback, then Index's
+ * settings effect. Identical requests share one promise and one notify(), and
+ * a request for the code that is already live is a no-op: each notify() is a
+ * re-render of the whole tree, so this is not cosmetic.
+ *
+ * Every real request also takes a generation number. When two DIFFERENT codes
+ * overlap (a stale hint, then the saved setting) the chunk that lands last is
+ * not necessarily the one asked for last, and only the newest request may
+ * write the module state — the earlier one finishes its await and bows out.
+ */
+let languageGen = 0;
+let pendingCode = null;       // code of the request in flight, if any
+let pendingPromise = null;
+let appliedCode = null;       // code whose own catalogue is live; null after a
+                              // fallback so that a later request retries it
+
+export const setLanguage = (code) => {
     const safe = CODE_RE.test(String(code || "")) ? String(code) : "en-US";
-    const lang = safe.split("-")[0];
+    if (pendingCode === safe) return pendingPromise;
+    if (pendingCode === null && appliedCode === safe) return Promise.resolve(currentLang);
 
     currentCode = safe;
+    pendingCode = safe;
+    pendingPromise = applyLanguage(safe, ++languageGen);
+    return pendingPromise;
+};
+
+const applyLanguage = async (safe, gen) => {
+    const lang = safe.split("-")[0];
 
     // Try the region-specific file first (pt-BR.js), then the base (pt.js).
     let resolved = lang;
@@ -279,6 +371,15 @@ export const setLanguage = async (code) => {
         if (LANG_RE.test(regional) && (await loadLocale(regional))) resolved = regional;
     }
     await loadLocale(lang);
+
+    // Neither file landed. This is the one place the baseline is fetched for
+    // a non-English user without a miss asking for it: the alternative is a
+    // blank app. (English itself failing is left to loadLocale's retries.)
+    const fellBack = !bundles.has(resolved) && !bundles.has(lang);
+    if (fellBack && lang !== BASE_FALLBACK) await loadLocale(BASE_FALLBACK);
+
+    // A newer request started while we were waiting; it owns the state now.
+    if (gen !== languageGen) return currentLang;
 
     currentLang = bundles.has(resolved) ? resolved : (bundles.has(lang) ? lang : BASE_FALLBACK);
     rebuildLangChain();
@@ -289,6 +390,10 @@ export const setLanguage = async (code) => {
         document.documentElement.dir = RTL.has(lang) ? "rtl" : "ltr";
     }
 
+    pendingCode = null;
+    pendingPromise = null;
+    appliedCode = fellBack ? null : safe;
+
     loadSvgCatalog();
     notify();
     return currentLang;
@@ -297,6 +402,14 @@ export const setLanguage = async (code) => {
 export const getLanguage = () => currentLang;
 export const getLocaleCode = () => currentCode;
 export const isLoaded = (lang) => bundles.has(String(lang || "").split("-")[0]);
+
+/**
+ * False until the first catalogue for the active language is live; while
+ * false, every t() answers "". For code that builds copy outside render (tour
+ * steps, document.title) and wants to wait for real strings rather than
+ * re-run on the notify.
+ */
+export const isReady = () => !cold;
 
 /**
  * Re-render THIS component when the language changes.
@@ -787,6 +900,12 @@ const cachePut = (map, key, value) => {
 export const t = (path, variables, parameters) => {
     if (typeof path !== "string" || path.length === 0 || path.length > 512) return "";
 
+    // No catalogue yet: the language is known, or about to be, but its chunk
+    // has not landed. Blank until it does — notify() re-renders every
+    // subscriber the moment it arrives. Returned before any cache is touched
+    // so nothing computed against "no bundle" survives the swap.
+    if (cold) return "";
+
     let vars = (variables !== null && typeof variables === "object") ? variables : EMPTY;
     let params = (parameters !== null && typeof parameters === "object") ? parameters : EMPTY;
 
@@ -837,7 +956,14 @@ export const t = (path, variables, parameters) => {
     }
 
     if (raw === undefined) {
-        if (process.env.NODE_ENV !== "production" && !warned.has(path)) {
+        if (!bundles.has(BASE_FALLBACK)) {
+            // The active locale has a hole. This is the event that fetches the
+            // baseline: the key renders as its tail until en.js lands, then
+            // notify() re-renders it in English. The rawCache MISS recorded
+            // above is dropped by loadLocale() when the chunk arrives.
+            ensureFallback();
+        } else if (process.env.NODE_ENV !== "production" && !warned.has(path)) {
+            // Only worth saying once the baseline has been consulted too.
             warned.add(path);
             console.warn(`[i18n] missing key "${path}" for "${currentLang}"`);
         }

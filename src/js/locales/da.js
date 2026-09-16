@@ -204,7 +204,8 @@ export default {
         "legal": "Juridisk",
         "risks": "Risici",
         "bug_reports": "Fejlrapporter",
-        "community": "Fællesskab"
+        "community": "Fællesskab",
+        "development": "Udvikling"
     },
 
     components: {
@@ -275,6 +276,14 @@ export default {
             "renounced": "Tilbageholdende",
             "balanced": "Balanceret",
             "sovereign": "Suveræn",
+            "licensing": "Licensering",
+            "the_default_license_is_the_starting_point_for": "Standardlicensen er udgangspunktet for hvert nyt indlæg. Du kan stadig justere vilkårene for hvert enkelt indlæg, før du udgiver.",
+            "no_default_license_set_yet_new_posts": "Ingen standardlicens angivet endnu — nye indlæg starter fra standardvilkårene i Pixa NFT-licensen.",
+            "holder_rights": "Indehaverens rettigheder:",
+            "visitor_rights": "Besøgendes rettigheder:",
+            "configure_default_license": "Konfigurér standardlicens",
+            "edit_default_license": "Redigér standardlicens",
+            "reset_to_standard_terms": "Nulstil til standardvilkår",
             "always_ask_before_voting": "Spørg altid, før der stemmes",
             "reset_custom_endpoint": "Nulstil brugerdefineret endpoint",
             "set_custom_endpoint": "Angiv brugerdefineret endpoint",
@@ -777,6 +786,7 @@ export default {
             "convert_picture": "Konvertér billede",
             "create_image": "Skab billede",
             "description_optional": "Beskrivelse (valgfri)",
+            "drop_an_image_here_or_paste_it_with": "Træk et billede hertil eller indsæt det med {{shortcut}}",
             "wizard_of_creation": "Skabelsens troldmand",
             "back": "Tilbage",
             "are_you_sure": "Er du sikker?",
@@ -2038,6 +2048,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "Decentralized Pixa Fund (DPF) er et on-chain skatkammer i en decentraliseret autonom organisation, som lader brugere indsende forslag til finansiering og stemme om, hvilke forslag der skal finansieres."
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "Personer, du har sendt til før",
             "what_is_this_transfer_for": "Hvad er denne overførsel til?",
             "make_this_a_recurring_transfer": "Gør dette til en tilbagevendende overførsel",
             "every_hours": "Hver (timer)",
@@ -2321,7 +2332,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "Risikovurdering, trusselsanalyse og afbødningsstrategier for økosystemets sikkerhed.",
             "security_audits_vulnerability_reports_and_best_p": "Sikkerhedsrevisioner, sårbarhedsrapporter og bedste praksis for sikker brug.",
             "report_bugs_technical_issues_and_track_their": "Rapportér fejl og tekniske problemer, og følg status på deres løsning.",
-            "community_events_meetups_collaborations_and_soci": "Fællesskabsarrangementer, meetups, samarbejder og sociale initiativer."
+            "development_roadmap_releases_code_contributions": "Udviklingsplan, udgivelser, kodebidrag og teknisk dokumentation."
         },
         "gdmetrics": {
             "key_metrics": "Nøglemetrikker",

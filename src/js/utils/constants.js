@@ -616,7 +616,7 @@ export const COMMUNITY_PORTALS = Object.freeze([
     Object.freeze({ name: "risks",       id: "portal-150607" }),
     Object.freeze({ name: "security",    id: "portal-140520" }),
     Object.freeze({ name: "bugs",        id: "portal-118883" }),
-    Object.freeze({ name: "community",   id: "portal-171204" }),
+    Object.freeze({ name: "development", id: "portal-171204" }),
 ]);
 
 // ── Post overlay URL helpers ──────────────────────────────────────────

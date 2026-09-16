@@ -25,7 +25,7 @@ import { $convertToMarkdownString } from '@lexical/markdown';
 // Shared markdown loader (clears root, converts with GFM tables) and the
 // transformer set that includes images
 import { loadMarkdownIntoEditor, EDITOR_TRANSFORMERS, $setBlocksTypeSafe, $getBlockTypeAtSelection } from './lexicalConfig';
-import { $createImageNode, isRenderableImageSrc } from '../../utils/lexical/ImageNode';
+import { $createImageNode, isRenderableImageSrc } from '../../utils/ImageNode';
 import { storeImageOnArweave } from '../../utils/lexical/arweaveImage';
 
 // Micromark imports for preview
@@ -63,7 +63,7 @@ import GradientEditorDialog from "../../components/GradientEditorDialog";
 import { editorHeaderStyles } from './EditorHeader';
 import { editorToolbarStyles } from './EditorToolbar';
 import { editorSectionStyles } from './EditorSection';
-import { coverImageUploadStyles } from './CoverImageUpload';
+import { coverImageUploadStyles, isGradientCover } from './CoverImageUpload';
 import { settingsPanelStyles } from './SettingsPanel';
 import { draftCardStyles } from './DraftCard';
 import { draftsDialogStyles } from './DraftsDialog';
@@ -88,6 +88,20 @@ const sanitizeUrl = (raw) => {
         const parsed = new URL(url);
         return SAFE_URL_PROTOCOLS.includes(parsed.protocol) ? parsed.href : null;
     } catch (e) {
+        return null;
+    }
+};
+
+// Raw SVG text out of a base64 SVG data URI — what publish() broadcasts in
+// jsonMetadata.image. Null when the URI isn't base64-encoded or won't
+// decode; create-mode publish then falls back to the data URI itself (same
+// bytes).
+const decodeSvgDataUri = (dataUri) => {
+    if (!dataUri.startsWith('data:image/svg+xml;base64,')) return null;
+    try {
+        return decodeURIComponent(escape(atob(dataUri.split(',')[1])));
+    } catch (e) {
+        console.warn('Failed to decode SVG:', e);
         return null;
     }
 };
@@ -364,9 +378,17 @@ class LexicalTextEditorDialog extends PureComponent {
             proposalDailyPay: "100",
             activeAccount: null,
             userCommunities: [],
+            // Portal id → title, filled by _resolvePortalTitles for portals
+            // the selector would otherwise show as a bare "portal-NNNNNN":
+            // the page's own portal (initialCommunity) when the account
+            // hasn't joined it, an edited post's parent_permlink, a draft's
+            // saved portal. The subscription rows carry titles already.
+            portalTitles: {},
             isPublishing: false,
-            // Raw SVG of the cover from the gradient editor — travels
-            // on-chain in jsonMetadata.image at publish time (< 1 kB).
+            // Raw SVG of the cover gradient — travels on-chain in
+            // jsonMetadata.image at publish time (< 1 kB). Kept in step with
+            // the cover by _setCover; null while an edit-mode post's existing
+            // cover only previews (see _loadEditPost).
             svgContent: null,
             enableComments: true,
             enableMonetization: false,
@@ -398,6 +420,8 @@ class LexicalTextEditorDialog extends PureComponent {
             imageUploading: false,
             wordCount: 0,
             readingTime: 0,
+            // The cover: an SVG gradient data URI or null, nothing else
+            // (isGradientCover — enforced by _getGradient/_setGradient).
             gradient: null,
             deleteConfirmDialogOpen: false,
             deleteConfirmDraftId: null,
@@ -414,7 +438,6 @@ class LexicalTextEditorDialog extends PureComponent {
         };
 
         this.editorRef = React.createRef();
-        this.fileInputRef = React.createRef();
         this.draftManager = new DraftManager();
         this.autoSaveTimer = null;
         this.statsTimer = null;
@@ -423,6 +446,10 @@ class LexicalTextEditorDialog extends PureComponent {
         // search keystrokes filter in memory instead of re-querying the
         // database (see handleDraftsSearch).
         this._allDrafts = [];
+        // Portal ids already sent to getCommunity this mount — one lookup
+        // per portal, whether or not it returned a title (a portal that has
+        // none keeps its id; asking again won't change that).
+        this._portalTitleLookups = new Set();
         // Last successful Lexical -> markdown serialization. Fallback for
         // saves that happen when the editor is unmounted (e.g. unmount flush),
         // so a detached ref can never overwrite a draft with empty content.
@@ -492,6 +519,9 @@ class LexicalTextEditorDialog extends PureComponent {
                             }
 
                             // If initialCommunity is set but not in subscriptions, prepend it
+                            // so it stays selectable after switching away. Its title is
+                            // deliberately the id here: that's the marker _resolvePortalTitles
+                            // reads (title === name) to fetch the real one once this lands.
                             const { initialCommunity } = this.props;
                             if (initialCommunity && !communities.some(c => c.name === initialCommunity)) {
                                 communities = [{ name: initialCommunity, title: initialCommunity, role: 'guest' }, ...communities];
@@ -512,14 +542,27 @@ class LexicalTextEditorDialog extends PureComponent {
         }
     }
 
-    componentDidUpdate(prevProps) {
+    componentDidUpdate(prevProps, prevState) {
+        // The selector must never show a raw portal id when a title exists.
+        // Every way a portal gets selected by id alone — the subscription
+        // list landing with initialCommunity prepended, an edit load setting
+        // parent_permlink, a draft restoring its saved portal, a re-open
+        // pre-selecting a new initialCommunity — changes one of these two
+        // state fields, so this single trigger covers them all.
+        if (prevState.community !== this.state.community
+            || prevState.userCommunities !== this.state.userCommunities) {
+            this._resolvePortalTitles();
+        }
+
         // Uncontrolled mode: a parent may still hand over an initial cover
         // via the gradient prop without wiring a setter — seed it into state
-        // when the dialog opens (same behavior as the retired editor).
+        // when the dialog opens (same behavior as the retired editor). Only
+        // a gradient qualifies; it goes through _setCover so it is also what
+        // publish() broadcasts.
         if (this.props.open && !prevProps.open &&
             typeof this.props.setGradient !== 'function' &&
-            this.props.gradient && this.props.gradient !== this.state.gradient) {
-            this.setState({ gradient: this.props.gradient });
+            isGradientCover(this.props.gradient) && this.props.gradient !== this.state.gradient) {
+            this._setCover(this.props.gradient);
         }
 
         // Pre-select community from props when dialog opens (create mode only —
@@ -545,6 +588,41 @@ class LexicalTextEditorDialog extends PureComponent {
             this._loadEditPost();
         }
     }
+
+    // ── Portal titles ────────────────────────────────────────────────────
+    // Collect every portal the selector would currently show by id — the
+    // selected one when it isn't among the subscriptions, and any list
+    // entry whose title is its own id — and look each up once.
+    _resolvePortalTitles = () => {
+        const { community, userCommunities } = this.state;
+        const untitled = (c) => !c.title || c.title === c.name;
+        const pending = new Set();
+        if (community) {
+            const entry = userCommunities.find(c => c.name === community);
+            if (!entry || untitled(entry)) pending.add(community);
+        }
+        for (const c of userCommunities) {
+            if (untitled(c)) pending.add(c.name);
+        }
+        pending.forEach(this._resolvePortalTitle);
+    };
+
+    // api.communities.getCommunity — bridge.get_community, sanitized; it
+    // resolves to null (never throws) for an unknown portal or a node
+    // error. Only a real, distinct title is stored: with nothing better
+    // than the id, the selector keeps showing the id.
+    _resolvePortalTitle = async (name) => {
+        if (!name || this._portalTitleLookups.has(name)) return;
+        this._portalTitleLookups.add(name);
+        const api = this.props.api;
+        if (!api?.communities?.getCommunity) return;
+        const info = await api.communities.getCommunity(name);
+        const title = info && typeof info.title === 'string' ? info.title.trim() : '';
+        if (!title || title === name) return;
+        this.setState((state) => ({
+            portalTitles: { ...state.portalTitles, [name]: title }
+        }));
+    };
 
     /**
      * EDIT MODE loader — fetch the RAW on-chain version of the post being
@@ -586,12 +664,17 @@ class LexicalTextEditorDialog extends PureComponent {
                 isProposal: false,
                 editProposal: null,
                 // The existing cover only previews; it's re-broadcast solely
-                // when the user replaces it (svgContent stays null).
+                // when the user replaces it (svgContent stays null) — which
+                // is why this path uses _setGradient, not _setCover.
                 svgContent: null,
             });
-            if (typeof meta.image === 'string' && meta.image) {
-                this._setGradient(meta.image);
-            }
+            // Always assigned, never conditionally: a cover left over from a
+            // create session in this kept-mounted instance must not show on
+            // an unrelated post. A non-gradient image in the metadata (a
+            // foreign URL, a raster) reads as "no cover" — the setter drops
+            // it, and the shallow metadata merge on update leaves the chain
+            // value untouched either way.
+            this._setGradient(typeof meta.image === 'string' ? meta.image : null);
 
             // Push into the already-mounted Lexical editor (the
             // InitializePlugin only runs once per mount, so a kept-mounted
@@ -685,9 +768,10 @@ class LexicalTextEditorDialog extends PureComponent {
                 loadMarkdownIntoEditor(editor, draft.content || '');
             }
 
-            if ((draft.gradient || null) !== this._getGradient()) {
-                this._setGradient(draft.gradient || null);
-            }
+            // Unconditional (no "same as current" shortcut): the decoded
+            // svgContent must always be THIS draft's, never the previous
+            // one's — publish() prefers it over the cover on screen.
+            this._setCover(draft.gradient || null);
         } catch (error) {
             console.error('Error loading draft:', error);
         }
@@ -858,7 +942,10 @@ class LexicalTextEditorDialog extends PureComponent {
             });
         }
 
-        this._setGradient(null);
+        // _setCover, not _setGradient: this used to clear only the cover and
+        // leave svgContent behind, so a gradient generated for the previous
+        // draft was still broadcast with the new one.
+        this._setCover(null);
 
         actions.trigger_snackbar(t("components.lexical_text_editor_dialog.new_draft_created"));
     };
@@ -1333,36 +1420,43 @@ class LexicalTextEditorDialog extends PureComponent {
     // points didn't pass gradient props either. If a parent DOES control it
     // (gradient + setGradient prop pair), that pair wins; otherwise the
     // dialog owns the value itself.
-    _getGradient = () => (
-        typeof this.props.setGradient === 'function'
+    //
+    // Both accessors enforce the rule "a cover is none or a gradient": a
+    // non-gradient value — a parent's prop, a raster left in a draft by the
+    // retired upload path, a foreign URL in on-chain metadata — reads and
+    // writes as null, so the editor never previews a cover the post can't
+    // carry.
+    _getGradient = () => {
+        const value = typeof this.props.setGradient === 'function'
             ? this.props.gradient
-            : this.state.gradient
-    );
+            : this.state.gradient;
+        return isGradientCover(value) ? value : null;
+    };
 
     _setGradient = (value) => {
+        const cover = isGradientCover(value) ? value : null;
         if (typeof this.props.setGradient === 'function') {
-            this.props.setGradient(value);
+            this.props.setGradient(cover);
         } else {
-            this.setState({ gradient: value });
+            this.setState({ gradient: cover });
         }
     };
 
-    handleImageUpload = (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            this._setGradient(event.target.result);
-            this.setState({ svgContent: null });
-        };
-        reader.readAsDataURL(file);
+    // The cover and the decoded SVG that publish() broadcasts, set TOGETHER.
+    // They used to be updated in different places, so "New draft" — or
+    // loading another draft — after generating a gradient left the previous
+    // svgContent behind; and since publish() prefers svgContent over the
+    // cover on screen, the stale gradient (or the other draft's) went
+    // on-chain. Every user-driven cover change goes through here; the one
+    // deliberate exception is _loadEditPost, which previews the on-chain
+    // cover without re-broadcasting it.
+    _setCover = (value) => {
+        const cover = isGradientCover(value) ? value : null;
+        this.setState({ svgContent: cover ? decodeSvgDataUri(cover) : null });
+        this._setGradient(cover);
     };
 
-    removeCoverImage = () => {
-        this._setGradient(null);
-        this.setState({ svgContent: null });
-    };
+    removeCoverImage = () => this._setCover(null);
 
     handleSave = async () => {
         const draftId = await this.saveDraft(true);
@@ -1568,18 +1662,17 @@ class LexicalTextEditorDialog extends PureComponent {
                 description: description || '',
             };
 
-            // If we have an SVG from the gradient editor, store it as image.
+            // The cover is the SVG gradient or nothing — the only two
+            // things a post can carry (_setCover / isGradientCover).
             if (svgContent) {
                 const encoded = btoa(unescape(encodeURIComponent(svgContent)));
                 jsonMetadata.image = `data:image/svg+xml;base64,${encoded}`;
             } else {
-                // Draft round-trip: a reloaded draft carries the gradient's
-                // data URI but not the decoded SVG — reuse it directly (same
-                // bytes). Raster covers never go on-chain.
+                // A gradient whose URI isn't base64 (or wouldn't decode)
+                // has no svgContent — broadcast the data URI as-is, same
+                // bytes. _getGradient already guarantees SVG-or-null.
                 const cover = this._getGradient();
-                if (cover && typeof cover === 'string' && cover.startsWith('data:image/svg+xml')) {
-                    jsonMetadata.image = cover;
-                }
+                if (cover) jsonMetadata.image = cover;
             }
 
             // Mark the post as a DAO proposal in its metadata so apps rendering
@@ -1730,21 +1823,12 @@ class LexicalTextEditorDialog extends PureComponent {
         this.setState({ gradientEditorOpen: false });
         // Wired as BOTH onAccept and onClose of GradientEditorDialog: a
         // cancel / backdrop close can invoke this with an event object (or
-        // nothing). Only an accepted data: URI, or null (explicit clear),
-        // may ever reach the gradient.
+        // nothing), which must leave the current cover alone. Only an
+        // accepted data: URI, or null (explicit clear), reaches the cover —
+        // and _setCover keeps just the SVG gradient form of it, the only
+        // form that goes on-chain (< 1 kB, never raster).
         if (b64 === null || (typeof b64 === 'string' && b64.startsWith('data:'))) {
-            // Keep the raw SVG for jsonMetadata at publish time — covers
-            // travel on-chain as < 1 kB SVGs, never as raster data.
-            let svgContent = null;
-            if (b64 && b64.startsWith('data:image/svg+xml;base64,')) {
-                try {
-                    svgContent = decodeURIComponent(escape(atob(b64.split(',')[1])));
-                } catch (e) {
-                    console.warn('Failed to decode SVG:', e);
-                }
-            }
-            this.setState({ svgContent });
-            this._setGradient(b64);
+            this._setCover(b64);
         }
     };
 
@@ -1808,7 +1892,7 @@ class LexicalTextEditorDialog extends PureComponent {
             editorMode, markdownSource, initialMarkdown, title, description, tags,
             payout, community,
             isProposal, editProposal, proposalStartDate, proposalEndDate, proposalDailyPay,
-            activeAccount, userCommunities, isPublishing,
+            activeAccount, userCommunities, portalTitles, isPublishing,
             editOpened, formatMenuAnchor, headingMenuAnchor, listMenuAnchor,
             linkDialogOpen, linkUrl, linkSelectedText, hasTextSelection,
             wordCount, readingTime, tab, currentDraftId, mobile,
@@ -1860,12 +1944,11 @@ class LexicalTextEditorDialog extends PureComponent {
                 payout={payout}
                 community={community}
                 communities={userCommunities}
+                portalTitles={portalTitles}
                 communityLocked={editMode}
                 activeAccount={activeAccount}
                 title={title}
                 description={description}
-                fileInputRef={this.fileInputRef}
-                onImageUpload={this.handleImageUpload}
                 onRemoveImage={this.removeCoverImage}
                 onOpenGradientEditor={this.openGradientEditor}
                 onPayoutChange={this.onPayoutChange}

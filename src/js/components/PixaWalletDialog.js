@@ -932,6 +932,20 @@ const SCROLL_EDGE_THRESHOLD = 10;
  */
 const PRICE_HISTORY_AVAILABLE = false;
 
+/**
+ * History op types that count as "sending something to another account" for
+ * the recent-recipients strip in PixaWalletSendDialog, and how many distinct
+ * accounts that strip keeps (newest first).
+ */
+const RECENT_RECIPIENT_OPS = [
+    'transfer',
+    'recurrent_transfer',
+    'fill_recurrent_transfer',
+    'transfer_to_vesting',   // power-up to someone else
+    'transfer_to_savings',   // deposit into someone else's savings
+];
+const RECENT_RECIPIENTS_MAX = 12;
+
 /** X-axis label granularity for a price range expressed in days. */
 const priceChartDateType = (days) => {
     const n = Number(days) || 0;
@@ -1213,6 +1227,10 @@ class PixaWalletDialog extends React.PureComponent {
             // Default collapsed for a cleaner view; counts surface in the header.
             _expandedSections: {},
             _walletHistory: [],
+            // Accounts this wallet has sent assets to, newest first, unique.
+            // Feeds the "people you've sent to before" quick-pick strip in
+            // PixaWalletSendDialog. [{ username, image, name }]
+            _recentRecipients: [],
             _walletLoaded: false,
             _LIQUID_SYMBOL: 'PXA',
             _DOLLAR_SYMBOL: 'PXS',
@@ -1954,23 +1972,54 @@ class PixaWalletDialog extends React.PureComponent {
                     .reverse();
             } catch (e) { /* ignore */ }
 
-            // Fetch profile images for delegation + recurrent-transfer accounts
+            // Recent recipients: every account this wallet has sent assets to,
+            // most recent first, one entry per account. `history` is already
+            // newest-first (see .reverse() above), so the first occurrence of
+            // a recipient is its latest transfer. Self-sends (power-up /
+            // savings with an empty or own `to`) are skipped.
+            let recentRecipients = [];
+            try {
+                const seen = {};
+                for (const h of history) {
+                    if (RECENT_RECIPIENT_OPS.indexOf(h.type) === -1) continue;
+                    const d = h.data || {};
+                    const to = d.to || '';
+                    if (!to || d.from !== account.username || to === account.username) continue;
+                    if (seen[to]) continue;
+                    seen[to] = true;
+                    recentRecipients.push({ username: to, image: '', name: '' });
+                    if (recentRecipients.length >= RECENT_RECIPIENTS_MAX) break;
+                }
+            } catch (e) { /* ignore */ }
+
+            // Fetch profile images (+ display names) for delegation,
+            // recurrent-transfer and recent-recipient accounts — one call.
             try {
                 const profileUsernames = [
                     ...outgoingDelegations.map(d => d.delegatee),
                     ...incomingDelegations.map(d => d.delegator),
                     ...recurrentTransfers.map(r => r.to),
+                    ...recentRecipients.map(r => r.username),
                 ].filter((v, i, a) => v && a.indexOf(v) === i); // unique
                 if (profileUsernames.length > 0) {
                     const profiles = await api.accounts.getAccounts(profileUsernames, true);
                     const profileMap = {};
+                    const profileNameMap = {};
                     for (const p of (profiles || [])) {
                         const u = p.username || p.name;
-                        if (u) profileMap[u] = (p._profile && p._profile.profile_image) || '';
+                        if (u) {
+                            profileMap[u] = (p._profile && p._profile.profile_image) || '';
+                            profileNameMap[u] = p.display_name || (p._profile && p._profile.display_name) || '';
+                        }
                     }
                     outgoingDelegations = outgoingDelegations.map(d => ({ ...d, image: profileMap[d.delegatee] || '' }));
                     incomingDelegations = incomingDelegations.map(d => ({ ...d, image: profileMap[d.delegator] || '' }));
                     recurrentTransfers = recurrentTransfers.map(r => ({ ...r, image: profileMap[r.to] || '' }));
+                    recentRecipients = recentRecipients.map(r => ({
+                        ...r,
+                        image: profileMap[r.username] || '',
+                        name: profileNameMap[r.username] || '',
+                    }));
                 }
             } catch (e) { /* ignore */ }
 
@@ -2050,6 +2099,7 @@ class PixaWalletDialog extends React.PureComponent {
                 _pendingPixa: pendingPixa,
                 _pendingPxs: pendingPxs,
                 _walletHistory: history,
+                _recentRecipients: recentRecipients,
                 _walletLoaded: true,
                 _LIQUID_SYMBOL: LIQUID_SYMBOL,
                 _DOLLAR_SYMBOL: DOLLAR_SYMBOL,
@@ -3405,6 +3455,7 @@ class PixaWalletDialog extends React.PureComponent {
             _outgoingDelegations,
             _incomingDelegations,
             _walletHistory,
+            _recentRecipients,
             _walletLoaded,
             _confirm_action_open,
             _confirm_action_title,
@@ -3990,6 +4041,7 @@ class PixaWalletDialog extends React.PureComponent {
                                 username={account.username}
                                 locales={locales}
                                 vestToPixa={this.state._vestToPixa}
+                                onOpenAuthor={this._open_author}
                             />
                         </div>
                     </div>
@@ -4200,7 +4252,7 @@ class PixaWalletDialog extends React.PureComponent {
                     </React.Suspense>
                 ) : null}
                 <PixaWalletPowerDialog type={_power_dialog_opened} open={_power_dialog_opened.length} onClose={this._close_power_dialog} onConfirm={this._handle_power_confirm} api={this.state.api} account={account} maxPXP={_powerDownablePxp} maxPXA={_pixaBalance} pixaUsdPrice={_pixaUsdPrice} fiatRate={fiatRate} fiatCurrency={cur} locale={this.state._locale} powerDownIntervals={this.state._powerDownIntervals} powerDownIntervalSeconds={this.state._powerDownIntervalSeconds}/>
-                <PixaWalletSendDialog type={_send_dialog_opened} open={_send_dialog_opened.length} onToggleCurrency={this._open_send_dialog} onClose={this._close_send_dialog} api={this.state.api} account={_itsOwnProfile ? account : broadcastAccount} maxPXA={_itsOwnProfile ? _pixaBalance : 999999999} maxPXS={_itsOwnProfile ? _pxsBalance : 999999999} pixaUsdPrice={_pixaUsdPrice} pxsUsdPrice={_pxsUsdPrice} fiatRate={fiatRate} fiatCurrency={cur} locale={this.state._locale} onSend={this._handle_send_confirm} initialUsername={!_itsOwnProfile ? account.username : undefined} lockedUsername={!_itsOwnProfile}/>
+                <PixaWalletSendDialog type={_send_dialog_opened} open={_send_dialog_opened.length} onToggleCurrency={this._open_send_dialog} onClose={this._close_send_dialog} api={this.state.api} account={_itsOwnProfile ? account : broadcastAccount} maxPXA={_itsOwnProfile ? _pixaBalance : 999999999} maxPXS={_itsOwnProfile ? _pxsBalance : 999999999} pixaUsdPrice={_pixaUsdPrice} pxsUsdPrice={_pxsUsdPrice} fiatRate={fiatRate} fiatCurrency={cur} locale={this.state._locale} onSend={this._handle_send_confirm} initialUsername={!_itsOwnProfile ? account.username : undefined} lockedUsername={!_itsOwnProfile} recentRecipients={_itsOwnProfile ? _recentRecipients : []}/>
                 <PixaWalletKeysDialog type={_keys_dialog_opened} open={_keys_dialog_opened.length} onClose={this._close_keys_dialog} api={this.state.api} account={account} isOwnProfile={_itsOwnProfile}/>
                 <PixaWalletSwapDialog type={_swap_dialog_opened} open={_swap_dialog_opened.length} onToggleCurrency={this._open_swap_dialog} onClose={this._close_swap_dialog} api={this.state.api} maxPXA={_pixaBalance} maxPXS={_pxsBalance} pixaUsdPrice={_pixaUsdPrice} pxsUsdPrice={_pxsUsdPrice} fiatRate={fiatRate} fiatCurrency={cur} locale={this.state._locale} onConfirm={this._handle_swap_confirm}/>
                 <PixaWalletDelegateDialog open={_delegate_dialog_opened} onClose={this._close_delegate_dialog} api={this.state.api} account={_itsOwnProfile ? account : broadcastAccount} maxPXP={_itsOwnProfile ? _powerDownablePxp : 999999999} locale={this.state._locale} onDelegate={this._handle_delegate_confirm} initialDelegatee={!_itsOwnProfile ? account.username : undefined} lockedDelegatee={!_itsOwnProfile}/>

@@ -18,8 +18,14 @@
 //   2. The pixaproxyapi chunk request is fired at module scope, so its
 //      download overlaps boot; usePixaAPI's JSLoader import later resolves
 //      from the module cache instead of hitting the network post-mount.
-//   3. The locale boot hint is applied synchronously, so non-English users
-//      get their language on first paint instead of an English flash.
+//   3. The locale boot hint is applied synchronously — and it is now what
+//      starts the ONLY locale fetch of a normal boot. utils/text no longer
+//      bundles en.js: every language, English included, is its own chunk,
+//      fetched once the language is known. A returning user's chunk request
+//      goes out at script evaluation; a first-time visitor's goes out the
+//      moment settings resolve (the api.init callback below). Nobody downloads
+//      English to have it replaced, and t() answers "" until the chunk lands
+//      rather than flashing the wrong language.
 //   4. React.render runs IMMEDIATELY with settings=null. Index was already
 //      built for this: normalizeSettings(null) leaves the previous state,
 //      settingsRef starts at { _know_the_settings: false }, and every
@@ -70,21 +76,35 @@ import(/* webpackChunkName: "sanitizer" */ "./utils/api/sanitizer").catch(() => 
 import(/* webpackChunkName: "dpixa" */ "@pixagram/dpixa/dist/dpixa").catch(() => {});
 
 // ── (3) Locale head start ────────────────────────────────────────────────────
-// Index will authoritatively call setLanguage() once settings hydrate; this
-// just starts the locale chunk fetch/swap ~one settings-I/O earlier so the
-// first paint is already in the user's language. Redundant for "en-US" and
-// self-corrects if the hint is ever stale (e.g. language changed mid-session
-// last visit): the authoritative call wins.
+// This call is what fetches the locale chunk for a returning user — there is
+// no English baseline in the main bundle to paint first, so the earlier it
+// goes out the shorter the blank window. The settings callback and Index will
+// each call setLanguage() again with the saved code; an identical request
+// shares this one's promise and costs nothing. If the hint is ever stale
+// (language changed mid-session last visit) the later call wins — one extra
+// chunk, once — and the hint is rewritten below.
+//
+// No hint (first visit, cleared storage): nothing is fetched yet. Guessing
+// from navigator.language would be right on a first visit but wrong for a
+// returning user whose stored setting differs from their browser — exactly
+// the double download this design exists to avoid — so the fetch waits for
+// settings, which resolve a few milliseconds later.
 try {
     const hintedLocale = localStorage.getItem("pixa_locale_hint");
     if (hintedLocale) setLanguage(hintedLocale);
-} catch (e) { /* private mode / storage disabled — default-language first paint */ }
+} catch (e) { /* private mode / storage disabled — the settings callback starts the fetch */ }
 
 // ── (1) Settings I/O — kicked off at evaluation time ─────────────────────────
 let _resolvedSettings = null;
 let _notifySettings = null;
 api.init((response) => {
     _resolvedSettings = response;
+
+    // The language is known now. Start its chunk from here rather than from
+    // Index's settings effect, which runs one React commit later — for a
+    // first-time visitor this is the request. With a matching hint above it
+    // is the same in-flight promise, not a second request.
+    if (response && response.locales) setLanguage(response.locales);
 
     // Refresh the locale hint for the NEXT cold start. Cleared when the value
     // is absent so reverting to defaults doesn't leave a stale hint behind.

@@ -12,6 +12,8 @@ import AccountBalanceIcon from "@material-ui/icons/AccountBalance";
 import WarningIcon from "@material-ui/icons/Warning";
 import SecurityIcon from "@material-ui/icons/Security";
 import BugReportIcon from "@material-ui/icons/BugReport";
+import CodeIcon from "@material-ui/icons/Code";
+// Not a portal icon any more: it draws the subscriber count in every tile.
 import GroupIcon from "@material-ui/icons/Group";
 
 import { HISTORY, PROPOSALS_PORTAL, COMMUNITY_PORTALS } from "../utils/constants";
@@ -191,10 +193,10 @@ const PORTAL_PRESENTATION = {
         description: () => t("components.gddisruptions.report_bugs_technical_issues_and_track_their"),
         icon: BugReportIcon
     },
-    community: {
-        title: () => t("words.community"),
-        description: () => t("components.gddisruptions.community_events_meetups_collaborations_and_soci"),
-        icon: GroupIcon
+    development: {
+        title: () => t("words.development"),
+        description: () => t("components.gddisruptions.development_roadmap_releases_code_contributions"),
+        icon: CodeIcon
     }
 };
 

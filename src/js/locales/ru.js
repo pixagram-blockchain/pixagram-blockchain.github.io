@@ -207,7 +207,8 @@ export default {
         "legal": "Юридические вопросы",
         "risks": "Риски",
         "bug_reports": "Сообщения об ошибках",
-        "community": "Сообщество"
+        "community": "Сообщество",
+        "development": "Разработка"
     },
 
     components: {
@@ -278,6 +279,14 @@ export default {
             "renounced": "Отказ",
             "balanced": "Сбалансированно",
             "sovereign": "Суверенно",
+            "licensing": "Лицензирование",
+            "the_default_license_is_the_starting_point_for": "Лицензия по умолчанию — отправная точка для каждого нового поста. Перед публикацией вы по-прежнему можете изменить условия для каждого поста отдельно.",
+            "no_default_license_set_yet_new_posts": "Лицензия по умолчанию ещё не задана — новые посты начинаются со стандартных условий NFT-лицензии Pixa.",
+            "holder_rights": "Права владельца:",
+            "visitor_rights": "Права посетителя:",
+            "configure_default_license": "Настроить лицензию по умолчанию",
+            "edit_default_license": "Изменить лицензию по умолчанию",
+            "reset_to_standard_terms": "Сбросить к стандартным условиям",
             "always_ask_before_voting": "Всегда спрашивать перед голосованием",
             "reset_custom_endpoint": "Сбросить свой узел",
             "set_custom_endpoint": "Задать свой узел",
@@ -780,6 +789,7 @@ export default {
             "convert_picture": "Преобразовать изображение",
             "create_image": "Создать изображение",
             "description_optional": "Описание (необязательно)",
+            "drop_an_image_here_or_paste_it_with": "Перетащите изображение сюда или вставьте его с помощью {{shortcut}}",
             "wizard_of_creation": "Мастер создания",
             "back": "Назад",
             "are_you_sure": "Вы уверены?",
@@ -2042,6 +2052,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "Decentralized Pixa Fund (DPF) — это казна децентрализованной автономной организации в блокчейне, куда пользователи подают заявки на финансирование и голосуют за то, какие из них финансировать."
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "Люди, которым вы уже отправляли",
             "what_is_this_transfer_for": "Для чего этот перевод?",
             "make_this_a_recurring_transfer": "Сделать перевод регулярным",
             "every_hours": "Каждые (часов)",
@@ -2325,7 +2336,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "Оценка рисков, анализ угроз и стратегии их снижения для безопасности экосистемы.",
             "security_audits_vulnerability_reports_and_best_p": "Аудиты безопасности, сообщения об уязвимостях и рекомендации по безопасному использованию.",
             "report_bugs_technical_issues_and_track_their": "Сообщайте об ошибках и технических проблемах и отслеживайте статус их решения.",
-            "community_events_meetups_collaborations_and_soci": "События сообщества, встречи, совместные проекты и социальные инициативы."
+            "development_roadmap_releases_code_contributions": "Дорожная карта разработки, релизы, вклад в код и техническая документация."
         },
         "gdmetrics": {
             "key_metrics": "Ключевые метрики",

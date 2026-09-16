@@ -11,7 +11,7 @@ import { CodeNode, CodeHighlightNode, $createCodeNode } from '@lexical/code';
 import { LinkNode, $createLinkNode, $isLinkNode } from '@lexical/link';
 import { TableNode, TableRowNode, TableCellNode, TableCellHeaderStates, $createTableNode, $createTableRowNode, $createTableCellNode } from '@lexical/table';
 import { HorizontalRuleNode, $createHorizontalRuleNode } from '@lexical/react/LexicalHorizontalRuleNode.js';
-import { ImageNode, $createImageNode, $isImageNode, isRenderableImageSrc } from './ImageNode';
+import { ImageNode, $createImageNode, $isImageNode, isRenderableImageSrc } from '../ImageNode';
 
 // Extended transformers for GFM support
 const HEADING_TRANSFORMER = {

@@ -214,7 +214,8 @@ export default {
         "legal": "Νομικά",
         "risks": "Κίνδυνοι",
         "bug_reports": "Αναφορές σφαλμάτων",
-        "community": "Κοινότητα"
+        "community": "Κοινότητα",
+        "development": "Ανάπτυξη"
     },
 
     components: {
@@ -285,6 +286,14 @@ export default {
             "renounced": "Παραιτημένη",
             "balanced": "Ισορροπημένη",
             "sovereign": "Κυρίαρχη",
+            "licensing": "Αδειοδότηση",
+            "the_default_license_is_the_starting_point_for": "Η προεπιλεγμένη άδεια είναι το σημείο εκκίνησης για κάθε νέα δημοσίευση. Μπορείτε πάντα να προσαρμόσετε τους όρους ανά δημοσίευση πριν δημοσιεύσετε.",
+            "no_default_license_set_yet_new_posts": "Δεν έχει οριστεί ακόμη προεπιλεγμένη άδεια — οι νέες δημοσιεύσεις ξεκινούν από τους τυπικούς όρους της Άδειας NFT Pixa.",
+            "holder_rights": "Δικαιώματα κατόχου:",
+            "visitor_rights": "Δικαιώματα επισκέπτη:",
+            "configure_default_license": "Ρύθμιση προεπιλεγμένης άδειας",
+            "edit_default_license": "Επεξεργασία προεπιλεγμένης άδειας",
+            "reset_to_standard_terms": "Επαναφορά στους τυπικούς όρους",
             "always_ask_before_voting": "Να ρωτάει πάντα πριν από την ψήφο",
             "reset_custom_endpoint": "Επαναφορά προσαρμοσμένου endpoint",
             "set_custom_endpoint": "Ορισμός προσαρμοσμένου endpoint",
@@ -787,6 +796,7 @@ export default {
             "convert_picture": "Μετατροπή εικόνας",
             "create_image": "Δημιουργία εικόνας",
             "description_optional": "Περιγραφή (προαιρετική)",
+            "drop_an_image_here_or_paste_it_with": "Αφήστε μια εικόνα εδώ ή επικολλήστε την με {{shortcut}}",
             "wizard_of_creation": "Οδηγός δημιουργίας",
             "back": "Πίσω",
             "are_you_sure": "Είστε βέβαιοι;",
@@ -2048,6 +2058,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "Το Αποκεντρωμένο Ταμείο Pixa (DPF) είναι ένα on-chain ταμείο αποκεντρωμένου αυτόνομου οργανισμού που επιτρέπει στους χρήστες να υποβάλλουν προτάσεις για χρηματοδότηση και να ψηφίζουν ποιες προτάσεις θα χρηματοδοτηθούν."
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "Άτομα στα οποία έχετε ήδη στείλει",
             "what_is_this_transfer_for": "Για ποιον σκοπό είναι αυτή η μεταφορά;",
             "make_this_a_recurring_transfer": "Να γίνει επαναλαμβανόμενη μεταφορά",
             "every_hours": "Κάθε (ώρες)",
@@ -2330,7 +2341,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "Αξιολόγηση κινδύνων, ανάλυση απειλών και στρατηγικές μετριασμού για την ασφάλεια του οικοσυστήματος.",
             "security_audits_vulnerability_reports_and_best_p": "Έλεγχοι ασφαλείας, αναφορές ευπαθειών και βέλτιστες πρακτικές για ασφαλή χρήση.",
             "report_bugs_technical_issues_and_track_their": "Αναφέρετε σφάλματα και τεχνικά προβλήματα και παρακολουθήστε την πορεία επίλυσής τους.",
-            "community_events_meetups_collaborations_and_soci": "Εκδηλώσεις της κοινότητας, συναντήσεις, συνεργασίες και κοινωνικές πρωτοβουλίες."
+            "development_roadmap_releases_code_contributions": "Οδικός χάρτης ανάπτυξης, εκδόσεις, συνεισφορές κώδικα και τεχνική τεκμηρίωση."
         },
         "gdmetrics": {
             "key_metrics": "Βασικοί δείκτες",

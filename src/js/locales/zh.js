@@ -205,7 +205,8 @@ export default {
         "legal": "法务",
         "risks": "风险",
         "bug_reports": "错误报告",
-        "community": "社区"
+        "community": "社区",
+        "development": "开发"
     },
 
     components: {
@@ -276,6 +277,14 @@ export default {
             "renounced": "放弃",
             "balanced": "均衡",
             "sovereign": "自主",
+            "licensing": "许可",
+            "the_default_license_is_the_starting_point_for": "默认许可是每篇新帖子的起点。发布前，你仍可为每篇帖子单独调整条款。",
+            "no_default_license_set_yet_new_posts": "尚未设置默认许可——新帖子将从 Pixa NFT 许可的标准条款开始。",
+            "holder_rights": "持有者权利：",
+            "visitor_rights": "访问者权利：",
+            "configure_default_license": "配置默认许可",
+            "edit_default_license": "编辑默认许可",
+            "reset_to_standard_terms": "重置为标准条款",
             "always_ask_before_voting": "投票前始终询问",
             "reset_custom_endpoint": "重置自定义节点",
             "set_custom_endpoint": "设置自定义节点",
@@ -778,6 +787,7 @@ export default {
             "convert_picture": "转换图片",
             "create_image": "创建图片",
             "description_optional": "描述（可选）",
+            "drop_an_image_here_or_paste_it_with": "将图片拖到此处，或使用 {{shortcut}} 粘贴",
             "wizard_of_creation": "创作向导",
             "back": "返回",
             "are_you_sure": "确定吗？",
@@ -2040,6 +2050,7 @@ export default {
             "the_decentralized_pixa_fund_dpf_is_an": "Decentralized Pixa Fund（DPF）是一个去中心化自治组织的链上金库，用户可提交资助提案，并投票决定资助哪些提案。"
         },
         "pixa_wallet_send_dialog": {
+            "people_youve_sent_to_before": "你之前转账过的人",
             "what_is_this_transfer_for": "这笔转账用于什么？",
             "make_this_a_recurring_transfer": "设为定期转账",
             "every_hours": "每隔（小时）",
@@ -2323,7 +2334,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "面向生态系统安全的风险评估、威胁分析和缓解策略。",
             "security_audits_vulnerability_reports_and_best_p": "安全审计、漏洞报告以及安全使用的最佳实践。",
             "report_bugs_technical_issues_and_track_their": "报告错误和技术问题，并跟踪其解决状态。",
-            "community_events_meetups_collaborations_and_soci": "社区活动、线下聚会、协作和社会公益举措。"
+            "development_roadmap_releases_code_contributions": "开发路线图、版本发布、代码贡献和技术文档。"
         },
         "gdmetrics": {
             "key_metrics": "关键指标",

@@ -211,7 +211,8 @@ export default {
         "legal": "Legal",
         "risks": "Risks",
         "bug_reports": "Bug Reports",
-        "community": "Community"
+        "community": "Community",
+        "development": "Development"
     },
 
     components: {
@@ -892,7 +893,7 @@ export default {
             "risk_assessment_threat_analysis_and_mitigation_s": "Risk assessment, threat analysis, and mitigation strategies for ecosystem security.",
             "security_audits_vulnerability_reports_and_best_p": "Security audits, vulnerability reports, and best practices for safe usage.",
             "report_bugs_technical_issues_and_track_their": "Report bugs, technical issues, and track their resolution status.",
-            "community_events_meetups_collaborations_and_soci": "Community events, meetups, collaborations, and social initiatives."
+            "development_roadmap_releases_code_contributions": "Development roadmap, releases, code contributions, and technical documentation."
         },
         "gdmetrics": {
             "key_metrics": "Key Metrics",
@@ -1313,6 +1314,7 @@ export default {
             "convert_picture": "Convert picture",
             "create_image": "Create image",
             "description_optional": "Description (Optional)",
+            "drop_an_image_here_or_paste_it_with": "Drop an image here or paste it with {{shortcut}}",
             "wizard_of_creation": "Wizard of Creation",
             "back": "Back",
             "are_you_sure": "Are you sure?",
@@ -1792,6 +1794,7 @@ export default {
         },
         "pixa_wallet_send_dialog": {
 
+            "people_youve_sent_to_before": "People you've sent to before",
             "what_is_this_transfer_for": "What is this transfer for?",
             "make_this_a_recurring_transfer": "Make this a recurring transfer",
             "every_hours": "Every (hours)",
@@ -2377,6 +2380,14 @@ export default {
             "renounced": "Renounced",
             "balanced": "Balanced",
             "sovereign": "Sovereign",
+            "licensing": "Licensing",
+            "the_default_license_is_the_starting_point_for": "The default license is the starting point for every new post. You can still adjust the terms per post before publishing.",
+            "no_default_license_set_yet_new_posts": "No default license set yet — new posts start from the standard Pixa NFT License terms.",
+            "holder_rights": "Holder rights:",
+            "visitor_rights": "Visitor rights:",
+            "configure_default_license": "Configure default license",
+            "edit_default_license": "Edit default license",
+            "reset_to_standard_terms": "Reset to standard terms",
             "voting_power": "Voting Power",
             "always_ask_before_voting": "Always ask before voting",
             "reset_custom_endpoint": "Reset custom endpoint",

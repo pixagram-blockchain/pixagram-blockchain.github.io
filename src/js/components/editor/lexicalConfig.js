@@ -26,7 +26,7 @@ import { LinkNode, AutoLinkNode, $isLinkNode } from '@lexical/link';
 import * as LexicalSelectionModule from '@lexical/selection';
 import { TableNode, TableRowNode, TableCellNode } from '@lexical/table';
 import { HorizontalRuleNode } from '@lexical/react/LexicalHorizontalRuleNode.js';
-import { ImageNode, $createImageNode } from '../../utils/lexical/ImageNode';
+import { ImageNode, $createImageNode } from '../../utils/ImageNode';
 
 // Lexical theme - maps to CSS classes that match Draft.js visual output
 export const lexicalTheme = {

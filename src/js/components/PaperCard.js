@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import withStyles from '@material-ui/core/styles/withStyles';
 import Card from '@material-ui/core/Card';
 import CardHeader from '@material-ui/core/CardHeader';
-import Avatar from '@material-ui/core/Avatar';
 import IconButton from '@material-ui/core/IconButton';
 import Tooltip from '@material-ui/core/Tooltip';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
@@ -19,13 +18,14 @@ import { votesWithLocalVote } from '../utils/voteSync';
 import { pngdby } from '../utils/png-db';
 import PaperCardActions from './PaperCardActions';
 import ProfileHoverAnchor from './ProfileHoverCard';
+import FadeAvatar from './FadeAvatar';
 import { withErrorBoundary } from './ErrorBoundary';
 import { t, useLanguage } from '../utils/text';
 
 // Version stamp — check in console: window.__PIXA_VERSIONS__
 if (typeof window !== 'undefined') {
     if (!window.__PIXA_VERSIONS__) window.__PIXA_VERSIONS__ = {};
-    window.__PIXA_VERSIONS__.PaperCard = '4.10.0-profilehover';
+    window.__PIXA_VERSIONS__.PaperCard = '4.11.0-fadeavatar';
 }
 
 // ── Async, non-critical NSFW detector loading ───────────────────────
@@ -757,10 +757,9 @@ function PaperCardInner({
             <CardHeader
                 className={classes.cardHeader}
                 avatar={
-                    <Avatar
+                    <FadeAvatar
                         onClick={() => openAuthor(author.username)}
                         src={author.image}
-                        imgProps={{ decoding: 'async', loading: 'lazy' }}
                     />
                 }
                 action={
