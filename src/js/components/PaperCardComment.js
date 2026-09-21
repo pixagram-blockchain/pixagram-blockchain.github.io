@@ -15,6 +15,7 @@ import { HISTORY, COMMUNITY_TAG_REGEX, buildCommentFocusHash } from '../utils/co
 import { t, useLanguage } from '../utils/text';
 import * as actions from '../actions/utils';
 import PaperCardActions from './PaperCardActions';
+import ProfileHoverAnchor from './ProfileHoverCard';
 import FadeAvatar from './FadeAvatar';
 import { safeHTML } from '../utils/api/sanitizer';
 
@@ -417,6 +418,9 @@ function PaperCardCommentInner({
     }, [voted, upvoteLoading, downvoteLoading, api, voter, data, applyVote]);
 
     const author = data.author || {};
+    // Same fallback as PaperCard: a name-less author still gets a hover
+    // target (and a readable subheader) through its username.
+    const authorName = (typeof author.name === 'string' && author.name.trim()) || author.username || '';
     const payout = parseFloat((data.payout || '').replace('$', '')) || 0;
     // Delta from initial state — avoids double-counting votes already in data
     const upVotesNumber = (data.upVotesNumber || 0) + (voted === 1 ? 1 : 0) - (initialVoted === 1 ? 1 : 0);
@@ -473,11 +477,16 @@ function PaperCardCommentInner({
                             </span>
                         </Tooltip>
                         <span className={classes.subheaderBy}> {t('words.by')} </span>
-                        <Tooltip title={'@' + author.username}>
+                        {/* Rich author hover card instead of the old raw-@username
+                            Tooltip. The anchor adds no element: it attaches its
+                            pointer listeners to this very span, and the card itself
+                            is the page's single <ProfileHoverCardLayer/>. Click
+                            behavior is unchanged. */}
+                        <ProfileHoverAnchor api={api} author={author} onOpenProfile={openAuthor}>
                             <span className={classes.subheaderName} onClick={() => openAuthor(author.username)}>
-                                {author.name}
+                                {authorName}
                             </span>
-                        </Tooltip>
+                        </ProfileHoverAnchor>
                     </span>
                 }
             />

@@ -12,11 +12,17 @@
  *   used_mana       = mana × |weight| × 86 400 / 10 000
  *   rshares         = ceil(used_mana / (vote_power_reserve_rate × regen_seconds)) − dust
  *   PXA             = rshares / reward_fund.recent_claims × reward_fund.reward_balance
- *   PXS             = PXA × (feed.base PXS / feed.quote PXA)
+ *   USD             = PXA × pxaUsd                       (PricesAPI / usePrices)
+ *   PXS             = USD / pxsUsd  =  PXA × pxaUsd / pxsUsd
  *
- * The chain's own `pending_payout_value` is denominated in PXS through the
- * same witness feed, so figures produced here are directly comparable with
- * the payout printed on the cards. Everything above is the marginal, linear
+ * Everything up to PXA is chain arithmetic and exact. Pricing PXA is NOT the
+ * chain's job: PricesAPI anchors PXA in USD and derives PXS from it through
+ * its plausibility-checked PXS/PXA ratio (see hooks/usePrices), so every PXS
+ * and fiat figure here goes through those two prices. The raw witness feed
+ * (feed.base PXS / feed.quote PXA — 1:1 while the chain bootstraps) is only
+ * the fallback when no price is available at all; pricing rewards through
+ * the raw feed and then multiplying by PricesAPI's pxsUsd counted every PXA
+ * as a full PXS, ~50× too much. Everything above is the marginal, linear
  * value of one vote (what the recipe computes). For a WHOLE post the chain
  * applies the reward fund's `author_reward_curve` to net_rshares before
  * dividing by recent_claims — payoutPxsForRshares() / estimatePayoutDeltaPxs()
@@ -196,9 +202,10 @@ export async function getRewardSnapshot(api, { maxAge = SNAPSHOT_TTL_MS, force =
             getChainConstants(api),
         ]);
 
-        // The chain prices pending payouts through the raw median feed —
-        // bootstrap 1:1 included — so we follow the chain, not PricesAPI's
-        // plausibility fallback, to stay comparable with pending_payout_value.
+        // Raw witness feed, kept on the snapshot as the LAST-RESORT PXS/PXA
+        // ratio. It reads 1:1 while the chain bootstraps, which is why the
+        // consumers pass their usePrices() result and rewardPxsPerPxa()
+        // prefers PricesAPI's pxaUsd / pxsUsd whenever both prices are known.
         let pxsPerPxa = feedPxsPerPxa(feed);
         if (pxsPerPxa == null) {
             const p = api.prices && typeof api.prices.getSync === 'function' ? api.prices.getSync() : null;
@@ -243,6 +250,68 @@ export function chainNowMs(snap) {
     return snap.headTimeMs + (Date.now() - snap.fetchedAt);
 }
 
+// ── Price bridge (PricesAPI / usePrices) ──────────────────────────────
+
+/**
+ * USD per PXA and per PXS out of whatever price object the caller holds —
+ * a usePrices() result ({ pxaUsdPrice, pxsUsdPrice, fiatRate, currency })
+ * or api.prices.getSync() ({ pxaUsd, pxsUsd }). Each field is null when it
+ * is not a positive finite number, so callers can degrade one token at a time.
+ */
+export function usdPrices(prices) {
+    if (!prices || typeof prices !== 'object') return { pxaUsd: null, pxsUsd: null };
+    const pos = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; };
+    return {
+        pxaUsd: pos(prices.pxaUsdPrice != null ? prices.pxaUsdPrice : prices.pxaUsd),
+        pxsUsd: pos(prices.pxsUsdPrice != null ? prices.pxsUsdPrice : prices.pxsUsd),
+    };
+}
+
+/**
+ * PXS per 1 PXA used to price rewards. PricesAPI is the source of truth for
+ * both tokens (PXA anchored in USD, PXS derived from it through the
+ * plausibility-checked ratio), so with both prices known the ratio is
+ * pxaUsd / pxsUsd. Without them, the snapshot's raw witness feed.
+ */
+export function rewardPxsPerPxa(snap, prices) {
+    const { pxaUsd, pxsUsd } = usdPrices(prices);
+    if (pxaUsd && pxsUsd) return pxaUsd / pxsUsd;
+    return snap && snap.pxsPerPxa > 0 ? snap.pxsPerPxa : VOTE_DEFAULTS.pxsPerPxa;
+}
+
+/** Units of the display currency per 1 USD from a usePrices() result (1 when unknown). */
+export function fiatRateOf(prices) {
+    const r = Number(prices && prices.fiatRate);
+    return Number.isFinite(r) && r > 0 ? r : 1;
+}
+
+/** { amount, currency } — a USD figure in the user's display currency. */
+export function fiatOf(usd, prices) {
+    return {
+        amount: (Number(usd) || 0) * fiatRateOf(prices),
+        currency: (prices && prices.currency) || 'USD',
+    };
+}
+
+/**
+ * { pxa, pxs, usd } of a bag of rshares, sign preserved. `pxa` is chain
+ * arithmetic; `pxs` and `usd` go through `prices` (usd is 0 when neither
+ * token has a price — never a made-up number).
+ */
+export function valueOfRshares(rshares, snap, prices) {
+    const pxa = rsharesToPxa(rshares, snap);
+    const pxs = pxa * rewardPxsPerPxa(snap, prices);
+    const { pxaUsd, pxsUsd } = usdPrices(prices);
+    const usd = pxaUsd ? pxa * pxaUsd : (pxsUsd ? pxs * pxsUsd : 0);
+    return { pxa, pxs, usd };
+}
+
+/** valueOfRshares() for a vote at `weight` cast now by `account`, plus the rshares it would carry. */
+export function estimateVoteValue(account, weight, snap, prices, nowMs) {
+    const rshares = estimateVoteRshares(account, weight, snap, nowMs);
+    return { rshares, ...valueOfRshares(rshares, snap, prices) };
+}
+
 // ── Reward curve (whole-post math) ────────────────────────────────────
 
 /**
@@ -268,10 +337,13 @@ export function claimsForRshares(rshares, snap) {
     }
 }
 
-/** Pending payout (PXS) the chain would print for a post holding `netRshares`. */
-export function payoutPxsForRshares(netRshares, snap) {
+/**
+ * Payout (PXS) for a post holding `netRshares`, priced through `prices`
+ * (usePrices() result) — the raw feed only when no price is known.
+ */
+export function payoutPxsForRshares(netRshares, snap, prices) {
     if (!snap || !snap.ok) return 0;
-    return snap.rewardBalance * claimsForRshares(netRshares, snap) / snap.recentClaims * snap.pxsPerPxa;
+    return snap.rewardBalance * claimsForRshares(netRshares, snap) / snap.recentClaims * rewardPxsPerPxa(snap, prices);
 }
 
 /** Linear value of a bag of rshares (sign preserved), in PXA / PXS — the recipe's formula. */
@@ -279,8 +351,8 @@ export function rsharesToPxa(rshares, snap) {
     if (!snap || !snap.ok) return 0;
     return (Number(rshares) || 0) / snap.recentClaims * snap.rewardBalance;
 }
-export function rsharesToPxs(rshares, snap) {
-    return rsharesToPxa(rshares, snap) * (snap ? snap.pxsPerPxa : 1);
+export function rsharesToPxs(rshares, snap, prices) {
+    return rsharesToPxa(rshares, snap) * rewardPxsPerPxa(snap, prices);
 }
 
 /**
@@ -288,12 +360,12 @@ export function rsharesToPxs(rshares, snap) {
  * the post's current net_rshares are known; falls back to the linear vote
  * value otherwise (a fund on the `linear` curve gives identical results).
  */
-export function estimatePayoutDeltaPxs({ baseNetRshares, deltaRshares }, snap) {
+export function estimatePayoutDeltaPxs({ baseNetRshares, deltaRshares }, snap, prices) {
     const delta = Number(deltaRshares) || 0;
     if (!snap || !snap.ok || delta === 0) return 0;
     const base = baseNetRshares == null || baseNetRshares === '' ? null : Number(baseNetRshares);
-    if (base == null || !Number.isFinite(base) || snap.curve === 'linear') return rsharesToPxs(delta, snap);
-    return payoutPxsForRshares(base + delta, snap) - payoutPxsForRshares(base, snap);
+    if (base == null || !Number.isFinite(base) || snap.curve === 'linear') return rsharesToPxs(delta, snap, prices);
+    return payoutPxsForRshares(base + delta, snap, prices) - payoutPxsForRshares(base, snap, prices);
 }
 
 // ── Account-side math ─────────────────────────────────────────────────
@@ -406,8 +478,8 @@ export function estimateVoteRshares(account, weight, snap, nowMs) {
 }
 
 /** Marginal (linear) value in PXS of a vote at `weight` cast now — the recipe's headline figure. */
-export function estimateVotePxs(account, weight, snap, nowMs) {
-    return rsharesToPxs(estimateVoteRshares(account, weight, snap, nowMs), snap);
+export function estimateVotePxs(account, weight, snap, nowMs, prices) {
+    return rsharesToPxs(estimateVoteRshares(account, weight, snap, nowMs), snap, prices);
 }
 
 // ── Voter account cache (vesting + manabar), 20 s TTL per api ─────────

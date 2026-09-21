@@ -1,6 +1,6 @@
 import * as React from 'preact/compat';
 import { h } from 'preact';
-import { useState, useMemo, useCallback, useRef } from 'preact/compat';
+import { useState, useMemo, useCallback } from 'preact/compat';
 import withStyles from '@material-ui/core/styles/withStyles';
 import Portal from '@material-ui/core/Portal';
 import timeAgo from '../utils/TimeAgo';
@@ -27,7 +27,7 @@ const styles = () => ({
         zIndex: 99999,
         whiteSpace: 'nowrap',
         boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-        transition: 'opacity 100ms ease',
+        transition: 'opacity 100ms cubic-bezier(0.4, 0, 0.2, 1)',
         '& strong': {
             color: '#fff',
             fontWeight: 600,
@@ -73,15 +73,50 @@ function truncate(str, maxW, fontSize) {
     return str.slice(0, maxChars - 1) + '\u2026';
 }
 
-function PayoutSankey({ classes, payout, isEstimate = false, data, pxsUsdPrice, pxaUsdPrice, currency, fiatRate }) {
+// Last-resort prices, identical to the synchronous seed in hooks/usePrices
+// (PricesAPI: PXA at its 12-cent anchor, PXS at DESIGN_BIG_MAC_USD). Only
+// reached when usePrices hands out 0, and then the card and this tooltip
+// still agree with each other.
+const DESIGN_PXS_USD = 6.22;
+const DESIGN_PXA_USD = 0.12;
+
+/**
+ * Who gets the creators' share, in percent of that share.
+ *
+ * Hive semantics: `beneficiaries` take their `weight` (basis points,
+ * 1000 = 10 %) off the top and the author keeps the remainder — the author
+ * is not listed. Rows that were pre-computed upstream may carry `percent`
+ * instead; both are accepted. Whatever the rows leave goes to the author,
+ * merged into an existing author row if the list already names them.
+ */
+export function creatorShares(data) {
+    const author = (data && data.author) || {};
+    const authorName = author.username || (data && data.username) || 'author';
+    const rows = data && Array.isArray(data.beneficiaries) ? data.beneficiaries : [];
+    const bens = rows.map(b => ({
+        account: b && b.account,
+        pct: b && b.percent != null
+            ? (parseFloat(b.percent) || 0)
+            : (parseFloat(b && b.weight) || 0) / 100,
+    })).filter(b => b.account && b.pct > 0);
+    const taken = bens.reduce((s, b) => s + b.pct, 0);
+    const remainder = Math.max(0, 100 - taken);
+    if (remainder > 0.005) {
+        const mine = bens.find(b => b.account === authorName);
+        if (mine) mine.pct += remainder; else bens.unshift({ account: authorName, pct: remainder });
+    }
+    if (bens.length === 0) bens.push({ account: authorName, pct: 100 });
+    return bens;
+}
+
+function PayoutSankey({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPrice, currency, fiatRate }) {
     const [tip, setTip] = useState(null);
 
     const info = useMemo(() => {
         // Prices flow in as props from PaperCardActions (which reads them from
-        // api.prices via usePrices). Fallbacks reflect Pixagram's economic design:
-        // PXS = $5.69 (Big Mac anchor), PXA = $0.06.
-        const pxsRate = Number.isFinite(pxsUsdPrice) && pxsUsdPrice > 0 ? pxsUsdPrice : 5.69;
-        const pxaRate = Number.isFinite(pxaUsdPrice) && pxaUsdPrice > 0 ? pxaUsdPrice : 0.06;
+        // api.prices via usePrices).
+        const pxsRate = Number.isFinite(pxsUsdPrice) && pxsUsdPrice > 0 ? pxsUsdPrice : DESIGN_PXS_USD;
+        const pxaRate = Number.isFinite(pxaUsdPrice) && pxaUsdPrice > 0 ? pxaUsdPrice : DESIGN_PXA_USD;
 
         // `payout` is the post's pending payout, denominated in PXS.
         const totalUSD = payout * pxsRate;
@@ -108,12 +143,7 @@ function PayoutSankey({ classes, payout, isEstimate = false, data, pxsUsdPrice, 
         const curatorsPXS = pxsAmount * curatorsP / 100;
         const curatorsPXA = pxaAmount * curatorsP / 100;
 
-        const author = data?.author || {};
-        const bens = data?.beneficiaries && data.beneficiaries.length > 0
-            ? data.beneficiaries.map(b => ({ account: b.account, pct: parseFloat(b.percent || 0) }))
-            : [{ account: author.username || 'author', pct: 100 }];
-
-        const authors = bens.map(b => ({
+        const authors = creatorShares(data).map(b => ({
             ...b,
             absPct: b.pct * creatorsP / 100,
             usd: creatorsUSD * b.pct / 100,
@@ -212,11 +242,10 @@ function PayoutSankey({ classes, payout, isEstimate = false, data, pxsUsdPrice, 
     // USD figures convert to the user's display currency at render time. The
     // amounts above stay USD-anchored; only the formatter localizes. ISO code
     // (not symbol) keeps "$"/"kr"/"¥" unambiguous across currencies.
+    // While the card's own vote is still an estimate (see useVotePayoutEstimate)
+    // every figure here inherits the "≈" the headline shows.
     const fiatMul = Number.isFinite(fiatRate) && fiatRate > 0 ? fiatRate : 1;
     const fiatCur = currency || 'USD';
-    // `payout` may already carry the estimated value of the viewer's own
-    // pending vote (PaperCardActions → useVotePayoutEstimate); `isEstimate`
-    // then prefixes every figure with "≈" until the chain refresh replaces it.
     const approx = isEstimate ? '≈ ' : '';
     const fmt = usd => `${approx}${(usd * fiatMul).toFixed(2)} ${fiatCur}`;
     const fmtP = v => `${approx}${v.toFixed(2)}`;

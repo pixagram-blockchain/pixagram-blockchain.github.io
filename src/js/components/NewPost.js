@@ -14,6 +14,7 @@ import CircularProgress from "@material-ui/core/CircularProgress";
 import FormControl from "@material-ui/core/FormControl";
 import FormControlLabel from "@material-ui/core/FormControlLabel";
 import FormHelperText from "@material-ui/core/FormHelperText";
+import FormLabel from "@material-ui/core/FormLabel";
 import Radio from "@material-ui/core/Radio";
 import TextField from "@material-ui/core/TextField";
 import Slider from "@material-ui/core/Slider";
@@ -312,6 +313,11 @@ const styles = theme => ({
         },
         "& .MuiRadio-root, & .MuiFormLabel-root.Mui-focused, .MuiTypography-root": {
             color: "#000 !important",
+        },
+        // Legend of the AI style radio list (theme default is the dark
+        // theme's light text.secondary — invisible on this white paper).
+        "& .MuiFormLabel-root": {
+            color: "rgba(0, 0, 0, 0.6) !important",
         },
         "& .MuiSlider-root": {
             color: "#000 !important",
@@ -897,6 +903,22 @@ const extractClipboardImageFile = (event) => {
 };
 
 // ============================================================================
+// AI STYLE PRESETS
+// ============================================================================
+// Offered as a radio list in the "Transform your picture with AI?" dialog.
+// `value` is passed verbatim to processImageFile as its `style` argument
+// (selects the LoRA); `labelKey` is resolved with t() at render time. Array
+// order is display order and the first entry is the default selection.
+// ImageWizard keeps an identical copy — change both together.
+
+const AI_STYLES = [
+    { value: "retroart", labelKey: "words.retro_art" },
+    { value: "lucasart", labelKey: "words.lucasart_style" },
+    { value: "vga",      labelKey: "words.vga_style" }
+];
+const DEFAULT_AI_STYLE = AI_STYLES[0].value;
+
+// ============================================================================
 // STATE REDUCER
 // ============================================================================
 
@@ -924,6 +946,10 @@ const initialState = {
     aspectRatio: "1:1",
     transformationPercent: 50,
     fidelityPercent: 50,
+    // Radio selection in the AI dialog. Like the other image settings it
+    // survives RESET_UPLOAD (back to step 0 keeps the user's last choice)
+    // and goes back to the default on RESET (dialog closed).
+    aiStyle: DEFAULT_AI_STYLE,
 
     // Canvas/preview data
     preview: null,
@@ -2223,7 +2249,7 @@ function NewPost(props) {
         transformationPercent, fidelityPercent, preview, previewCache, quantizedData,
         base64, processorData, availableSizes, dropzoneActive, message, inputFileUrl,
         inputFile, showingOriginal, preloading, preloadProgress, isGenerating,
-        canvasKey, closeConfirmOpen, useAiOpen, quantizeDialogOpen,
+        canvasKey, closeConfirmOpen, useAiOpen, aiStyle, quantizeDialogOpen,
         licenseCustomizationOpen, quantizeDownscale, quantizeColors,
         licenseBase, licenseCustomization, processName, processStart, processFinish,
         validationErrors, touched, isPublishing
@@ -2692,9 +2718,10 @@ function NewPost(props) {
     }, [processFileUpload]);
 
     // Process image with or without AI
-    // style: "retroart" | "vga" — selects the AI LoRA; undefined when the
-    // user declined AI (the pipeline ignores it without AI).
-    const processImage = useCallback(async (useAi, style = "retroart") => {
+    // style: one of AI_STYLES[].value ("retroart" | "lucasart" | "vga") —
+    // selects the AI LoRA. Falls back to the default style when omitted (the
+    // text-to-image tab, or the user declined AI — the pipeline then ignores it).
+    const processImage = useCallback(async (useAi, style = DEFAULT_AI_STYLE) => {
         if (!mountedRef.current) return;
 
         try {
@@ -2886,6 +2913,11 @@ function NewPost(props) {
         dispatch({ type: actionTypes.SET_FIELD, field: 'useAiOpen', value: false });
         processImage(useAi, style);
     }, [processImage]);
+
+    // Handle AI style radio change (AI dialog)
+    const handleAiStyleChange = useCallback((event) => {
+        dispatch({ type: actionTypes.SET_FIELD, field: 'aiStyle', value: event.target.value });
+    }, []);
 
     // Handle size change
     const handleSizeChange = useCallback((event) => {
@@ -3546,28 +3578,31 @@ function NewPost(props) {
                         {t("components.new_post.the_conversion_process_that_involves_a_style")}<br/>
                         {t("components.new_post.while_being_free_and_anonymous_it_only")}
                     </Typography>
-                    <Box style={{ display: "flex", gap: "12px", marginTop: 24, marginBottom: 8 }}>
-                        <Button
-                            variant="contained"
-                            color="primary"
-                            style={{ flexGrow: 1 }}
-                            onClick={() => handleCloseUseAi(true, "vga")}
+                    <FormControl component="fieldset" style={{ marginTop: 24, marginBottom: 8 }}>
+                        <FormLabel component="legend">{t("words.style")}</FormLabel>
+                        <RadioGroup
+                            aria-label="ai style"
+                            name="AI_STYLE"
+                            value={aiStyle}
+                            onChange={handleAiStyleChange}
                         >
-                            {t("words.vga_style")}
-                        </Button>
-                        <Button
-                            variant="contained"
-                            color="primary"
-                            style={{ flexGrow: 1 }}
-                            onClick={() => handleCloseUseAi(true, "retroart")}
-                        >
-                            {t("words.retro_art")}
-                        </Button>
-                    </Box>
+                            {AI_STYLES.map(({ value, labelKey }) => (
+                                <FormControlLabel
+                                    key={value}
+                                    value={value}
+                                    control={<Radio color="primary" />}
+                                    label={t(labelKey)}
+                                />
+                            ))}
+                        </RadioGroup>
+                    </FormControl>
                 </DialogContent>
                 <DialogActions style={{ textAlign: "right" }}>
                     <Button variant="text" color="primary" autoFocus onClick={() => handleCloseUseAi(false)}>
                         {t("words.no_i_don_t_want")}
+                    </Button>
+                    <Button variant="contained" color="primary" onClick={() => handleCloseUseAi(true, aiStyle)}>
+                        {t("words.transform")}
                     </Button>
                 </DialogActions>
             </Dialog>

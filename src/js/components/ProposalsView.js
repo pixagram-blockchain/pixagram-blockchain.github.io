@@ -59,7 +59,7 @@ const styles = theme => ({
         fontSize: "18px",
         color: "#888",
         cursor: "pointer",
-        transition: "color 150ms ease",
+        transition: "color 150ms cubic-bezier(0.4, 0, 0.2, 1)",
         "&:hover": {
             color: "#aaa"
         }
@@ -105,7 +105,7 @@ const styles = theme => ({
             margin: "0px 0px 12px 0px !important",
             backgroundColor: "#171717 !important"
         },
-        transition: "background-color 200ms ease, border-color 200ms ease",
+        transition: "background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), border-color 200ms cubic-bezier(0.4, 0, 0.2, 1)",
     },
     proposalSummary: {
         padding: "8px 20px",

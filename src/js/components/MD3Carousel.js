@@ -31,7 +31,7 @@ const styles = theme => ({
         borderRadius: '24px',
         overflow: 'hidden',
         background: '#171717',
-        transition: 'width 400ms cubic-bezier(0.4, 0, 0.2, 1), opacity 300ms ease',
+        transition: 'width 400ms cubic-bezier(0.4, 0, 0.2, 1), opacity 300ms cubic-bezier(0.4, 0, 0.2, 1)',
         position: 'relative',
         height: '380px',
     },
@@ -101,11 +101,11 @@ const styles = theme => ({
         padding: '20px',
         boxSizing: 'border-box',
         opacity: 1,
-        transition: 'opacity 300ms ease 100ms',
+        transition: 'opacity 300ms cubic-bezier(0.4, 0, 0.2, 1) 100ms',
     },
     expandedContentHidden: {
         opacity: 0,
-        transition: 'opacity 200ms ease',
+        transition: 'opacity 200ms cubic-bezier(0.4, 0, 0.2, 1)',
         pointerEvents: 'none',
     },
     expandedImage: {
@@ -145,7 +145,7 @@ const styles = theme => ({
         borderRadius: '8px',
         textDecoration: 'none',
         fontSize: '12px',
-        transition: 'all 300ms ease',
+        transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
         '&:hover': {
             backgroundColor: 'rgba(255,255,255,0.15)',
             color: '#ffffff',
@@ -165,7 +165,7 @@ const styles = theme => ({
         borderRadius: '50%',
         backgroundColor: 'rgba(255,255,255,0.2)',
         cursor: 'pointer',
-        transition: 'all 300ms ease',
+        transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
         '&:hover': {
             backgroundColor: 'rgba(255,255,255,0.4)',
         },
@@ -191,7 +191,7 @@ const styles = theme => ({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        transition: 'all 300ms ease',
+        transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
         zIndex: 10,
         backdropFilter: 'blur(8px)',
         '&:hover': {

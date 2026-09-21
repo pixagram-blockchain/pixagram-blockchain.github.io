@@ -191,7 +191,7 @@ const Chevron = ({ open }) => (
     <span style={{
         display: "inline-flex", alignItems: "center", justifyContent: "center",
         width: 18, height: 18, flexShrink: 0,
-        transition: "transform 0.15s ease",
+        transition: "transform 0.15s cubic-bezier(0.4, 0, 0.2, 1)",
         transform: open ? "rotate(90deg)" : "rotate(0deg)",
     }}>
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
@@ -256,7 +256,7 @@ const TreeNode = React.memo(({ node, depth, selectedId, onSelect, expanded, onTo
                     paddingLeft: depth * 18 + 6, paddingRight: 8,
                     height: 28, cursor: "pointer",
                     background: isSelected ? "#202020" : "transparent",
-                    transition: "background 0.1s ease",
+                    transition: "background 0.1s cubic-bezier(0.4, 0, 0.2, 1)",
                 }}
                 onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "#181818"; }}
                 onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}
@@ -453,7 +453,7 @@ const BottomDrawer = React.memo(({ open, onClose, children, peekHeight = "85vh" 
                     position: "absolute", inset: 0,
                     background: "#000",
                     opacity: backdropOpacity,
-                    transition: isDragging ? "none" : "opacity 0.24s ease",
+                    transition: isDragging ? "none" : "opacity 0.24s cubic-bezier(0.4, 0, 0.2, 1)",
                 }}
             />
             {/* Sheet */}

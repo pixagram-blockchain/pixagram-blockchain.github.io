@@ -28,7 +28,7 @@ import { withLanguage } from "../utils/withLanguage";
 import { withPrices } from "../hooks/usePrices";
 import {
     voteSign, votePercentBp, formatPxs,
-    rsharesToPxs, estimateVoteRshares,
+    valueOfRshares, estimateVoteValue, fiatOf,
     getRewardSnapshot, getRewardSnapshotSync,
     getVoterAccount, getVoterAccountSync,
 } from "../utils/voteValue";
@@ -267,29 +267,28 @@ class VotingListModal extends React.PureComponent {
     }
 
     /**
-     * What one vote is worth right now, in PXS — the HIVE estimate_upvote
-     * recipe: rshares / recent_claims × reward_balance, priced in PXS through
-     * the median feed. Chain rows use their rshares; an optimistic placeholder
-     * is estimated from the voter's vesting shares and current mana.
-     * Returns { pxs, estimate, ready }.
+     * What one vote is worth right now — the HIVE estimate_upvote recipe:
+     * rshares / recent_claims × reward_balance gives PXA; PXA is then priced
+     * through usePrices() (PXA anchored in USD, PXS derived from it), never
+     * through the raw 1:1 bootstrap feed. Chain rows use their rshares; an
+     * optimistic placeholder is estimated from the voter's vesting shares
+     * and current mana. Returns { pxa, pxs, usd, estimate, ready }.
      */
     _voteValue = (vote) => {
         const snap = this.state._snapshot;
-        if (!vote || !snap || !snap.ok) return { pxs: 0, estimate: !!(vote && vote._optimistic), ready: false };
+        const prices = this.props.prices;
+        const none = { pxa: 0, pxs: 0, usd: 0 };
+        if (!vote || !snap || !snap.ok) return { ...none, estimate: !!(vote && vote._optimistic), ready: false };
         if (vote._optimistic) {
             const acc = this.state._voter_accounts[vote.voter] || getVoterAccountSync(this.props.api, vote.voter);
-            if (!acc) return { pxs: 0, estimate: true, ready: false };
-            return { pxs: rsharesToPxs(estimateVoteRshares(acc, vote.weight, snap), snap), estimate: true, ready: true };
+            if (!acc) return { ...none, estimate: true, ready: false };
+            return { ...estimateVoteValue(acc, vote.weight, snap, prices), estimate: true, ready: true };
         }
-        return { pxs: rsharesToPxs(vote.rshares, snap), estimate: false, ready: true };
+        return { ...valueOfRshares(vote.rshares, snap, prices), estimate: false, ready: true };
     }
 
-    _fiatOf = (pxs) => {
-        const prices = this.props.prices || {};
-        const pxsUsd = Number(prices.pxsUsdPrice) || 0;
-        const rate = Number(prices.fiatRate) || 1;
-        return { amount: pxs * pxsUsd * rate, currency: prices.currency || 'USD' };
-    }
+    // USD → the user's display currency (fiatRate / currency from usePrices).
+    _fiatOf = (usd) => fiatOf(usd, this.props.prices);
 
     // Votes ranked by what they are worth; a voter's still-pending vote sits on
     // top so the user finds the vote they just cast at a glance.
@@ -303,7 +302,7 @@ class VotingListModal extends React.PureComponent {
         if (!val.ready) {
             return <span className={classes.voteValue + ' ' + classes.voteValueEstimate}>{val.estimate ? '≈ …' : '…'}</span>;
         }
-        const fiat = this._fiatOf(Math.abs(val.pxs));
+        const fiat = this._fiatOf(Math.abs(val.usd));
         return (
             <span>
                 <span className={classes.voteValue + (val.estimate ? ' ' + classes.voteValueEstimate : '')}>
@@ -439,12 +438,13 @@ class VotingListModal extends React.PureComponent {
     // while any row is still an estimate or the fund snapshot hasn't landed.
     _renderTotal = (ranked, classes) => {
         if (!ranked.length) return <div className={classes.tabTotal} />;
-        let pxs = 0, approx = false;
+        let pxs = 0, usd = 0, approx = false;
         for (const e of ranked) {
             if (!e.val.ready || e.val.estimate) approx = true;
             pxs += Math.abs(e.val.pxs);
+            usd += Math.abs(e.val.usd);
         }
-        const fiat = this._fiatOf(pxs);
+        const fiat = this._fiatOf(usd);
         return (
             <div className={classes.tabTotal}>
                 <span>Σ {ranked.length}</span>

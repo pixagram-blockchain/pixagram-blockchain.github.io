@@ -256,7 +256,7 @@ export default function PublishLogoLoader(props) {
             const el = containerRef.current;
             if (el) {
                 el.style.animation = "none";        // drop the fade-in fill state
-                el.style.transition = "opacity " + FADE_OUT_MS + "ms ease";
+                el.style.transition = "opacity " + FADE_OUT_MS + "ms cubic-bezier(0.4, 0, 0.2, 1)";
                 void el.offsetWidth;                // reflow so the transition runs
                 el.style.opacity = "0";
             }
@@ -476,7 +476,7 @@ export default function PublishLogoLoader(props) {
                     background: "#00000040",
                     backdropFilter: "blur(8px)",
                     WebkitBackdropFilter: "blur(8px)",
-                    animation: "pixaLoaderFade 320ms ease both",
+                    animation: "pixaLoaderFade 320ms cubic-bezier(0.4, 0, 0.2, 1) both",
                     overflow: "hidden",
                     touchAction: "none",
                     userSelect: "none",

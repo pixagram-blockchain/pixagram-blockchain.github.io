@@ -164,7 +164,7 @@ const styles = theme => ({
         fontSize: '13px',
         fontFamily: '"Normative Pro", "Industry Book", "Normative", sans-serif',
         fontWeight: '500',
-        transition: 'color 250ms ease, background-color 150ms ease',
+        transition: 'color 250ms cubic-bezier(0.4, 0, 0.2, 1), background-color 150ms cubic-bezier(0.4, 0, 0.2, 1)',
         border: 'none',
         position: 'relative',
         overflow: 'hidden',
@@ -175,7 +175,7 @@ const styles = theme => ({
             inset: 0,
             backgroundColor: 'rgba(255,255,255,0)',
             borderRadius: '8px',
-            transition: 'background-color 250ms ease',
+            transition: 'background-color 250ms cubic-bezier(0.4, 0, 0.2, 1)',
         },
         '&:hover': {
             color: '#ffffff',
@@ -212,7 +212,7 @@ const styles = theme => ({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        transition: 'all 300ms ease',
+        transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
         zIndex: 10,
         '&:hover:not(:disabled)': {
             backgroundColor: '#191919',

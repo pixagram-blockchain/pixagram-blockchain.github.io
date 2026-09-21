@@ -61,7 +61,7 @@ const styles = theme => ({
         fontSize: 32,
         pointerEvents: "none",
         userSelect: "none",
-        transition: "opacity 0.2s ease, transform 0.2s ease",
+        transition: "opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
     },
     textContainer: {
         position: "absolute",

@@ -160,7 +160,7 @@ const styles = theme => ({
         backgroundColor: "#171717",
         borderRadius: "12px",
         cursor: "pointer",
-        transition: "background-color 200ms ease",
+        transition: "background-color 200ms cubic-bezier(0.4, 0, 0.2, 1)",
         "&:hover": {
             backgroundColor: "#222"
         }

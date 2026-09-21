@@ -13,6 +13,7 @@ import Chip from '@material-ui/core/Chip';
 import ButtonBase from '@material-ui/core/ButtonBase';
 import MoreVert from '@material-ui/icons/MoreVert';
 import useLiveTimeAgo from '../hooks/useLiveTimeAgo';
+import usePostPortal from '../hooks/usePostPortal';
 import { HISTORY } from '../utils/constants';
 import * as actions from '../actions/utils';
 import { voteSign } from '../utils/voteValue';
@@ -22,6 +23,10 @@ import ProfileHoverAnchor from './ProfileHoverCard';
 import FadeAvatar from './FadeAvatar';
 
 import { t, useLanguage } from "../utils/text";
+
+// Stable empty list for posts without tags — a fresh [] per render would
+// re-run the header's tag memo on every live-date tick.
+const EMPTY_TAGS = [];
 
 const styles = theme => ({
     card: {
@@ -135,53 +140,72 @@ const styles = theme => ({
     contentContainerStacked: {
         minHeight: 'auto',
     },
+    // Same header as PaperCard (48px avatar, 14px radius, 8px gap, white
+    // bold title, one ellipsized "timeago by author in …" subheader line) so
+    // a blog card and an artwork card read as siblings in a mixed feed. Two
+    // deliberate differences: the 8px bottom padding (the inline cover or
+    // the excerpt follows right below) and the title size — a blog card has
+    // no artwork to carry it, so the title stays above the excerpt's
+    // 0.9375rem rather than dropping to PaperCard's body2.
     cardHeader: {
         padding: "16px 16px 8px 16px",
         '& .MuiCardHeader-title': {
             fontWeight: 'bold',
             fontFamily: '"Industry Book", "Normative Pro"',
-            color: '#ddd',
+            color: '#fff',
             cursor: 'pointer',
+            userSelect: 'none',
             fontSize: '1.125rem',
             lineHeight: '1.25rem',
         },
+        // PaperCard's subheader is an inline-block ellipsis line; here it is
+        // a flex row so the reading time can sit at the right edge without
+        // ever being the part that gets ellipsized — the line itself
+        // (subheaderLine below) truncates exactly like PaperCard's.
         '& .MuiCardHeader-subheader': {
             display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            marginTop: '4px',
-            "& .MuiSvgIcon-root": {
-                fontSize: "1rem"
-            }
+            alignItems: 'baseline',
+            width: 'calc(100% - 16px)',
+            userSelect: 'none',
         },
         '& .MuiAvatar-root': {
             cursor: 'pointer',
-            borderRadius: '21px',
-            width: 64,
-            height: 64,
+            borderRadius: '14px',
+            width: 48,
+            height: 48,
+            userSelect: 'none',
         },
         '& .MuiCardHeader-avatar': {
-            marginRight: '12px'
+            marginRight: '8px',
+            userSelect: 'none',
         },
         '& .MuiCardHeader-content': {
             overflow: 'hidden',
         }
     },
-    subheaderName: {
-        color: '#fff',
+    subheaderLine: {
+        flex: 1,
+        minWidth: 0,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+    },
+    subheaderName: { color: '#fff', cursor: 'pointer', userSelect: 'none' },
+    subheaderBy: { color: '#aaa', userSelect: 'none' },
+    subheaderDate: { color: '#ddd', userSelect: 'none' },
+    // "#tag" fallback of the "in …" segment — a shade under the portal name
+    // so a run of three tags does not read as one long proper name.
+    subheaderTag: {
+        color: '#ddd',
         cursor: 'pointer',
-        fontWeight: '500',
-    },
-    subheaderBy: {
-        color: '#aaa'
-    },
-    subheaderDate: {
-        color: '#888',
-        fontSize: '0.875rem',
+        userSelect: 'none',
+        '&:hover': { color: '#fff' },
     },
     subheaderReadingTime: {
+        flexShrink: 0,
+        marginLeft: 8,
         color: '#888',
-        fontSize: '0.875rem',
+        userSelect: 'none',
     },
     cardContent: {
         padding: '8px 16px',
@@ -308,6 +332,10 @@ function PaperCardBlog({
                            stacked = false,
                            // No outer margin (the card's default 24px top margin is removed).
                            noMargin = false,
+                           // { name: "portal-12", title: "Proper Name" } of the portal the
+                           // host page is displaying, when it is one (Community passes it;
+                           // FeedPersonal does not). Only a hint — see utils/portal.
+                           portal = null,
                        }) {
     // Behind memo(withStyles(...)(PaperCardBlog)) — a language swap changes no
     // prop, so without this the reading-time line keeps its old wording.
@@ -368,8 +396,23 @@ function PaperCardBlog({
         historyRef.current.push('/@' + username);
     }, []);
 
-    const openCommunity = useCallback((community) => {
-        historyRef.current.push('/' + community);
+    // Portal name in the subheader → the portal's page. A no-op when that
+    // page is exactly where we are (the Community feed rendering its own
+    // cards), so the click does not stack a duplicate history entry; from
+    // a sorted URL (/portal-12/hot) it is a real navigation to the default
+    // sort, same as typing the portal's address.
+    const openPortal = useCallback((name) => {
+        if (!name) return;
+        const target = '/' + name;
+        if (historyRef.current.location.pathname === target) return;
+        historyRef.current.push(target);
+    }, []);
+
+    // "#tag" in the subheader → the tag's feed, same route as the chips in
+    // BlogPostDialog (_open_tag).
+    const openTag = useCallback((tag) => {
+        if (!tag) return;
+        historyRef.current.push('/trending/' + String(tag).toLowerCase());
     }, []);
 
     const handleUpvote = useCallback(() => {
@@ -467,8 +510,17 @@ function PaperCardBlog({
     const downVotesNumber = (data.downVotesNumber || 0) + (voted === -1 ? 1 : 0) - (initialVoted === -1 ? 1 : 0);
     const commentsNumber = data.commentsNumber || 0;
     const readTime = data.readTime || 5;
-    const tags = data.tags || [];
-    const community = data.community || 'Community';
+    const tags = data.tags || data._tags || EMPTY_TAGS;
+    // Where the post lives, for the subheader: the portal's proper name (its
+    // title back-filled from the chain when neither the page nor the post
+    // has it — "" until then, and the segment waits), or — for a post that
+    // is in no portal — its first three tags.
+    const postPortal = usePostPortal(api, data, portal);
+    const headerTags = useMemo(
+        () => postPortal ? [] : tags.filter((tag) => typeof tag === 'string' && tag.trim()).slice(0, 3),
+        [postPortal, tags]
+    );
+    const authorLabel = (typeof author.name === 'string' && author.name.trim()) || author.username || '';
     // Memoized: the live-date ticks re-render this component up to once a
     // second while the post is fresh, and stripping tags out of the whole
     // content string is the one per-render cost worth pinning down.
@@ -534,38 +586,60 @@ function PaperCardBlog({
                             </span>
                         }
                         subheader={
-
-                            <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: '8px', width: "100%", justifyContent: "space-between" }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px'}}>
-                                    {/* Rich author hover card (silhouette) instead of the old
-                                        raw-@username Tooltip. Click behavior is unchanged. */}
-                                    <ProfileHoverAnchor api={api} author={author} onOpenProfile={openAuthor}>
-                                    <span className={classes.subheaderName} onClick={() => openAuthor(author.username)}>
-                                        {(author || {}).name || ('@' + (data.author || {}).username)}
-                                    </span>
-                                    </ProfileHoverAnchor>
+                            /* PaperCard's line — "timeago by author" — followed by where
+                               the post lives: "in Portal's Name" for a portal post, or
+                               "in #tag1 #tag2 #tag3" for one that is in no portal. One
+                               ellipsized line; the reading time keeps the right edge. */
+                            <>
+                                <span className={classes.subheaderLine}>
                                     <Tooltip
                                         arrow
                                         title={new Date(data.date || Date.now()).toLocaleDateString(locales, {
-                                            weekday: 'long',
-                                            year: 'numeric',
-                                            month: 'long',
-                                            day: 'numeric',
-                                            hour: 'numeric',
-                                            minute: 'numeric',
+                                            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: 'numeric',
                                         })}
                                     >
-                                    <span className={classes.subheaderDate}>
-                                        {liveTimeAgo}
-                                    </span>
+                                        <span className={classes.subheaderDate}>
+                                            {liveTimeAgo}
+                                        </span>
                                     </Tooltip>
-                                </div>
-                                <div className={classes.subheaderReadingTime}>
-                                    <span>{t("components.paper_card_blog.min_read", {
+                                    <span className={classes.subheaderBy}> {t('words.by')} </span>
+                                    {/* Rich author hover card instead of the old raw-@username
+                                        Tooltip. The anchor adds no element: it attaches its
+                                        pointer listeners to this very span, and the card itself
+                                        is the page's single <ProfileHoverCardLayer/>. Click
+                                        behavior is unchanged. */}
+                                    <ProfileHoverAnchor api={api} author={author} onOpenProfile={openAuthor}>
+                                        <span className={classes.subheaderName} onClick={() => openAuthor(author.username)}>
+                                            {authorLabel}
+                                        </span>
+                                    </ProfileHoverAnchor>
+                                    {postPortal ? (postPortal.title !== '' && (
+                                        <>
+                                            <span className={classes.subheaderBy}> {t('words.in')} </span>
+                                            <span className={classes.subheaderName} onClick={() => openPortal(postPortal.name)}>
+                                                {postPortal.title}
+                                            </span>
+                                        </>
+                                    )) : headerTags.length > 0 && (
+                                        <>
+                                            <span className={classes.subheaderBy}> {t('words.in')} </span>
+                                            {headerTags.map((tag, i) => (
+                                                <React.Fragment key={i}>
+                                                    {i > 0 ? ' ' : null}
+                                                    <span className={classes.subheaderTag} onClick={() => openTag(tag)}>
+                                                        {'#' + tag}
+                                                    </span>
+                                                </React.Fragment>
+                                            ))}
+                                        </>
+                                    )}
+                                </span>
+                                <span className={classes.subheaderReadingTime}>
+                                    {t("components.paper_card_blog.min_read", {
                                         readTime: readTime
-                                    })}</span>
-                                </div>
-                            </div>
+                                    })}
+                                </span>
+                            </>
                         }
                     />
 
@@ -665,6 +739,8 @@ export default memo(withStyles(styles)(PaperCardBlog), (prev, next) => {
     if (prev.stacked !== next.stacked) return false;
     if (prev.noMargin !== next.noMargin) return false;
     if (prev.muted !== next.muted) return false;
+    // Identity on purpose — Community memoizes it on the two strings inside.
+    if (prev.portal !== next.portal) return false;
     if (!shallowEqual(prev.style, next.style)) return false;
     return true;
 });

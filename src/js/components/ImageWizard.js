@@ -6,9 +6,10 @@
 // probe (isArtworkPixelart, same as NewPost). Mirrors the NewPost flow:
 //
 //   1. "Transform your picture with AI?" — same white dialog as NewPost.
-//      The two AI styles are contained buttons in the BODY ("VGA STYLE" →
-//      style "vga", "RETRO ART" → style "retroart"); the actions bar holds
-//      only "No, I don't want" (= convert without AI).
+//      The AI style is a radio list in the BODY (AI_STYLES below: "retroart"
+//      = default, "lucasart", "vga"); the actions bar holds "No, I don't
+//      want" (= convert without AI) and "Transform" (= AI with the selected
+//      style).
 //      (Skipped when the upload is already pixel art: the file is just badly
 //      encoded, so we jump straight to Adjust.)
 //   2. Pixel-art conversion via utils/pix2art (with or without AI), with the
@@ -40,6 +41,7 @@ import Typography from "@material-ui/core/Typography";
 import Box from "@material-ui/core/Box";
 import FormControl from "@material-ui/core/FormControl";
 import FormControlLabel from "@material-ui/core/FormControlLabel";
+import FormLabel from "@material-ui/core/FormLabel";
 import RadioGroup from "@material-ui/core/RadioGroup";
 import Radio from "@material-ui/core/Radio";
 import Slider from "@material-ui/core/Slider";
@@ -87,8 +89,16 @@ const styles = theme => ({
                 backgroundColor: "#222 !important",
             }
         },
+        "& .MuiRadio-colorPrimary.Mui-checked, & .MuiRadio-colorSecondary.Mui-checked": {
+            color: "#000 !important"
+        },
         "& .MuiRadio-root, & .MuiFormLabel-root.Mui-focused, .MuiTypography-root": {
             color: "#000 !important",
+        },
+        // Legend of the AI style radio list (theme default is the dark
+        // theme's light text.secondary — invisible on this white paper).
+        "& .MuiFormLabel-root": {
+            color: "rgba(0, 0, 0, 0.6) !important",
         }
     },
     // Preview stage the input image / loader / result canvas live in.
@@ -345,6 +355,18 @@ const percentToFidelity = (percent) => 0.05 + (percent / 100) * 0.45;
 const DEFAULT_TRANSFORMATION_STEPS = percentToTransformationSteps(50);
 const DEFAULT_FIDELITY = percentToFidelity(50);
 
+// AI style presets offered as a radio list in the AI dialog. `value` is
+// passed verbatim to processImageFile as its `style` argument (selects the
+// LoRA); `labelKey` is resolved with t() at render time. Array order is
+// display order and the first entry is the default selection.
+// Identical copy of NewPost's AI_STYLES — change both together.
+const AI_STYLES = [
+    { value: "retroart", labelKey: "words.retro_art" },
+    { value: "lucasart", labelKey: "words.lucasart_style" },
+    { value: "vga",      labelKey: "words.vga_style" }
+];
+const DEFAULT_AI_STYLE = AI_STYLES[0].value;
+
 // encodeIMG(..., true) returns a base64 string; be defensive in case a
 // data-URI prefix ever shows up (the PNG download path suggests it may).
 const stripDataUriPrefix = (b64) => {
@@ -456,6 +478,9 @@ function ImageWizard(props) {
     const [inputFileUrl, setInputFileUrl] = useState("");
     const [errorMsg, setErrorMsg] = useState("");
 
+    // Radio selection in the AI dialog ("ask" phase)
+    const [aiStyle, setAiStyle] = useState(DEFAULT_AI_STYLE);
+
     // Conversion progress (same mechanics as NewPost)
     const [processStart, setProcessStart] = useState(0);
     const [processFinish, setProcessFinish] = useState(0);
@@ -497,6 +522,7 @@ function ImageWizard(props) {
         setPhase("idle");
         setInputFileUrl("");
         setErrorMsg("");
+        setAiStyle(DEFAULT_AI_STYLE);
         setProcessStart(0);
         setProcessFinish(0);
         setProcessorData(null);
@@ -590,8 +616,9 @@ function ImageWizard(props) {
     }, [phase]);
 
     // ── AI choice → run the pix2art pipeline ────────────────────────────
-    // style: "retroart" | "vga" — selects the AI LoRA; undefined when the
-    // user declined AI (the pipeline ignores it without AI).
+    // style: one of AI_STYLES[].value ("retroart" | "lucasart" | "vga") —
+    // selects the AI LoRA; undefined when the user declined AI (the pipeline
+    // ignores it without AI).
     const processImage = useCallback(async (useAi, style) => {
         if (!file) return;
         const gen = genRef.current;
@@ -651,6 +678,10 @@ function ImageWizard(props) {
     const handleCloseUseAi = useCallback((useAi, style) => {
         processImage(useAi, style);
     }, [processImage]);
+
+    const handleAiStyleChange = useCallback((event) => {
+        setAiStyle(event.target.value);
+    }, []);
 
     // ── Size selection (identical caching to NewPost) ────────────────────
     const handleSizeChange = useCallback((event) => {
@@ -980,28 +1011,31 @@ function ImageWizard(props) {
                     <Typography variant="body2" color="textPrimary" component="p">
                         <T k="components.image_wizard.your_picture_must_be_pixel_art_under" vars={{ maxKb }} />
                     </Typography>
-                    <Box style={{ display: "flex", gap: "12px", marginTop: 24, marginBottom: 8 }}>
-                        <Button
-                            variant="contained"
-                            color="primary"
-                            style={{ flexGrow: 1 }}
-                            onClick={() => handleCloseUseAi(true, "vga")}
+                    <FormControl component="fieldset" style={{ marginTop: 24, marginBottom: 8 }}>
+                        <FormLabel component="legend">{t("words.style")}</FormLabel>
+                        <RadioGroup
+                            aria-label="ai style"
+                            name="AI_STYLE"
+                            value={aiStyle}
+                            onChange={handleAiStyleChange}
                         >
-                            {t("words.vga_style")}
-                        </Button>
-                        <Button
-                            variant="contained"
-                            color="primary"
-                            style={{ flexGrow: 1 }}
-                            onClick={() => handleCloseUseAi(true, "retroart")}
-                        >
-                            {t("words.retro_art")}
-                        </Button>
-                    </Box>
+                            {AI_STYLES.map(({ value, labelKey }) => (
+                                <FormControlLabel
+                                    key={value}
+                                    value={value}
+                                    control={<Radio color="primary" />}
+                                    label={t(labelKey)}
+                                />
+                            ))}
+                        </RadioGroup>
+                    </FormControl>
                 </DialogContent>
                 <DialogActions style={{ textAlign: "right" }}>
                     <Button variant="text" color="primary" autoFocus onClick={() => handleCloseUseAi(false)}>
                         {t("words.no_i_don_t_want")}
+                    </Button>
+                    <Button variant="contained" color="primary" onClick={() => handleCloseUseAi(true, aiStyle)}>
+                        {t("words.transform")}
                     </Button>
                 </DialogActions>
             </Dialog>

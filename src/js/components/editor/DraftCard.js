@@ -18,7 +18,7 @@ export const draftCardStyles = (theme) => ({
         borderRadius: "32px !important",
         margin: theme.spacing(1, 4, 2, 4),
         cursor: "pointer",
-        transition: "background-color 0.2s ease",
+        transition: "background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
         "&:hover": {
             backgroundColor: "#000000",
         },

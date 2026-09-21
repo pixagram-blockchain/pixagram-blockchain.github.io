@@ -39,7 +39,7 @@ const styles = theme => ({
         padding: '16px',
         textDecoration: 'none',
         color: '#ffffff',
-        transition: 'all 0.3s ease',
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         cursor: 'pointer',
         display: 'flex',
         alignItems: 'center',
@@ -57,7 +57,7 @@ const styles = theme => ({
         borderRadius: '16px',
         padding: '20px',
         textAlign: 'center',
-        transition: 'all 0.3s ease'
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
     },
     profileImage: {
         width: '160px',
@@ -161,7 +161,7 @@ const styles = theme => ({
         color: '#aaa',
         cursor: 'pointer',
         fontSize: '12px',
-        transition: 'all 300ms ease',
+        transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
         '&:hover': {
             background: 'rgba(255,255,255,0.12)',
         },

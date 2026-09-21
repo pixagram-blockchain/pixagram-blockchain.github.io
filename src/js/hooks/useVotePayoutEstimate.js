@@ -20,16 +20,21 @@ import {
 //   • `_withdrawn_rshares` on the card (an unvote) → subtract that row.
 //
 // The delta is converted through the reward fund exactly like the chain does
-// (curve-aware when the card carries net_rshares), and added to the chain
-// payout. Once mergeFreshVoteData lands the real figures the placeholder and
-// the flag vanish and this returns the chain payout untouched.
+// (curve-aware when the card carries net_rshares) into PXA, priced in PXS
+// through `prices` — the caller's usePrices() result, PXA anchored in USD
+// and PXS derived from it — and added to the chain payout. The raw witness
+// feed (1:1 while the chain bootstraps) is never used when prices exist:
+// pricing the delta through it made a fresh vote jump the headline by every
+// PXA counted as a full PXS. Once mergeFreshVoteData lands the real figures
+// the placeholder and the flag vanish and this returns the chain payout
+// untouched.
 //
 // Fetches happen only while an optimistic state exists (RAM-cached, deduped
 // in utils/voteValue), so an idle feed costs nothing.
 
 const EMPTY = [];
 
-const useVotePayoutEstimate = (api, voter, data, payout) => {
+const useVotePayoutEstimate = (api, voter, data, payout, prices) => {
     const votes = data && Array.isArray(data.active_votes) ? data.active_votes : EMPTY;
     const mine = voter ? (votes.find(v => v && v.voter === voter) || null) : null;
     const pending = mine && mine._optimistic ? mine : null;
@@ -38,6 +43,10 @@ const useVotePayoutEstimate = (api, voter, data, payout) => {
     const pendingWeight = pending ? pending.weight : 0;
     const prevRshares = pending ? String(pending._prev_rshares || '0') : '0';
     const netRshares = data ? data.net_rshares : null;
+    // Primitives, so the memo below keys on the numbers rather than on the
+    // fresh object usePrices() hands out every render.
+    const pxaUsd = Number(prices && prices.pxaUsdPrice) || 0;
+    const pxsUsd = Number(prices && prices.pxsUsdPrice) || 0;
 
     const [snap, setSnap] = useState(() => getRewardSnapshotSync(api));
     const [account, setAccount] = useState(() => (active && voter ? getVoterAccountSync(api, voter) : null));
@@ -45,6 +54,9 @@ const useVotePayoutEstimate = (api, voter, data, payout) => {
     useEffect(() => {
         if (!active || !api) return undefined;
         let cancelled = false;
+        // A different voter (login switch) must not be priced with the
+        // previous voter's vesting shares while its own account loads.
+        setAccount(voter ? getVoterAccountSync(api, voter) : null);
         getRewardSnapshot(api)
             .then(s => { if (!cancelled && s) setSnap(s); })
             .catch(() => {});
@@ -70,8 +82,9 @@ const useVotePayoutEstimate = (api, voter, data, payout) => {
             deltaRshares += est - (Number(prevRshares) || 0);
         }
         if (withdrawn) deltaRshares -= Number(withdrawn) || 0;
-        return estimatePayoutDeltaPxs({ baseNetRshares: netRshares, deltaRshares }, snap);
-    }, [active, snap, account, pending, pendingWeight, prevRshares, withdrawn, netRshares]);
+        return estimatePayoutDeltaPxs({ baseNetRshares: netRshares, deltaRshares }, snap,
+            { pxaUsdPrice: pxaUsd, pxsUsdPrice: pxsUsd });
+    }, [active, snap, account, pending, pendingWeight, prevRshares, withdrawn, netRshares, pxaUsd, pxsUsd]);
 
     return {
         payout: Math.max(0, base + delta),

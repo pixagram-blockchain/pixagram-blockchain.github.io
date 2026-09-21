@@ -95,7 +95,7 @@ const styles = theme => ({
         borderRadius: "16px",
         boxSizing: "border-box",
         opacity: 1,
-        transition: "background-color 200ms ease, transform 200ms ease, opacity 200ms ease, box-shadow 200ms ease",
+        transition: "background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), transform 200ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1)",
         "&:hover": {
             backgroundColor: "#88888844",
             transform: "translateY(-2px)",

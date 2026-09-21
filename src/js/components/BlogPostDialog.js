@@ -50,6 +50,7 @@ import * as toxicity from "../utils/toxicity";
 import PaperCardActions from "./PaperCardActions";
 import { voteSign, countUpvotes, countDownvotes } from "../utils/voteValue";
 import { votesWithLocalVote } from "../utils/voteSync";
+import { resolvePortal, fetchPortalTitle } from "../utils/portal";
 import EditPostDialog, { DeletePostDialog } from "./EditPostDialog";
 import DeleteCommentModal from "./DeleteCommentModal";
 import * as clipboard from "clipboard-polyfill";
@@ -476,6 +477,16 @@ const styles = theme => ({
     subheaderDate: {
         color: "#ddd",
         userSelect: "none",
+    },
+    // The portal's proper name on the author line ("3h in Pixagram · 5 min
+    // read") — a link to the portal's page, styled like the author name.
+    subheaderPortal: {
+        color: "#fff",
+        cursor: "pointer",
+        userSelect: "none",
+        "&:hover": {
+            textDecoration: "underline",
+        }
     },
     title: {
         fontSize: "3em",
@@ -1184,6 +1195,10 @@ class BlogPostDialog extends React.PureComponent {
             api: props.api || null,
             account: props.account || null,
             onVoteChange: props.onVoteChange || null,
+            // { name, title } of the portal the host page displays — the only
+            // source of a deep-linked post's portal title (get_content carries
+            // none). Kept current by componentWillReceiveProps' props spread.
+            portal: props.portal || null,
             _scrollTop: 0,
             _copied: false,
             _history: HISTORY,
@@ -1287,6 +1302,7 @@ class BlogPostDialog extends React.PureComponent {
         window.addEventListener("resize", this._close_lightbox_on_resize);
         this._cacheOwnProfile();
         this._check_favorite();
+        this._backfill_portal_title();
         // Live heart sync — e.g. a removal made in the FavoriteManagerDialog
         // opened above this dialog un-fills the icon immediately.
         this._favUnsub = favorites.subscribe(this._check_favorite);
@@ -1423,6 +1439,7 @@ class BlogPostDialog extends React.PureComponent {
                 this._fetch_comments(data);
                 this._cacheOwnProfile();
                 this._check_favorite();
+                this._backfill_portal_title();
                 // Deep-link intents ride the URL hash exactly as they do into
                 // PostDialog ("#replies", "#replies&focus=<b64>").
                 this._adopt_url_hash();
@@ -1465,6 +1482,7 @@ class BlogPostDialog extends React.PureComponent {
                 this._toc_hover = false;
                 this._fetch_comments(data);
                 this._check_favorite();
+                this._backfill_portal_title();
                 // The new post's URL carries its own (or no) hash intents; the
                 // previous post's focus never survives the switch.
                 this._adopt_url_hash();
@@ -1576,6 +1594,43 @@ class BlogPostDialog extends React.PureComponent {
     _open_tag = (tag) => {
         this.st4te._history.push("/trending/" + tag.toLowerCase());
         if (this.props.onClose) this.props.onClose();
+    }
+
+    // Portal name on the author line → the portal's page. Same shape as
+    // _open_tag: push, then onClose (the host's closePost sees a non-post
+    // URL and only clears its state). When the host page already displays
+    // this very portal — Community hands its own portal down as the `portal`
+    // prop, so that is the test, not the URL: a post URL sits under
+    // /portal-12/ on every host page — closing IS the navigation: closePost
+    // rewinds to the feed underneath, and pushing the portal URL on top
+    // would leave the post one Back away, to reopen.
+    _open_portal = () => {
+        const portal = resolvePortal(this.st4te.data, this.st4te.portal);
+        if (!portal) return;
+        const host = this.st4te.portal;
+        if (!(host && host.name === portal.name)) {
+            this.st4te._history.push("/" + portal.name);
+        }
+        if (this.props.onClose) this.props.onClose();
+    }
+
+    // The portal's title from the chain when neither the host page nor the
+    // post has it — a get_content post opened outside its portal page (a
+    // Profile, favorites, a notification). One getCommunity() per handle per
+    // session (utils/portal caches it); the author line renders its "in …"
+    // segment only once the title is settled, so this re-render is what
+    // makes it appear. Runs on open and on every post swap, next to
+    // _check_favorite; a stale answer (the dialog moved on) is dropped.
+    _backfill_portal_title = () => {
+        if (!this.st4te.open) return;   // mounted closed — nothing to show yet
+        const resolved = resolvePortal(this.st4te.data, this.st4te.portal);
+        if (!resolved || resolved.known) return;
+        const name = resolved.name;
+        fetchPortalTitle(this.st4te.api, name).then((settled) => {
+            if (!settled || !this.st4te.open) return;
+            const now = resolvePortal(this.st4te.data, this.st4te.portal);
+            if (now && now.name === name) this.forceUpdate();
+        });
     }
 
     _handle_backdrop_click = (e) => {
@@ -2807,6 +2862,11 @@ class BlogPostDialog extends React.PureComponent {
         const author = data.author || {};
         const readingTime = data.readTime || data.readingTime || Math.max(1, Math.round((data._word_count || 0) / 200)) || 5;
         const tags = data.tags || data._tags || [];
+        // The portal this post was published into (null outside a portal) —
+        // its proper name joins the author line, linking to the portal. An
+        // empty title means the chain lookup is still in flight
+        // (_backfill_portal_title); the segment waits for it.
+        const postPortal = resolvePortal(data, this.st4te.portal);
         const payout = parseFloat((data.payout || "0$").replace("$", "")) || 0.0;
         const upVotesNumber = (data.upVotesNumber || 0) + (_voted === 1 ? 1 : 0) - (_initialVoted === 1 ? 1 : 0);
         const downVotesNumber = (data.downVotesNumber || 0) + (_voted === -1 ? 1 : 0) - (_initialVoted === -1 ? 1 : 0);
@@ -2977,6 +3037,17 @@ class BlogPostDialog extends React.PureComponent {
                                                                         <LiveTimeAgo date={data.date || Date.now()} options={TIME_AGO_NARROW} />
                                                                     </span>
                                                                 </Tooltip>
+                                                                {/* "in Portal's Name" — the card's line, minus the author,
+                                                                    who has the line above. Sits between the date and the
+                                                                    reading time, whose string carries its own separator. */}
+                                                                {postPortal && postPortal.title !== "" && (
+                                                                    <React.Fragment>
+                                                                        <span className={classes.subheaderBy}> {t("words.in")} </span>
+                                                                        <span className={classes.subheaderPortal} onClick={this._open_portal}>
+                                                                            {postPortal.title}
+                                                                        </span>
+                                                                    </React.Fragment>
+                                                                )}
                                                                 <span className={classes.subheaderBy}>{t("components.blog_post_dialog.min_read", {
                                                                     readingTime: readingTime
                                                                 })}</span>

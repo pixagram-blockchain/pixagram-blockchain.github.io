@@ -22,6 +22,7 @@ import PaperCard, { isArtworkBlurred } from "../components/PaperCard";
 import PaperCardBlog from "../components/PaperCardBlog";
 import { enrichPostForBlogCard, isPortalBlogPost, isBlogCard, buildPortalPostUrl } from "../utils/blogCard";
 import PaperCardMenuOption from "../components/PaperCardMenuOption";
+import { ProfileHoverCardLayer } from "../components/ProfileHoverCard";
 import PhotoCameraRounded from "@material-ui/icons/PhotoCameraRounded";
 import Fab from "@material-ui/core/Fab";
 
@@ -1739,6 +1740,12 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
 
             <PaperCardMenuOption xy={menuCardXY} data={menuCardData} onClose={closeCardMenu}
                                  viewer={loggedInUser} onEditPost={onEditPost} onDeletePost={onDeletePost} />
+
+            {/* The one author hover card for every artwork and blog card on
+                this page — the cards' <ProfileHoverAnchor>s only carry
+                listeners. Renders nothing until a name is hovered; unmounts
+                with the page. */}
+            <ProfileHoverCardLayer />
 
             {ownPostDialogsMounted && (
                 <React.Suspense fallback={DIALOG_FALLBACK}>

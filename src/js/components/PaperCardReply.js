@@ -15,6 +15,7 @@ import { HISTORY, COMMUNITY_TAG_REGEX, buildCommentFocusHash } from '../utils/co
 import { t, useLanguage } from '../utils/text';
 import * as actions from '../actions/utils';
 import PaperCardActions from './PaperCardActions';
+import ProfileHoverAnchor from './ProfileHoverCard';
 import FadeAvatar from './FadeAvatar';
 import { safeHTML } from '../utils/api/sanitizer';
 
@@ -417,9 +418,20 @@ function PaperCardReplyInner({
     }, [voted, upvoteLoading, downvoteLoading, api, voter, data, applyVote]);
 
     const author = data.author || {};
+    // Same fallback as PaperCard: a name-less author still gets a hover
+    // target (and a readable subheader) through its username.
+    const authorName = (typeof author.name === 'string' && author.name.trim()) || author.username || '';
     const replyTo = data.replyTo || {};
     const replyToUsername = replyTo.username || replyTo.name || '';
     const replyToDisplayName = replyTo.name || replyTo.display_name || replyToUsername;
+    // The "to" account in the author shape ProfileHoverAnchor expects. It is
+    // memoized on its fields so the anchor sees a stable object across the
+    // live-date ticks; the card fetches the profile itself, so a missing
+    // image only means the initial shows until the bundle arrives.
+    const replyToAuthor = useMemo(
+        () => ({ username: replyToUsername, name: replyToDisplayName, image: replyTo.image || '' }),
+        [replyToUsername, replyToDisplayName, replyTo.image]
+    );
 
     const payout = parseFloat((data.payout || '').replace('$', '')) || 0;
     // Delta from initial state — avoids double-counting votes already in data
@@ -477,19 +489,24 @@ function PaperCardReplyInner({
                             </span>
                         </Tooltip>
                         <span className={classes.subheaderBy}> {t('words.by')} </span>
-                        <Tooltip title={'@' + author.username}>
+                        {/* Rich author hover card instead of the old raw-@username
+                            Tooltip. The anchor adds no element: it attaches its
+                            pointer listeners to this very span (and to the "to"
+                            name below), and the card itself is the page's single
+                            <ProfileHoverCardLayer/>. Click behavior is unchanged. */}
+                        <ProfileHoverAnchor api={api} author={author} onOpenProfile={openAuthor}>
                             <span className={classes.subheaderName} onClick={() => openAuthor(author.username)}>
-                                {author.name}
+                                {authorName}
                             </span>
-                        </Tooltip>
+                        </ProfileHoverAnchor>
                         {replyToUsername ? (
                             <span>
                                 <span className={classes.subheaderBy}> {t('words.to')} </span>
-                                <Tooltip title={'@' + replyToUsername}>
+                                <ProfileHoverAnchor api={api} author={replyToAuthor} onOpenProfile={openAuthor}>
                                     <span className={classes.subheaderName} onClick={() => openAuthor(replyToUsername)}>
                                         {replyToDisplayName}
                                     </span>
-                                </Tooltip>
+                                </ProfileHoverAnchor>
                             </span>
                         ) : null}
                     </span>

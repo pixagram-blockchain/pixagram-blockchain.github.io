@@ -77,8 +77,8 @@ const styles = (theme) => ({
     desktopPaper: {
         backgroundColor: "#101010",
         borderRadius: "16px",
-        width: 420,
-        maxHeight: 520,
+        width: 320,
+        maxHeight: 480,
         overflow: "hidden",
     },
     mobileDialog: {
@@ -100,14 +100,14 @@ const styles = (theme) => ({
             borderRadius: "0px",
             minHeight: 64,
         },
-        backgroundColor: "#ffffff21",
-        borderRadius: "16px",
+        backgroundColor: "#222222",
+        borderRadius: "16px 16px 8px 8px",
         minHeight: 52,
     },
     headerTitle: {
         fontWeight: 500,
-        fontSize: "21px",
-        color: "#eee",
+        fontSize: "16px",
+        color: "#fff",
         letterSpacing: "0.01em",
         fontFamily: `"Industry Book", "Normative Pro"`
     },
@@ -121,8 +121,8 @@ const styles = (theme) => ({
         "&:hover": { color: "#ccc" },
     },
     markReadButton: {
-        color: "#666",
-        transition: "color 200ms ease",
+        color: "#888",
+        transition: "color 200ms cubic-bezier(0.4, 0, 0.2, 1)",
         "&:hover": { color: "#fff" },
     },
     content: {
@@ -141,7 +141,7 @@ const styles = (theme) => ({
         padding: 0,
     },
     listItem: {
-        transition: "background-color 150ms ease",
+        transition: "background-color 150ms cubic-bezier(0.4, 0, 0.2, 1)",
         cursor: "pointer",
         "&:hover": {
             backgroundColor: "#1e1e1e",

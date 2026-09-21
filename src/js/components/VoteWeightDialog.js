@@ -11,7 +11,7 @@ import IconButton from "@material-ui/core/IconButton";
 import {DoneRounded} from "@material-ui/icons";
 import { withPrices } from "../hooks/usePrices";
 import {
-    estimateVotePxs, formatPxs,
+    estimateVoteValue, fiatOf, formatPxs,
     getRewardSnapshot, getRewardSnapshotSync,
     getVoterAccount, getVoterAccountSync,
 } from "../utils/voteValue";
@@ -257,16 +257,17 @@ class VoteWeightDialog extends React.PureComponent {
     /**
      * What a vote at `weight` would be worth right now → { pxs, fiat,
      * currency, ready }. Pure math over the cached snapshot + account
-     * (HF20 vote evaluator → rshares → reward fund → PXS via the median
-     * feed), so it tracks the thumb live while dragging.
+     * (HF20 vote evaluator → rshares → reward fund → PXA), priced through
+     * usePrices() — PXA anchored in USD, PXS derived from it — rather than
+     * the raw 1:1 bootstrap feed. Tracks the thumb live while dragging.
      */
     _estimate = (weight) => {
         const { snapshot, account } = this.state;
-        const prices = this.props.prices || {};
+        const prices = this.props.prices;
         const ready = !!(snapshot && snapshot.ok && account);
-        const pxs = ready ? estimateVotePxs(account, weight, snapshot) : 0;
-        const fiat = pxs * (Number(prices.pxsUsdPrice) || 0) * (Number(prices.fiatRate) || 1);
-        return { pxs, fiat, currency: prices.currency || "USD", ready };
+        const value = ready ? estimateVoteValue(account, weight, snapshot, prices) : { pxs: 0, usd: 0 };
+        const fiat = fiatOf(value.usd, prices);
+        return { pxs: value.pxs, fiat: fiat.amount, currency: fiat.currency, ready };
     };
 
     _renderEstimate = () => {

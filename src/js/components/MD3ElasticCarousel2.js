@@ -152,7 +152,7 @@ const styles = theme => ({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        transition: 'all 300ms ease',
+        transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
         zIndex: 10,
         backdropFilter: 'blur(12px)',
         '&:hover': {
@@ -801,7 +801,7 @@ class MD3ElasticCarousel extends React.Component {
                     className={`${classes.navButton} ${classes.navButtonLeft}`}
                     onClick={this.handlePrev}
                     aria-label={t("words.previous")}
-                    style={{ opacity: rolledIn ? 1 : 0, transition: 'opacity 400ms ease' }}
+                    style={{ opacity: rolledIn ? 1 : 0, transition: 'opacity 400ms cubic-bezier(0.4, 0, 0.2, 1)' }}
                 >
                     <svg className={classes.navIcon} viewBox="0 0 24 24">
                         <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
@@ -811,7 +811,7 @@ class MD3ElasticCarousel extends React.Component {
                     className={`${classes.navButton} ${classes.navButtonRight}`}
                     onClick={this.handleNext}
                     aria-label={t("words.next")}
-                    style={{ opacity: rolledIn ? 1 : 0, transition: 'opacity 400ms ease' }}
+                    style={{ opacity: rolledIn ? 1 : 0, transition: 'opacity 400ms cubic-bezier(0.4, 0, 0.2, 1)' }}
                 >
                     <svg className={classes.navIcon} viewBox="0 0 24 24">
                         <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>
@@ -878,7 +878,7 @@ class MD3ElasticCarousel extends React.Component {
                     <div className={classes.spacer} style={{ width: this.getSpacerWidth() }} />
                 </div>
                 {/* Pagination — shows real item count, highlights current */}
-                <div className={classes.pagination} style={{ opacity: rolledIn ? 1 : 0, transition: 'opacity 600ms ease 200ms' }}>
+                <div className={classes.pagination} style={{ opacity: rolledIn ? 1 : 0, transition: 'opacity 600ms cubic-bezier(0.4, 0, 0.2, 1) 200ms' }}>
                     {items.map((_, index) => (
                         <button
                             key={index}

@@ -19,6 +19,7 @@ import {
 } from "../theme/motion";
 import PaperCard, { isArtworkBlurred } from "../components/PaperCard";
 import PaperCardMenuOption from "../components/PaperCardMenuOption";
+import { ProfileHoverCardLayer } from "../components/ProfileHoverCard";
 import Button from "@material-ui/core/Button";
 import Typography from "@material-ui/core/Typography";
 import CircularProgress from "@material-ui/core/CircularProgress";
@@ -2489,6 +2490,13 @@ const Profile = ({ classes, settings, pathname, api }) => {
                                  viewer={profile.loggedInUser}
                                  onEditPost={onEditPost} onDeletePost={onDeletePost}
                                  onDeleteComment={onDeleteComment} />
+
+            {/* The one author hover card for the posts, comments and replies
+                cards of every tab — the cards' <ProfileHoverAnchor>s only
+                carry listeners. Renders nothing until a name is hovered;
+                closes on the wallet's /@name/wallet round trip like on any
+                other route change; unmounts with the page. */}
+            <ProfileHoverCardLayer />
 
             {ownPostDialogsMounted && (
                 <React.Suspense fallback={DIALOG_FALLBACK}>

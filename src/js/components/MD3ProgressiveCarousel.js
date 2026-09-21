@@ -66,9 +66,9 @@ const styles = theme => ({
         position: 'relative',
         height: '400px',
         transition: 'width 450ms cubic-bezier(0.23, 1, 0.32, 1), ' +
-                   'opacity 350ms ease, ' +
-                   'box-shadow 350ms ease, ' +
-                   'transform 350ms ease',
+                   'opacity 350ms cubic-bezier(0.4, 0, 0.2, 1), ' +
+                   'box-shadow 350ms cubic-bezier(0.4, 0, 0.2, 1), ' +
+                   'transform 350ms cubic-bezier(0.4, 0, 0.2, 1)',
         border: '1px solid rgba(255,255,255,0.04)',
     },
     cardClickable: {
@@ -101,7 +101,7 @@ const styles = theme => ({
         height: '100%',
         objectFit: 'cover',
         filter: 'brightness(0.5) saturate(0.8)',
-        transition: 'filter 400ms ease',
+        transition: 'filter 400ms cubic-bezier(0.4, 0, 0.2, 1)',
     },
     collapsedGradient: {
         position: 'absolute',
@@ -138,12 +138,12 @@ const styles = theme => ({
         padding: '24px',
         boxSizing: 'border-box',
         opacity: 1,
-        transition: 'opacity 300ms ease 100ms',
+        transition: 'opacity 300ms cubic-bezier(0.4, 0, 0.2, 1) 100ms',
     },
     expandedHidden: {
         opacity: 0,
         pointerEvents: 'none',
-        transition: 'opacity 200ms ease',
+        transition: 'opacity 200ms cubic-bezier(0.4, 0, 0.2, 1)',
     },
     avatar: {
         width: '140px',
@@ -154,7 +154,7 @@ const styles = theme => ({
         marginBottom: '20px',
         boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
         border: '3px solid rgba(255,255,255,0.1)',
-        transition: 'transform 300ms ease',
+        transition: 'transform 300ms cubic-bezier(0.4, 0, 0.2, 1)',
     },
     name: {
         fontSize: '20px',
@@ -188,7 +188,7 @@ const styles = theme => ({
         textDecoration: 'none',
         fontSize: '13px',
         fontWeight: '500',
-        transition: 'all 300ms ease',
+        transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
         border: '1px solid rgba(255,255,255,0.06)',
         '&:hover': {
             backgroundColor: 'rgba(255,255,255,0.15)',

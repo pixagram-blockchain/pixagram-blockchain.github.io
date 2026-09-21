@@ -106,7 +106,7 @@ export const transform = async (file, step_n, fidelity, callback = () => {}, cal
         };
         try {
 
-            const client = await Client.connect("primerz/face-to-pixel-art-4K");
+            const client = await Client.connect("primerz/face-to-pixel-art-4K-b");
             const result = await client.predict("/process_image", dynamic_config);
 
             console.log(result, "hey")

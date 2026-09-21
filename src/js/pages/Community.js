@@ -17,12 +17,14 @@ import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFres
 import { idle, cancelIdle } from "../utils/idle";
 import { parseRules } from "../utils/community-rules";
 import { enrichPostForBlogCard, extractJsonMeta } from "../utils/blogCard";
+import { forgetPortalTitle } from "../utils/portal";
 import {
     EASE as EASE_STANDARD, TRANSITION_FAST, TRANSITION_MEDIUM, TRANSITION_ENTRY,
     RAINBOW_RIPPLE, RAINBOW_RIPPLE_SIMPLE,
 } from "../theme/motion";
 import PaperCardBlog from "../components/PaperCardBlog";
 import PaperCardMenuOption from "../components/PaperCardMenuOption";
+import { ProfileHoverCardLayer } from "../components/ProfileHoverCard";
 import timeAgo from "../utils/TimeAgo";
 
 import SortingTabs from "../components/SortingTabs";
@@ -1181,7 +1183,7 @@ const useCommunityData = (api, pathname) => {
             if (loadTokenRef.current !== myToken) return; // superseded by a newer load
             if (!communityData) {
                 batch(() => {
-                    setCommunity({ name, title: name, about: '', description: '', image: '' });
+                    setCommunity({ name, _name: name, title: name, about: '', description: '', image: '' });
                     setPosts([]); setMembers([]); setRules([]); setLoading(false);
                 });
                 return;
@@ -1266,7 +1268,7 @@ const useCommunityData = (api, pathname) => {
             console.error('[Community] Failed to load:', e);
             if (loadTokenRef.current !== myToken) return;
             batch(() => {
-                setCommunity({ name, title: name, description: '', image: '' });
+                setCommunity({ name, _name: name, title: name, description: '', image: '' });
                 setPosts([]); setMembers([]); setRules([]); setLoading(false);
                 setDataVersion(v => v + 1);
             });
@@ -1652,6 +1654,17 @@ const Community = ({ classes, settings, pathname, api }) => {
 
     const locales = settings._selected_locales_code;
 
+    // The portal this page displays, handed to the cards ("… in Portal's
+    // Name") and to BlogPostDialog. The feed's posts all live here, and a
+    // deep-linked post (fetchOrphanPost → get_content) carries no community
+    // title of its own, so this is how its proper name reaches the dialog.
+    // Memoized on the two strings: PaperCardBlog compares the prop by
+    // identity, and `community` is replaced wholesale on every load.
+    const portal = useMemo(() => {
+        const name = community?._name || '';
+        return name ? { name, title: community?.name || name } : null;
+    }, [community?._name, community?.name]);
+
     // ── Callbacks ──────────────────────────────────────────────────────
     const handleSortingChange = useCallback((e, value) => {
         // replace (not push) so mobile back doesn't walk through every sort
@@ -1855,7 +1868,11 @@ const Community = ({ classes, settings, pathname, api }) => {
         handleVoteChange(permlink, voter, weight);
     }, [handleVoteChange]);
 
-    const handleEditCommunityClose = useCallback(() => { closeDialog('editCommunity'); reload(); }, [closeDialog, reload]);
+    // The edit may have renamed the portal: this page refetches it (reload),
+    // and the cached title other pages' cards use is dropped so they do too.
+    const handleEditCommunityClose = useCallback(() => {
+        closeDialog('editCommunity'); forgetPortalTitle(communityName); reload();
+    }, [closeDialog, reload, communityName]);
     const handleAddSomeoneSave = useCallback(() => { closeDialog('addSomeone'); reload(); }, [closeDialog, reload]);
     // Stable onClose for the two dialogs below: the previous inline
     // `() => closeDialog('…')` lambdas re-created a closure per render
@@ -1912,12 +1929,13 @@ const Community = ({ classes, settings, pathname, api }) => {
                     rowIndex={rowIndex} columnIndex={columnIndex} style={style}
                     api={api} voter={loggedInUser} onVoteChange={onVoteChange}
                     muted={isMuted}
+                    portal={portal}
                 />
             </CellMeasurer>
         );
     }, [posts, columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
         selectedPostIndex, masonryRef, rootDimensions, openPost, openPostComments,
-        locales, openCardMenu, api, loggedInUser, onVoteChange]);
+        locales, openCardMenu, api, loggedInUser, onVoteChange, portal]);
 
     // ── Shared props for header/info ───────────────────────────────────
     // Keyed on the posts COUNT, not the array identity: header and sidebar
@@ -1987,6 +2005,11 @@ const Community = ({ classes, settings, pathname, api }) => {
                 onEditPost={onEditPost} onEditContent={onEditContent} onDeletePost={onDeletePost}
             />
 
+            {/* The one author hover card for every blog card on this page —
+                the cards' <ProfileHoverAnchor>s only carry listeners. Renders
+                nothing until a name is hovered; unmounts with the page. */}
+            <ProfileHoverCardLayer />
+
             {ownPostDialogsMounted && (
                 <React.Suspense fallback={DIALOG_FALLBACK}>
                     <LazyEditPostDialog
@@ -2027,6 +2050,7 @@ const Community = ({ classes, settings, pathname, api }) => {
                         locales={locales} api={api} account={loggedInUser}
                         onVoteChange={onVoteChange} onClose={postNav.closePost}
                         onPrevious={postNav.previousPost} onNext={postNav.nextPost}
+                        portal={portal}
                     />
                 </React.Suspense>
             )}

@@ -150,12 +150,12 @@ function sameLayout(a, b) {
 
 // ── Static styles ─────────────────────────────────────────────────────────────
 
-const SPOT_TRANSITION = "top 280ms ease, left 280ms ease, width 280ms ease, height 280ms ease, border-radius 280ms ease";
+const SPOT_TRANSITION = "top 280ms cubic-bezier(0.4, 0, 0.2, 1), left 280ms cubic-bezier(0.4, 0, 0.2, 1), width 280ms cubic-bezier(0.4, 0, 0.2, 1), height 280ms cubic-bezier(0.4, 0, 0.2, 1), border-radius 280ms cubic-bezier(0.4, 0, 0.2, 1)";
 // After the overlay has entered, opacity joins the transition set; before
 // that, transitions are off entirely so the first appearance fades in at its
 // final position instead of flying in from the parked -9999px coordinates.
-const ENTERED_TRANSITION = SPOT_TRANSITION + ", opacity 250ms ease";
-const SHIELD_TRANSITION = "background 280ms ease, opacity 250ms ease";
+const ENTERED_TRANSITION = SPOT_TRANSITION + ", opacity 250ms cubic-bezier(0.4, 0, 0.2, 1)";
+const SHIELD_TRANSITION = "background 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 250ms cubic-bezier(0.4, 0, 0.2, 1)";
 
 const TIP_BASE = {
     position: "fixed",

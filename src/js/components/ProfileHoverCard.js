@@ -1,6 +1,5 @@
 import * as React from 'preact/compat';
-import { render } from 'preact/compat';
-import { withStyles, ThemeProvider, useTheme } from '@material-ui/core/styles';
+import { withStyles } from '@material-ui/core/styles';
 import Popper from '@material-ui/core/Popper';
 import Fade from '@material-ui/core/Fade';
 import ButtonBase from '@material-ui/core/ButtonBase';
@@ -13,18 +12,24 @@ import BellIcon from '../icons/Bell';
 import BellRingIcon from '../icons/BellRing';
 import AccountArrowLeft from '../icons/AccountArrowLeft';
 import AccountArrowRight from '../icons/AccountArrowRight';
+import { HISTORY } from '../utils/constants';
 import { t, useLanguage } from '../utils/text';
 import { TRANSITION_FAST as TF, RAINBOW_RIPPLE as RIPPLE } from '../theme/motion';
 
-const { useState, useEffect, useRef, useCallback, useReducer } = React;
+const {
+    useState, useEffect, useLayoutEffect, useRef, useCallback, useReducer,
+    memo, isValidElement, cloneElement,
+} = React;
 
 if (typeof window !== 'undefined') {
     window.__PIXA_VERSIONS__ = window.__PIXA_VERSIONS__ || {};
-    window.__PIXA_VERSIONS__.ProfileHoverCard = '3.2.2-namelink';
+    window.__PIXA_VERSIONS__.ProfileHoverCard = '5.0.0-layer';
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
- * ProfileHoverCard — author hover card for PaperCard / PaperCardBlog.
+ * ProfileHoverCard — author hover card for every card that names an
+ * account: PaperCard, PaperCardBlog, PaperCardReply, PaperCardComment, and
+ * anything else that wraps a name in <ProfileHoverAnchor>.
  *
  * Rounded-square design: the card and the avatar share one border radius
  * (CARD_RADIUS); the avatar sits flush inside the card — no padding, no
@@ -37,26 +42,56 @@ if (typeof window !== 'undefined') {
  * IconButton follow toggle (whiteButton styling, disabled + explanatory
  * tooltip when logged out, hidden on the viewer's own account).
  *
- * PERFORMANCE — singleton layer, page-level invocation:
- * A page renders hundreds of cards, so the per-card anchor must cost
- * nothing. ProfileHoverAnchor is now just a <span> with two pointer
- * listeners — no Popper, no state, no timers per card. All of that lives
- * in ONE ProfileHoverCardLayer holding the single Popper + card, and the
- * anchors invoke it through a module-level controller:
+ * ARCHITECTURE — one floating element per page, zero elements per card:
  *
- *   · lazy portal (default): the first hover creates a host div on
- *     document.body and renders the layer into it — nothing to wire up;
- *   · page-level (optional): render <ProfileHoverCardLayer /> once in a
- *     page/app root; it registers itself and the lazy portal never mounts.
+ *   · <ProfileHoverCardLayer/> is mounted ONCE by each page that shows
+ *     these cards (Feed, FeedPersonal, Profile, Community). It owns the
+ *     single MUI <Popper> + card for the whole page and renders nothing at
+ *     all while no name is hovered. The layer is part of the page tree, so
+ *     it unmounts with the page: a card can never outlive the page that
+ *     showed it.
  *
- * Hover-intent timing (open 420 ms / close 280 ms), retargeting (moving
- * from one author name to another while open swaps the card in place),
- * scroll/Escape close and mouse-only gating are all handled by the layer.
+ *   · <ProfileHoverAnchor> is the per-card wrapper and it renders NO element
+ *     of its own: it clones the name <span> it is given and attaches two
+ *     pointer listeners plus a ref to it. A feed of hundreds of cards costs
+ *     hundreds of listeners and not one extra node — no Popper, no Portal,
+ *     no state, no timers until a name is actually hovered.
  *
- * The anchor API is unchanged: PaperCard / PaperCardBlog wrap their name
- * span in <ProfileHoverAnchor api author onOpenProfile> and need no edits —
- * count navigation reuses onOpenProfile('name/followers'), which both
- * cards' openAuthor turn into HISTORY.push('/@name/followers').
+ *   · Anchors and the layer meet in the module-level HOVER registry below:
+ *     the one anchor whose card is up, the open / closing phase, the close
+ *     grace timer and the MUI-Tooltip-style warm window that lets the card
+ *     swap near-instantly when the pointer slides from one author name to
+ *     the next. The registry is plain data; the layer re-renders when it is
+ *     told to (notify()) and reads it during that render.
+ *
+ *   · Hover intent — mouse only, OPEN_DELAY_MS at rest on the name — shows
+ *     the card. PREFETCH_DELAY_MS into a hover the author bundle and the
+ *     active account are pulled into the module caches, so by the time the
+ *     card appears its numbers are usually already there (no skeleton).
+ *
+ *   · While a card is on screen the layer listens for everything that
+ *     should take it down, none of which the per-card wrapper could see:
+ *     the pointer resting anywhere but the name or the card (checked on
+ *     pointermove, so a dialog or backdrop sliding under a resting pointer
+ *     is caught even when the browser never delivers a pointerleave), any
+ *     pointerdown outside the card, Escape, any scroll, a route change
+ *     (HISTORY — page swaps, the wallet's /@name/wallet round trip, post
+ *     overlays), the tab going hidden, the window losing focus, the
+ *     hovered anchor unmounting or being re-pointed at another author, and
+ *     the layer itself unmounting.
+ *
+ * Usage — identical in every card, the click behavior is the card's own:
+ *
+ *   <ProfileHoverAnchor api={api} author={author} onOpenProfile={openAuthor}>
+ *     <span className={classes.subheaderName} onClick={…}>{name}</span>
+ *   </ProfileHoverAnchor>
+ *
+ * and once per page, anywhere in its tree:
+ *
+ *   <ProfileHoverCardLayer />
+ *
+ * Count navigation reuses onOpenProfile('name/followers'), which the cards'
+ * openAuthor turns into HISTORY.push('/@name/followers').
  * ──────────────────────────────────────────────────────────────────────── */
 
 /* ── Module-level caches ─────────────────────────────────────────────────
@@ -188,7 +223,7 @@ function getFollowingSetSync(api) {
     return (hit && hit.set) || null;
 }
 
-/* ── Data hooks (run only inside the single mounted card) ──────────────── */
+/* ── Data hooks (run only inside the one mounted card) ─────────────────── */
 
 function useAuthorBundle(api, username) {
     const [state, setState] = useState({ loading: true, bundle: null });
@@ -452,7 +487,7 @@ const cardStyles = () => ({
 const ProfileHoverCardBase = withStyles(cardStyles)(function ProfileHoverCard(props) {
     const {
         classes, api, author = {}, onOpenProfile,
-        onHold, onRelease,
+        rootRef, onHold, onRelease,
     } = props;
     useLanguage();
     const username = author.username || '';
@@ -489,8 +524,12 @@ const ProfileHoverCardBase = withStyles(cardStyles)(function ProfileHoverCard(pr
             ? 'You are following this account'
             : 'You are not following this account';
 
+    /* The layer keys the card by anchor + author, so it mounts fresh for
+     * every name and every <Fade> below plays its staggered entrance on
+     * mount — no keys needed to retrigger them. */
     return (
         <div
+            ref={rootRef}
             className={classes.cardRoot}
             onPointerEnter={onHold}
             onPointerLeave={onRelease}
@@ -517,7 +556,7 @@ const ProfileHoverCardBase = withStyles(cardStyles)(function ProfileHoverCard(pr
             </ButtonBase>
 
             <div className={classes.col}>
-                <Fade in timeout={100} key={imageSrc}><span
+                <Fade in timeout={100}><span
                     className={classes.username}
                     onClick={openProfile}
                     role="link"
@@ -525,7 +564,7 @@ const ProfileHoverCardBase = withStyles(cardStyles)(function ProfileHoverCard(pr
                 >
                     {'@' + username}
                 </span></Fade>
-                <Fade in timeout={300} key={imageSrc}><span
+                <Fade in timeout={300}><span
                     className={classes.displayName}
                     onClick={openProfile}
                     role="link"
@@ -542,9 +581,9 @@ const ProfileHoverCardBase = withStyles(cardStyles)(function ProfileHoverCard(pr
                     </React.Fragment>
                 ) : (
                     <React.Fragment>
-                        {bio ? <Fade in timeout={500} key={imageSrc}><span className={classes.bio}>{bio}</span></Fade> : null}
+                        {bio ? <Fade in timeout={500}><span className={classes.bio}>{bio}</span></Fade> : null}
 
-                        <Fade in timeout={bio ? 700: 500} key={imageSrc}>
+                        <Fade in timeout={bio ? 700 : 500}>
                             <div className={classes.actions}>
                                 <ButtonGroup
                                     variant="contained"
@@ -594,199 +633,412 @@ const ProfileHoverCardBase = withStyles(cardStyles)(function ProfileHoverCard(pr
     );
 });
 
-/* ── Singleton layer ─────────────────────────────────────────────────────
- * One Popper + card for the whole page. Anchors talk to it through this
- * module-level controller; before the layer has mounted, the latest
- * request is queued and flushed on registration. */
-const OPEN_DELAY_MS = 420;
-const CLOSE_DELAY_MS = 280;
+/* ── Hover-intent timing ─────────────────────────────────────────────────── */
+const OPEN_DELAY_MS = 420;      // rest on a name this long before the card shows
+const OPEN_DELAY_WARM_MS = 80;  // …or only this long right after another card closed
+const CLOSE_DELAY_MS = 280;     // grace period to travel from the name to the card
+const PREFETCH_DELAY_MS = 150;  // hover this long → warm the data caches
+const WARM_MS = 600;            // a pointer-driven close keeps the next open fast
 
-let layerCtl = null;      // controller registered by the mounted layer
-let layerQueued = null;   // latest withLayer callback awaiting registration
-let layerHostMade = false;
+const FADE_TIMEOUT = { enter: 200, exit: 150 };
+const POPPER_STYLE = { zIndex: 1500, pointerEvents: 'none' };
+const POPPER_MODIFIERS = {
+    offset: { enabled: true, offset: '0, 12' },
+    flip: { enabled: true },
+    preventOverflow: { enabled: true, boundariesElement: 'viewport' },
+};
+const PASS_THROUGH_STYLE = { pointerEvents: 'none' }; // only the card itself catches the pointer
+const ANCHOR_STYLE = { display: 'inline' };
 
-/* The lazy layer renders into its own root OUTSIDE the app's ThemeProvider.
- * Without the app theme, MUI would fall back to its default LIGHT theme
- * there — and because v4 injects core sheets per theme, that would append
- * light-coloured duplicates of global classes (.MuiIconButton-root,
- * .MuiSvgIcon-*, …) AFTER the app's themed sheets, flipping icons across
- * the whole app toward black. Anchors live inside the app tree, so they
- * capture the real theme and the layer re-provides it: same theme object →
- * the already-injected sheets are reused and nothing new leaks. */
-let capturedAppTheme = null;
+/* ── Hover registry ───────────────────────────────────────────────────────
+ * The single meeting point of every anchor and the one mounted layer. Plain
+ * data, not React state: mutations call notify() and the layer re-renders
+ * from it. `layers` is a stack so that a layer nested inside another page
+ * (a dialog with its own cards, say) takes over while it is mounted and
+ * hands back when it goes. */
+const HOVER = {
+    layers: [],        // mounted layer controllers, innermost last
+    phase: 'closed',   // 'closed' | 'open' | 'closing' (exit fade playing)
+    anchor: null,      // controller of the anchor whose card is up or fading
+    closeTimer: null,  // pending grace-period close
+    warmUntil: 0,      // Date.now() threshold under which opens are "warm"
+};
 
-function mountLazyLayer() {
-    if (layerHostMade || layerCtl || typeof document === 'undefined') return;
-    layerHostMade = true;
-    const host = document.createElement('div');
-    host.setAttribute('data-pixa-profile-hover-layer', '');
-    document.body.appendChild(host);
-    render(<ProfileHoverCardLayer />, host);
+function currentLayer() {
+    return HOVER.layers[HOVER.layers.length - 1] || null;
 }
 
-function withLayer(fn) {
-    if (typeof document === 'undefined') return;
-    if (layerCtl) { fn(layerCtl); return; }
-    layerQueued = fn;
-    mountLazyLayer();
+function notify() {
+    const layer = currentLayer();
+    if (layer) layer.update();
 }
 
-export function ProfileHoverCardLayer() {
-    const [target, setTarget] = useState(null); // { anchorEl, api, author, onOpenProfile }
-    const [open, setOpen] = useState(false);
-    const openTimer = useRef(null);
-    const closeTimer = useRef(null);
-    const targetRef = useRef(null);
-    const openRef = useRef(false);
-    targetRef.current = target;
-    openRef.current = open;
+function isWarm() { return Date.now() < HOVER.warmUntil; }
+function markWarm() { HOVER.warmUntil = Date.now() + WARM_MS; }
 
-    const clearTimers = useCallback(() => {
-        if (openTimer.current) { clearTimeout(openTimer.current); openTimer.current = null; }
-        if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
-    }, []);
-
-    const closeNow = useCallback(() => { clearTimers(); setOpen(false); }, [clearTimers]);
-
-    // Stable controller — created once, registered for the module.
-    const ctlRef = useRef(null);
-    if (!ctlRef.current) {
-        ctlRef.current = {
-            requestOpen(payload) {
-                clearTimers();
-                if (openRef.current) {
-                    // Already open: retarget in place (moving between names).
-                    setTarget(payload);
-                    return;
-                }
-                openTimer.current = setTimeout(() => {
-                    setTarget(payload);
-                    setOpen(true);
-                }, OPEN_DELAY_MS);
-            },
-            requestClose() {
-                clearTimers();
-                closeTimer.current = setTimeout(() => setOpen(false), CLOSE_DELAY_MS);
-            },
-            hold() { clearTimers(); },
-            closeIfAnchor(el) {
-                const cur = targetRef.current;
-                if (openRef.current && cur && cur.anchorEl === el) closeNow();
-            },
-        };
+function cancelClose() {
+    if (HOVER.closeTimer) {
+        clearTimeout(HOVER.closeTimer);
+        HOVER.closeTimer = null;
     }
-
-    useEffect(() => {
-        // First registered layer wins (a page-level layer pre-empts the lazy
-        // portal; a second mount stays inert).
-        if (layerCtl && layerCtl !== ctlRef.current) return undefined;
-        layerCtl = ctlRef.current;
-        if (layerQueued) { const q = layerQueued; layerQueued = null; q(layerCtl); }
-        return () => { if (layerCtl === ctlRef.current) layerCtl = null; };
-    }, []);
-
-    // Close on any scroll (capture reaches nested scrollers) and on Escape.
-    useEffect(() => {
-        if (!open) return undefined;
-        const onScroll = () => closeNow();
-        const onKey = (e) => { if (e.key === 'Escape') closeNow(); };
-        window.addEventListener('scroll', onScroll, { capture: true, passive: true });
-        window.addEventListener('keydown', onKey);
-        return () => {
-            window.removeEventListener('scroll', onScroll, { capture: true });
-            window.removeEventListener('keydown', onKey);
-        };
-    }, [open, closeNow]);
-
-    const openProfile = useCallback((targetPath) => {
-        const cur = targetRef.current;
-        closeNow();
-        if (cur && typeof cur.onOpenProfile === 'function') cur.onOpenProfile(targetPath);
-    }, [closeNow]);
-
-    if (!target) return null;
-    const content = (
-        <Popper
-            open={open}
-            anchorEl={target.anchorEl}
-            placement="bottom"
-            transition
-            style={{ zIndex: 1500, pointerEvents: 'none' }}
-            modifiers={{
-                offset: { enabled: true, offset: '0, 12' },
-                flip: { enabled: true },
-                preventOverflow: { enabled: true, boundariesElement: 'viewport' },
-            }}
-        >
-            {({ TransitionProps }) => (
-                <Fade {...TransitionProps} timeout={{ enter: 200, exit: 150 }}>
-                    <div style={{ pointerEvents: 'none' }}>
-                        <ProfileHoverCardBase
-                            api={target.api}
-                            author={target.author}
-                            onOpenProfile={openProfile}
-                            onHold={ctlRef.current.hold}
-                            onRelease={ctlRef.current.requestClose}
-                        />
-                    </div>
-                </Fade>
-            )}
-        </Popper>
-    );
-    return capturedAppTheme
-        ? <ThemeProvider theme={capturedAppTheme}>{content}</ThemeProvider>
-        : content;
 }
 
-/* ── Anchor: featherweight per-card wrapper ────────────────────────────── */
-function ProfileHoverAnchorInner(props) {
-    const { api, author = {}, onOpenProfile, children } = props;
-    const anchorRef = useRef(null);
-    // Read the app theme from context (anchors are inside the provider) so
-    // the out-of-tree layer can re-provide it — see capturedAppTheme above.
-    const theme = useTheme();
-    const themeRef = useRef(theme);
-    themeRef.current = theme;
+/* Give the pointer CLOSE_DELAY_MS to reach the card / come back to the
+ * name. Armed once: re-arming on every pointer move would let a pointer
+ * wandering outside postpone the close forever. */
+function scheduleClose(warm) {
+    if (HOVER.phase !== 'open' || HOVER.closeTimer) return;
+    HOVER.closeTimer = setTimeout(() => {
+        HOVER.closeTimer = null;
+        closeCard(warm);
+    }, CLOSE_DELAY_MS);
+}
 
-    const handleEnter = useCallback((e) => {
-        // Hover is a mouse concept — touch keeps its tap-to-navigate behavior.
-        if (e && e.pointerType && e.pointerType !== 'mouse') return;
-        const el = anchorRef.current;
-        if (!el) return;
-        capturedAppTheme = themeRef.current;
-        withLayer((ctl) => ctl.requestOpen({ anchorEl: el, api, author, onOpenProfile }));
-    }, [api, author, onOpenProfile]);
+let warnedNoLayer = false;
 
-    const handleLeave = useCallback(() => {
-        withLayer((ctl) => ctl.requestClose());
-    }, []);
+/* Show the card for this anchor. A card already up for another anchor is
+ * simply re-pointed — the layer swaps the content and repositions, so the
+ * page never shows two cards and the swap is instant. */
+function showCard(anchor) {
+    cancelClose();
+    if (!currentLayer()) {
+        if (!warnedNoLayer) {
+            warnedNoLayer = true;
+            console.warn('[ProfileHoverCard] no <ProfileHoverCardLayer /> is mounted on this page — author hover cards are disabled here.');
+        }
+        return;
+    }
+    if (!anchor.el || !anchor.el.isConnected) return;
+    HOVER.anchor = anchor;
+    HOVER.phase = 'open';
+    notify();
+}
 
-    // New author under the same anchor (recycled rows) or unmount → make
-    // sure a card anchored here doesn't linger.
+/* Start the exit fade. A pointer-driven close (`warm`) lets the next name
+ * open near-instantly; Escape / scroll / pointerdown close cold. */
+function closeCard(warm) {
+    cancelClose();
+    if (HOVER.phase !== 'open') return;
+    if (warm) markWarm();
+    HOVER.phase = 'closing';
+    notify();
+}
+
+/* Drop the card with no fade — the anchor is gone, the page is going, the
+ * tab is hidden: nothing to animate against. */
+function closeCardNow() {
+    cancelClose();
+    if (HOVER.phase === 'closed') return;
+    HOVER.phase = 'closed';
+    HOVER.anchor = null;
+    notify();
+}
+
+/* Exit fade finished → the layer renders nothing again. */
+function cardExited() {
+    if (HOVER.phase !== 'closing') return;
+    HOVER.phase = 'closed';
+    HOVER.anchor = null;
+    notify();
+}
+
+/* Pointer onto the card: keep it (and rescue it mid-fade). */
+function holdCard() {
+    cancelClose();
+    if (HOVER.phase === 'closing' && HOVER.anchor) showCard(HOVER.anchor);
+}
+
+/* Pointer off the card. */
+function releaseCard() {
+    markWarm();
+    scheduleClose(true);
+}
+
+function applyRef(ref, value) {
+    if (!ref) return;
+    if (typeof ref === 'function') ref(value);
+    else if (typeof ref === 'object') ref.current = value;
+}
+
+/* Programmatic dismissal for hosts that know a context switch is coming
+ * (opening a dialog from a keyboard shortcut, say). The layer already
+ * closes on every pointer, keyboard, scroll and route signal by itself. */
+export function dismissProfileHoverCard() {
+    closeCard(false);
+}
+
+/* ── Anchor controller ────────────────────────────────────────────────────
+ * Created once per <ProfileHoverAnchor> instance. Its handlers never change
+ * identity — they read the latest props through `latest` — so the cloned
+ * name element's props are stable and its diff is a no-op. */
+let anchorSeq = 0;
+
+function createAnchorController(latest) {
+    const timers = { open: null, prefetch: null };
+    const clear = (k) => { if (timers[k]) { clearTimeout(timers[k]); timers[k] = null; } };
+
+    const c = {
+        id: ++anchorSeq,
+        el: null,
+        latest,
+        /* Ref on the name element; forwards to the element's own ref if the
+         * caller had one. */
+        setRef(node) {
+            c.el = node;
+            applyRef(latest.current.childRef, node);
+        },
+        /* Pointer onto the name. Hover is a mouse concept — touch keeps its
+         * tap-to-navigate behavior. */
+        enter(e) {
+            const L = latest.current;
+            if (L.childEnter) L.childEnter(e);
+            if (e && e.pointerType && e.pointerType !== 'mouse') return;
+            if (HOVER.anchor === c) {
+                cancelClose();                                    // back from the card
+                if (HOVER.phase === 'closing') showCard(c);       // caught it mid-fade
+                return;
+            }
+            const name = (L.author && L.author.username) || '';
+            if (!name) return;
+            clear('prefetch');
+            timers.prefetch = setTimeout(() => {
+                timers.prefetch = null;
+                const now = latest.current;
+                getCachedBundle(now.api, name);
+                getCachedActiveAccount(now.api);
+            }, PREFETCH_DELAY_MS);
+            clear('open');
+            // Another card up (or fading) or one just closed → swap fast.
+            const delay = (HOVER.phase !== 'closed' || isWarm()) ? OPEN_DELAY_WARM_MS : OPEN_DELAY_MS;
+            timers.open = setTimeout(() => { timers.open = null; showCard(c); }, delay);
+        },
+        /* Pointer off the name: cancel a pending open, or give the pointer
+         * CLOSE_DELAY_MS to reach the card. Marked warm here, at leave time,
+         * because the next name is usually reached inside that grace period. */
+        leave(e) {
+            const L = latest.current;
+            if (L.childLeave) L.childLeave(e);
+            clear('open');
+            clear('prefetch');
+            if (HOVER.anchor !== c || HOVER.phase !== 'open') return;
+            markWarm();
+            scheduleClose(true);
+        },
+        /* A recycled row re-pointed this anchor at another author. */
+        reset() {
+            clear('open');
+            clear('prefetch');
+            if (HOVER.anchor === c) closeCardNow();
+        },
+        /* Unmount: timers off, our card (if it is ours) gone. */
+        dispose() {
+            c.reset();
+            c.el = null;
+        },
+    };
+    return c;
+}
+
+/* ── Anchor: the per-card wrapper ──────────────────────────────────────────
+ * Renders no element of its own: the name element it wraps is cloned with
+ * two pointer listeners and a ref (its own handlers/ref, if any, still
+ * run). Only when the child is not a plain DOM element does it fall back
+ * to an inline <span> of its own. */
+export function ProfileHoverAnchor(props) {
+    const { api, author, onOpenProfile, children } = props;
+    const username = (author && author.username) || '';
+
+    const latest = useRef(null);
+    if (!latest.current) latest.current = {};
+    latest.current.api = api;
+    latest.current.author = author;
+    latest.current.onOpenProfile = onOpenProfile;
+
+    const ctlRef = useRef(null);
+    if (!ctlRef.current) ctlRef.current = createAnchorController(latest);
+    const c = ctlRef.current;
+
+    // New author under the same anchor (recycled rows) → drop the card.
+    const prevUser = useRef(username);
     useEffect(() => {
-        const el = anchorRef.current;
-        return () => { if (layerCtl && el) layerCtl.closeIfAnchor(el); };
-    }, [author.username]);
+        if (prevUser.current === username) return;
+        prevUser.current = username;
+        c.reset();
+    }, [username, c]);
 
+    useEffect(() => () => c.dispose(), [c]);
+
+    const child = isValidElement(children) && typeof children.type === 'string' ? children : null;
+    const L = latest.current;
+    L.childRef = child ? (child.ref || null) : null;
+    L.childEnter = child ? (child.props.onPointerEnter || null) : null;
+    L.childLeave = child ? (child.props.onPointerLeave || null) : null;
+
+    if (child) {
+        return cloneElement(child, {
+            ref: c.setRef,
+            onPointerEnter: c.enter,
+            onPointerLeave: c.leave,
+        });
+    }
     return (
         <span
-            ref={anchorRef}
-            style={{ display: 'inline' }}
-            onPointerEnter={handleEnter}
-            onPointerLeave={handleLeave}
+            ref={c.setRef}
+            style={ANCHOR_STYLE}
+            onPointerEnter={c.enter}
+            onPointerLeave={c.leave}
         >
             {children}
         </span>
     );
 }
 
-const ProfileHoverAnchor = React.memo(ProfileHoverAnchorInner, (prev, next) => (
-    prev.api === next.api &&
-    (prev.author || {}).username === (next.author || {}).username &&
-    (prev.author || {}).name === (next.author || {}).name &&
-    (prev.author || {}).image === (next.author || {}).image &&
-    prev.onOpenProfile === next.onOpenProfile &&
-    prev.children === next.children
-));
+/* ── Layer: the one floating element of the page ───────────────────────────
+ * Mounted once per page. Nothing is rendered while no name is hovered; the
+ * MUI <Popper> (portalled to document.body, so the card is never clipped by
+ * a card's overflow:hidden nor caught in its contain / transform / filter
+ * transitions) exists only from the moment a card shows until its exit
+ * fade ends. memo'd with no props: the page's own re-renders never reach
+ * the card, only the registry's notify() does. */
+export const ProfileHoverCardLayer = memo(function ProfileHoverCardLayer() {
+    const [, bump] = useReducer((x) => x + 1, 0);
+    const mountedRef = useRef(false);
+    const popperElRef = useRef(null);
+    const cardElRef = useRef(null);
+
+    useLayoutEffect(() => {
+        mountedRef.current = true;
+        const ctl = { update() { if (mountedRef.current) bump(); } };
+        HOVER.layers.push(ctl);
+        return () => {
+            mountedRef.current = false;
+            const i = HOVER.layers.lastIndexOf(ctl);
+            if (i >= 0) HOVER.layers.splice(i, 1);
+            // Whatever this layer was showing leaves with it.
+            cancelClose();
+            HOVER.phase = 'closed';
+            HOVER.anchor = null;
+            notify();
+            // The popper node lives in document.body through the Popper's
+            // portal. Its own teardown removes it; should that ever be
+            // skipped while the page tree is torn down around it, the node
+            // must still not survive the page — check once the unmount pass
+            // has fully completed.
+            const el = popperElRef.current;
+            if (el) {
+                setTimeout(() => {
+                    if (el.isConnected && el.parentNode) el.parentNode.removeChild(el);
+                }, 0);
+            }
+        };
+    }, []);
+
+    const phase = HOVER.phase;
+    const anchor = HOVER.anchor;
+
+    // Everything that takes an on-screen card down. Attached only while a
+    // card is up or fading, detached the moment it is gone.
+    useEffect(() => {
+        if (phase === 'closed') return undefined;
+        const onScroll = () => closeCard(false);
+        const onKey = (e) => { if (e.key === 'Escape') closeCard(false); };
+        // Any press outside the card — a wallet button, a dialog's close
+        // button, the name itself (its click navigates), the backdrop of a
+        // modal that opened over the page.
+        const onDown = (e) => {
+            const card = cardElRef.current;
+            if (card && e.target instanceof Node && card.contains(e.target)) return;
+            closeCard(false);
+        };
+        // The pointer's real whereabouts, independent of boundary events:
+        // resting on anything but the name or the card → grace close. Also
+        // notices an anchor that left the document under an open card.
+        const onMove = (e) => {
+            if (HOVER.phase !== 'open' || !HOVER.anchor) return;
+            const a = HOVER.anchor.el;
+            if (!a || !a.isConnected) { closeCardNow(); return; }
+            const target = e.target;
+            const card = cardElRef.current;
+            const inside = target instanceof Node &&
+                ((card && card.contains(target)) || a.contains(target));
+            if (inside) cancelClose(); else scheduleClose(true);
+        };
+        const onVisibility = () => { if (document.visibilityState === 'hidden') closeCardNow(); };
+        const onBlur = () => closeCardNow();
+        // Any route change: page swap, /@name/wallet round trip, a post
+        // overlay opening, a tab switch — the card's context is gone.
+        const unlisten = HISTORY.listen(() => closeCard(false));
+
+        window.addEventListener('scroll', onScroll, { capture: true, passive: true });
+        window.addEventListener('keydown', onKey);
+        document.addEventListener('pointerdown', onDown, true);
+        document.addEventListener('pointermove', onMove, { capture: true, passive: true });
+        document.addEventListener('visibilitychange', onVisibility);
+        window.addEventListener('blur', onBlur);
+        return () => {
+            window.removeEventListener('scroll', onScroll, { capture: true });
+            window.removeEventListener('keydown', onKey);
+            document.removeEventListener('pointerdown', onDown, true);
+            document.removeEventListener('pointermove', onMove, { capture: true });
+            document.removeEventListener('visibilitychange', onVisibility);
+            window.removeEventListener('blur', onBlur);
+            if (typeof unlisten === 'function') unlisten();
+        };
+    }, [phase]);
+
+    const setCardEl = useCallback((node) => { cardElRef.current = node; }, []);
+
+    /* A click inside the card that navigates: dismiss, then let the
+     * anchor's own onOpenProfile route it (the cards' openAuthor →
+     * HISTORY.push('/@name…')). */
+    const openProfile = useCallback((targetPath) => {
+        const a = HOVER.anchor;
+        closeCard(false);
+        const fn = a && a.latest.current.onOpenProfile;
+        if (typeof fn === 'function') fn(targetPath);
+    }, []);
+
+    if (phase === 'closed' || !anchor || !anchor.el) return null;
+
+    const { api, author } = anchor.latest.current;
+    const username = (author && author.username) || '';
+
+    return (
+        <Popper
+            ref={popperElRef}
+            open={phase === 'open'}
+            anchorEl={anchor.el}
+            placement="bottom"
+            transition
+            style={POPPER_STYLE}
+            modifiers={POPPER_MODIFIERS}
+        >
+            {({ TransitionProps }) => (
+                <Fade
+                    {...TransitionProps}
+                    timeout={FADE_TIMEOUT}
+                    onExited={(node) => {
+                        // Popper's own handler first (it stops rendering),
+                        // then ours (the layer renders nothing again).
+                        if (TransitionProps.onExited) TransitionProps.onExited(node);
+                        cardExited();
+                    }}
+                >
+                    <div style={PASS_THROUGH_STYLE}>
+                        <ProfileHoverCardBase
+                            key={anchor.id + ':' + username}
+                            api={api}
+                            author={author}
+                            onOpenProfile={openProfile}
+                            rootRef={setCardEl}
+                            onHold={holdCard}
+                            onRelease={releaseCard}
+                        />
+                    </div>
+                </Fade>
+            )}
+        </Popper>
+    );
+});
 
 export default ProfileHoverAnchor;

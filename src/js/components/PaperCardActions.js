@@ -19,6 +19,10 @@ import useVotePayoutEstimate from '../hooks/useVotePayoutEstimate';
 
 import { t } from "../utils/text";
 
+// Mirrors the synchronous seed in hooks/usePrices (PricesAPI's
+// DESIGN_BIG_MAC_USD). Only reached when usePrices hands out 0.
+const DESIGN_PXS_USD = 6.22;
+
 const styles = theme => ({
     voted: {
         color: '#eee',
@@ -364,7 +368,9 @@ function Payout({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPrice, c
     // `isFinite` and plain coercion-free guards instead.
     const rate = (isFinite(fiatRate) && fiatRate > 0) ? fiatRate : 1;
     const cur = currency || 'USD';
-    const pxsRate = (isFinite(pxsUsdPrice) && pxsUsdPrice > 0) ? pxsUsdPrice : 5.69;
+    // Same last-resort seed as usePrices / PricesAPI (design Big Mac price),
+    // so an unpriced card and a priced one never disagree by construction.
+    const pxsRate = (isFinite(pxsUsdPrice) && pxsUsdPrice > 0) ? pxsUsdPrice : DESIGN_PXS_USD;
     const fiatValue = (payout * pxsRate * rate).toFixed(2);
 
     return (
@@ -426,13 +432,16 @@ function VoteButtons({
     // Hook pulls the current snapshot and re-renders when prices change live. It
     // also surfaces the user's display currency and the USD→currency rate so the
     // payout can be shown in local money.
-    const { pxsUsdPrice, pxaUsdPrice, currency, fiatRate } = usePrices(api);
+    const prices = usePrices(api);
+    const { pxsUsdPrice, pxaUsdPrice, currency, fiatRate } = prices;
 
     // The chain's pending payout plus the estimated value of THIS viewer's
     // still-unconfirmed vote (placeholder row in data.active_votes), so the
     // figure and the Sankey move the moment the vote is cast instead of
     // sitting at 0.0 until the ~6 s chain refresh lands (utils/voteSync).
-    const payoutEstimate = useVotePayoutEstimate(api, voter, data, payout);
+    // The estimate is priced through the same `prices` as the headline, so
+    // the two agree PXS-for-PXS.
+    const payoutEstimate = useVotePayoutEstimate(api, voter, data, payout, prices);
 
     const loggedOut = !voter;
 

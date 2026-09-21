@@ -444,7 +444,7 @@ const styles = theme => ({
             "& .rc-fill": {
                 height: "100%",
                 borderRadius: "3px",
-                transition: "width 300ms ease",
+                transition: "width 300ms cubic-bezier(0.4, 0, 0.2, 1)",
             }
         }
     },
@@ -906,7 +906,7 @@ const StepSecurity = memo(function StepSecurity({
                                       style={{
                                           backgroundColor: met ? "#2a2a2a" : "transparent",
                                           borderColor: "#4a4a4a", color: met ? "#e0e0e0" : "#7b7b7b",
-                                          fontSize: 12, transition: "all 200ms ease",
+                                          fontSize: 12, transition: "all 200ms cubic-bezier(0.4, 0, 0.2, 1)",
                                       }}
                                 />
                             ))}

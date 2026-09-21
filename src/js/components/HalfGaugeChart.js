@@ -99,7 +99,7 @@ const styles = theme => ({
         padding: "4px 12px",
         borderRadius: "24px",
         backgroundColor: "rgba(255, 255, 255, 0.02)",
-        transition: "all 0.3s ease",
+        transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
         "&:hover": {
             backgroundColor: "#1d1d1d",
             transform: "translateY(-2px)"
@@ -132,7 +132,7 @@ const styles = theme => ({
         pointerEvents: "none",
         zIndex: 9999,
         maxWidth: "240px",
-        transition: "opacity 0.2s ease",
+        transition: "opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
         "& h4": {
             margin: "0 0 8px 0",
             fontSize: "0.9rem",
@@ -466,7 +466,7 @@ const HalfGaugeChart = ({ classes, data, totalValue, delegationDeltaValue = 0, o
                         return (
                             <g key={`label-${index}`} pointerEvents="none" style={{
                                 opacity: hoveredIndex === index || activeIndex === index ? 1 : 0.7,
-                                transition: "opacity 0.3s ease"
+                                transition: "opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1)"
                             }}>
                                 <text
                                     x={x}

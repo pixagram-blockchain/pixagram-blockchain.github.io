@@ -44,7 +44,7 @@ const styles = theme => ({
         backgroundColor: "#101010",
         borderRadius: "16px",
         padding: "20px",
-        transition: "background-color 200ms ease",
+        transition: "background-color 200ms cubic-bezier(0.4, 0, 0.2, 1)",
         position: "relative",
         overflow: "hidden",
         "&:hover": {
@@ -98,7 +98,7 @@ const styles = theme => ({
         borderRadius: "16px",
         padding: "20px",
         marginBottom: "12px",
-        transition: "background-color 200ms ease",
+        transition: "background-color 200ms cubic-bezier(0.4, 0, 0.2, 1)",
         position: "relative",
         overflow: "hidden",
         "&:hover": {

@@ -137,7 +137,7 @@ export const dateRangePickerStyles = () => ({
         color: "#bbb",
         font: "inherit",
         cursor: "pointer",
-        transition: "background-color 120ms ease, color 120ms ease",
+        transition: "background-color 120ms cubic-bezier(0.4, 0, 0.2, 1), color 120ms cubic-bezier(0.4, 0, 0.2, 1)",
         "&:hover": { color: "#fff" },
     },
     headerChipActive: {
@@ -215,7 +215,7 @@ export const dateRangePickerStyles = () => ({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        transition: "background-color 100ms ease, color 100ms ease",
+        transition: "background-color 100ms cubic-bezier(0.4, 0, 0.2, 1), color 100ms cubic-bezier(0.4, 0, 0.2, 1)",
         "&:hover": { backgroundColor: "rgba(255,255,255,0.10)" },
     },
     dayToday: {

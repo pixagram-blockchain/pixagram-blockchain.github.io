@@ -51,7 +51,7 @@ const styles = theme => ({
         backgroundColor: "#101010",
         borderRadius: "16px",
         textAlign: "left",
-        transition: "background-color 200ms ease",
+        transition: "background-color 200ms cubic-bezier(0.4, 0, 0.2, 1)",
         position: "relative",
         overflow: "hidden",
         cursor: "pointer",
@@ -125,7 +125,7 @@ const styles = theme => ({
         fontWeight: 600,
         letterSpacing: "0.5px",
         fontFamily: "'Normative Pro'",
-        transition: "background-color 200ms ease, color 200ms ease",
+        transition: "background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), color 200ms cubic-bezier(0.4, 0, 0.2, 1)",
         "&:hover": {
             backgroundColor: "#2c2c2c",
             color: "#fff"

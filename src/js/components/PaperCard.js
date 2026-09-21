@@ -787,8 +787,11 @@ function PaperCardInner({
               </span>
             </Tooltip>
             <span className={classes.subheaderBy}> {t('words.by')} </span>
-                        {/* Rich author hover card (silhouette) instead of the old
-                raw-@username Tooltip. Click behavior is unchanged. */}
+                        {/* Rich author hover card instead of the old raw-@username
+                Tooltip. The anchor adds no element: it attaches its
+                pointer listeners to this very span, and the card itself
+                is the page's single <ProfileHoverCardLayer/>. Click
+                behavior is unchanged. */}
                         <ProfileHoverAnchor api={api} author={author} onOpenProfile={openAuthor}>
               <span className={classes.subheaderName} onClick={() => openAuthor(author.username)}>
                 {(typeof author.name === 'string' && author.name.trim()) || author.username || ''}
