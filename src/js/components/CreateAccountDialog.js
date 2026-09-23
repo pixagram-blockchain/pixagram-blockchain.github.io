@@ -1,5 +1,5 @@
 import * as React from "preact/compat";
-import { memo, useCallback, useMemo, useState, useEffect } from "preact/compat";
+import { memo, useCallback, useMemo, useState, useEffect, useRef } from "preact/compat";
 import withStyles from "@material-ui/core/styles/withStyles";
 import DialogActions from "@material-ui/core/DialogActions";
 import DialogContent from "@material-ui/core/DialogContent";
@@ -299,6 +299,8 @@ const ST_CUR_POINTER = { cursor: "pointer" };
 const ST_C_7B7B7B__MR_8__CUR_POINTER = { color: "#7b7b7b", marginRight: 8, cursor: "pointer" };
 const ST_MB_16__MT_8 = { marginBottom: 16, marginTop: 8 };
 const ST_MB_16 = { marginBottom: 16 };
+const ST_MB_8 = { marginBottom: 8 };
+const ST_DISPLAY_NONE = { display: "none" };
 const ST_FS_12__MT_NEG8__MB_8 = { fontSize: 12, marginTop: -8, marginBottom: 8, color: "#7b7b7b", textAlign: "left" };
 const ST_FS_14__MB_12__C_BDBDBD = { fontSize: 14, marginBottom: 12, color: "#bdbdbd", fontStyle: "italic", textAlign: "left" };
 const ST_MT_8 = { marginTop: 8 };
@@ -332,6 +334,42 @@ const pixaLogoWhite = getIT();
 
 // Unified phone-verification + voucher + account-creation worker.
 const ACCOUNT_SERVICE_API = "https://pixa-account-service.p1x4.workers.dev";
+
+// Cloudflare Turnstile — the bot gate in front of /send-code (SMS-pumping
+// defense, see docs/INTEGRATION-GUIDE.md §3.3b). Create the widget in the
+// Cloudflare dashboard (Turnstile → Add widget, hostname pixagram.com, mode
+// "Managed") and paste its SITE key here; the SECRET key goes to the worker
+// (`wrangler secret put TURNSTILE_SECRET_KEY`). Empty = the dialog sends no
+// token — matching a worker whose secret is unset. Deploy order: worker →
+// this site key → worker secret. Cloudflare's test keys for local work:
+// "1x00000000000000000000AA" (always passes) / "3x00000000000000000000FF"
+// (forces a visible interactive challenge).
+const TURNSTILE_SITE_KEY = "0x4AAAAAAFBNQ9Ess9iIWkVA";
+const TURNSTILE_SCRIPT = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+// If the challenge produces no token within this time (script blocked, slow
+// network), the send goes out WITHOUT a token and the worker decides: a
+// worker with the gate on answers TURNSTILE_REQUIRED, which is shown to the
+// user; a worker with the gate off just sends.
+const TURNSTILE_TIMEOUT_MS = 20000;
+
+// Idempotent loader for the Turnstile script (explicit render mode).
+let _turnstileLoading = null;
+const loadTurnstile = () => {
+    if (typeof window === "undefined") return Promise.reject(new Error("no window"));
+    if (window.turnstile) return Promise.resolve(window.turnstile);
+    if (_turnstileLoading) return _turnstileLoading;
+    _turnstileLoading = new Promise((resolve, reject) => {
+        const cb = "__pixaTurnstileOnload";
+        window[cb] = () => resolve(window.turnstile);
+        const s = document.createElement("script");
+        s.src = `${TURNSTILE_SCRIPT}&onload=${cb}`;
+        s.async = true;
+        s.defer = true;
+        s.onerror = () => { _turnstileLoading = null; reject(new Error("Turnstile script failed to load")); };
+        document.head.appendChild(s);
+    });
+    return _turnstileLoading;
+};
 
 // SMS languages supported by the worker (mirrors its SUPPORTED_SMS_LANGS).
 // The active UI language is sent with /send-code; anything else falls back
@@ -1666,6 +1704,78 @@ const StepVerify = memo(function StepVerify({
         if (onCountrySelect) onCountrySelect(iso);
     }, [onCountrySelect]);
     const onPickerFilterChange = useCallback((e) => setPickerFilter(e.target.value), []);
+    // ── Turnstile (bot gate for /send-code) ──────────────────────────────
+    // One invisible widget ("interaction-only": nothing is shown unless
+    // Cloudflare needs the user to click) rendered in execute mode, so the
+    // challenge only runs when the user presses SEND. Each click resets the
+    // widget first — tokens are single-use — and waits for a fresh token,
+    // which is handed to onSendCode(token). All hooks live above the
+    // recovery-mode early return, as React requires.
+    const turnstileHost = useRef(null);              // container <div>
+    const turnstileWidget = useRef(null);            // { ts, id, pending }
+    const [challenging, setChallenging] = useState(false);
+    const [turnstileState, setTurnstileState] = useState(TURNSTILE_SITE_KEY ? "loading" : "off"); // off|loading|ready|error
+    useEffect(() => {
+        if (!TURNSTILE_SITE_KEY || recoveryMode) return undefined;
+        let cancelled = false;
+        const settle = (fn) => {
+            const w = turnstileWidget.current;
+            const p = w && w.pending;
+            if (!p) return;
+            w.pending = null;
+            fn(p);
+        };
+        loadTurnstile().then((ts) => {
+            if (cancelled || !turnstileHost.current || !ts) return;
+            const id = ts.render(turnstileHost.current, {
+                sitekey: TURNSTILE_SITE_KEY,
+                action: "send-code",
+                execution: "execute",            // run only on turnstile.execute()
+                appearance: "interaction-only",  // visible only when a click is required
+                size: "flexible",
+                theme: "dark",
+                language: "auto",
+                "refresh-expired": "manual",     // we reset before every execute anyway
+                callback: (token) => settle((p) => p.resolve(token)),
+                "error-callback": (code) => { settle((p) => p.resolve(null)); return true; },
+                "expired-callback": () => settle((p) => p.resolve(null)),
+                "timeout-callback": () => settle((p) => p.resolve(null)),
+            });
+            turnstileWidget.current = { ts, id, pending: null };
+            setTurnstileState("ready");
+        }).catch(() => { if (!cancelled) setTurnstileState("error"); });
+        return () => {
+            cancelled = true;
+            const w = turnstileWidget.current;
+            turnstileWidget.current = null;
+            if (w) { try { w.ts.remove(w.id); } catch (_) { /* already gone */ } }
+        };
+    }, [recoveryMode]);
+    // Resolve to a token, or to null when the gate is off / unavailable /
+    // too slow — the worker is the authority on whether null is acceptable.
+    const acquireTurnstileToken = useCallback(() => {
+        const w = turnstileWidget.current;
+        if (!TURNSTILE_SITE_KEY || !w) return Promise.resolve(null);
+        return new Promise((resolve) => {
+            let done = false;
+            const finish = (token) => { if (done) return; done = true; clearTimeout(timer); resolve(token || null); };
+            const timer = setTimeout(() => { if (w.pending) w.pending = null; finish(null); }, TURNSTILE_TIMEOUT_MS);
+            w.pending = { resolve: finish };
+            try {
+                w.ts.reset(w.id);
+                w.ts.execute(w.id);
+            } catch (_) {
+                w.pending = null;
+                finish(null);
+            }
+        });
+    }, []);
+    const handleSendClick = useCallback(async () => {
+        setChallenging(true);
+        let token = null;
+        try { token = await acquireTurnstileToken(); } finally { setChallenging(false); }
+        onSendCode(token);
+    }, [acquireTurnstileToken, onSendCode]);
     // ── Recovery branch: show what the user entered and try to derive/match.
     if (recoveryMode) {
         const enoughSeed = [12, 15, 18, 21, 24].indexOf(seed.length) !== -1;
@@ -1712,11 +1822,13 @@ const StepVerify = memo(function StepVerify({
     const blockedByCheck = Boolean(phoneCheck) && !phoneCheck.can_send && phoneCheck.phone_status !== "verified";
     const sendLockedByWindow = Boolean(nextSendAllowedAt) && Date.now() < new Date(nextSendAllowedAt).getTime();
     const countryUnsupported = destSupport(dialCode) === "unsupported";
-    const sendDisabled = sendingCode || phoneRaw.length < 4 || resendInSec > 0 || noCapacity || blockedByCheck || sendLockedByWindow || countryUnsupported;
+    const sendDisabled = sendingCode || challenging || phoneRaw.length < 4 || resendInSec > 0 || noCapacity || blockedByCheck || sendLockedByWindow || countryUnsupported;
     // One-line status under the phone field, fed by /check-phone.
     let phoneNote = "";
     if (countryUnsupported) {
         phoneNote = "SMS verification is not yet available for this country.";
+    } else if (turnstileState === "error") {
+        phoneNote = "The browser check could not load. If you use a content blocker, allow challenges.cloudflare.com and reload.";
     } else if (phoneChecking) {
         phoneNote = "Checking number…";
     } else if (phoneCheck) {
@@ -1810,20 +1922,23 @@ const StepVerify = memo(function StepVerify({
                     inputProps={{ autoComplete: "tel-national", inputMode: "tel" }}
                 />
             </FormControl>
+            {/* Turnstile mount point — empty unless Cloudflare needs a click. */}
+            <div ref={turnstileHost} style={turnstileState === "off" ? ST_DISPLAY_NONE : ST_MB_8} />
             <Button
                 fullWidth
                 variant="contained"
                 color="default"
-                onClick={onSendCode}
+                onClick={handleSendClick}
                 disabled={sendDisabled}
-                startIcon={sendingCode ? <CircularProgress size={16} color="inherit" /> : <SendIcon />}
+                startIcon={(sendingCode || challenging) ? <CircularProgress size={16} color="inherit" /> : <SendIcon />}
                 style={ST_MB_16}
             >
-                {sendingCode ? "SENDING..." :
-                    resendInSec > 0 ? t("components.create_account_dialog.resend_in_s", {
-                            resendInSec: resendInSec
-                        }) :
-                        codeSent ? "RESEND CONFIRMATION CODE" : "SEND CONFIRMATION CODE"}
+                {challenging ? "CHECKING BROWSER..." :
+                    sendingCode ? "SENDING..." :
+                        resendInSec > 0 ? t("components.create_account_dialog.resend_in_s", {
+                                resendInSec: resendInSec
+                            }) :
+                            codeSent ? "RESEND CONFIRMATION CODE" : "SEND CONFIRMATION CODE"}
             </Button>
             {capacity && (
                 <Typography style={ST_FS_12__MT_NEG8__MB_8}>
@@ -2748,17 +2863,25 @@ class CreateAccountDialog extends React.PureComponent {
      *     verified; the token is never re-revealed, so a *different* session
      *     must finish where it verified or wait for the voucher to expire.
      *   - 403: the phone already created an account (permanent, one per phone).
+     *   - 403 TURNSTILE_*: the bot gate refused the (missing / stale) token.
      *   - 429 + retry_after: resend cooldown — mirrored on the button.
+     *   - 429 VELOCITY_LIMIT / RATE_LIMITED, 503 SENDING_DISABLED: the
+     *     worker's anti-pumping ceilings, burst limiter and kill switch.
+     *
+     * `turnstileToken` comes from StepVerify's handleSendClick (null when the
+     * gate is off or the challenge did not complete in time).
      */
-    _sendCode = async () => {
+    _sendCode = async (turnstileToken) => {
         const { _phoneRaw, _dialCode } = this.state;
         const phone = composeE164(_dialCode, _phoneRaw);
+        const payload = { phone, language: toSmsLang(getLanguage()) };
+        if (typeof turnstileToken === "string" && turnstileToken) payload.turnstile_token = turnstileToken;
         this.setState({ _sendingCode: true, _codeStatus: "idle", _sendError: "", _codeError: "" }, () => this.forceUpdate());
         try {
             const res = await fetch(`${ACCOUNT_SERVICE_API}/send-code`, {
                 method:  "POST",
                 headers: { "Content-Type": "application/json" },
-                body:    JSON.stringify({ phone, language: toSmsLang(getLanguage()) }),
+                body:    JSON.stringify(payload),
             });
             const json = await res.json().catch(() => ({}));
 
@@ -2811,6 +2934,33 @@ class CreateAccountDialog extends React.PureComponent {
                 }
             } else if (json.code === "SEND_LIMIT_TOTAL") {
                 msg = `This phone number has reached the maximum of ${json.sends_max_total || 2} verification SMS and cannot receive more.`;
+            } else if (json.code === "TURNSTILE_REQUIRED" || json.code === "TURNSTILE_FAILED") {
+                // The gate is on and the token was missing, stale or already
+                // used. The widget is reset before every send, so a plain
+                // retry usually succeeds; a blocked script needs a reload.
+                msg = TURNSTILE_SITE_KEY
+                    ? "The browser check did not pass. Please try again — if it keeps failing, reload the page (and allow challenges.cloudflare.com in any content blocker)."
+                    : "This version of the app cannot pass the sign-up browser check. Please reload to get the latest version.";
+            } else if (json.code === "TURNSTILE_UNAVAILABLE") {
+                msg = "The browser check service is momentarily unavailable. Please try again in a minute.";
+                this._startResendCountdown(30);
+            } else if (json.code === "VELOCITY_LIMIT" || json.code === "RATE_LIMITED") {
+                // Anti-pumping ceiling or burst limiter. retry_after can be up
+                // to a day for a daily ceiling: show a date beyond 5 minutes,
+                // a countdown below.
+                const when = json.next_send_allowed_at
+                    ? new Date(json.next_send_allowed_at).toLocaleString(getLocaleCode())
+                    : null;
+                if (typeof json.retry_after === "number" && json.retry_after <= 300) {
+                    this._startResendCountdown(json.retry_after);
+                    msg = json.error || "Too many verification requests right now. Please wait a moment and retry.";
+                } else {
+                    msg = when
+                        ? `Too many verification requests right now. Please try again after ${when}.`
+                        : (json.error || "Too many verification requests right now. Please try again later.");
+                }
+            } else if (json.code === "SENDING_DISABLED") {
+                msg = json.error || "SMS verification is temporarily paused. Please try again later.";
             } else if (res.status === 429 && json.retry_after) {
                 this._startResendCountdown(json.retry_after);
                 msg = t(

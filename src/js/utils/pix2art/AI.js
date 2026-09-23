@@ -67,9 +67,9 @@ const PRESETS_TRANSFORM = {
     seed: -1,
     identity_preserve: true,
     lora_style: "retroart",
-    identitynet_strength: 1.15,
-    ip_adapter_scale: 1.15,
-    resolution: 1600,
+    identitynet_strength: 0.85,
+    ip_adapter_scale: 0.85,
+    resolution: 1400,
     aspect_ratio: "1:1",
     use_tiled: false,
     tile_size: 786,
@@ -106,7 +106,7 @@ export const transform = async (file, step_n, fidelity, callback = () => {}, cal
         };
         try {
 
-            const client = await Client.connect("primerz/face-to-pixel-art-4K-b");
+            const client = await Client.connect("primerz/face-to-pixel-art-4K");
             const result = await client.predict("/process_image", dynamic_config);
 
             console.log(result, "hey")

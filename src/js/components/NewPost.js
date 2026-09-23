@@ -28,10 +28,12 @@ import SendIcon from "@material-ui/icons/Send";
 import ImageIcon from "@material-ui/icons/Image";
 import DescriptionIcon from "@material-ui/icons/Description";
 import CloseIcon from "@material-ui/icons/Close";
+import EditIcon from "@material-ui/icons/Edit";
 import {isArtworkPixelart, normalizeUpload, processImageFile, quantizeImageData} from "../utils/pix2art/file2imgd";
 import JSLoader from "../utils/JSLoader";
 import Fade from "@material-ui/core/Fade";
 import LicenseCustomizationDialog from "./LicenseCustomizationDialog";
+import ImageEditor from "./ImageEditor";
 import { PIXA_LICENSE_BASE } from "../utils/pixa_license";
 import { resolveDefaultLicense } from "../utils/default_license";
 import { get_cached_settings as getCachedSettings, subscribe as subscribeSettings, same_setting_value as sameSettingValue } from "../utils/settings";
@@ -290,6 +292,17 @@ const styles = theme => ({
         position: "relative",
         overflow: "hidden"
     },
+    // A picture is resting in the zone (picked, waiting for "Next"): the
+    // dashed "drop here" outline gives way to a plain rounded surface — the
+    // border stays (transparent) so nothing shifts — and the picture is
+    // centred in it.
+    dropZoneLoaded: {
+        border: "2px solid transparent",
+        backgroundColor: "#101010",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center"
+    },
     whiteDialog: {
         backgroundColor: "#fff !important",
         color: "#000 !important",
@@ -335,15 +348,23 @@ const styles = theme => ({
     tagPopper: {
         backgroundColor: "#242424ff !important",
     },
+    // The picked picture, shown as-is inside the zone (contained, centred,
+    // rounded to sit inside the zone's 21px corners).
     inputImage: {
         margin: "0px",
-        borderRadius: "12px",
+        borderRadius: "19px",
+        display: "block",
         width: "100%",
-        height: "100%",
+        maxHeight: "70vh",
         objectFit: "contain",
         userSelect: "none",
+        WebkitUserDrag: "none",
+        transition: "filter 400ms cubic-bezier(0.4, 0, 0.2, 1) 25ms !important"
+    },
+    // While the conversion runs the same picture recedes behind the loader:
+    // desaturated, dimmed, blurred and slowly pulsing.
+    inputImageConverting: {
         filter: "grayscale(1) contrast(.8) brightness(0.55) opacity(0.65) blur(8px)",
-        transition: "filter 400ms cubic-bezier(0.4, 0, 0.2, 1) 25ms !important",
         animationName: "$opacity-create",
         animationTimingFunction: "ease-in-out",
         animationDuration: "2400ms",
@@ -359,6 +380,28 @@ const styles = theme => ({
         },
         "&:hover": {
             filter: "grayscale(0.15) contrast(.8) brightness(0.6) opacity(0.7) blur(0px)"
+        }
+    },
+    // Edit / remove buttons pinned to the top-right corner of the picked
+    // picture (same dark round buttons as the comparison toggle on Adjust).
+    zoneActions: {
+        position: "absolute",
+        top: 12,
+        right: 12,
+        zIndex: 11,
+        display: "flex",
+        gap: 8
+    },
+    zoneActionButton: {
+        padding: "10px",
+        backgroundColor: "rgba(0, 0, 0, 0.6)",
+        color: "#fff",
+        "&:hover": {
+            backgroundColor: "rgba(0, 0, 0, 0.78)"
+        },
+        "&.Mui-disabled": {
+            color: "#777",
+            backgroundColor: "rgba(0, 0, 0, 0.45)"
         }
     },
     licenseSection: {
@@ -819,6 +862,34 @@ const percentToTransformationSteps = (percent) => Math.round(5 + (percent / 100)
 // Percentage to fidelity (0% -> 0.05, 100% -> 0.30)
 const percentToFidelity = (percent) => 0.05 + (percent / 100) * 0.45;
 
+// Pictures whose longest side is at most this many pixels are treated as
+// pixel art for *display* purposes (nearest-neighbour scaling so the pixels
+// stay crisp). Photos are always larger than this. The real decision — the
+// isArtworkPixelart probe — is made when the user clicks "Next".
+const PIXEL_ART_MAX_SIDE = 256;
+
+// Aspect ratios the conversion pipeline understands (the same set the
+// "Create image" tab offers). After a crop, the ratio closest to the crop is
+// handed to processImageFile so the pipeline does not undo the user's
+// framing with its own default (1:1) crop.
+const PIPELINE_ASPECT_RATIOS = ["1:1", "4:3", "16:9", "3:4", "9:16"];
+
+const closestPipelineAspectRatio = (width, height) => {
+    if (!(width > 0) || !(height > 0)) return "1:1";
+    const target = Math.log(width / height);
+    let best = PIPELINE_ASPECT_RATIOS[0];
+    let bestDistance = Infinity;
+    for (const ratio of PIPELINE_ASPECT_RATIOS) {
+        const [rw, rh] = ratio.split(":").map(Number);
+        const distance = Math.abs(Math.log(rw / rh) - target);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = ratio;
+        }
+    }
+    return best;
+};
+
 // Extract image file from event (cross-browser: files, items, and input sources)
 const extractImageFile = (event) => {
     // 1. dataTransfer.files (Firefox, Chrome, Edge)
@@ -964,6 +1035,16 @@ const initialState = {
     message: "We don't store uploaded images",
     inputFileUrl: "",
     inputFile: null,
+    // The upload as picked (after HEIC normalisation) and the crop/rotation
+    // last applied to it in ImageEditor. `inputFile` is what gets converted:
+    // the original, or the edited copy when `editParams` is set. Keeping the
+    // original lets the editor reopen non-destructively and "Reset" go back
+    // to the untouched picture.
+    uploadOriginal: null,
+    editParams: null,
+    editorOpen: false,
+    // True while "Next" runs the pixel-art probe on the picked picture.
+    isProbing: false,
     showingOriginal: false,
     preloading: false,
     preloadProgress: 0,
@@ -1041,10 +1122,27 @@ const reducer = (state, action) => {
                 licenseCustomization: action.defaultCustomization
             };
 
-        case actionTypes.RESET_UPLOAD:
-            // Reset only upload-related state, preserving settings
+        case actionTypes.RESET_UPLOAD: {
+            // Reset only upload-related state, preserving settings. With
+            // `keepInput` the picked picture (and its edit) stays in the zone
+            // — used by "Back" from Adjust so the user can crop again or
+            // answer the AI question differently without re-uploading.
+            const input = action.keepInput
+                ? {
+                    inputFileUrl: state.inputFileUrl,
+                    inputFile: state.inputFile,
+                    uploadOriginal: state.uploadOriginal,
+                    editParams: state.editParams
+                }
+                : {
+                    inputFileUrl: "",
+                    inputFile: null,
+                    uploadOriginal: null,
+                    editParams: null
+                };
             return {
                 ...state,
+                ...input,
                 currentStep: 0,
                 preview: null,
                 previewCache: {},
@@ -1052,13 +1150,14 @@ const reducer = (state, action) => {
                 base64: "",
                 processorData: null,
                 availableSizes: [],
-                inputFileUrl: "",
-                inputFile: null,
                 showingOriginal: false,
                 preloading: false,
                 preloadProgress: 0,
                 isGenerating: false,
                 isImageOptimal: false,
+                isProbing: false,
+                editorOpen: false,
+                useAiOpen: false,
                 canvasKey: 0,
                 quantizeDialogOpen: false,
                 quantizeDownscale: 4,
@@ -1068,6 +1167,7 @@ const reducer = (state, action) => {
                 processStart: 0,
                 processFinish: 0
             };
+        }
 
         case actionTypes.SET_PREVIEW_DATA:
             return {
@@ -1223,15 +1323,27 @@ const SHOW_DROP_PASTE_HINT = typeof window !== "undefined" && typeof window.matc
     : false;
 
 // Upload Zone Component — visual only, drag/drop is handled by a Portal overlay
+//
+// Three looks, in order of precedence:
+//   converting — the AI pixel-art pipeline is running: the picked picture
+//                recedes (blurred, dimmed) behind the PIXIFYING loader;
+//   loaded     — a picture has been picked and rests in the zone, shown as
+//                is, with the edit (crop) and remove buttons pinned to its
+//                top-right corner; "Next" in the footer continues;
+//   idle       — the upload button, its message and the drop/paste hint.
 const UploadZone = memo(({
                              classes,
                              dropzoneActive,
                              inputFileUrl,
                              loading,
+                             generating,
+                             probing,
                              processName,
                              loadingPercent,
                              message,
-                             onFileUpload
+                             onFileUpload,
+                             onEdit,
+                             onRemove
                          }) => {
     useLanguage();
     const inputRef = useRef(null);
@@ -1245,7 +1357,22 @@ const UploadZone = memo(({
     // the idle "Click to upload" the moment a stage starts and is reset back
     // (with currentStep -> 1) once a preview exists — so this also covers the
     // brief 0% / 100% windows where `loading` itself is momentarily false.
-    const converting = loading || (!!processName && processName !== "Click to upload");
+    // `generating` closes the last gap: it is set the instant the user answers
+    // the AI question, before the pipeline reports its first stage.
+    const converting = loading || !!generating || (!!processName && processName !== "Click to upload");
+
+    // A picture has been picked and is waiting in the zone.
+    const hasImage = !!inputFileUrl;
+
+    // Pixel-art-sized pictures are shown with nearest-neighbour scaling so
+    // their pixels stay crisp; photos get normal smooth scaling (the
+    // `pixelated` class would make a downscaled photo shimmer).
+    const [crispPreview, setCrispPreview] = useState(false);
+    const handleImageLoad = useCallback((e) => {
+        const el = e?.currentTarget || e?.target;
+        const longest = Math.max(el?.naturalWidth || 0, el?.naturalHeight || 0);
+        setCrispPreview(longest > 0 && longest <= PIXEL_ART_MAX_SIDE);
+    }, []);
 
     // Rotating funny sub-line. Starts on a random quip, then advances every
     // LOADER_QUIP_MS — but only while converting (no timer runs otherwise).
@@ -1266,19 +1393,57 @@ const UploadZone = memo(({
     const C = 2 * Math.PI * R;
     const dashOffset = C * (1 - pct / 100);
 
+    const zoneClassName = dropzoneActive
+        ? classes.dropZoneActive
+        : hasImage
+            ? `${classes.dropZone} ${classes.dropZoneLoaded}`
+            : classes.dropZone;
+
     return (
         <div>
             <div
                 style={{ borderRadius: "21px" }}
-                className={dropzoneActive ? classes.dropZoneActive : classes.dropZone}
+                className={zoneClassName}
             >
-                {inputFileUrl && (
+                {hasImage && (
                     <Fade in timeout={300}>
                         <img
                             src={inputFileUrl}
-                            className={classes.inputImage + " pixelated"}
+                            className={
+                                classes.inputImage
+                                + (converting ? " " + classes.inputImageConverting : "")
+                                + (crispPreview ? " pixelated" : "")
+                            }
                             alt={t("words.input_image")}
+                            draggable={false}
+                            onLoad={handleImageLoad}
                         />
+                    </Fade>
+                )}
+                {hasImage && !converting && (
+                    <Fade in timeout={400}>
+                        <div className={classes.zoneActions}>
+                            <IconButton
+                                className={classes.zoneActionButton}
+                                size="small"
+                                onClick={onEdit}
+                                disabled={!!probing}
+                                aria-label="Edit picture"
+                                title="Edit picture"
+                            >
+                                <EditIcon fontSize="small" />
+                            </IconButton>
+                            <IconButton
+                                className={classes.zoneActionButton}
+                                size="small"
+                                onClick={onRemove}
+                                disabled={!!probing}
+                                aria-label="Remove picture"
+                                title="Remove picture"
+                            >
+                                <CloseIcon fontSize="small" />
+                            </IconButton>
+                        </div>
                     </Fade>
                 )}
                 <Input
@@ -1370,7 +1535,7 @@ const UploadZone = memo(({
                             <div className={classes.loaderPercent}>{pct}%</div>
                         </div>
                     </Fade>)
-                ) : (
+                ) : hasImage ? null : (
                     /* ── Idle: the upload affordance ────────────────────────── */
                     (<Fade in timeout={600}>
                         <div style={{
@@ -1421,9 +1586,13 @@ const UploadZone = memo(({
     prev.dropzoneActive === next.dropzoneActive &&
     prev.inputFileUrl === next.inputFileUrl &&
     prev.loading === next.loading &&
+    prev.generating === next.generating &&
+    prev.probing === next.probing &&
     prev.processName === next.processName &&
     prev.loadingPercent === next.loadingPercent &&
-    prev.message === next.message
+    prev.message === next.message &&
+    prev.onEdit === next.onEdit &&
+    prev.onRemove === next.onRemove
 ));
 
 // Aspect Ratio Selector Component
@@ -2248,7 +2417,8 @@ function NewPost(props) {
         tabValue, currentStep, title, description, tags, nsfw, preferredSize, aspectRatio,
         transformationPercent, fidelityPercent, preview, previewCache, quantizedData,
         base64, processorData, availableSizes, dropzoneActive, message, inputFileUrl,
-        inputFile, showingOriginal, preloading, preloadProgress, isGenerating,
+        inputFile, uploadOriginal, editParams, editorOpen, isProbing,
+        showingOriginal, preloading, preloadProgress, isGenerating,
         canvasKey, closeConfirmOpen, useAiOpen, aiStyle, quantizeDialogOpen,
         licenseCustomizationOpen, quantizeDownscale, quantizeColors,
         licenseBase, licenseCustomization, processName, processStart, processFinish,
@@ -2626,16 +2796,57 @@ function NewPost(props) {
     }, []);
 
     // Process file upload (extracted for reuse)
+    //
+    // Only places the picture in the upload zone. Nothing else happens until
+    // the user clicks "Next" (see handleContinueWithUpload): that is where the
+    // pixel-art probe runs and, when the picture is not pixel art already,
+    // where the "Transform your picture with AI?" question is asked. In
+    // between, the picture can be cropped through the edit button on the
+    // zone or swapped through the remove button.
     const processFileUpload = useCallback(async (imageFile) => {
         if (!imageFile) return;
 
         try {
             // HEIC (iPhone) uploads are converted once here, so the preview
-            // <img>, the probe and the AI/pipeline paths (which get `upload`
-            // via inputFile) all see a file the browser can decode. Anything
-            // else passes through untouched.
+            // <img>, the editor, the probe and the AI/pipeline paths (which
+            // get `upload` via inputFile) all see a file the browser can
+            // decode. Anything else passes through untouched.
             const upload = await normalizeUpload(imageFile);
-            const pixelartImagedata = await isArtworkPixelart(upload, 512, 512, 160);
+            if (!mountedRef.current) return;
+
+            const url = URL.createObjectURL(upload);
+            dispatch({
+                type: actionTypes.SET_MULTIPLE,
+                payload: {
+                    inputFileUrl: url,
+                    inputFile: upload,
+                    uploadOriginal: upload,
+                    editParams: null
+                }
+            });
+        } catch (error) {
+            console.error('Error processing file:', error);
+            actions.trigger_snackbar(t("components.new_post.please_try_again_later"));
+            dispatch({
+                type: actionTypes.SET_FIELD,
+                field: 'message',
+                value: "We don't store uploaded images"
+            });
+        }
+    }, []);
+
+    // "Next" on the Create step with a picked picture: probe it, then either
+    // jump straight to Adjust (already pixel art — the file only needs
+    // re-encoding) or ask the AI question. Runs on `inputFile`, i.e. on the
+    // cropped copy when the user edited the picture.
+    const handleContinueWithUpload = useCallback(async () => {
+        if (!inputFile) return;
+
+        dispatch({ type: actionTypes.SET_FIELD, field: 'isProbing', value: true });
+
+        try {
+            const pixelartImagedata = await isArtworkPixelart(inputFile, 512, 512, 160);
+            if (!mountedRef.current) return;
 
             if (pixelartImagedata instanceof ImageData) {
                 dispatch({
@@ -2659,29 +2870,53 @@ function NewPost(props) {
                 // Authority" error the empty-body case produces.
                 handleCanvasReady(pixelartImagedata);
             } else {
-                // Revoke any existing URL
-                safeRevokeURL(inputFileUrl);
-
-                const url = URL.createObjectURL(upload);
-                dispatch({
-                    type: actionTypes.SET_MULTIPLE,
-                    payload: {
-                        inputFileUrl: url,
-                        inputFile: upload,
-                        useAiOpen: true
-                    }
-                });
+                dispatch({ type: actionTypes.SET_FIELD, field: 'useAiOpen', value: true });
             }
         } catch (error) {
-            console.error('Error processing file:', error);
-            actions.trigger_snackbar(t("components.new_post.please_try_again_later"));
-            dispatch({
-                type: actionTypes.SET_FIELD,
-                field: 'message',
-                value: "We don't store uploaded images"
-            });
+            console.error('Error probing file:', error);
+            if (mountedRef.current) {
+                actions.trigger_snackbar(t("components.new_post.please_try_again_later"));
+            }
+        } finally {
+            if (mountedRef.current) {
+                dispatch({ type: actionTypes.SET_FIELD, field: 'isProbing', value: false });
+            }
         }
-    }, [inputFileUrl, handleCanvasReady]);
+    }, [inputFile, handleCanvasReady]);
+
+    // ── Picture editor (crop / rotate / flip) ──────────────────────────
+    // Opened from the edit button on the picked picture. The editor always
+    // works on the ORIGINAL upload with the last edit pre-applied, so
+    // reopening it shows the previous frame and "Reset" restores the
+    // untouched picture.
+    const handleOpenImageEditor = useCallback(() => {
+        dispatch({ type: actionTypes.SET_FIELD, field: 'editorOpen', value: true });
+    }, []);
+
+    const handleCloseImageEditor = useCallback(() => {
+        dispatch({ type: actionTypes.SET_FIELD, field: 'editorOpen', value: false });
+    }, []);
+
+    const handleImageEditorComplete = useCallback((file, edit) => {
+        if (!file) {
+            dispatch({ type: actionTypes.SET_FIELD, field: 'editorOpen', value: false });
+            return;
+        }
+        // The previous object URL is revoked by the inputFileUrl effect.
+        const url = URL.createObjectURL(file);
+        dispatch({
+            type: actionTypes.SET_MULTIPLE,
+            payload: {
+                inputFile: file,
+                inputFileUrl: url,
+                editParams: edit || null,
+                editorOpen: false,
+                // Keep the pipeline's own framing in step with the crop; an
+                // identity edit (file = the original) leaves it untouched.
+                ...(edit ? { aspectRatio: closestPipelineAspectRatio(edit.width, edit.height) } : {})
+            }
+        });
+    }, []);
 
     // Keep processFileUpload ref in sync for the overlay handler
     useEffect(() => { processFileUploadRef.current = processFileUpload; }, [processFileUpload]);
@@ -2798,7 +3033,9 @@ function NewPost(props) {
                 // Trigger snackbar with error message
                 actions.trigger_snackbar(t("components.new_post.please_try_again_later"));
 
-                // Reset to step 0 and clear generation state
+                // Reset to step 0 and clear generation state. The picked
+                // picture stays in the zone: "Next" retries the conversion
+                // and the remove button swaps it for another one.
                 dispatch({
                     type: actionTypes.SET_MULTIPLE,
                     payload: {
@@ -2808,21 +3045,15 @@ function NewPost(props) {
                         processName: "Click to upload",
                         processStart: 0,
                         processFinish: 0,
-                        // Clear upload state to allow retry
-                        inputFileUrl: "",
-                        inputFile: null,
                         preview: null,
                         previewCache: {},
                         processorData: null,
                         availableSizes: []
                     }
                 });
-
-                // Also revoke the URL if it exists
-                safeRevokeURL(inputFileUrl);
             }
         }
-    }, [description, inputFile, inputFileUrl, preferredSize, aspectRatio, transformationPercent, fidelityPercent, handleCanvasReady]);
+    }, [description, inputFile, preferredSize, aspectRatio, transformationPercent, fidelityPercent, handleCanvasReady]);
 
     // Start preloading other sizes
     const startPreloading = useCallback((processor, sizes, currentSize) => {
@@ -2898,21 +3129,34 @@ function NewPost(props) {
         });
     }, [inputFileUrl, licenseBase]);
 
-    // Reset upload state only (when going back from step 1)
-    const resetUploadState = useCallback(() => {
-        safeRevokeURL(inputFileUrl);
+    // Reset upload state only. `keepInput` leaves the picked picture (and its
+    // edit) in the zone — "Back" from Adjust; without it the zone is emptied
+    // — the remove button on the picture.
+    const resetUploadState = useCallback((keepInput = false) => {
+        if (!keepInput) safeRevokeURL(inputFileUrl);
 
         if (preloadTimeoutRef.current) clearTimeout(preloadTimeoutRef.current);
         if (debounceTimeoutRef.current) clearTimeout(debounceTimeoutRef.current);
 
-        dispatch({ type: actionTypes.RESET_UPLOAD });
+        dispatch({ type: actionTypes.RESET_UPLOAD, keepInput: !!keepInput });
     }, [inputFileUrl]);
 
-    // Handle close AI dialog
+    // Remove button on the picked picture: empty the zone for another one.
+    const handleRemoveUpload = useCallback(() => {
+        resetUploadState(false);
+    }, [resetUploadState]);
+
+    // Handle close AI dialog: the two buttons answer the question and start
+    // the conversion; the backdrop / Escape (handleCancelUseAi) only dismiss
+    // it, leaving the picture in the zone for the user to come back to.
     const handleCloseUseAi = useCallback((useAi, style) => {
         dispatch({ type: actionTypes.SET_FIELD, field: 'useAiOpen', value: false });
         processImage(useAi, style);
     }, [processImage]);
+
+    const handleCancelUseAi = useCallback(() => {
+        dispatch({ type: actionTypes.SET_FIELD, field: 'useAiOpen', value: false });
+    }, []);
 
     // Handle AI style radio change (AI dialog)
     const handleAiStyleChange = useCallback((event) => {
@@ -3082,8 +3326,10 @@ function NewPost(props) {
                 dispatch({ type: actionTypes.SET_FIELD, field: 'closeConfirmOpen', value: true });
             }
         } else if (currentStep === 1) {
-            // Going back from step 1 - reset upload state to allow new upload
-            resetUploadState();
+            // Going back from Adjust: drop the conversion result but keep the
+            // picked picture in the zone, so the user can crop it or answer
+            // the AI question differently without re-uploading.
+            resetUploadState(true);
         } else {
             // Going back from step 2 to step 1 - use GO_TO_STEP to trigger canvas re-render
             dispatch({ type: actionTypes.GO_TO_STEP, step: currentStep - 1 });
@@ -3182,13 +3428,18 @@ function NewPost(props) {
             if (!description.trim()) return;
             dispatch({ type: actionTypes.SET_FIELD, field: 'isGenerating', value: true });
             processImage(true);
+        } else if (currentStep === 0) {
+            // Convert picture: probe the picked picture, then Adjust or the
+            // AI question (nothing happens without a picture in the zone)
+            if (!inputFile || isProbing) return;
+            handleContinueWithUpload();
         } else if (currentStep === 2) {
             // Final step: publish immediately (no confirmation dialog)
             handlePublishClick();
         } else {
             dispatch({ type: actionTypes.SET_FIELD, field: 'currentStep', value: currentStep + 1 });
         }
-    }, [currentStep, tabValue, description, processImage, handlePublishClick]);
+    }, [currentStep, tabValue, description, inputFile, isProbing, processImage, handleContinueWithUpload, handlePublishClick]);
 
     // Handle apply quantize
     const handleApplyQuantize = useCallback(() => {
@@ -3398,10 +3649,14 @@ function NewPost(props) {
                                 dropzoneActive={dropzoneActive}
                                 inputFileUrl={inputFileUrl}
                                 loading={loading}
+                                generating={isGenerating}
+                                probing={isProbing}
                                 processName={processName}
                                 loadingPercent={loadingPercent}
                                 message={message}
                                 onFileUpload={handleFileUpload}
+                                onEdit={handleOpenImageEditor}
+                                onRemove={handleRemoveUpload}
                             />
                             <GenerationParameters
                                 classes={classes}
@@ -3521,14 +3776,17 @@ function NewPost(props) {
                                 (currentStep === 0 && tabValue === 1
                                     ? !description.trim() || isGenerating
                                     : currentStep === 0
-                                        ? true
+                                        // Convert picture: needs a picture in
+                                        // the zone that is not being edited,
+                                        // probed or converted right now
+                                        ? !inputFile || loading || isGenerating || isProbing || editorOpen
                                         : currentStep === 2
                                             ? !isFormValid
                                             : false)
                             }
                             onClick={handleNextOrFinish}
                         >
-                            {isPublishing ? (
+                            {isPublishing || isProbing ? (
                                 <CircularProgress size={24} style={{ color: "#fff" }} />
                             ) : currentStep === 2 ? "Publish" : currentStep === 0 && tabValue === 1 ? "Generate" : "Next"}
                         </Button>
@@ -3561,13 +3819,14 @@ function NewPost(props) {
                     </Button>
                 </DialogActions>
             </Dialog>
-            {/* AI Dialog */}
+            {/* AI Dialog — opened by "Next" on the Create step. The buttons
+                answer the question; the backdrop / Escape just dismiss it. */}
             <Dialog
                 PaperProps={{ classes: { root: classes.whiteDialog } }}
                 open={useAiOpen}
                 maxWidth="xs"
                 disablePortal={false}
-                onClose={() => handleCloseUseAi(false)}
+                onClose={handleCancelUseAi}
                 keepMounted={false}
             >
                 <DialogContent>
@@ -3696,6 +3955,18 @@ function NewPost(props) {
                     initialCustomization={licenseCustomization}
                 />
             )}
+            {/* Picture editor (crop / rotate / flip) — opened from the edit
+                button on the picked picture. Always gets the ORIGINAL upload
+                plus the last edit, so it reopens on the previous frame. The
+                output is capped at 2560px, the size the pipeline works at. */}
+            <ImageEditor
+                open={editorOpen}
+                file={uploadOriginal}
+                initialEdit={editParams}
+                maxOutputSize={2560}
+                onClose={handleCloseImageEditor}
+                onComplete={handleImageEditorComplete}
+            />
             {/* Invisible full-screen drag overlay — rendered at step 0 before a file is
                 loaded. pointer-events stays "none" (so clicks pass through to the upload
                 button) until the document-level dragenter detects a file, which flips
