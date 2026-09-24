@@ -1436,6 +1436,112 @@ function useSessionAvatar(apiRef, apiReady, apiGeneration) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// §9c — useLandingAutoEnter: a session that STARTS on the landing page skips it
+// ═════════════════════════════════════════════════════════════════════════════
+// The rule is about the app's own history, not the browser's: when the app
+// is instantiated ON the landing page and the visitor turns out to be logged
+// in, they are taken to their personal feed; when the app is already
+// instantiated and the landing page is reached by navigating back to it,
+// nothing happens. It is the transition the Browse button plays: this hook
+// only decides WHEN, and hands Home a one-way `autoEnterFeed` flag; Home
+// then runs its own exit (canvas fade + HISTORY.push), and
+// RootAnimationOverlay plays the rainbow on the home→app flip exactly as it
+// does for a click — nothing here is a special path through the router.
+//
+// One-shot, per page load — however that load came about (typed URL, link
+// from another site, reload, the browser's Back into the site: the app
+// starts on home in every one of those). The gate is armed only when the
+// page the router resolved FIRST was home (a cold entry into /feed/ or a
+// post URL, followed by an in-app hop to "/", is the already-instantiated
+// case) and it is consumed the moment it fires OR the moment the visitor
+// leaves home by any other means — so coming back to the landing page
+// later, logged in or not (wordmark → history.back(), the browser's Back
+// from the feed the redirect itself pushed), never redirects again.
+//
+// The trigger is the session itself: `session_restored` — the very event
+// usePixaAPI turns into the "Welcome back, @user" snackbar — read from the
+// same payload field that snackbar reads, so the redirect fires in the same
+// beat as the greeting (session_created / resumed / switched / unlocked are
+// taken the same way). The session is restored asynchronously AFTER
+// apiReady (usePixaAPI awaits restoreSession() past setApiReady) and Preact
+// runs effects after paint, so the event can fire either side of this
+// subscription. Hence: subscribe first (nothing emitted afterwards can be
+// missed), then ask api.getActiveAccount() once — the call FeedPersonal
+// itself makes to decide whose feed it shows — for a session restored
+// before the subscription existed. A null answer consumes nothing; only an
+// account fires. A visitor with no session simply keeps the landing page.
+//
+// The FeedPersonal chunk is fetched on the decision itself and awaited
+// before the flag flips: the landing page stays fully alive (stars, strip)
+// until the feed can mount in the same beat as the exit, instead of fading
+// to black and stalling on a download. Deliberately NOT warmed earlier on
+// idle: the gate is armed for every load that starts on home, and most of
+// those are logged-out first visits that may bounce — the same reason the
+// sibling warm below skips the landing page. If the import fails the flip
+// goes ahead regardless — the router makes its own attempt and shows its
+// fallback, just as a Browse click would.
+function useLandingAutoEnter(apiRef, apiReady, apiGeneration, pageName) {
+    const [autoEnter, setAutoEnter] = useState(false);
+    // First page this page load resolved to — "home" arms the gate.
+    const landingPageRef = useRef(null);
+    if (landingPageRef.current === null && pageName) landingPageRef.current = pageName;
+    // Consumed: fired, or the visitor left home before it could fire.
+    const doneRef = useRef(false);
+
+    useEffect(() => {
+        if (pageName && pageName !== "home") doneRef.current = true;
+    }, [pageName]);
+
+    useEffect(() => {
+        if (doneRef.current) return undefined;
+        if (landingPageRef.current !== "home" || pageName !== "home") return undefined;
+        if (!apiReady) return undefined;
+        const api = apiRef.current;
+        if (!api?.eventEmitter || typeof api.getActiveAccount !== "function") return undefined;
+
+        let cancelled = false;
+
+        // Same payload shape the Welcome-back handler and useSessionAvatar
+        // read; a payload without it (or the initial, event-less check)
+        // falls through to the API's own answer.
+        const accountOf = (data) => data?.account || data?.session?.account
+            || (typeof data === "string" ? data : null);
+
+        const check = async (data) => {
+            if (doneRef.current) return;
+            let account = accountOf(data);
+            if (!account) {
+                try { account = await api.getActiveAccount(); } catch (e) { account = null; }
+            }
+            if (cancelled || doneRef.current || !account) return;
+            doneRef.current = true;
+            // The flip is not gated on `cancelled`: the only thing that can
+            // retire this effect between the decision and the flip is the
+            // visitor leaving home on their own, and a flag that lands on an
+            // unmounted (or later re-mounted) Home is inert by design — Home
+            // acts only on the false→true transition of a mounted instance.
+            PAGE_IMPORTERS.feedpersonal()
+                .catch(() => {})
+                .then(() => setAutoEnter(true));
+        };
+
+        // Same lifecycle set the pages resync their identity on (Feed.js),
+        // minus the ones that can only END a session.
+        const events = ["session_created", "session_restored", "session_resumed", "account_switched", "pin_unlocked"];
+        events.forEach((ev) => api.eventEmitter.on(ev, check));
+        check();
+
+        return () => {
+            cancelled = true;
+            events.forEach((ev) => api.eventEmitter.off(ev, check));
+        };
+        // apiGeneration: a node switch retires the emitter subscribed above.
+    }, [apiRef, apiReady, apiGeneration, pageName]);
+
+    return autoEnter;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // §10 — Memoized sub-components with comparison functions
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -2398,6 +2504,11 @@ function Index({ classes, history, settings: rawSettings }) {
         page, historyTags, deleteHistoryTag, navigate, livePathname, setPageComponent,
     } = usePageRouter(history, settingsRef, apiRef);
 
+    // ── Logged-in arrival on the landing page → personal feed ─────────────
+    // One-way flag handed to Home (see useLandingAutoEnter): Home plays its
+    // Browse-button exit into /feed/ when it flips.
+    const autoEnterFeed = useLandingAutoEnter(apiRef, apiReady, apiGeneration, page.name);
+
     // Re-route when locale changes or on initial settings load.
     // Other settings changes (renderer, nsfw, payout…) propagate to pages
     // via ContentComponent's cloneElement — no async page rebuild needed.
@@ -2902,6 +3013,20 @@ function Index({ classes, history, settings: rawSettings }) {
         [classes, goHome],
     );
 
+    // The landing element is baked in setPageComponent without `autoEnterFeed`
+    // (that flag is state that only exists here), so it is injected at render
+    // the way ContentComponent injects settings/pathname/api into the app
+    // pages: clone the inner <Home> with the flag, re-wrap it in its keyed
+    // Suspense. Memoized so an Index re-render for anything else hands Home
+    // (a PureComponent) the same element rather than a fresh clone.
+    const landingElement = useMemo(() => {
+        const element = page.element;
+        if (page.name !== "home" || !element) return element;
+        const inner = element.props?.children;
+        if (!inner) return element;
+        return React.cloneElement(element, null, React.cloneElement(inner, { autoEnterFeed }));
+    }, [page.name, page.element, autoEnterFeed]);
+
     // ═════════════════════════════════════════════════════════════════════
     // Render
     // ═════════════════════════════════════════════════════════════════════
@@ -2928,7 +3053,7 @@ function Index({ classes, history, settings: rawSettings }) {
     return (
         <React.Fragment>
             {isHome ? (
-                page.element
+                landingElement
             ) : (
                 <React.Fragment>
                     <main className={classes.root}>

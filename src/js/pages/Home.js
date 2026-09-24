@@ -531,6 +531,19 @@ const STRIP_WHEEL_GAIN = 5;        // px/s of velocity impulse per wheel px
 const STRIP_MAX_SPEED = 6000;      // px/s clamp for flings + wheel bursts
 const STRIP_FLING_WINDOW_MS = 120; // pointer-sample window → release velocity
 
+// ── Auto-enter (the app started on the landing page, logged in) ──
+// Index flips the `autoEnterFeed` prop once it knows the visitor whose page
+// load STARTED here is logged in (see useLandingAutoEnter there; a return
+// to this page inside the already-running app never flips it). The page
+// then plays the very same exit as the Browse button — canvas fade here,
+// rainbow overlay in Index on the home→app flip — into the personal feed.
+// If the session is known almost instantly (cached, local), the exit would
+// start while the entrance is still revealing (600 ms spiral, the
+// Fade-ins): this floor lets the landing finish arriving first, so the
+// sequence reads as home → rainbow → feed and never as a flash.
+const AUTO_ENTER_MIN_DWELL_MS = 900;
+const AUTO_ENTER_PATH = "/feed/";
+
 class Home extends React.PureComponent {
     constructor(props) {
         super(props);
@@ -602,10 +615,18 @@ class Home extends React.PureComponent {
         // available (explicit user input) — same policy as the shader above.
         this._stripReducedMotion = !!(window.matchMedia &&
             window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+        // ── Leaving the page ──
+        // Set the moment an exit (Browse click or auto-enter) has pushed the
+        // route: the auto-enter never fires on top of a click the visitor
+        // already made. A click is never blocked by it.
+        this._leaving = false;
+        this._mountedAt = 0;      // performance.now() at mount (dwell floor)
+        this._autoEnterTimer = 0; // pending dwell-delayed auto-enter
     }
 
     componentDidMount() {
         this._mounted = true;
+        this._mountedAt = performance.now();
         // No mousemove listener here anymore: the parallax exists solely for
         // the shader's uMouse uniform, so it's registered in _setBgCanvasRef
         // once a healthy GL context exists and dropped again in _stopBg.
@@ -642,9 +663,26 @@ class Home extends React.PureComponent {
         });
     }
 
+    // The only prop that changes over the page's life is `autoEnterFeed`
+    // (settings is baked once and nothing here reads it). It is acted on
+    // strictly as a false→true TRANSITION: a page that mounts with the flag
+    // already true is a return visit — the visitor left home before Index's
+    // flip landed — and a return to the landing page must never redirect.
+    componentDidUpdate(prevProps) {
+        if (this.props.autoEnterFeed && !prevProps.autoEnterFeed) {
+            this._scheduleAutoEnter();
+        }
+    }
+
     componentWillUnmount() {
         // Synchronous flag stops the animation loop immediately
         this._mounted = false;
+
+        // A dwell-delayed auto-enter must not fire into an unmounted page
+        if (this._autoEnterTimer) {
+            clearTimeout(this._autoEnterTimer);
+            this._autoEnterTimer = 0;
+        }
 
         // Cancel a still-pending deferred artwork load
         if (this._artsIdleId != null) {
@@ -779,13 +817,13 @@ class Home extends React.PureComponent {
             const newIntervalTimeRevealImage = this.state._intervalTimeRevealImage * this.state._intervalTimeRevealImageMultipier;
 
             if(this.state._artworks_url.length >= newY){
-               this.setState({_y: newY, _intervalTimeRevealImage: newIntervalTimeRevealImage}, () => {
-                   this._imageAppearsTimeout = this._showNextImage();
+                this.setState({_y: newY, _intervalTimeRevealImage: newIntervalTimeRevealImage}, () => {
+                    this._imageAppearsTimeout = this._showNextImage();
                 });
             }
         }, this.state._intervalTimeRevealImage);
     }
-    
+
     _scheduleStripMeasure = () => {
         setTimeout(() => {
             this._imageAppearsTimeout = this._showNextImage();
@@ -1040,14 +1078,54 @@ class Home extends React.PureComponent {
         this._buffer = null;
     }
 
-    _goToFeed = () => {
+    // ── Leaving the landing page ──
+    // ONE exit for both ways out (Browse click, auto-enter): the canvas
+    // fades here, the route is pushed at once (the fade runs in parallel
+    // with the swap) and Index's RootAnimationOverlay plays the rainbow on
+    // the home→app flip it detects — so the auto-enter is pixel-identical
+    // to the click, by construction rather than by copy.
+    _enterApp = (path) => {
+        this._leaving = true;
         // Fade the canvas before unmount so it doesn't visibly snap away
         if (this._canvas) {
             this._canvas.style.transition = "opacity 200ms ease-out";
             this._canvas.style.opacity = "0";
         }
         // Navigate immediately — fade runs in parallel with the route change
-        HISTORY.push("/created/");
+        HISTORY.push(path);
+    }
+
+    _goToFeed = () => {
+        this._enterApp("/created/");
+    }
+
+    // Auto-enter, first step: honour the dwell floor. Landing straight into
+    // the exit while the entrance is still revealing would read as a flash
+    // (see AUTO_ENTER_MIN_DWELL_MS); past the floor it fires right away.
+    _scheduleAutoEnter = () => {
+        if (this._autoEnterTimer) return;
+        const remaining = AUTO_ENTER_MIN_DWELL_MS - (performance.now() - this._mountedAt);
+        if (remaining <= 0) {
+            this._autoEnter();
+            return;
+        }
+        this._autoEnterTimer = setTimeout(() => {
+            this._autoEnterTimer = 0;
+            this._autoEnter();
+        }, remaining);
+    }
+
+    // Auto-enter, second step. Vetoed — for good, Index's gate is one-shot —
+    // when the visitor has already taken the page over: they clicked Browse
+    // themselves (`_leaving`, the click always wins), or they opened Learn
+    // More at any point (`_learn_more_mounted` stays true after the first
+    // open): someone who came to read must not be whisked away from under
+    // a dialog. Otherwise: exactly what the Browse button does, aimed at the
+    // personal feed.
+    _autoEnter = () => {
+        if (!this._mounted || this._leaving) return;
+        if (this.state._learn_more_mounted) return;
+        this._enterApp(AUTO_ENTER_PATH);
     }
 
     _openLearnMore = () => {

@@ -7,10 +7,18 @@ import SwipeableViews from "react-swipeable-views";
 import JSLoader from "../utils/JSLoader";
 import DescriptionIcon from "@material-ui/icons/Description";
 import HowToVoteIcon from "@material-ui/icons/HowToVote";
+import AccountBalanceIcon from "@material-ui/icons/AccountBalance";
 
 // Import sub-views
-import GDVMWitnesses from "../utils/GDVMWitnesses";
+import GDVMWitnesses from "./GDVMWitnesses";
 import GDVMProposals from "./GDVMProposals";
+import GDVMTokenomics from "./GDVMTokenomics";
+
+// Tab indices, in rail order. GDVMTokenomics jumps to the proposals tab
+// from the DPF card, so the index is named rather than counted.
+const TAB_PROPOSALS = 0;
+const TAB_WITNESSES = 1;
+const TAB_TOKENOMICS = 2;
 
 const styles = theme => ({
     root: {
@@ -23,7 +31,7 @@ const styles = theme => ({
     },
     // Desktop: a vertical rail pinned to the left edge that runs the (nearly)
     // full height of the panel — an 18.5px inset top and bottom, matching its
-    // left inset — with the two tabs splitting that height between them. The
+    // left inset — with the three tabs splitting that height between them. The
     // indicator pill follows the selected tab's own height (MUI writes it
     // inline for vertical tabs), so it is NOT fixed here.
     tabs: {
@@ -213,6 +221,10 @@ class GDViabilityManagement extends React.PureComponent {
         });
     }
 
+    _openProposals = () => {
+        this._handleSubTabChange({}, TAB_PROPOSALS);
+    }
+
     render() {
         const { classes, api } = this.props;
         const { _sub_tab_value, _authors, _is_mobile } = this.state;
@@ -226,8 +238,9 @@ class GDViabilityManagement extends React.PureComponent {
                     onChange={this._handleSubTabChange}
                     className={classes.tabs}
                 >
-                    <Tab icon={<DescriptionIcon />} />
-                    <Tab icon={<HowToVoteIcon />} />
+                    <Tab icon={<DescriptionIcon />} value={TAB_PROPOSALS} />
+                    <Tab icon={<HowToVoteIcon />} value={TAB_WITNESSES} />
+                    <Tab icon={<AccountBalanceIcon />} value={TAB_TOKENOMICS} />
                 </Tabs>
 
                 <div className={classes.contentWrapper}>
@@ -243,6 +256,7 @@ class GDViabilityManagement extends React.PureComponent {
                     >
                         <GDVMProposals api={api} />
                         <GDVMWitnesses api={api} authors={_authors} />
+                        <GDVMTokenomics api={api} onOpenProposals={this._openProposals} />
                     </SwipeableViews>
                 </div>
             </div>

@@ -1,0 +1,73 @@
+{
+  "_readme": [
+    "TGE treasury ledger rendered by components/GDVMTokenomics.js. Edit by hand; the view recomputes everything from this file.",
+    "tge.date        genesis day (UTC, YYYY-MM-DD). Anchors the pixa.rex distribution roadmap. 2026-09-04 12:00:03 UTC per the v1.29.0 release notes.",
+    "accounts[]      one object per treasury: name, role (team | company | dpf), control (multisig | protocol), genesis {amount, asset},",
+    "                holds (asset the account carries today), transfers (assets it may send; [] = protocol only), can_vote,",
+    "                policy {kind: discretionary} | {kind: timed_distribution, min_years, max_years} | {kind: proposals, daily_budget_divider}.",
+    "ledger[]        one object per outflow, newest or oldest first (the view sorts): date, from, to, amount, asset, category,",
+    "                optional note, status (done | planned — planned rows are listed but not counted), earmarks [{to, amount, asset, status, note}]",
+    "                for what the recipient does with the funds downstream, unvest: true to show the recipient's live power-down.",
+    "categories      contributor_reward | sale | market_distribution | grant | other (unknown values are shown as typed).",
+    "VERIFY          the ledger dates below are read off the wallet's '2 weeks ago' (2026-09-24) — replace them with the block timestamps."
+  ],
+  "tge": {
+    "date": "2026-09-04"
+  },
+  "accounts": [
+    {
+      "name": "pixa.team",
+      "role": "team",
+      "control": "multisig",
+      "genesis": { "amount": 25000000, "asset": "PIXA" },
+      "holds": "PXP",
+      "transfers": ["PXP"],
+      "can_vote": false,
+      "policy": { "kind": "discretionary" }
+    },
+    {
+      "name": "pixa.rex",
+      "role": "company",
+      "control": "multisig",
+      "genesis": { "amount": 75000000, "asset": "PIXA" },
+      "holds": "PXP",
+      "transfers": ["PXP"],
+      "can_vote": false,
+      "policy": { "kind": "timed_distribution", "min_years": 9, "max_years": 11 }
+    },
+    {
+      "name": "pixa.omnibus",
+      "role": "dpf",
+      "control": "protocol",
+      "genesis": { "amount": 245000, "asset": "PXS" },
+      "holds": "PXS",
+      "transfers": [],
+      "can_vote": false,
+      "policy": { "kind": "proposals", "daily_budget_divider": 100 }
+    }
+  ],
+  "ledger": [
+    { "date": "2026-09-10", "from": "pixa.team", "to": "matias",  "amount": 8000000.030, "asset": "PXP", "category": "contributor_reward" },
+    { "date": "2026-09-10", "from": "pixa.team", "to": "mathiew", "amount": 4000000.015, "asset": "PXP", "category": "contributor_reward" },
+    { "date": "2026-09-10", "from": "pixa.team", "to": "matus",   "amount": 2360000.009, "asset": "PXP", "category": "contributor_reward" },
+    { "date": "2026-09-10", "from": "pixa.team", "to": "tetiana", "amount": 1000000.004, "asset": "PXP", "category": "contributor_reward" },
+    { "date": "2026-09-10", "from": "pixa.team", "to": "karen",   "amount": 1000000.004, "asset": "PXP", "category": "contributor_reward" },
+    { "date": "2026-09-10", "from": "pixa.team", "to": "melanie", "amount": 150000.001,  "asset": "PXP", "category": "contributor_reward" },
+
+    {
+      "date": "2026-09-10",
+      "from": "pixa.rex",
+      "to": "pixa",
+      "amount": 15000000.056,
+      "asset": "PXP",
+      "category": "market_distribution",
+      "note": "Powered down by the operating account and sold on exchanges.",
+      "unvest": true,
+      "earmarks": [
+        { "to": "Coinstore", "amount": 3000000, "asset": "PIXA", "status": "planned", "note": "Listing liquidity." }
+      ]
+    },
+    { "date": "2026-09-10", "from": "pixa.rex", "to": "gonor", "amount": 250000.001, "asset": "PXP", "category": "sale" },
+    { "date": "2026-09-10", "from": "pixa.rex", "to": "damon", "amount": 250000.001, "asset": "PXP", "category": "sale" }
+  ]
+}

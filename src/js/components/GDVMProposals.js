@@ -65,6 +65,12 @@ function renderPostBody(api, body) {
 const PROPOSALS_COMMUNITY_URL = PROPOSALS_PORTAL.id;
 const PROPOSAL_CREATE_URL = `/${PROPOSALS_COMMUNITY_URL}/created/editor`;
 
+// The return proposal — the one whose receiver is the DPF treasury, so that
+// everything ranked below it goes unfunded. On Hive it is proposal 0, created
+// by the hardfork; on the Pixa chain it was created through the ordinary
+// create_proposal path and carries proposal_id 2.
+const RETURN_PROPOSAL_ID = 2;
+
 const styles = theme => ({
     dialogContent: {
         padding: "24px"
@@ -288,14 +294,19 @@ const styles = theme => ({
         backgroundColor: "#ffffff",
         color: "#000000"
     },
+    // Title: bold, bright, Industry Book — the base class is always applied,
+    // the status classes below only shift the colour.
     proposalTitle: {
-        color: "#fff",
+        fontFamily: "'Industry Book'",
+        fontWeight: 600,
+        fontSize: "15px",
+        color: "#ffffff",
     },
     proposalTitleExpired: {
-        color: "#333",
+        color: "#8a8a8a",
     },
     proposalTitlePending: {
-        color: "#999",
+        color: "#f0f0f0",
     },
     proposalStatusChipPending: {
         backgroundColor: "#999",
@@ -499,13 +510,15 @@ const styles = theme => ({
             backgroundColor: "transparent"
         }
     },
+    // "Pending Proposals" header between the active and the pending lists.
     sectionDivider: {
-        margin: "32px 0px 16px 0px",
+        color: "#999",
+        margin: "16px 0px 16px 0px",
         fontSize: "14px",
         fontWeight: 600,
-        color: "#666",
-        textTransform: "uppercase",
-        letterSpacing: "1px"
+        letterSpacing: "1px",
+        fontFamily: "'Industry Book'",
+        textTransform: "none"
     },
     // ── Return Proposal (threshold) card ─────────────────────
     returnProposalCard: {
@@ -621,11 +634,58 @@ const styles = theme => ({
 const _fmtDate = (d) =>
     d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-// Amount of a legacy asset string ("245554.228 PXS" → 245554.228); 0 when the
-// value is missing or malformed. Shared by mapProposal and the treasury read.
+// Amount of a legacy asset string ("245554.228 PXS" → 245554.228) or of an
+// NAI object ({ amount: "245554228", precision: 3 }); 0 when the value is
+// missing or malformed. Shared by mapProposal, the treasury read and the
+// vesting-price read.
 const assetAmount = (asset) => {
+    if (asset && typeof asset === 'object') {
+        const n = Number(asset.amount);
+        const p = Number(asset.precision) || 0;
+        return Number.isFinite(n) ? n / Math.pow(10, p) : 0;
+    }
     const n = parseFloat(String(asset == null ? '' : asset).split(' ')[0]);
     return Number.isFinite(n) ? n : 0;
+};
+
+// Chain timestamps are naive UTC ("2026-09-23T12:00:00"); NaN when absent.
+const chainMs = (s) => (s ? Date.parse(String(s).replace(/Z?$/, 'Z')) : NaN);
+
+// ──────────────────────────────────────────────────────────────
+// Vote weight → Pixa Power.
+//
+// proposal.total_votes (and a witness's `votes`) are sums of vesting share
+// units — 1e6 per VESTS — NOT Pixa Power. The card's label says PIXA POWER,
+// so the figure is converted through the vesting share price from the
+// dynamic global properties: total_vesting_fund_<coin> / total_vesting_shares.
+// The fund key is found by prefix so the fork's coin name does not matter
+// (total_vesting_fund_pixa here, _hive on Hive).
+// ──────────────────────────────────────────────────────────────
+const vestingSharePrice = (dgp) => {
+    if (!dgp || typeof dgp !== 'object') return null;
+    const fundKey = Object.keys(dgp).find(k => k.startsWith('total_vesting_fund_'));
+    const fund = fundKey ? assetAmount(dgp[fundKey]) : 0;
+    const shares = assetAmount(dgp.total_vesting_shares);
+    return (fund > 0 && shares > 0) ? fund / shares : null;
+};
+
+// Share units → Pixa Power. Without a price (globals read failed) the figure
+// stays in VESTS: still monotonic, so the ranking reads the same.
+const sharesToPower = (shares, price) => {
+    const vests = (Number(shares) || 0) / 1e6;
+    return (Number.isFinite(price) && price > 0) ? vests * price : vests;
+};
+
+// account_object::witness_vote_weight(), as dhf_processor::calculate_votes()
+// applies it: vesting_shares + proxied_vsf_votes, and ZERO for an account
+// that proxies its own vote. Share units.
+const governanceWeight = (acc) => {
+    if (!acc || acc.proxy) return 0;
+    let w = assetAmount(acc.vesting_shares) * 1e6;
+    if (Array.isArray(acc.proxied_vsf_votes)) {
+        for (const v of acc.proxied_vsf_votes) w += Number(v) || 0;
+    }
+    return w;
 };
 
 const mapProposal = (p) => {
@@ -648,8 +708,8 @@ const mapProposal = (p) => {
     const paidOut = dailyPay * daysElapsed;
     const remaining = Math.max(0, totalFunding - paidOut);
 
-    // Raw total_votes is VESTS-scale; keep as number for the card,
-    // formatVotes() below collapses it into k/m.
+    // Raw total_votes is in vesting share units (1e6 per VESTS), as the chain
+    // last COUNTED them — see Branch D in _loadData for why that is stale.
     const votes = Number(p.total_votes || 0);
 
     // Map chain status onto the three UI buckets the styles know.
@@ -680,7 +740,11 @@ const mapProposal = (p) => {
         duration: `${durationDays} days`,
         totalFunding,
         dailyPay,
-        votes,
+        votes,                 // share units, chain's last count
+        liveVotes: null,       // share units, live tally — set by decorateVotes
+        power: 0,              // Pixa Power shown on the card (live when available)
+        powerOnChain: 0,       // Pixa Power of `votes`
+        recountPending: false, // live tally differs from the chain's count
         author: p.creator,
         receiver: p.receiver,
         description: "",
@@ -692,59 +756,15 @@ const mapProposal = (p) => {
     };
 };
 
-// ──────────────────────────────────────────────────────────────
-// ReturnProposalCard — the "return proposal" (id 0) acts as the
-// dynamic funding threshold.  Proposals with more votes than this
-// threshold get funded from the DAO treasury; those below it do
-// not.  This card cannot be collapsed; it shows only a title, an
-// info tooltip, the current vote weight, and a vote button.
-// ──────────────────────────────────────────────────────────────
-const ReturnProposalCard = ({ classes, proposal, voted, canVote, onToggleVote }) => {
-    const formatVotes = (votes) => {
-        if (votes >= 1e9) return `${(votes / 1e9).toFixed(2)}b`;
-        if (votes >= 1e6) return `${(votes / 1e6).toFixed(2)}m`;
-        if (votes >= 1e3) return `${(votes / 1e3).toFixed(1)}k`;
-        return String(Math.round(votes));
-    };
-
-    return (
-        <div className={classes.returnProposalCard}>
-            <div className={classes.returnProposalLeft}>
-                <span className={classes.returnProposalTitle}>
-                    {t("components.gdvmproposals.active_proposals_dynamic_threshold")}
-                </span>
-                <Tooltip
-                    arrow
-                    interactive
-                    title={
-                        <div className={classes.tooltip}>
-                            {t("components.gdvmproposals.the_return_proposal_sets_the_funding_threshold")}
-                        </div>
-                    }
-                >
-                    <InfoIcon className={classes.returnProposalInfoIcon} />
-                </Tooltip>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
-                <span className={classes.returnProposalVotes}>
-                    {formatVotes(proposal.votes)}
-                </span>
-                <span className={classes.returnProposalVoteLabel}>{t("words.pixa_power")}</span>
-                <FormControlLabel
-                    className={classes.voteCheckboxLabel}
-                    control={
-                        <Checkbox
-                            checked={!!voted}
-                            disabled={!canVote}
-                            onChange={(_e, checked) => onToggleVote(proposal.id, checked)}
-                            color="default"
-                        />
-                    }
-                    label={t("components.gdvmproposals.vote")}
-                />
-            </div>
-        </div>
-    );
+// Attach the figures the cards display. `liveVotes` is the Branch D tally
+// (share units per proposal id) or null when it could not be completed, in
+// which case the chain's own count is the only figure shown.
+const decorateVotes = (p, liveVotes, vestPrice) => {
+    p.liveVotes = liveVotes ? (liveVotes.get(p.id) || 0) : null;
+    p.powerOnChain = sharesToPower(p.votes, vestPrice);
+    p.power = sharesToPower(p.liveVotes != null ? p.liveVotes : p.votes, vestPrice);
+    // Below one VESTS the difference is float noise, not a pending recount.
+    p.recountPending = p.liveVotes != null && Math.abs(p.liveVotes - p.votes) >= 1e6;
 };
 
 // shared formatters (module-level so every card + the treasury share them)
@@ -761,6 +781,65 @@ const fmtPXS = (amount) => {
     return `${Math.round(a)} PXS`;
 };
 
+// Native tooltip on the vote figure while the chain still shows the old count.
+const recountHint = (p, recountAt) => {
+    const live = t("components.gdvmproposals.live_tally_of_the_voters_pixa_power", {
+        onChain: fmtVotes(p.powerOnChain)
+    });
+    if (!Number.isFinite(recountAt)) return live;
+    const time = new Date(recountAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return `${live} ${t("components.gdvmproposals.next_recount_at", { time })}`;
+};
+
+// ──────────────────────────────────────────────────────────────
+// ReturnProposalCard — the "return proposal" (RETURN_PROPOSAL_ID) acts as the
+// dynamic funding threshold.  Proposals with more votes than this
+// threshold get funded from the DAO treasury; those below it do
+// not.  This card cannot be collapsed; it shows only a title, an
+// info tooltip, the current vote weight, and a vote button.
+// ──────────────────────────────────────────────────────────────
+const ReturnProposalCard = ({ classes, proposal, voted, canVote, onToggleVote, recountAt }) => (
+    <div className={classes.returnProposalCard}>
+        <div className={classes.returnProposalLeft}>
+            <span className={classes.returnProposalTitle}>
+                {t("components.gdvmproposals.active_proposals_dynamic_threshold")}
+            </span>
+            <Tooltip
+                arrow
+                interactive
+                title={
+                    <div className={classes.tooltip}>
+                        {t("components.gdvmproposals.the_return_proposal_sets_the_funding_threshold")}
+                    </div>
+                }
+            >
+                <InfoIcon className={classes.returnProposalInfoIcon} />
+            </Tooltip>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+            <span
+                className={classes.returnProposalVotes}
+                title={proposal.recountPending ? recountHint(proposal, recountAt) : undefined}
+            >
+                {fmtVotes(proposal.power)}
+            </span>
+            <span className={classes.returnProposalVoteLabel}>{t("words.pixa_power")}</span>
+            <FormControlLabel
+                className={classes.voteCheckboxLabel}
+                control={
+                    <Checkbox
+                        checked={!!voted}
+                        disabled={!canVote}
+                        onChange={(_e, checked) => onToggleVote(proposal.id, checked)}
+                        color="default"
+                    />
+                }
+                label={t("components.gdvmproposals.vote")}
+            />
+        </div>
+    </div>
+);
+
 // ──────────────────────────────────────────────────────────────
 // ProposalCard — the proposal rendered as a real, self-contained card.
 // Collapsed it shows the avatar, title/meta and live vote weight with a
@@ -773,7 +852,7 @@ const fmtPXS = (amount) => {
 // ──────────────────────────────────────────────────────────────
 const ProposalCard = ({
                           classes, api, proposal, expanded, onExpandChange,
-                          voted, canVote, onToggleVote, avatarUrl, fiatFor
+                          voted, canVote, onToggleVote, avatarUrl, fiatFor, recountAt
                       }) => {
     const [body, setBody] = useState('');
     const [bodyLoading, setBodyLoading] = useState(false);
@@ -818,10 +897,10 @@ const ProposalCard = ({
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
     };
 
-    const titleClass =
-        proposal.status === 'pending' ? classes.proposalTitlePending :
-            proposal.status === 'expired' ? classes.proposalTitleExpired :
-                classes.proposalTitle;
+    const titleClass = `${classes.proposalTitle}${
+        proposal.status === 'pending' ? ` ${classes.proposalTitlePending}` :
+            proposal.status === 'expired' ? ` ${classes.proposalTitleExpired}` : ''
+    }`;
     const chipClass =
         proposal.status === 'pending'
             ? `${classes.proposalStatusChip} ${classes.proposalStatusChipPending}`
@@ -873,7 +952,12 @@ const ProposalCard = ({
                     </div>
                 </div>
                 <div className={classes.proposalVoteInfo}>
-                    <span className={classes.proposalVoteCount}>{fmtVotes(proposal.votes)}</span>
+                    <span
+                        className={classes.proposalVoteCount}
+                        title={proposal.recountPending ? recountHint(proposal, recountAt) : undefined}
+                    >
+                        {fmtVotes(proposal.power)}
+                    </span>
                     <span className={classes.proposalVoteLabel}>{t("words.pixa_power")}</span>
                 </div>
                 <ExpandMoreIcon
@@ -926,16 +1010,16 @@ const ProposalCard = ({
                     ) : (
                         <div className={classes.proposalContentEmpty}>
                             {bodyError
-                                ? "Couldn't load the proposal content — open the full proposal to read it."
-                                : "This proposal has no description."}
+                                ? t("components.gdvmproposals.couldnt_load_the_proposal_content_open_the")
+                                : t("components.gdvmproposals.this_proposal_has_no_description")}
                         </div>
                     )}
 
                     <div className={classes.proposalStatsRow}>
-                        {StatBlock("Total Requested", fmtPXS(proposal.totalFunding), proposal.totalFunding)}
-                        {StatBlock("Daily Pay", `${Math.round(proposal.dailyPay)} PXS`, Number(proposal.dailyPay))}
-                        {StatBlock("Paid Out", fmtPXS(proposal.paidOut), proposal.paidOut)}
-                        {StatBlock("Remaining", fmtPXS(proposal.remaining), proposal.remaining)}
+                        {StatBlock(t("components.gdvmproposals.total_requested"), fmtPXS(proposal.totalFunding), proposal.totalFunding)}
+                        {StatBlock(t("components.gdvmproposals.daily_pay"), `${Math.round(proposal.dailyPay)} PXS`, Number(proposal.dailyPay))}
+                        {StatBlock(t("components.gdvmproposals.paid_out"), fmtPXS(proposal.paidOut), proposal.paidOut)}
+                        {StatBlock(t("components.gdvmproposals.remaining"), fmtPXS(proposal.remaining), proposal.remaining)}
                         <div className={classes.proposalStatBlock}>
                             <div className={classes.proposalStatBlockLabel}>{t("words.days_left")}</div>
                             <div className={classes.proposalStatBlockValue}>{proposal.daysRemaining}</div>
@@ -998,9 +1082,9 @@ const fmtPXSStat = (amount) => {
 // Mirror of the chain's payout pass (dhf_processor::calculate_payments):
 // active proposals are paid in total_votes order while the daily budget
 // lasts, each receiving min(daily_pay, remaining). The return proposal
-// (id 0) absorbs whatever is left, so the walk stops there. `ordered` is
-// the mapped list_proposals result in by_total_votes/descending order;
-// `treasuryPxs` is the treasury's PXS balance, or null when unavailable.
+// (RETURN_PROPOSAL_ID) absorbs whatever is left, so the walk stops there.
+// `ordered` is the mapped list_proposals result in by_total_votes/descending
+// order; `treasuryPxs` is the treasury's PXS balance, or null when unavailable.
 const computeDpfStats = (ordered, treasuryPxs) => {
     if (!Number.isFinite(treasuryPxs)) return null;
     const totalBudget = treasuryPxs;
@@ -1008,7 +1092,7 @@ const computeDpfStats = (ordered, treasuryPxs) => {
     let remaining = dailyBudget;
     let dailyFunded = 0;
     for (const p of ordered) {
-        if (p.id === 0) break;
+        if (p.id === RETURN_PROPOSAL_ID) break;
         if (p.status !== 'active') continue;
         if (remaining <= 0) break;
         const pay = Math.min(Number(p.dailyPay) || 0, remaining);
@@ -1050,9 +1134,9 @@ const DpfStatsBox = ({ classes, dpf, fiatFor, onCreate }) => {
                 </span>
             </div>
             <div className={classes.dpfStatsGrid}>
-                {dpfStat("Daily Funded", dpf ? dpf.dailyFunded : null)}
-                {dpfStat("Daily Budget", dpf ? dpf.dailyBudget : null)}
-                {dpfStat("Total Budget", dpf ? dpf.totalBudget : null)}
+                {dpfStat(t("components.gdvmproposals.daily_funded"), dpf ? dpf.dailyFunded : null)}
+                {dpfStat(t("components.gdvmproposals.daily_budget"), dpf ? dpf.dailyBudget : null)}
+                {dpfStat(t("components.gdvmproposals.total_budget"), dpf ? dpf.totalBudget : null)}
             </div>
             <Button
                 className={classes.createProposalButton}
@@ -1065,32 +1149,6 @@ const DpfStatsBox = ({ classes, dpf, fiatFor, onCreate }) => {
         </div>
     );
 };
-
-// Placeholder cards shaped like the real collapsed proposal cards, shown while
-// data loads so the panel keeps its layout when real content swaps in — no
-// spinner→list jump, no layout shift. Skeleton supplies its own theme-aware
-// shimmer, so no hardcoded colors here.
-const renderLoadingSkeleton = (classes) => (
-    <div aria-busy="true" aria-label={t("components.gdvmproposals.loading_proposals")} style={{ padding: "4px 0" }}>
-        {[0, 1, 2, 3].map((i) => (
-            <Card key={`sk-${i}`} className={classes.proposalCard}>
-                <div className={classes.proposalHeader}>
-                    <div className={classes.proposalMainInfo}>
-                        <div className={classes.proposalTitleRow}>
-                            <Skeleton variant="text" width={`${44 + (i % 3) * 14}%`} height={18} />
-                            <Skeleton variant="text" width={26} height={18} />
-                            <Skeleton variant="rect" width={54} height={16} style={{ borderRadius: 8 }} />
-                        </div>
-                        <div className={classes.proposalMeta} style={{ marginTop: 6 }}>
-                            <Skeleton variant="text" width={210} height={13} />
-                        </div>
-                    </div>
-                    <Skeleton variant="text" width={48} height={20} />
-                </div>
-            </Card>
-        ))}
-    </div>
-);
 
 const renderEmptyState = (classes, onCreate) => (
     <div className={classes.emptyWrap}>
@@ -1116,9 +1174,11 @@ const renderEmptyState = (classes, onCreate) => (
 // orchestration purely so it can call the usePrices() hook (the parent is a
 // class component, which cannot). One hook call here drives the live PXS→FIAT
 // conversion fed to every card and the treasury box.
+// While the lists load, nothing is rendered under the treasury box — no
+// placeholder cards.
 // ──────────────────────────────────────────────────────────────
 const ProposalsBody = ({
-                           classes, api, loading, active, pending, returnProposal, dpf,
+                           classes, api, loading, active, pending, returnProposal, dpf, recountAt,
                            myVotes, currentAccount, avatars, expandedId,
                            onExpandChange, onToggleVote, onCreate
                        }) => {
@@ -1146,15 +1206,14 @@ const ProposalsBody = ({
             onToggleVote={onToggleVote}
             avatarUrl={avatars[proposal.author] || ''}
             fiatFor={fiatFor}
+            recountAt={recountAt}
         />
     ));
 
     return (
         <>
             <DpfStatsBox classes={classes} dpf={dpf} fiatFor={fiatFor} onCreate={onCreate} />
-            {loading ? (
-                renderLoadingSkeleton(classes)
-            ) : !hasAny ? (
+            {loading ? null : !hasAny ? (
                 renderEmptyState(classes, onCreate)
             ) : (
                 <>
@@ -1168,6 +1227,7 @@ const ProposalsBody = ({
                             voted={myVotes.has(returnProposal.id)}
                             canVote={!!currentAccount}
                             onToggleVote={onToggleVote}
+                            recountAt={recountAt}
                         />
                     )}
 
@@ -1192,6 +1252,7 @@ class GDVMProposals extends React.PureComponent {
             _pending: [],
             _returnProposal: null,
             _dpf: null,              // { totalBudget, dailyBudget, dailyFunded } once the treasury read lands
+            _recountAt: NaN,         // dgp.next_maintenance_time (ms) — when the chain recounts votes
             _avatars: {},            // { accountName: imageUrl }
             _myVotes: new Set(),     // proposal ids voted for by current user
             _currentAccount: null,
@@ -1225,14 +1286,15 @@ class GDVMProposals extends React.PureComponent {
 
         try {
             // Chain A (proposals → author/receiver avatars), Branch B (the
-            // current user's proposal votes) and Branch C (the DPF treasury
-            // balance) are independent: B needs only `currentAccount`, resolved
-            // synchronously above, and C needs nothing. They run concurrently,
-            // so latency is max(A, B, C) rather than the sum. Branch B can be
-            // several paginated round-trips for a heavy voter, so it is the
-            // bigger tail. Per-branch error handling: only Chain A's root read
-            // (listProposals) can hard-fail the panel via the outer catch; a
-            // failed Branch C just leaves the treasury figures dashed.
+            // current user's proposal votes), Branch C (the DPF treasury
+            // balance), Branch D (the live vote tally) and Branch E (dynamic
+            // global properties) are independent: B needs only `currentAccount`,
+            // resolved synchronously above, and C/D/E need nothing. They run
+            // concurrently, so latency is max(A…E) rather than the sum. Per-branch
+            // error handling: only Chain A's root read (listProposals) can
+            // hard-fail the panel via the outer catch; a failed Branch C just
+            // leaves the treasury figures dashed, a failed D or E just leaves the
+            // vote figures at the chain's own count.
 
             // ── Chain A: all proposals → split → author/receiver avatars ────────
             const proposalsAndAvatars = (async () => {
@@ -1243,10 +1305,10 @@ class GDVMProposals extends React.PureComponent {
                 );
                 const mapped = (Array.isArray(list) ? list : []).map(mapProposal);
 
-                // Proposal id 0 is the "return proposal" — the dynamic
+                // RETURN_PROPOSAL_ID is the "return proposal" — the dynamic
                 // funding threshold.  It lives in its own dedicated card.
-                const returnProposal = mapped.find(p => p.id === 0) || null;
-                const rest = mapped.filter(p => p.id !== 0);
+                const returnProposal = mapped.find(p => p.id === RETURN_PROPOSAL_ID) || null;
+                const rest = mapped.filter(p => p.id !== RETURN_PROPOSAL_ID);
 
                 const active = rest.filter(p => p.status === 'active');
                 const pending = rest.filter(p => p.status === 'pending' || p.status === 'expired');
@@ -1351,19 +1413,127 @@ class GDVMProposals extends React.PureComponent {
                 }
             })();
 
-            const [{ active, pending, returnProposal, avatars, ordered }, myVotes, treasuryPxs] = await Promise.all([
+            // ── Branch D: live vote tally (independent) ──────────────────────────
+            // proposal_object.total_votes is NOT touched when an
+            // update_proposal_votes op is applied: dhf_processor::update_votes
+            // recomputes it once per maintenance period (hourly), from the
+            // voters' vesting shares at that moment. A vote cast right now
+            // therefore reads back as the OLD figure — 0 on a proposal nobody
+            // had voted for — until the next recount, which is what made the
+            // threshold card sit at 0 after voting. This sweep does the same
+            // sum client-side: every (proposal, voter) row, then each voter's
+            // governance weight (vesting_shares + proxied votes; 0 for an
+            // account that proxies its own vote, as calculate_votes() does).
+            // Resolves a Map<proposal_id, share units>, or null when the sweep
+            // could not be completed — the chain's own count is shown then.
+            const liveVotesPromise = (async () => {
+                if (typeof api.accounts.listProposalVotes !== 'function'
+                    || typeof api.accounts.getAccounts !== 'function') return null;
+                const PAGE = 1000;
+                // 20 pages × 1000 = 20k vote rows — far beyond this DAO. Past
+                // that the tally would be partial, so it is dropped instead.
+                const MAX_PAGES = 20;
+                const votersByProposal = new Map();   // pid → Set<voter>
+                let startArr = [];
+                let lastPid = null;
+                let lastVoter = null;
+                let complete = false;
+                try {
+                    for (let page = 0; page < MAX_PAGES; page++) {
+                        const batch = await api.accounts.listProposalVotes(
+                            startArr, PAGE, 'by_proposal_voter', 'ascending', 'all'
+                        );
+                        if (!Array.isArray(batch) || batch.length === 0) { complete = true; break; }
+
+                        let advanced = false;
+                        for (const rec of batch) {
+                            const pid = rec?.proposal?.proposal_id ?? rec?.proposal?.id ?? null;
+                            const voter = rec?.voter;
+                            if (pid == null || typeof voter !== 'string' || !voter) continue;
+                            // First row of a continuation page echoes the previous
+                            // page's last row.
+                            if (pid === lastPid && voter === lastVoter) continue;
+                            let set = votersByProposal.get(pid);
+                            if (!set) { set = new Set(); votersByProposal.set(pid, set); }
+                            set.add(voter);
+                            lastPid = pid;
+                            lastVoter = voter;
+                            advanced = true;
+                        }
+
+                        if (batch.length < PAGE) { complete = true; break; }
+                        if (!advanced) break;
+                        startArr = [lastPid, lastVoter];
+                    }
+                } catch (e) {
+                    console.warn('[GDVMProposals] live vote tally failed:', e?.message);
+                    return null;
+                }
+                if (!complete) return null;
+
+                // Governance weight of every distinct voter, in batches.
+                const voters = new Set();
+                for (const set of votersByProposal.values()) for (const v of set) voters.add(v);
+                const names = [...voters];
+                const weight = new Map();
+                for (let i = 0; i < names.length; i += 100) {
+                    try {
+                        const accs = await api.accounts.getAccounts(names.slice(i, i + 100));
+                        for (const acc of (accs || [])) {
+                            if (acc?.name) weight.set(acc.name, governanceWeight(acc));
+                        }
+                    } catch (e) {
+                        console.warn('[GDVMProposals] getAccounts for vote weights failed:', e?.message);
+                        return null;
+                    }
+                }
+
+                const live = new Map();
+                for (const [pid, set] of votersByProposal) {
+                    let sum = 0;
+                    for (const v of set) sum += weight.get(v) || 0;
+                    live.set(pid, sum);
+                }
+                return live;
+            })();
+
+            // ── Branch E: dynamic global properties (independent) ────────────────
+            // Vesting share price for the VESTS → Pixa Power conversion, and
+            // next_maintenance_time — the moment the chain recounts.
+            const dgpPromise = (async () => {
+                if (typeof api.globals?.getDynamicGlobalProperties !== 'function') return null;
+                try {
+                    return await api.globals.getDynamicGlobalProperties();
+                } catch (e) {
+                    console.warn('[GDVMProposals] getDynamicGlobalProperties failed:', e?.message);
+                    return null;
+                }
+            })();
+
+            const [
+                { active, pending, returnProposal, avatars, ordered },
+                myVotes, treasuryPxs, liveVotes, dgp
+            ] = await Promise.all([
                 proposalsAndAvatars,
                 myVotesPromise,
                 treasuryPromise,
+                liveVotesPromise,
+                dgpPromise,
             ]);
 
             if (!this._mounted) return;
+
+            // `ordered` holds the same objects as active / pending / returnProposal.
+            const vestPrice = vestingSharePrice(dgp);
+            for (const p of ordered) decorateVotes(p, liveVotes, vestPrice);
+
             this.setState({
                 _loading: false,
                 _active: active,
                 _pending: pending,
                 _returnProposal: returnProposal,
                 _dpf: computeDpfStats(ordered, treasuryPxs),
+                _recountAt: chainMs(dgp?.next_maintenance_time),
                 _avatars: avatars,
                 _myVotes: myVotes,
                 _currentAccount: currentAccount
@@ -1397,6 +1567,10 @@ class GDVMProposals extends React.PureComponent {
             await api.broadcast.updateProposalVotes(
                 _currentAccount, [proposalId], !!shouldApprove
             );
+            // The tx is in a block; the chain's total_votes still shows the old
+            // count until the next maintenance period, but the live tally
+            // (Branch D) picks the new vote up right away.
+            if (this._mounted) this._loadData();
         } catch (e) {
             console.warn('[GDVMProposals] vote toggle failed:', e?.message);
             // Roll back the optimistic change
@@ -1408,7 +1582,7 @@ class GDVMProposals extends React.PureComponent {
     render() {
         const { classes, api } = this.props;
         const {
-            _loading, _active, _pending, _returnProposal, _dpf,
+            _loading, _active, _pending, _returnProposal, _dpf, _recountAt,
             _myVotes, _currentAccount, _avatars, _expandedId
         } = this.state;
 
@@ -1422,6 +1596,7 @@ class GDVMProposals extends React.PureComponent {
                     pending={_pending}
                     returnProposal={_returnProposal}
                     dpf={_dpf}
+                    recountAt={_recountAt}
                     myVotes={_myVotes}
                     currentAccount={_currentAccount}
                     avatars={_avatars}
