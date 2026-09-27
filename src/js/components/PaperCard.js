@@ -1,15 +1,14 @@
 import * as React from 'preact/compat';
 import { h } from 'preact';
-import { memo, lazy, Suspense } from 'preact/compat';
+import { memo } from 'preact/compat';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import withStyles from '@material-ui/core/styles/withStyles';
 import Card from '@material-ui/core/Card';
 import CardHeader from '@material-ui/core/CardHeader';
 import IconButton from '@material-ui/core/IconButton';
-import Tooltip from '@material-ui/core/Tooltip';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
 import { xbrzF, hexF, crtF, triF, releaseId, getCachedRender, acquireCachedBitmap } from '../utils/render-pool';
-import useLiveTimeAgo from '../hooks/useLiveTimeAgo';
+import DateLabel from './DateLabel';
 import { HISTORY } from '../utils/constants';
 import ButtonBase from '@material-ui/core/ButtonBase';
 import * as actions from '../actions/utils';
@@ -25,7 +24,7 @@ import { t, useLanguage } from '../utils/text';
 // Version stamp — check in console: window.__PIXA_VERSIONS__
 if (typeof window !== 'undefined') {
     if (!window.__PIXA_VERSIONS__) window.__PIXA_VERSIONS__ = {};
-    window.__PIXA_VERSIONS__.PaperCard = '4.11.0-fadeavatar';
+    window.__PIXA_VERSIONS__.PaperCard = '4.12.1-datelabel';
 }
 
 // ── Async, non-critical NSFW detector loading ───────────────────────
@@ -95,7 +94,7 @@ const styles = theme => ({
             contentVisibility: 'visible',
             backgroundColor: '#101010',
             transition:
-                'background-color 225ms cubic-bezier(0.4, 0, 0.2, 1) 75ms, box-shadow 225ms cubic-bezier(0.4, 0, 0.2, 1) 75ms, filter 320ms cubic-bezier(0.4, 0, 0.2, 1) 30ms',
+                'background-color 225ms cubic-bezier(0.4, 0, 0.2, 1) 75ms, box-shadow 225ms cubic-bezier(0.4, 0, 0.2, 1) 75ms, opacity 320ms cubic-bezier(0.4, 0, 0.2, 1) 30ms',
         },
         '&.MuiCard-root:hover': {
             backgroundColor: '#000000',
@@ -103,10 +102,15 @@ const styles = theme => ({
             boxShadow:
                 '0px 2px 4px -1px rgb(0 0 0 / 20%), 0px 4px 5px 0px rgb(0 0 0 / 14%), 0px 1px 10px 0px rgb(0 0 0 / 12%)',
             transition:
-                'background-color 325ms cubic-bezier(0.4, 0, 0.2, 1) 10ms, box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1) 10ms, filter 320ms cubic-bezier(0.4, 0, 0.2, 1) 30ms',
+                'background-color 325ms cubic-bezier(0.4, 0, 0.2, 1) 10ms, box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1) 10ms, opacity 320ms cubic-bezier(0.4, 0, 0.2, 1) 30ms',
         },
-        '&.shown': { filter: 'opacity(1)' },
-        '&.hidden': { filter: 'opacity(0)'},
+        // The whole-card reveal animates `opacity`, not `filter: opacity()`:
+        // same picture, but `opacity` is the property every engine keeps on
+        // the compositor, whereas a filter goes through the filter-effects
+        // path (not accelerated everywhere, and never cheaper). The NSFW
+        // blur on the canvas keeps `filter` — that one has no alternative.
+        '&.shown': { opacity: 1 },
+        '&.hidden': { opacity: 0 },
         '& .MuiCardActions-root': {
             fontFamily: 'Geist Mono',
             fontSize: '1.125rem',
@@ -174,9 +178,18 @@ function shallowEqual(a, b) {
 // Some browsers (Safari) lack requestIdleCallback; fall back to RAF.
 // We always return a { type, handle } pair so the cleanup path can
 // cancel the right kind of callback.
-function scheduleIdle(fn) {
+//
+// `timeoutMs` is the idle callback's `timeout`: during a continuous
+// scroll the browser can go many frames without an idle period, and an
+// idle callback with no timeout simply never fires — which is how a
+// cache-hit repaint on scroll-back (a ~1 ms bitmap clone) could sit
+// unpainted for as long as the finger was moving. With a timeout the
+// callback is still deferred behind input and paint while there is
+// slack, and runs at the deadline otherwise. (Ignored on the RAF path.)
+function scheduleIdle(fn, timeoutMs) {
     if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-        return { type: 'idle', handle: window.requestIdleCallback(fn) };
+        const opts = timeoutMs > 0 ? { timeout: timeoutMs } : undefined;
+        return { type: 'idle', handle: window.requestIdleCallback(fn, opts) };
     }
     return { type: 'raf', handle: requestAnimationFrame(fn) };
 }
@@ -190,6 +203,16 @@ function cancelScheduled(token) {
         }
     } catch (e) {}
 }
+// Deadlines for the two draw paths. A cache hit is cheap and is what the
+// user is looking at right now (scroll-back); a miss hands the pool a job
+// whose main-thread part is small too, but it is a batch, so it may wait
+// a little longer for a real idle slot.
+const IDLE_TIMEOUT_CACHE_HIT_MS = 100;
+const IDLE_TIMEOUT_MISS_MS = 400;
+
+// The live "<time ago>" label and its full-date tooltip are the shared
+// <DateLabel> leaf (components/DateLabel.js) — see its header for why the
+// hook lives there and not in the card.
 
 // Map the card-level renderer name to the pool's algorithm key for
 // cache-first lookups. 'square' is absent on purpose: it paints the raw
@@ -217,6 +240,7 @@ const CanvasImage = memo(function CanvasImage({
                                                   nsfwEnabled,
                                                   nsfwFlag,
                                                   canvasRef, // NEW: Accept external ref
+                                                  active = true, // draw only once the card has been in (or near) view
                                               }) {
     const internalCanRef = useRef(null);
     const canRef = canvasRef || internalCanRef; // Use external ref if provided
@@ -416,7 +440,7 @@ const CanvasImage = memo(function CanvasImage({
                     } else {
                         guardedApply(cachedRender);
                     }
-                });
+                }, IDLE_TIMEOUT_CACHE_HIT_MS);
                 return;
             }
         }
@@ -442,10 +466,22 @@ const CanvasImage = memo(function CanvasImage({
 
         // Cancel any previous scheduled draw before queueing a new one.
         cancelScheduled(pendingScheduleRef.current);
-        pendingScheduleRef.current = scheduleIdle(run);
+        pendingScheduleRef.current = scheduleIdle(run, IDLE_TIMEOUT_MISS_MS);
     }, [renderer, mode, id, column_width, image_width, size, getImgData, renderHex, renderXbrz, renderCrt, renderTri, applyImage]);
 
-    useEffect(() => { draw(); }, [draw, renderKey]);
+    // ── When to draw ────────────────────────────────────────────────
+    // Every cell the Masonry renders — the whole overscan band included —
+    // used to enter the pipeline the moment it mounted, in mount order, so
+    // the tiles the user was actually looking at queued behind decode and
+    // upscale work for tiles a screen away. `active` is the card's
+    // visibility latch (Feed's cellRenderer marks a cell visible once it
+    // is within its threshold band of the viewport; the card latches it):
+    // an inactive card mounts, lays out and reserves its height, but does
+    // not decode, upscale or paint until it approaches the viewport. The
+    // latch never goes back, so a renderer/mode change on an active card
+    // redraws exactly as before; on a card that is still inactive the
+    // change is picked up by its first draw.
+    useEffect(() => { if (active) draw(); }, [draw, renderKey, active]);
 
     // Compose className: base + 'revealed' for opacity reveal + 'nsfw-blur'
     // when the post is NSFW and the user has not enabled NSFW display.
@@ -474,6 +510,7 @@ const CanvasImage = memo(function CanvasImage({
     a.renderer === b.renderer &&
     a.mode === b.mode &&
     a.id === b.id &&
+    a.active === b.active &&
     a.nsfwEnabled === b.nsfwEnabled &&
     a.nsfwFlag === b.nsfwFlag &&
     a.image_width === b.image_width &&
@@ -555,12 +592,8 @@ function PaperCardInner({
 
     const rootRef = useRef(null);
 
-    // Live relative date — this card re-renders exactly when the label is
-    // due to change (every second under a minute old, every minute under
-    // an hour, every hour under a day, then daily). The hook releases its
-    // watcher on unmount. CanvasImage is memo'd on stable props, so the
-    // tick never reaches the render pipeline.
-    const liveTimeAgo = useLiveTimeAgo(data.date, { labels: 'narrow' });
+    // The live relative date (and its full-date tooltip) is the DateLabel
+    // leaf in the subheader below, so its ticks re-render that span only.
 
     const openAuthor = useCallback((username) => {
         // HISTORY is a module-level singleton — no need to hold a ref.
@@ -763,11 +796,12 @@ function PaperCardInner({
                     />
                 }
                 action={
-                    <Suspense fallback={<span />}>
-                        <IconButton aria-label="settings" onClick={(e) => onMenuClick(e, data)}>
-                            <MoreVertIcon />
-                        </IconButton>
-                    </Suspense>
+                    // No Suspense boundary here any more: nothing inside it
+                    // was lazy, so it was one extra component per card that
+                    // did nothing.
+                    <IconButton aria-label="settings" onClick={(e) => onMenuClick(e, data)}>
+                        <MoreVertIcon />
+                    </IconButton>
                 }
                 title={
                     <span onClick={() => onOpen?.(data, getCanvasBoundingRect())}>
@@ -776,16 +810,7 @@ function PaperCardInner({
                 }
                 subheader={
                     <span>
-            <Tooltip
-                arrow
-                title={new Date(data.date || Date.now()).toLocaleDateString(locales, {
-                    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: 'numeric',
-                })}
-            >
-              <span className={classes.subheaderDate}>
-                {liveTimeAgo}
-              </span>
-            </Tooltip>
+            <DateLabel date={data.date} locales={locales} className={classes.subheaderDate} narrow />
             <span className={classes.subheaderBy}> {t('words.by')} </span>
                         {/* Rich author hover card instead of the old raw-@username
                 Tooltip. The anchor adds no element: it attaches its
@@ -825,6 +850,7 @@ function PaperCardInner({
                     nsfwEnabled={nsfw}
                     nsfwFlag={effectiveNsfwFlag}
                     canvasRef={canvasRef} // NEW: Pass the ref down
+                    active={hasBeenVisible}
                 />
             </ButtonBase>
 

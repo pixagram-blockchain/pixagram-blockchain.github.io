@@ -427,66 +427,76 @@ const AUTO_CLOSE_MS = 6000;
 // Phone mask data — array of [ISO2, mask] tuples. Multiple masks per country
 // are allowed (the JSON source had duplicate keys for variable-length numbers).
 // We pick the mask that best fits the current input length on each keystroke.
+//
+// Invariant: every mask of one ISO2 carries the SAME dial code — the UI keeps
+// one dial code per country (`dialCodeFor`). The JSON source filed France's
+// overseas collectivities under "FR" (+262 Réunion, +508 Saint-Pierre-et-
+// Miquelon, +590 Guadeloupe), which made `dialCodeFor("FR")` return the
+// shortest of those masks, +508. They now live under their own ISO2 (RE,
+// PM, GP); the set of dial codes offered is unchanged.
 // =============================================================================
 const PHONE_MASKS = [
     ["AC", "+247-####"], ["AD", "+376-###-###"], ["AE", "+971-5#-###-####"], ["AE", "+971-#-###-####"],
     ["AF", "+93-##-###-####"], ["AG", "+1(268)###-####"], ["AI", "+1(264)###-####"], ["AL", "+355(###)###-###"],
     ["AM", "+374-##-###-###"], ["AN", "+599-###-####"], ["AN", "+599-9###-####"], ["AO", "+244(###)###-###"],
-    ["AQ", "+672-1##-###"], ["AR", "+54(###)###-####"], ["AS", "+1(684)###-####"], ["AT", "+43(###)###-####"],
+    ["AQ", "+672-1##-###"], ["AR", "+54(###)###-####"], ["AR", "+54-9(##)####-####"], ["AS", "+1(684)###-####"], ["AT", "+43(###)###-####"], ["AT", "+43(###)###-#####"], ["AT", "+43(###)####-######"],
     ["AU", "+61-#-####-####"], ["AW", "+297-###-####"], ["AZ", "+994-##-###-##-##"], ["BA", "+387-##-#####"],
-    ["BA", "+387-##-####"], ["BB", "+1(246)###-####"], ["BD", "+880-##-###-###"], ["BE", "+32(###)###-###"],
+    ["BA", "+387-##-####"], ["BB", "+1(246)###-####"], ["BD", "+880-##-###-###"], ["BD", "+880-##-####-####"], ["BE", "+32-#-###-##-##"], ["BE", "+32(###)###-###"],
     ["BF", "+226-##-##-####"], ["BG", "+359(###)###-###"], ["BH", "+973-####-####"], ["BI", "+257-##-##-####"],
-    ["BJ", "+229-##-##-####"], ["BM", "+1(441)###-####"], ["BN", "+673-###-####"], ["BO", "+591-#-###-####"],
+    ["BJ", "+229-##-##-####"], ["BJ", "+229-01-##-##-##-##"], ["BM", "+1(441)###-####"], ["BN", "+673-###-####"], ["BO", "+591-#-###-####"],
     ["BR", "+55(##)####-####"], ["BR", "+55(##)7###-####"], ["BR", "+55(##)9####-####"], ["BS", "+1(242)###-####"],
     ["BT", "+975-17-###-###"], ["BT", "+975-#-###-###"], ["BW", "+267-##-###-###"], ["BY", "+375(##)###-##-##"],
     ["BZ", "+501-###-####"], ["CA", "+1(###)###-####"], ["CD", "+243(###)###-###"], ["CF", "+236-##-##-####"],
-    ["CG", "+242-##-###-####"], ["CH", "+41-##-###-####"], ["CI", "+225-##-###-###"], ["CK", "+682-##-###"],
-    ["CL", "+56-#-####-####"], ["CM", "+237-####-####"], ["CN", "+86(###)####-####"], ["CN", "+86(###)####-###"],
+    ["CG", "+242-##-###-####"], ["CH", "+41-##-###-####"], ["CI", "+225-##-###-###"], ["CI", "+225-##-##-##-##-##"], ["CK", "+682-##-###"],
+    ["CL", "+56-#-####-####"], ["CM", "+237-####-####"], ["CM", "+237-#-##-##-##-##"], ["CN", "+86(###)####-####"], ["CN", "+86(###)####-###"],
     ["CN", "+86-##-#####-#####"], ["CO", "+57(###)###-####"], ["CR", "+506-####-####"], ["CU", "+53-#-###-####"],
     ["CV", "+238(###)##-##"], ["CW", "+599-###-####"], ["CY", "+357-##-###-###"], ["CZ", "+420(###)###-###"],
     ["DE", "+49(####)###-####"], ["DE", "+49(###)###-####"], ["DE", "+49(###)##-####"], ["DE", "+49(###)##-###"],
     ["DE", "+49(###)##-##"], ["DE", "+49-###-###"], ["DJ", "+253-##-##-##-##"], ["DK", "+45-##-##-##-##"],
-    ["DM", "+1(767)###-####"], ["DO", "+1(809)###-####"], ["DO", "+1(829)###-####"], ["DO", "+1(849)###-####"],
+    // DO has three area codes: written "-809-" (not "(809)") so the dial code
+    // stays +1 and the area code is typed as part of the number, while a pasted
+    // "+1 809/829/849 …" still resolves to DO rather than US.
+    ["DM", "+1(767)###-####"], ["DO", "+1-809-###-####"], ["DO", "+1-829-###-####"], ["DO", "+1-849-###-####"],
     ["DZ", "+213-##-###-####"], ["EC", "+593-##-###-####"], ["EC", "+593-#-###-####"], ["EE", "+372-####-####"],
     ["EE", "+372-###-####"], ["EG", "+20(###)###-####"], ["ER", "+291-#-###-###"], ["ES", "+34(###)###-###"],
-    ["ET", "+251-##-###-####"], ["FI", "+358(###)###-##-##"], ["FJ", "+679-##-#####"], ["FK", "+500-#####"],
-    ["FM", "+691-###-####"], ["FO", "+298-###-###"], ["FR", "+262-#####-####"], ["FR", "+33(###)###-###"],
-    ["FR", "+508-##-####"], ["FR", "+590(###)###-###"], ["GA", "+241-#-##-##-##"], ["GD", "+1(473)###-####"],
-    ["GE", "+995(###)###-###"], ["GF", "+594-#####-####"], ["GH", "+233(###)###-###"], ["GI", "+350-###-#####"],
-    ["GL", "+299-##-##-##"], ["GM", "+220(###)##-##"], ["GN", "+224-##-###-###"], ["GQ", "+240-##-###-####"],
+    ["ET", "+251-##-###-####"], ["FI", "+358-##-###-####"], ["FI", "+358(###)###-##-##"], ["FJ", "+679-##-#####"], ["FK", "+500-#####"],
+    ["FM", "+691-###-####"], ["FO", "+298-###-###"], ["FR", "+33(###)###-###"], ["GA", "+241-#-##-##-##"],
+    ["GD", "+1(473)###-####"], ["GE", "+995(###)###-###"], ["GF", "+594-#####-####"], ["GH", "+233(###)###-###"],
+    ["GI", "+350-###-#####"], ["GL", "+299-##-##-##"], ["GM", "+220(###)##-##"], ["GN", "+224-##-###-###"], ["GN", "+224-###-##-##-##"],
+    ["GP", "+590(###)###-###"], ["GQ", "+240-##-###-####"],
     ["GR", "+30(###)###-####"], ["GT", "+502-#-###-####"], ["GU", "+1(671)###-####"], ["GW", "+245-#-######"],
-    ["GY", "+592-###-####"], ["HK", "+852-####-####"], ["HN", "+504-####-####"], ["HR", "+385-##-###-###"],
-    ["HT", "+509-##-##-####"], ["HU", "+36(###)###-###"], ["ID", "+62(8##)###-####"], ["ID", "+62-##-###-##"],
-    ["ID", "+62-##-###-###"], ["ID", "+62-##-###-####"], ["ID", "+62(8##)###-###"], ["ID", "+62(8##)###-##-###"],
-    ["IE", "+353(###)###-###"], ["IL", "+972-5#-###-####"], ["IL", "+972-#-###-####"], ["IN", "+91(####)###-###"],
+    ["GY", "+592-###-####"], ["HK", "+852-####-####"], ["HN", "+504-####-####"], ["HR", "+385-#-###-####"], ["HR", "+385-##-###-###"],
+    ["HT", "+509-##-##-####"], ["HU", "+36-#-###-####"], ["HU", "+36(###)###-###"], ["ID", "+62(8##)###-####"], ["ID", "+62-##-###-##"],
+    ["ID", "+62-##-###-###"], ["ID", "+62-##-###-####"], ["ID", "+62(8##)###-###"], ["ID", "+62(8##)###-##-###"], ["ID", "+62(8##)####-#####"],
+    ["IE", "+353-#-###-###"], ["IE", "+353-##-###-###"], ["IE", "+353(###)###-###"], ["IL", "+972-5#-###-####"], ["IL", "+972-#-###-####"], ["IN", "+91(####)###-###"],
     ["IO", "+246-###-####"], ["IQ", "+964(###)###-####"], ["IR", "+98(###)###-####"], ["IS", "+354-###-####"],
-    ["IT", "+39(###)####-###"], ["JM", "+1(876)###-####"], ["JO", "+962-#-####-####"], ["JP", "+81-##-####-####"],
+    ["IT", "+39-######"], ["IT", "+39(###)###-###"], ["IT", "+39(###)####-###"], ["IT", "+39(###)####-####"], ["JM", "+1(876)###-####"], ["JO", "+962-#-####-####"], ["JP", "+81-#-####-####"], ["JP", "+81-##-####-####"],
     ["JP", "+81(###)###-###"], ["KE", "+254-###-######"], ["KG", "+996(###)###-###"], ["KH", "+855-##-###-###"],
     ["KI", "+686-##-###"], ["KM", "+269-##-#####"], ["KN", "+1(869)###-####"], ["KP", "+850-191-###-####"],
     ["KP", "+850-##-###-###"], ["KP", "+850-###-####-###"], ["KP", "+850-###-###"], ["KP", "+850-####-####"],
-    ["KP", "+850-####-#############"], ["KR", "+82-##-###-####"], ["KW", "+965-####-####"], ["KY", "+1(345)###-####"],
+    ["KR", "+82-##-###-####"], ["KR", "+82-##-####-####"], ["KW", "+965-####-####"], ["KY", "+1(345)###-####"],
     ["KZ", "+7(6##)###-##-##"], ["KZ", "+7(7##)###-##-##"], ["LA", "+856(20##)###-###"], ["LA", "+856-##-###-###"],
     ["LB", "+961-##-###-###"], ["LB", "+961-#-###-###"], ["LC", "+1(758)###-####"], ["LI", "+423(###)###-####"],
     ["LK", "+94-##-###-####"], ["LR", "+231-##-###-###"], ["LS", "+266-#-###-####"], ["LT", "+370(###)##-###"],
-    ["LU", "+352(###)###-###"], ["LV", "+371-##-###-###"], ["LY", "+218-##-###-###"], ["LY", "+218-21-###-####"],
+    ["LU", "+352-##-##-##"], ["LU", "+352-##-##-##-##"], ["LU", "+352(###)###-###"], ["LV", "+371-##-###-###"], ["LY", "+218-##-###-###"], ["LY", "+218-21-###-####"],
     ["MA", "+212-##-####-###"], ["MC", "+377(###)###-###"], ["MC", "+377-##-###-###"], ["MD", "+373-####-####"],
     ["ME", "+382-##-###-###"], ["MG", "+261-##-##-#####"], ["MH", "+692-###-####"], ["MK", "+389-##-###-###"],
     ["ML", "+223-##-##-####"], ["MM", "+95-##-###-###"], ["MM", "+95-#-###-###"], ["MM", "+95-###-###"],
     ["MN", "+976-##-##-####"], ["MO", "+853-####-####"], ["MP", "+1(670)###-####"], ["MQ", "+596(###)##-##-##"],
-    ["MR", "+222-##-##-####"], ["MS", "+1(664)###-####"], ["MT", "+356-####-####"], ["MU", "+230-###-####"],
+    ["MR", "+222-##-##-####"], ["MS", "+1(664)###-####"], ["MT", "+356-####-####"], ["MU", "+230-###-####"], ["MU", "+230-####-####"],
     ["MV", "+960-###-####"], ["MW", "+265-1-###-###"], ["MW", "+265-#-####-####"], ["MX", "+52(###)###-####"],
-    ["MX", "+52-##-##-####"], ["MY", "+60-##-###-####"], ["MY", "+60(###)###-###"], ["MY", "+60-##-###-###"],
+    ["MX", "+52-##-##-####"], ["MY", "+60-##-###-####"], ["MY", "+60-##-####-####"], ["MY", "+60(###)###-###"], ["MY", "+60-##-###-###"],
     ["MY", "+60-#-###-###"], ["MZ", "+258-##-###-###"], ["NA", "+264-##-###-####"], ["NC", "+687-##-####"],
     ["NE", "+227-##-##-####"], ["NF", "+672-3##-###"], ["NG", "+234(###)###-####"], ["NG", "+234-##-###-###"],
     ["NG", "+234-##-###-##"], ["NI", "+505-####-####"], ["NL", "+31-##-###-####"], ["NO", "+47(###)##-###"],
-    ["NP", "+977-##-###-###"], ["NR", "+674-###-####"], ["NU", "+683-####"], ["NZ", "+64(###)###-###"],
+    ["NP", "+977-##-###-###"], ["NP", "+977-###-###-####"], ["NR", "+674-###-####"], ["NU", "+683-####"], ["NZ", "+64(###)###-###"],
     ["NZ", "+64-##-###-###"], ["NZ", "+64(###)###-####"], ["OM", "+968-##-###-###"], ["PA", "+507-###-####"],
     ["PE", "+51(###)###-###"], ["PF", "+689-##-##-##"], ["PG", "+675(###)##-###"], ["PH", "+63(###)###-####"],
-    ["PK", "+92(###)###-####"], ["PL", "+48(###)###-###"], ["PS", "+970-##-###-####"], ["PT", "+351-##-###-####"],
+    ["PK", "+92(###)###-####"], ["PL", "+48(###)###-###"], ["PM", "+508-##-####"], ["PS", "+970-##-###-####"], ["PT", "+351-##-###-####"],
     ["PW", "+680-###-####"], ["PY", "+595(###)###-###"], ["QA", "+974-####-####"], ["RE", "+262-#####-####"],
     ["RO", "+40-##-###-####"], ["RS", "+381-##-###-####"], ["RU", "+7(###)###-##-##"], ["RW", "+250(###)###-###"],
     ["SA", "+966-5-####-####"], ["SA", "+966-#-###-####"], ["SB", "+677-###-####"], ["SB", "+677-#####"],
-    ["SC", "+248-#-###-###"], ["SD", "+249-##-###-####"], ["SE", "+46-##-###-####"], ["SG", "+65-####-####"],
+    ["SC", "+248-#-###-###"], ["SD", "+249-##-###-####"], ["SE", "+46-#-###-###"], ["SE", "+46-##-###-###"], ["SE", "+46-##-###-####"], ["SG", "+65-####-####"],
     ["SH", "+290-####"], ["SI", "+386-##-###-###"], ["SK", "+421(###)###-###"], ["SL", "+232-##-######"],
     ["SM", "+378-####-######"], ["SN", "+221-##-###-####"], ["SO", "+252-##-###-###"], ["SO", "+252-#-###-###"],
     ["SR", "+597-###-####"], ["SR", "+597-###-###"], ["SS", "+211-##-###-####"], ["ST", "+239-##-#####"],
@@ -501,7 +511,7 @@ const PHONE_MASKS = [
     ["VE", "+58(###)###-####"], ["VG", "+1(284)###-####"], ["VI", "+1(340)###-####"], ["VN", "+84-##-####-###"],
     ["VN", "+84(###)####-###"], ["VU", "+678-##-#####"], ["VU", "+678-#####"], ["WF", "+681-##-####"],
     ["WS", "+685-##-####"], ["YE", "+967-###-###-###"], ["YE", "+967-#-###-###"], ["YE", "+967-##-###-###"],
-    ["ZA", "+27-##-###-####"], ["ZM", "+260-##-###-####"], ["ZW", "+263-#-######"]
+    ["ZA", "+27-##-###-####"], ["ZM", "+260-##-###-####"], ["ZW", "+263-#-######"], ["ZW", "+263-##-###-####"]
 ];
 
 // Build a country -> [masks...] lookup once.
@@ -557,6 +567,24 @@ const FLAG_BY_COUNTRY = {
     AN: FlagCW,
     // Alias: masks/PREFERRED_COUNTRY say "UK", timezone/locale data says "GB"
     GB: FlagUK,
+    // Guadeloupe (+590) and Saint-Pierre-et-Miquelon (+508): French overseas
+    // collectivities whose official flag is the tricolour (Noto's 🇬🇵/🇵🇲
+    // glyphs are the tricolour too). To use the dedicated glyphs instead,
+    // import EmojiU1F1Ec1F1F5 (GP) and EmojiU1F1F51F1F2 (PM) if they exist
+    // in ../notoemoji/react.
+    GP: FlagFR,
+    PM: FlagFR,
+};
+
+// If mask[i] opens a "(…)" group made of literal digits only — a NANP area
+// code such as "(268)" — return those digits; "" for a slot group "(###)" or
+// a mixed one like "(6##)" / "(20##)", whose digits belong to the subscriber.
+const literalParenGroup = (mask, i) => {
+    if (mask[i] !== "(") return "";
+    const close = mask.indexOf(")", i);
+    if (close === -1) return "";
+    const inner = mask.slice(i + 1, close);
+    return /^\d+$/.test(inner) ? inner : "";
 };
 
 // Extract the dialing prefix (literal digits only) from a mask.
@@ -564,24 +592,27 @@ const FLAG_BY_COUNTRY = {
 //   "+41-##-###-####"     -> "41"
 //   "+1(###)###-####"     -> "1"     (the ### are slots, not literals)
 //   "+1(268)###-####"     -> "1268"  (Antigua: 268 is a literal area code)
+//   "+7(6##)###-##-##"    -> "7"     (Kazakhstan: the 6 is typed by the user)
 //   "+44-##-####-####"    -> "44"
 const dialPrefixFromMask = (mask) => {
-    if (!mask) return "";
-    // Walk the mask char by char after the leading "+", collecting digits and
-    // bridging across one optional "(" if the next char inside is a literal
-    // digit (not a # slot).
-    if (mask[0] !== "+") return "";
+    if (!mask || mask[0] !== "+") return "";
     let i = 1;
     let prefix = "";
     while (i < mask.length && /\d/.test(mask[i])) { prefix += mask[i++]; }
-    // Optional: a "(" right after the country code, with literal digits inside.
-    if (mask[i] === "(" && /\d/.test(mask[i + 1] || "")) {
-        i++; // consume "("
-        while (i < mask.length && /\d/.test(mask[i])) { prefix += mask[i++]; }
-        // We don't actually care about the closing ")" — we've captured the
-        // literal digits. The mask remains usable.
+    return prefix + literalParenGroup(mask, i);
+};
+
+// All literal digits a number must START with to fit this mask: the dial
+// code plus any fixed digits ahead of the first "#" slot. Only used to match
+// a pasted "+…" number to its country, so "+7 7xx…" resolves to Kazakhstan
+// ("+7(7##)…" -> "77") while "+7 9xx…" stays Russia ("+7(###)…" -> "7").
+const matchHeadFromMask = (mask) => {
+    if (!mask || mask[0] !== "+") return "";
+    let head = "";
+    for (let i = 1; i < mask.length && mask[i] !== "#"; i++) {
+        if (/\d/.test(mask[i])) head += mask[i];
     }
-    return prefix;
+    return head;
 };
 
 // ── Country detection (timezone-first, locale-fallback) ─────────────────────
@@ -800,7 +831,7 @@ const detectBrowserCountry = () => {
             ? navigator.languages
             : [navigator.language || navigator.userLanguage || ""];
         for (const lng of langs) {
-            const match = String(lng).match(/[-_]([A-Z]{2})/i);
+            const match = String(lng).match(/[-_]([A-Z]{2})\b/i);
             if (match) {
                 const iso = match[1].toUpperCase();
                 if (MASKS_BY_COUNTRY[iso]) return iso;
@@ -821,6 +852,10 @@ const detectBrowserCountry = () => {
  *    the mask absorbed (useful for detecting overflow).
  */
 const applyMask = (digits, mask) => {
+    // No digits, no output: a subscriber mask that opens with a literal, like
+    // "(###)###-####", must not leave a lone "(" in an emptied field (which
+    // also kept the placeholder from showing).
+    if (!digits || digits.length === 0) return { formatted: "", digitsConsumed: 0 };
     let out = "";
     let di = 0;
     for (let mi = 0; mi < mask.length; mi++) {
@@ -842,17 +877,17 @@ const applyMask = (digits, mask) => {
 };
 
 /**
- * Pick the best mask for a country given the current digit count.
- * Prefers the mask whose `#` count is >= digit count and is the smallest such;
- * falls back to the longest mask if all are too short.
+ * Pick the best mask entry for a country given the current SUBSCRIBER digit
+ * count (see `maskEntries`). Prefers the mask whose subscriber slot count is
+ * >= digit count and is the smallest such; falls back to the longest mask if
+ * all are too short.
  */
-const pickBestMask = (country, digitCount) => {
-    const candidates = MASKS_BY_COUNTRY[country] || [];
+const pickMaskEntry = (country, digitCount) => {
+    const candidates = maskEntries(country);
     if (candidates.length === 0) return null;
-    const withCounts = candidates.map(m => ({ mask: m, slots: (m.match(/#/g) || []).length }));
-    const fits = withCounts.filter(c => c.slots >= digitCount).sort((a, b) => a.slots - b.slots);
-    if (fits.length > 0) return fits[0].mask;
-    return withCounts.sort((a, b) => b.slots - a.slots)[0].mask;
+    const fits = candidates.filter(c => c.slots >= digitCount).sort((a, b) => a.slots - b.slots);
+    if (fits.length > 0) return fits[0];
+    return candidates.slice().sort((a, b) => b.slots - a.slots)[0];
 };
 
 // Confirmation code mask: XXX-XXX over the 36-char alphabet [A-Z0-9] — the
@@ -881,55 +916,103 @@ const composeE164 = (dialCode, subscriberDigits) => {
 // `stripPrefixFromMask` returns the part of the mask that represents the
 // subscriber number (after the country code).
 //
-// Two cases:
+// Three cases:
 //  - Slots in parens, like "+1(###)###-####": parens enclose ### slots, so the
 //    subscriber INCLUDES the "(" — result "(###)###-####". The country code is
 //    just "+1".
 //  - Literals in parens, like "+1(268)###-####": parens enclose literal area-
 //    code digits that identify the specific country/region (Antigua, etc.).
 //    Strip the entire "+1(268)" — subscriber is "###-####".
+//  - Literal digits left INSIDE the subscriber part — "+971-5#-###-####" (UAE
+//    mobiles), "+55(##)9####-####" (Brazilian mobiles), "+7(6##)###-##-##"
+//    (Kazakhstan) — become "#" slots. The user types them, so they land in
+//    `_phoneRaw` and in the E.164 number. As display-only literals they were
+//    shown in the field but silently missing from the number we sent the SMS
+//    to (and the real digit was cut off by the slot cap).
 const stripPrefixFromMask = (mask) => {
     if (!mask) return "";
     if (mask[0] !== "+") return mask;
     let i = 1;
     while (i < mask.length && /\d/.test(mask[i])) i++;
-    if (mask[i] === "(" && /\d/.test(mask[i + 1] || "")) {
-        // Literal digits in parens — strip them and the closing ).
-        i++;
-        while (i < mask.length && /\d/.test(mask[i])) i++;
-        if (mask[i] === ")") i++;
-    }
+    const group = literalParenGroup(mask, i);
+    if (group) i += group.length + 2; // "(" + digits + ")"
     // Skip ONE optional separator character if it's "-" or " ".
     if (mask[i] === "-" || mask[i] === " ") i++;
-    return mask.slice(i);
+    return mask.slice(i).replace(/\d/g, "#");
 };
+
+// Per-country mask entries, derived once from PHONE_MASKS:
+//   { mask, dial, sub, slots } — the full mask, its dial code (digits, no +),
+//   the subscriber-only mask and that mask's slot count.
+let _MASK_ENTRIES = null;
+const maskEntries = (country) => {
+    if (!_MASK_ENTRIES) {
+        _MASK_ENTRIES = {};
+        for (const [iso, mask] of PHONE_MASKS) {
+            const sub = stripPrefixFromMask(mask);
+            if (!_MASK_ENTRIES[iso]) _MASK_ENTRIES[iso] = [];
+            _MASK_ENTRIES[iso].push({ mask, dial: dialPrefixFromMask(mask), sub, slots: (sub.match(/#/g) || []).length });
+        }
+    }
+    return _MASK_ENTRIES[country] || [];
+};
+
+// Shortest / longest subscriber length among a country's masks ({0, 0} for an
+// unknown country). A number whose length falls in this range is "complete"
+// as far as the masks know — numbering plans with several lengths (DE, IT,
+// AT…) have a mask per length, so the range, not one exact count, decides.
+const slotRange = (country) => {
+    const entries = maskEntries(country);
+    if (entries.length === 0) return { min: 0, max: 0 };
+    let min = Infinity, max = 0;
+    for (const e of entries) { if (e.slots < min) min = e.slots; if (e.slots > max) max = e.slots; }
+    return { min, max };
+};
+
+// Sanity limit on subscriber digits: E.164 allows 15 digits in total, so no
+// national number is longer than this. Nothing else truncates what the user
+// enters — an over-long number is shown as is and flagged under the field.
+const PHONE_MAX_DIGITS = 15;
+
+// The leading "0" of a nationally-dialled number is a trunk prefix that is
+// dropped in international format ("079 …" -> "+41 79 …") — except in the few
+// plans where it is part of the number itself: Italy (landlines "+39 02 …"),
+// Côte d'Ivoire ("+225 07 …" since the 2021 renumbering) and Benin ("+229 01 …"
+// since November 2024).
+const KEEP_TRUNK_ZERO = new Set(["IT", "VA", "CI", "BJ"]);
+const stripTrunkZero = (digits, country) =>
+    KEEP_TRUNK_ZERO.has(country) ? String(digits || "") : String(digits || "").replace(/^0+/, "");
 
 // Best subscriber-only mask for a country given current subscriber digit count.
 const pickSubscriberMask = (country, digitCount) => {
-    const full = pickBestMask(country, digitCount);
-    return stripPrefixFromMask(full);
+    const entry = pickMaskEntry(country, digitCount);
+    return entry ? entry.sub : "";
 };
 
-// Format subscriber-only digits under the country's mask.
+// Format subscriber-only digits under the country's mask. Digits beyond the
+// longest mask are not cut: the number is then shown unformatted, so the user
+// sees exactly what they entered (StepVerify flags it as over-long).
 const formatSubscriber = (digits, country) => {
-    const fullMask = pickBestMask(country, digits.length);
-    if (!fullMask) return digits;
-    const subscriberMask = stripPrefixFromMask(fullMask);
-    return applyMask(String(digits || ""), subscriberMask).formatted;
+    const str = String(digits || "");
+    const entry = pickMaskEntry(country, str.length);
+    if (!entry || str.length > entry.slots) return str;
+    return applyMask(str, entry.sub).formatted;
 };
 
-// Country code (digits, no +) for a given ISO2.
+// Country code (digits, no +) for a given ISO2. Every mask of a country
+// carries the same dial code (see the PHONE_MASKS invariant), so the choice
+// of entry does not matter.
 const dialCodeFor = (country) => {
-    const mask = pickBestMask(country, 0);
-    return mask ? dialPrefixFromMask(mask) : "";
+    const entry = pickMaskEntry(country, 0);
+    return entry ? entry.dial : "";
 };
 
-// Walk known prefixes (longest first) and return the country whose dial code
-// matches the leading digits. Used when the user pastes/types a "+..." number
-// and we want to auto-switch country.
+// Walk known number heads (longest first) and return the country whose mask
+// matches the leading digits, plus that country's dial code. Used when the
+// user pastes/types a "+..." number and we want to auto-switch country.
 //
-// PREFERRED_COUNTRY overrides resolve ambiguity for shared prefixes (e.g.
-// prefix "1" maps to many NANP countries; we prefer US over Canada/AG/AI).
+// PREFERRED_COUNTRY overrides resolve ambiguity for shared heads (e.g. head
+// "1" maps to many NANP countries; we prefer US over Canada/AG/AI).
 const PREFERRED_COUNTRY = {
     "1":  "US",
     "44": "UK",
@@ -940,28 +1023,64 @@ const PREFERRED_COUNTRY = {
     "64": "NZ",
 };
 
-let _SORTED_PREFIXES = null;
-const sortedPrefixes = () => {
-    if (_SORTED_PREFIXES) return _SORTED_PREFIXES;
-    const seen = new Map(); // prefix -> ISO
+let _SORTED_HEADS = null;
+const sortedHeads = () => {
+    if (_SORTED_HEADS) return _SORTED_HEADS;
+    const seen = new Map(); // head -> { iso, dial }
     for (const [iso, mask] of PHONE_MASKS) {
-        const pfx = dialPrefixFromMask(mask);
-        if (!pfx) continue;
-        if (PREFERRED_COUNTRY[pfx]) {
-            seen.set(pfx, PREFERRED_COUNTRY[pfx]);
-        } else if (!seen.has(pfx)) {
-            seen.set(pfx, iso);
+        const head = matchHeadFromMask(mask);
+        if (!head) continue;
+        const dial = dialPrefixFromMask(mask);
+        if (PREFERRED_COUNTRY[head]) {
+            seen.set(head, { iso: PREFERRED_COUNTRY[head], dial });
+        } else if (!seen.has(head)) {
+            seen.set(head, { iso, dial });
         }
     }
-    _SORTED_PREFIXES = Array.from(seen.entries()).sort((a, b) => b[0].length - a[0].length);
-    return _SORTED_PREFIXES;
+    _SORTED_HEADS = Array.from(seen.entries()).sort((a, b) => b[0].length - a[0].length);
+    return _SORTED_HEADS;
 };
 
+// `digits` is the full international number without "+". Returns
+// { country, prefix } where `prefix` is the dial code to strip off the front
+// of `digits` to get the subscriber part.
 const matchCountryByPrefix = (digits) => {
-    for (const [pfx, iso] of sortedPrefixes()) {
-        if (digits.startsWith(pfx)) return { country: iso, prefix: pfx };
+    for (const [head, { iso, dial }] of sortedHeads()) {
+        if (digits.startsWith(head)) return { country: iso, prefix: dial };
     }
     return null;
+};
+
+// Normalise whatever lands in the phone field — typed, pasted or autofilled —
+// into { intl, digits }. `intl` is true when a "+" (or the "00" international
+// access code) precedes the first digit; `digits` then starts with the
+// country code. Real-world clipboard text hides the "+" in several ways:
+//   - iOS/macOS Contacts, WhatsApp and many web pages wrap numbers in
+//     invisible bidi marks (U+202A…U+202C, U+200E), which String.trim() does
+//     not remove, so "+33 6…" used to be read as "33 6…";
+//   - "(+33) 6 12…", "Tél. : +33 6…" and "tel:+33…" put text before the "+";
+//   - some keyboards emit a full-width "＋" / full-width digits;
+//   - the international form is often written "0033 6 12…".
+const parsePhoneInput = (raw) => {
+    const s = String(raw || "")
+        .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g, "")
+        .replace(/[\uFF10-\uFF19]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xFF10 + 0x30))
+        .replace(/\uFF0B/g, "+");
+    const plus = s.indexOf("+");
+    const firstDigit = s.search(/\d/);
+    const digits = s.replace(/\D/g, "");
+    if (plus !== -1 && (firstDigit === -1 || plus < firstDigit)) return { intl: true, digits };
+    // "00…": no national number starts with two zeros (the trunk prefix is a
+    // single 0), so this is unambiguously the international access code.
+    if (/^00\d/.test(digits)) return { intl: true, digits: digits.slice(2) };
+    return { intl: false, digits };
+};
+
+// Localised country name from an Intl.DisplayNames instance (ISO2 fallback).
+// "UK" is the masks' name for GB; "AC" (Ascension) is displayed as St Helena.
+const regionNameOf = (regionNames, iso) => {
+    if (!regionNames) return iso;
+    try { return regionNames.of(iso === "UK" ? "GB" : iso === "AC" ? "SH" : iso) || iso; } catch (_) { return iso; }
 };
 
 // One entry per ISO2 for the country picker, with its dialing code. Names are
@@ -1678,32 +1797,55 @@ const StepVerify = memo(function StepVerify({
     }, [getLocaleCode()]);
     const pickerEntries = useMemo(() => {
         const named = countryEntries().map(({ iso, code }) => {
-            const name = (regionNames && regionNames.of(iso === "UK" ? "GB" : iso === "AC" ? "SH" : iso)) || iso;
+            const name = regionNameOf(regionNames, iso);
             // Lower-cased once here: the filter below used to lower-case every
             // name and iso again on every keystroke (~240 entries × 2).
             return { iso, code, name, lname: name.toLowerCase(), liso: iso.toLowerCase() };
         });
         return named.sort((a, b) => a.name.localeCompare(b.name));
     }, [regionNames]);
+    // A whole phone number pasted or typed into the search box ("+33 6 12 34
+    // 56 78", "0033…", "33612345678"): recognise its country so the list
+    // offers it, and hand the number over when that country is selected.
+    // Without a "+"/"00", five digits or more are needed before a search is
+    // read as a number rather than as a dial code being typed.
+    const pickerNumber = useMemo(() => {
+        const parsed = parsePhoneInput(pickerFilter);
+        if (!parsed.digits || (!parsed.intl && parsed.digits.length < 5)) return null;
+        const match = matchCountryByPrefix(parsed.digits);
+        return match ? { country: match.country, digits: parsed.digits } : null;
+    }, [pickerFilter]);
     const filteredEntries = useMemo(() => {
         const q = pickerFilter.trim().toLowerCase();
         if (!q) return pickerEntries;
+        if (pickerNumber) {
+            const hit = pickerEntries.filter((e) => e.iso === pickerNumber.country);
+            if (hit.length > 0) return hit;
+        }
         const qDigits = q.replace(/\D/g, "");
         return pickerEntries.filter((e) =>
             e.lname.indexOf(q) !== -1 ||
             e.liso === q ||
             (qDigits.length > 0 && e.code.indexOf(qDigits) === 0)
         );
-    }, [pickerEntries, pickerFilter]);
+    }, [pickerEntries, pickerFilter, pickerNumber]);
     // Stable: were re-created per render, which also forced every memo'd
     // CountryPickerRow below to re-render on each filter keystroke.
     const openPicker = useCallback(() => { setPickerFilter(""); setPickerOpen(true); }, []);
     const closePicker = useCallback(() => setPickerOpen(false), []);
     const selectCountry = useCallback((iso) => {
         setPickerOpen(false);
-        if (onCountrySelect) onCountrySelect(iso);
-    }, [onCountrySelect]);
+        if (onCountrySelect) onCountrySelect(iso, pickerNumber && pickerNumber.country === iso ? pickerNumber.digits : undefined);
+    }, [onCountrySelect, pickerNumber]);
     const onPickerFilterChange = useCallback((e) => setPickerFilter(e.target.value), []);
+    // Enter with a single remaining entry selects it — one keystroke after
+    // pasting a number or finishing a country name.
+    const onPickerFilterKeyDown = useCallback((e) => {
+        if (e.key === "Enter" && filteredEntries.length === 1) {
+            e.preventDefault();
+            selectCountry(filteredEntries[0].iso);
+        }
+    }, [filteredEntries, selectCountry]);
     // ── Turnstile (bot gate for /send-code) ──────────────────────────────
     // One invisible widget ("interaction-only": nothing is shown unless
     // Cloudflare needs the user to click) rendered in execute mode, so the
@@ -1821,12 +1963,26 @@ const StepVerify = memo(function StepVerify({
     // 7-day window). "verified" is not a block — it means skip the SMS.
     const blockedByCheck = Boolean(phoneCheck) && !phoneCheck.can_send && phoneCheck.phone_status !== "verified";
     const sendLockedByWindow = Boolean(nextSendAllowedAt) && Date.now() < new Date(nextSendAllowedAt).getTime();
-    const countryUnsupported = destSupport(dialCode) === "unsupported";
+    // A "+…" typed or pasted into the number field that matches no offered
+    // country stays visible there (with `phoneRaw` empty, so SEND is off) —
+    // explain it the same way as an unsupported dial code.
+    const typedUnsupported = String(phoneFormatted || "").startsWith("+") && destSupport(phoneFormatted) === "unsupported";
+    const countryUnsupported = destSupport(dialCode) === "unsupported" || typedUnsupported;
     const sendDisabled = sendingCode || challenging || phoneRaw.length < 4 || resendInSec > 0 || noCapacity || blockedByCheck || sendLockedByWindow || countryUnsupported;
+    // More digits than any of the country's masks: shown in full, never cut.
+    // Usually a foreign number entered without its "+" — the country switches
+    // by itself once the number is complete, otherwise this note says what to
+    // do. Sending stays possible: the masks are a formatting aid, the worker
+    // and the SMS provider decide what is deliverable.
+    const maxDigits = slotRange(country).max;
+    const phoneTooLong = maxDigits > 0 && phoneRaw.length > maxDigits;
+    const countryName = regionNameOf(regionNames, country);
     // One-line status under the phone field, fed by /check-phone.
     let phoneNote = "";
     if (countryUnsupported) {
         phoneNote = "SMS verification is not yet available for this country.";
+    } else if (phoneTooLong) {
+        phoneNote = `${phoneRaw.length} digits — a ${countryName} number has at most ${maxDigits}. For another country, start with its code ("+…") or choose it from the list.`;
     } else if (turnstileState === "error") {
         phoneNote = "The browser check could not load. If you use a content blocker, allow challenges.cloudflare.com and reload.";
     } else if (phoneChecking) {
@@ -2010,7 +2166,8 @@ const StepVerify = memo(function StepVerify({
                             autoFocus
                             value={pickerFilter}
                             onChange={onPickerFilterChange}
-                            placeholder={"Search country or code"}
+                            onKeyDown={onPickerFilterKeyDown}
+                            placeholder={"Search country, code or paste a number"}
                             inputProps={PICKER_INPUT_PROPS}
                         />
                     </FormControl>
@@ -2548,15 +2705,29 @@ class CreateAccountDialog extends React.PureComponent {
      * Country chosen from the picker: switch dial code + mask, keep any
      * subscriber digits already typed, reset the code flow, and re-run the
      * phone pre-check for the new destination.
+     *
+     * `number` (digits, optional) is a whole phone number the user pasted or
+     * typed into the picker's search box — the picker recognised its country
+     * and offered it; selecting the row also puts the number into the field.
      */
-    _handleCountrySelect = (iso) => {
+    _handleCountrySelect = (iso, number) => {
         const prefix = dialCodeFor(iso);
         if (!prefix) return;
+        let raw = String(number || this.state._phoneRaw || "").replace(/\D/g, "");
+        // A number carrying this country's dial code (a whole number from the
+        // search box, or an over-long "33 6 12 34 56 78" held in the field
+        // whose country the user now picks) loses the code — but only when it
+        // would not fit otherwise, since national numbers can start with the
+        // same digits (Kazakh mobiles 7xx under +7).
+        const { max } = slotRange(iso);
+        if (raw.startsWith(prefix) && max > 0 && raw.length > max) raw = raw.slice(prefix.length);
+        raw = stripTrunkZero(raw, iso).slice(0, PHONE_MAX_DIGITS);
         this.setState({
             _country: iso,
             _dialCode: "+" + prefix,
-            _phoneMask: pickSubscriberMask(iso, this.state._phoneRaw.length) || "",
-            _phoneFormatted: formatSubscriber(this.state._phoneRaw, iso),
+            _phoneRaw: raw,
+            _phoneMask: pickSubscriberMask(iso, raw.length) || "",
+            _phoneFormatted: formatSubscriber(raw, iso),
             _codeSent: false,
             _confirmationCode: "",
             _codeStatus: "idle",
@@ -2627,83 +2798,111 @@ class CreateAccountDialog extends React.PureComponent {
      * Subscriber field change handler.
      *
      *  - Strip non-digits so paste with whitespace (e.g. "79 123 45 67") works.
-     *  - If the pasted/typed value starts with "+", treat it as a full
-     *    international number and re-route the leading country code to
-     *    `_dialCode` so we never duplicate the prefix.
+     *  - If the pasted/typed value is a full international number ("+33 6…",
+     *    "0033 6…", "(+33) 6…", a Contacts copy with invisible bidi marks —
+     *    see `parsePhoneInput`), select that country: re-route the country
+     *    code to `_dialCode` and keep only the subscriber part in the field.
+     *  - Without a "+", the current country is kept as long as the number
+     *    fits it. A number that does NOT fit and reads as a complete number
+     *    of another country — that country's dial code followed by a number
+     *    of one of its lengths — selects that country instead ("33 6 12 34
+     *    56 78" in a Swiss field is a French mobile, not eleven Swiss digits).
+     *    This works while typing too: the digits are shown in full, and the
+     *    switch happens the moment the foreign number is complete.
      *  - If the user typed the bare country dial code at the start (e.g. "41..."
      *    in CH), strip it.
-     *  - If the digits would overflow the country's mask AND begin with a "0",
-     *    strip the leading "0" — this is the European/Swiss/etc. trunk prefix
-     *    that callers use domestically but is dropped in the international
-     *    representation. So "076 429 49 80" -> "76 429 49 80".
-     *  - Hard-cap at the mask's slot count so typing extra digits is rejected
-     *    rather than truncating from the END (which would lose the new digit).
+     *  - Strip the leading "0" — the European/Swiss/etc. trunk prefix that
+     *    callers use domestically but is dropped in the international
+     *    representation. So "076 429 49 80" -> "76 429 49 80". (Not in the
+     *    plans where the 0 is part of the number: see KEEP_TRUNK_ZERO.)
+     *  - Nothing is ever cut off: a number longer than the country's masks is
+     *    shown unformatted and flagged under the field (the worker and the
+     *    SMS provider remain the authority on what is deliverable).
      *  - When the formatted value would be LONGER than the user's current
      *    input, the user just deleted a separator — pop a digit so the field
      *    never feels "stuck" on the same character.
      */
-    _handlePhoneChange = (e) => {
+    _handlePhoneChange = (e, opts) => {
         const inputVal = String(e.target.value || "");
-        const trimmed = inputVal.trim();
         const { _country, _dialCode } = this.state;
+        const parsed = parsePhoneInput(inputVal);
+        const prevDigits = String(this.state._phoneRaw || "");
+        const resetFlow = { _codeSent: false, _confirmationCode: "", _codeStatus: "idle", _phoneCheck: null, _sendError: "" };
+        const afterUpdate = () => { this.forceUpdate(); this._schedulePhoneCheck(); };
+        // Select `country` (dial code `prefix`, digits only) with `subscriber`
+        // in the field.
+        const selectCountry = (country, prefix, subscriber) => {
+            subscriber = stripTrunkZero(subscriber, country).slice(0, PHONE_MAX_DIGITS);
+            this.setState({
+                _country: country,
+                _dialCode: "+" + prefix,
+                _phoneRaw: subscriber,
+                _phoneFormatted: formatSubscriber(subscriber, country),
+                _phoneMask: pickSubscriberMask(country, subscriber.length) || "",
+                ...resetFlow,
+            }, afterUpdate);
+        };
 
-        // Detect a leading "+..." (paste or manual full-number entry).
-        if (trimmed.startsWith("+")) {
-            const allDigits = trimmed.replace(/\D/g, "");
-            const match = matchCountryByPrefix(allDigits);
+        // Full international number (paste, autofill or manual "+…" entry):
+        // the country code selects the country.
+        if (parsed.intl) {
+            const match = matchCountryByPrefix(parsed.digits);
             if (match) {
-                let subscriber = allDigits.slice(match.prefix.length);
-                const country = match.country;
-                // Strip leading "0" (trunk prefix).
-                subscriber = subscriber.replace(/^0+/, "");
-                const maxSlots = ((pickSubscriberMask(country, 64) || "").match(/#/g) || []).length;
-                if (maxSlots > 0 && subscriber.length > maxSlots) subscriber = subscriber.slice(0, maxSlots);
-
-                this.setState({
-                    _country: country,
-                    _dialCode: "+" + match.prefix,
-                    _phoneRaw: subscriber,
-                    _phoneFormatted: formatSubscriber(subscriber, country),
-                    _phoneMask: pickSubscriberMask(country, subscriber.length) || "",
-                    _codeSent: false,
-                    _confirmationCode: "",
-                    _codeStatus: "idle",
-                    _phoneCheck: null,
-                    _sendError: "",
-                }, () => { this.forceUpdate(); this._schedulePhoneCheck(); });
+                // "+41 (0)79 …": the trunk 0 goes (stripTrunkZero, in selectCountry).
+                selectCountry(match.country, match.prefix, parsed.digits.slice(match.prefix.length));
                 return;
             }
+            // No country (yet): keep the "+…" visible so the user can go on
+            // typing ("+3" on its way to "+33") or see what they pasted
+            // ("+999 …"). Nothing is sendable in this state — `_phoneRaw` is
+            // empty — and StepVerify explains an unknown code under the field.
+            this.setState({ _phoneRaw: "", _phoneFormatted: "+" + parsed.digits, ...resetFlow }, afterUpdate);
+            return;
         }
 
-        let digits = trimmed.replace(/\D/g, "");
+        let digits = stripTrunkZero(parsed.digits, _country).slice(0, PHONE_MAX_DIGITS);
+        const { max: maxSlots } = slotRange(_country);
 
         // Tolerate users typing the country code without "+": if digits start
-        // with the current country's dial code AND they typed more than that,
-        // assume they retyped the prefix and strip it.
+        // with the current country's dial code AND would not fit the mask
+        // otherwise, assume they retyped the prefix and strip it. The overflow
+        // condition matters — national numbers can legitimately start with
+        // the dial-code digits (Kazakh mobiles 7xx under +7, Lucerne 41x
+        // under +41).
         const dialDigits = (_dialCode || "").replace(/\D/g, "");
-        if (dialDigits && digits.startsWith(dialDigits) && digits.length > dialDigits.length) {
-            digits = digits.slice(dialDigits.length);
+        if (dialDigits && digits.startsWith(dialDigits) && maxSlots > 0 && digits.length > maxSlots) {
+            digits = stripTrunkZero(digits.slice(dialDigits.length), _country);
         }
 
-        // Strip leading "0" (trunk prefix). In European/most national dialing
-        // plans, the leading 0 is dialed domestically but is never part of the
-        // international subscriber number. None of our subscriber masks start
-        // with a literal 0, so this is safe across countries.
-        digits = digits.replace(/^0+/, "");
-
-        // Mask slot count for the active country (use a generous probe so we
-        // pick the LONGEST mask among the country's options).
-        const maxSlots = ((pickSubscriberMask(_country, 64) || "").match(/#/g) || []).length;
-
-        // Hard cap so extra typing doesn't shift digits off the end.
+        // No "+", and the number does not fit the selected country. If it
+        // reads as a COMPLETE number of another country — that country's
+        // dial code followed by a number of one of its lengths — select that
+        // country. Typed digit by digit, "33 6 12 34 56 78" in a Swiss field
+        // is shown in full from the 10th digit on (flagged as too long for
+        // Switzerland) and becomes a French mobile at the 11th.
+        //
+        // Guard against stray digits: for the one-digit codes +1 and +7 this
+        // switch only happens for a number that arrived in one go (paste,
+        // autofill, keyboard clipboard chip) — otherwise a Swiss mobile (7x…)
+        // with two extra keystrokes would turn into a Russian number, and a
+        // British 1xx… landline with one into an American one.
         if (maxSlots > 0 && digits.length > maxSlots) {
-            digits = digits.slice(0, maxSlots);
+            const match = matchCountryByPrefix(digits);
+            if (match && match.country !== _country) {
+                const subscriber = stripTrunkZero(digits.slice(match.prefix.length), match.country);
+                const range = slotRange(match.country);
+                const complete = subscriber.length >= range.min && subscriber.length <= range.max;
+                const bulk = Boolean(opts && opts.pasted) || digits.length >= prevDigits.length + 2;
+                if (complete && (bulk || match.prefix.length > 1)) {
+                    selectCountry(match.country, match.prefix, subscriber);
+                    return;
+                }
+            }
         }
 
         // Separator-deletion detection: if the user kept the same number of
         // digits but shortened the field, they deleted a separator character
         // — pop a trailing digit so progress visibly happens.
-        const prevDigits = String(this.state._phoneRaw || "");
         const prevFormatted = String(this.state._phoneFormatted || "");
         const sameDigits = digits === prevDigits;
         const shortened = inputVal.length < prevFormatted.length;
@@ -2717,26 +2916,24 @@ class CreateAccountDialog extends React.PureComponent {
             _phoneRaw: digits,
             _phoneFormatted: formatted,
             _phoneMask: pickSubscriberMask(_country, digits.length) || "",
-            _codeSent: false,
-            _confirmationCode: "",
-            _codeStatus: "idle",
-            _phoneCheck: null,
-            _sendError: "",
-        }, () => { this.forceUpdate(); this._schedulePhoneCheck(); });
+            ...resetFlow,
+        }, afterUpdate);
     };
 
     /**
-     * Paste handler — explicit so we can robustly trim whitespace and detect
-     * "+..." prefixes from browser autofill suggestions. We intercept the
-     * paste, normalise, and apply it; the synthetic onChange in some browsers
-     * would otherwise fire with the raw clipboard text.
+     * Paste handler — explicit so the clipboard text is parsed on its own
+     * (`parsePhoneInput` handles the "+", "00", bidi-mark and "tel:" cases),
+     * regardless of what the field already contains or where the caret is.
+     * We intercept the paste, normalise, and apply it; the synthetic onChange
+     * would otherwise fire with the clipboard text spliced into the current
+     * value.
      */
     _handlePhonePaste = (e) => {
         try {
             const txt = (e.clipboardData || window.clipboardData)?.getData("text") || "";
             if (!txt) return;
             e.preventDefault();
-            this._handlePhoneChange({ target: { value: txt.trim() } });
+            this._handlePhoneChange({ target: { value: txt.trim() } }, { pasted: true });
         } catch (_) {
             // Fall through — let the default paste happen and onChange catch it.
         }

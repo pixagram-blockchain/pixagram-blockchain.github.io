@@ -1462,35 +1462,71 @@ const useMasonryGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels,
     const cellPositionerConfig = useMemo(() => ({ cellMeasurerCache, columnCount, columnWidth, spacer: gutterSize }), [cellMeasurerCache, columnCount, columnWidth, gutterSize]);
     const cellPositioner = useMemo(() => createMasonryCellPositioner(cellPositionerConfig), [cellPositionerConfig]);
 
+    // ── Root measurement ───────────────────────────────────────────────
+    // Same fix the shared hook (hooks/useMasonryGrid) already carries. Only
+    // the WIDTH is load-bearing — columnWidth derives from it. The wrapper's
+    // height is ~0 by design (the masonry inside it is position:absolute),
+    // so the previous `height >= 100` gate meant (a) a window resize never
+    // re-measured the root, and (b) the 50 ms retry loop below NEVER
+    // settled: a getBoundingClientRect — a forced layout — every 50 ms for
+    // as long as the profile page was open. Gate on width only, bail out on
+    // unchanged values, bound the retry, and let a ResizeObserver (drawer
+    // toggles, orientation changes) do the re-measuring instead of polling.
+    const measureRoot = useCallback(() => {
+        const el = rootRef.current;
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 100) return false;
+        setRootDims(prev =>
+            (prev.width === rect.width && prev.height === rect.height)
+                ? prev
+                : { width: rect.width, height: rect.height });
+        return true;
+    }, []);
+
     const setRootElement = useCallback((el) => {
         if (!el) return;
         rootRef.current = el;
-        const r = el.getBoundingClientRect();
-        setRootDims({ width: r.width, height: r.height });
-    }, []);
-    // Re-measure on window resize
-    useEffect(() => { if (!rootRef.current) return; const r = rootRef.current.getBoundingClientRect(); if (r.width>=100&&r.height>=100) setRootDims({width:r.width,height:r.height}); }, [windowWidth, windowHeight]);
-    // Retry measurement until root has valid dimensions (position:absolute
-    // div starts at 0×0 before content lays out — original retried via
-    // _updated_dimensions → setTimeout(50) loop).
-    useEffect(() => {
-        if (rootDims.width >= 100 && rootDims.height >= 100) return;
-        let cancelled = false;
-        const retry = () => {
-            if (cancelled || !rootRef.current) return;
-            const r = rootRef.current.getBoundingClientRect();
-            if (r.width >= 100 && r.height >= 100) setRootDims({ width: r.width, height: r.height });
-            else setTimeout(retry, 50);
-        };
-        setTimeout(retry, 50);
-        return () => { cancelled = true; };
-    }, [rootDims.width, rootDims.height]);
+        measureRoot();
+    }, [measureRoot]);
 
-    // Clear ref on unmount, set on mount
-    const setMasonryRef = useCallback((cat) => (el) => {
-        if (el) masonryRefs.current[cat] = el;
-        else masonryRefs.current[cat] = null;
-    }, []);
+    useEffect(() => { measureRoot(); }, [windowWidth, windowHeight, measureRoot]);
+
+    useEffect(() => {
+        const el = rootRef.current;
+        if (!el || typeof ResizeObserver === "undefined") return;
+        const ro = new ResizeObserver(() => { measureRoot(); });
+        ro.observe(el);
+        return () => ro.disconnect();
+        // rootRef is populated by the callback ref before effects run.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [measureRoot]);
+
+    // Bounded retry for the rare case where the wrapper has no width yet at
+    // ref-attach time (pending layout). Stops as soon as a width lands, or
+    // after 5 s — never an unbounded forced-layout loop again.
+    useEffect(() => {
+        if (rootDims.width >= 100) return;
+        let cancelled = false;
+        let attempts = 0;
+        let timer = 0;
+        const retry = () => {
+            if (cancelled) return;
+            if (!measureRoot() && ++attempts < 100) timer = setTimeout(retry, 50);
+        };
+        timer = setTimeout(retry, 50);
+        return () => { cancelled = true; clearTimeout(timer); };
+    }, [rootDims.width, measureRoot]);
+
+    // One ref callback per tab, created once. `setMasonryRef(cat)` used to
+    // mint a new closure on every call — i.e. on every Profile render, scroll
+    // ticks included — and a changed ref callback makes Preact detach the old
+    // one (ref(null)) and attach the new one (ref(el)) on every commit.
+    const masonryRefCallbacks = useMemo(
+        () => [0, 1, 2, 3].map((cat) => (el) => { masonryRefs.current[cat] = el || null; }),
+        [],
+    );
+    const setMasonryRef = useCallback((cat) => masonryRefCallbacks[cat], [masonryRefCallbacks]);
 
     // Recompute on layout change (columnWidth/cache/positioner changed, or tab switch)
     useEffect(() => {
@@ -1537,7 +1573,12 @@ const useMasonryGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels,
 
     const scrollToIndex = useCallback((index) => {
         const idx = index ?? selectedPostIndex;
-        const top = (topScrollByIndex.current[idx]||0) + (heightByIndex.current[idx]||0)/2 - rootDims.height/3;
+        // Viewport height comes from the scroll container itself — the
+        // wrapper div is ~0 px tall (see root measurement above), so
+        // rootDims.height would pin the target card to the top edge.
+        const container = masonryRefs.current[categoryRef.current]?._scrollingContainer;
+        const viewH = container?.clientHeight || rootDims.height || 0;
+        const top = (topScrollByIndex.current[idx]||0) + (heightByIndex.current[idx]||0)/2 - viewH/3;
         scrollTo(top);
     }, [selectedPostIndex, rootDims.height, scrollTo]);
 
@@ -1975,6 +2016,20 @@ const EMPTY_ICONS = [
 ];
 const EMPTY_KEYS = ['posts', 'comments', 'replies', 'history'];
 
+// ── ImageMeasurer accessors ────────────────────────────────────────────
+// Module-level so they're referentially stable across renders. They were
+// inline lambdas (`item=>item.image`, `item=>item.id`) — a fresh prop
+// identity on every Profile render, every 380 ms scroll tick included,
+// which defeated ImageMeasurer's PureComponent bail-out AND, now that its
+// output is memoized on the keyMapper's identity, would have made it
+// rebuild `itemsWithSizes` on every render. Same constants Feed and
+// FeedPersonal hoist.
+const GET_ITEM_IMAGE = (item) => item.image;
+const GET_ITEM_ID = (item) => item.id;
+// Initial value of the posts key-mapper ref, before the measurer has handed
+// over its first `itemsWithSizes` (see renderPostsMasonry in the component).
+const EMPTY_ITEMS = [];
+
 
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  5. MAIN COMPONENT                                                  ║
@@ -2297,15 +2352,27 @@ const Profile = ({ classes, settings, pathname, api }) => {
         return openCommentArtwork(c, api, profile.account, focus);
     }, [openCommentArtwork, api, profile.account]);
 
+    // `tabData.posts` is deliberately NOT a dependency of cellRendererPosts:
+    // the renderer reads its rows from parent.props.itemsWithSizes, and the
+    // forceUpdate effect on [activeData, category] above already re-runs it
+    // for appends and vote patches. Keying it on the list handed the mounted
+    // MasonryExtended a new cellRenderer on every list change for nothing.
+    // (The comments / replies / timeline renderers index their lists
+    // directly, so theirs stay.)
     const cellRendererPosts = useCallback((data) => {
-        const {index, key, parent, style, isScrolling} = data;
+        const {index, key, parent, style, isScrolling, top: placedTop} = data;
         if (!parent?.props?.itemsWithSizes?.[index|0]) return null;
         const {item, size} = parent.props.itemsWithSizes[index|0]; if (!size.height) return null;
         const colIdx = index%columnCount, rowIdx = (index-colIdx)/columnCount;
         const ih = Math.ceil(columnWidth*(size.height/size.width))||0; style.width = columnWidth;
-        trackElementPosition(index, +style.top, +style.height, rowIdx, colIdx);
+        // Where the cell sits: the Masonry's `top` param (under useTransform the
+        // style's `top` is 0 and the position is a transform). NaN on the
+        // measurement pass — ignored by the tracker, "not visible" below.
+        // `style.top` is the fallback for a Masonry build without the param.
+        const top = placedTop !== undefined ? +placedTop : +style.top;
+        trackElementPosition(index, top, +style.height, rowIdx, colIdx);
         const container = parent._scrollingContainer; const st = container?container.scrollTop:0;
-        const top = +style.top, bottom = top+(+style.height);
+        const bottom = top+(+style.height);
         const viewH = container?container.clientHeight:postListHeight, viewW = container?container.clientWidth:pageWidth;
         const threshold = viewH*(viewH/(viewW||1));
         const visible = threshold+bottom>st && top<st+viewH+threshold;
@@ -2313,7 +2380,7 @@ const Profile = ({ classes, settings, pathname, api }) => {
         return (<CellMeasurer cache={cellMeasurerCache} index={index} key={key} parent={parent}>
             <PaperCard onOpen={openPost} onCommentsClick={openPostComments} locales={locales} nsfw={settings._nsfw_enabled} data={item} renderer={settings._renderer} mode={settings._mode} onMenuClick={openCardMenu} api={api} voter={profile.loggedInUser} onVoteChange={onVoteChange} is_scrolling={isScrolling} selected={selectedPostIndex===index} size={size} visible={cellMeasurerCache.visible_ids[size.id]} column_width={columnWidth} image_height={ih} image_width={columnWidth} id={size.id} key={size.id} rowIndex={rowIdx} columnIndex={colIdx} style={style} />
         </CellMeasurer>);
-    }, [tabData.posts, columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
+    }, [columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
         selectedPostIndex, postListHeight, pageWidth, openPost, openPostComments,
         locales, settings, openCardMenu, api, profile.loggedInUser, onVoteChange]);
 
@@ -2412,11 +2479,14 @@ const Profile = ({ classes, settings, pathname, api }) => {
     const isEmpty = !tabData.tabLoading && !profile.isLoading && activeData.length === 0 && accountName;
     let emptyState = isEmpty ? (<div className={classes.emptyState} key={`empty-${es.key}`}><div className={classes.emptyStateIcon}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{es.icon}</svg></div><div className={classes.emptyStateTitle}>{es.title}</div><div className={classes.emptyStateSubtitle}>{es.sub}</div></div>) : null;
 
-    const scrollTop = grid.scrollTops[category];
-    // Memoized: this object is spread into MasonryExtended, which re-renders on
-    // every scroll frame (scrollTop). Its four inputs don't change on scroll, so
-    // a stable identity here keeps the spread from churning MasonryExtended's
-    // props each frame.
+    // The four Masonry instances are rendered UNCONTROLLED — no `scrollTop`
+    // prop (see the note in MasonryExtended): they track their own scroll
+    // events, and the hook's scrollTo writes the container directly. The
+    // `scrollTops` state above stays for the page chrome (ProfileTabs,
+    // ProfileMobileCard, the FAB), which still takes the raw numbers.
+    // Memoized: this object is spread into every MasonryExtended; its four
+    // inputs only change on a layout change, so the spread never churns the
+    // Masonry's props on a scroll tick.
     const masonryProps = useMemo(() => ({
         scrollingResetTimeInterval: grid.scrollingResetTimeInterval,
         height: grid.postListHeight,
@@ -2424,16 +2494,51 @@ const Profile = ({ classes, settings, pathname, api }) => {
         width: grid.pageWidth,
     }), [grid.scrollingResetTimeInterval, grid.postListHeight, grid.overscanByPixels, grid.pageWidth]);
 
+    // ── Masonry key-mappers, one per tab, created once ─────────────────
+    // All four were inline lambdas — a fresh `keyMapper` prop on every
+    // Profile render, which alone fails MasonryExtended's shallow prop
+    // compare. Each now reads its list through a ref refreshed during
+    // render, before the Masonry vnode is created, so it never goes stale.
+    // The keys are the ones the lambdas produced (size id, date, date,
+    // event id); only the never-hit fallbacks are now deterministic.
+    const postsItemsRef = useRef(EMPTY_ITEMS);
+    const commentsRef = useRef(tabData.comments);
+    const repliesRef = useRef(tabData.replies);
+    const timelineRef = useRef(tabData.timeline);
+    commentsRef.current = tabData.comments;
+    repliesRef.current = tabData.replies;
+    timelineRef.current = tabData.timeline;
+    const postsKeyMapper = useCallback((i) => { const e = postsItemsRef.current[i]; return e ? e.size.id : `missing_${i}`; }, []);
+    const commentsKeyMapper = useCallback((i) => { const c = commentsRef.current?.[i]; return c ? c.date : `missing_${i}`; }, []);
+    const repliesKeyMapper = useCallback((i) => { const r = repliesRef.current?.[i]; return r ? r.date : `missing_${i}`; }, []);
+    const timelineKeyMapper = useCallback((i) => { const ev = timelineRef.current?.[i]; return ev ? ev.id : `tl_${i}`; }, []);
+
+    // The posts tab's ImageMeasurer render-prop, memoized on what it forwards
+    // (it was an inline arrow, failing ImageMeasurer's PureComponent compare
+    // on every render). Everything it forwards only changes on a layout
+    // change, so it is stable across scroll ticks: a tick re-renders this
+    // page for its chrome, but neither the measurer nor the Masonry.
+    const { cellMeasurerCache: gridCache, cellPositioner: gridPositioner, setMasonryRef } = grid;
+    const renderPostsMasonry = useCallback((itemsWithSizes) => {
+        postsItemsRef.current = itemsWithSizes || EMPTY_ITEMS;
+        return (
+            <MasonryExtended key="masonry-profile-posts" {...masonryProps}
+                             cellCount={(itemsWithSizes||[]).length|0} itemsWithSizes={itemsWithSizes}
+                             keyMapper={postsKeyMapper} cellMeasurerCache={gridCache} cellPositioner={gridPositioner}
+                             cellRenderer={cellRendererPosts} ref={setMasonryRef(0)} />
+        );
+    }, [masonryProps, postsKeyMapper, gridCache, gridPositioner, cellRendererPosts, setMasonryRef]);
+
     let body = null;
     if (!isEmpty) {
         if (category === 0) body = (
-            <ImageMeasurer key="posts" className={classes.masonry} items={visiblePosts} image={item=>item.image} keyMapper={item=>item.id}>
-                {(itemsWithSizes) => (<MasonryExtended key="masonry-profile-posts" scrollTop={scrollTop} {...masonryProps} cellCount={(itemsWithSizes||[]).length|0} itemsWithSizes={itemsWithSizes} keyMapper={i=>(itemsWithSizes[i]||{size:{id:Math.random()}}).size.id} cellMeasurerCache={grid.cellMeasurerCache} cellPositioner={grid.cellPositioner} cellRenderer={cellRendererPosts} ref={grid.setMasonryRef(0)} />)}
+            <ImageMeasurer key="posts" className={classes.masonry} items={visiblePosts} image={GET_ITEM_IMAGE} keyMapper={GET_ITEM_ID}>
+                {renderPostsMasonry}
             </ImageMeasurer>
         );
-        else if (category === 1) body = (<div className={classes.masonry} key="comments"><MasonryExtended key="masonry-comments" scrollTop={scrollTop} {...masonryProps} cellCount={(tabData.comments||[]).length|0} items={tabData.comments} keyMapper={i=>(tabData.comments[i]||{date:Date.now()}).date} cellMeasurerCache={grid.cellMeasurerCache} cellPositioner={grid.cellPositioner} cellRenderer={cellRendererComments} ref={grid.setMasonryRef(1)} /></div>);
-        else if (category === 2) body = (<div className={classes.masonry} key="replies"><MasonryExtended key="masonry-replies" scrollTop={scrollTop} {...masonryProps} cellCount={(tabData.replies||[]).length|0} items={tabData.replies} keyMapper={i=>(tabData.replies[i]||{date:Date.now()}).date} cellMeasurerCache={grid.cellMeasurerCache} cellPositioner={grid.cellPositioner} cellRenderer={cellRendererReplies} ref={grid.setMasonryRef(2)} /></div>);
-        else body = (<div className={`${classes.masonry} ${classes.masonryTimeline}`} key="timeline"><MasonryExtended key="masonry-timeline" scrollTop={scrollTop} {...masonryProps} cellCount={(tabData.timeline||[]).length|0} items={tabData.timeline} keyMapper={i=>(tabData.timeline[i]||{id:`tl_${i}`}).id} cellMeasurerCache={grid.cellMeasurerCache} cellPositioner={grid.cellPositioner} cellRenderer={cellRendererTimeline} ref={grid.setMasonryRef(3)} /></div>);
+        else if (category === 1) body = (<div className={classes.masonry} key="comments"><MasonryExtended key="masonry-comments" {...masonryProps} cellCount={(tabData.comments||[]).length|0} items={tabData.comments} keyMapper={commentsKeyMapper} cellMeasurerCache={grid.cellMeasurerCache} cellPositioner={grid.cellPositioner} cellRenderer={cellRendererComments} ref={grid.setMasonryRef(1)} /></div>);
+        else if (category === 2) body = (<div className={classes.masonry} key="replies"><MasonryExtended key="masonry-replies" {...masonryProps} cellCount={(tabData.replies||[]).length|0} items={tabData.replies} keyMapper={repliesKeyMapper} cellMeasurerCache={grid.cellMeasurerCache} cellPositioner={grid.cellPositioner} cellRenderer={cellRendererReplies} ref={grid.setMasonryRef(2)} /></div>);
+        else body = (<div className={`${classes.masonry} ${classes.masonryTimeline}`} key="timeline"><MasonryExtended key="masonry-timeline" {...masonryProps} cellCount={(tabData.timeline||[]).length|0} items={tabData.timeline} keyMapper={timelineKeyMapper} cellMeasurerCache={grid.cellMeasurerCache} cellPositioner={grid.cellPositioner} cellRenderer={cellRendererTimeline} ref={grid.setMasonryRef(3)} /></div>);
     }
 
     // ── Sidebar/mobile props ───────────────────────────────────────────

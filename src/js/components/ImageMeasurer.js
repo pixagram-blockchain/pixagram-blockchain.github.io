@@ -22,6 +22,10 @@ const _EMPTY = [];
  *     frame produce a single `forceUpdate`, not one per image.
  *   • Pending-set deduplication — rapid props changes cannot fire
  *     duplicate measurement requests for the same ID.
+ *   • Referentially stable output — `itemsWithSizes` is rebuilt only
+ *     when `items` changes or a new measurement lands, so a parent
+ *     re-render (scroll tick, dialog state) hands the Masonry the SAME
+ *     array and its PureComponent bail-out actually holds.
  *
  * Props:
  *   items      — array of data objects (posts, etc.)
@@ -39,6 +43,17 @@ class ImageMeasurer extends React.PureComponent {
         this._cache   = new Map();   // id → { width, height, id }
         this._failed  = new Set();   // ids that permanently failed decode
         this._pending = new Set();   // ids currently in-flight
+
+        // ── Output memo ──────────────────────────────────────────────
+        // `_version` counts successful measurements. The last built
+        // output is reused verbatim while (items, keyMapper, _version)
+        // are unchanged — failures and in-flight ids never appear in the
+        // output, so they don't bump the version.
+        this._version    = 0;
+        this._outItems   = null;
+        this._outKeyMap  = null;
+        this._outVersion = -1;
+        this._out        = _EMPTY;
 
         // ── RAF coalescing ───────────────────────────────────────────
         this._rafId     = 0;
@@ -88,8 +103,6 @@ class ImageMeasurer extends React.PureComponent {
         const { items, image } = this.props;
         if (!items || items.length === 0) return;
 
-        let dispatched = false;
-
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
             const id   = this._keyOf(item);
@@ -105,7 +118,6 @@ class ImageMeasurer extends React.PureComponent {
             }
 
             this._pending.add(id);
-            dispatched = true;
 
             pngdby.get_new_img_obj(src)
                 .then((size) => {
@@ -117,26 +129,26 @@ class ImageMeasurer extends React.PureComponent {
                             ...size,
                             id,
                         });
+                        this._version++;
+                        this._scheduleUpdate();
                     } else {
+                        // A failed id is omitted from the output exactly as a
+                        // pending one was, so nothing the children see changes
+                        // — no render pass needed.
                         this._failed.add(id);
                     }
-                    this._scheduleUpdate();
                 })
                 .catch(() => {
                     this._pending.delete(id);
                     if (this._unmounted) return;
                     this._failed.add(id);
-                    this._scheduleUpdate();
                 });
         }
 
-        // If nothing new was dispatched but the cache already holds data
-        // (e.g. items reordered, or append where the new slice was all
-        // cached), we still need a render pass so children see the
-        // up-to-date `itemsWithSizes` array.
-        if (!dispatched && this._cache.size > 0) {
-            this._scheduleUpdate();
-        }
+        // No "nothing dispatched → schedule a render" fallback here: this
+        // runs from componentDidMount / componentDidUpdate, i.e. AFTER the
+        // render that already built the output for the current `items`.
+        // Scheduling another pass only re-rendered the same array.
     };
 
     // ── Output builder ───────────────────────────────────────────────
@@ -147,12 +159,19 @@ class ImageMeasurer extends React.PureComponent {
      * succeeded are included — failed/pending items are silently
      * omitted so downstream Masonry never receives incomplete entries.
      *
-     * Runs on every render; cost is O(n) with no allocations when the
-     * item list hasn't changed (returns the cached reference).
+     * Memoized on (items, keyMapper, _version): a render triggered by
+     * anything else returns the previous array by reference, with no
+     * allocation and no O(n) walk.
      */
     _buildOutput = () => {
-        const { items } = this.props;
+        const { items, keyMapper } = this.props;
         if (!items || items.length === 0) return _EMPTY;
+
+        if (items === this._outItems
+            && keyMapper === this._outKeyMap
+            && this._version === this._outVersion) {
+            return this._out;
+        }
 
         const out = [];
         for (let i = 0; i < items.length; i++) {
@@ -160,7 +179,12 @@ class ImageMeasurer extends React.PureComponent {
             const size = this._cache.get(this._keyOf(item));
             if (size) out.push({ item, size });
         }
-        return out.length > 0 ? out : _EMPTY;
+
+        this._outItems   = items;
+        this._outKeyMap  = keyMapper;
+        this._outVersion = this._version;
+        this._out        = out.length > 0 ? out : _EMPTY;
+        return this._out;
     };
 
     // ── Render ───────────────────────────────────────────────────────

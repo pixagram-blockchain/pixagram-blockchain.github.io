@@ -45,7 +45,7 @@ const styles = {
     root: {
         opacity: 0,
         '&.revealed': {
-            animation: '$fadeAvatarIn 240ms cubic-bezier(0.4, 0, 0.2, 1) both',
+            animation: '$fadeAvatarIn 60ms cubic-bezier(0.4, 0, 0.2, 1) both',
         },
     },
     // Same box MUI gives its built-in silhouette (classes.fallback).

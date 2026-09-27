@@ -340,7 +340,18 @@ const FEED_PAGE_SIZE = 20;      // posts per feed page
 const FEED_MAX_PAGES = 3;       // hard cap: 3 × 20 = 60 posts scanned
 const DISCOVER_TAGS_MAX = 24;   // random trending tags shown in "Trending"
 const DISCOVER_PORTALS_MAX = 6; // random trending portals (must stay < 8)
-const COMMUNITIES_FETCH_LIMIT = 100; // listCommunities page size
+
+// Chain ids of the official governance portals (the proposals row plus the
+// eight topical portals). They never appear among the random "Trending
+// portals" — they already have their own grid below — so the trending
+// sample draws from the fetched page MINUS this set.
+const GOVERNANCE_PORTAL_IDS = new Set([PROPOSALS_PORTAL, ...COMMUNITY_PORTALS].map(p => p.id));
+
+// listCommunities page size (sorted by rank): the trending sample plus one
+// slot per governance portal, so that even in the worst case — all nine
+// governance portals occupying the top nine ranks — the page still holds
+// DISCOVER_PORTALS_MAX non-governance portals to sample from.
+const COMMUNITIES_FETCH_LIMIT = DISCOVER_PORTALS_MAX + GOVERNANCE_PORTAL_IDS.size;
 
 // Which feed posts count as seen — the floor and the scrolled-through ranges
 // FeedPersonal records as the reader rests on cards — is read through
@@ -1494,10 +1505,21 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
         () => trendingTagIdx.map(i => tagSource[i]).filter(Boolean),
         [trendingTagIdx, tagSource]
     );
-    const trendingPortalIdx = useMemo(() => sampleIndices(communities.length, DISCOVER_PORTALS_MAX), [communities.length]);
+    // Portals: the fetched page minus the governance portals, which have
+    // their own grid below and never repeat here. The page is sized
+    // (COMMUNITIES_FETCH_LIMIT) so this source keeps at least
+    // DISCOVER_PORTALS_MAX entries even when every governance portal sits at
+    // the top of the ranking. The filter keeps order and is keyed on the
+    // chain name, which the enrichment pass never touches — so the source
+    // length (and with it the sampled indices) stays put across it.
+    const trendingPortalSource = useMemo(
+        () => communities.filter(c => c && !GOVERNANCE_PORTAL_IDS.has(c.name)),
+        [communities]
+    );
+    const trendingPortalIdx = useMemo(() => sampleIndices(trendingPortalSource.length, DISCOVER_PORTALS_MAX), [trendingPortalSource.length]);
     const discoverPortals = useMemo(
-        () => trendingPortalIdx.map(i => communities[i]).filter(Boolean),
-        [trendingPortalIdx, communities]
+        () => trendingPortalIdx.map(i => trendingPortalSource[i]).filter(Boolean),
+        [trendingPortalIdx, trendingPortalSource]
     );
 
     return (

@@ -23,6 +23,19 @@ import { t } from "../utils/text";
 // DESIGN_BIG_MAC_USD). Only reached when usePrices hands out 0.
 const DESIGN_PXS_USD = 6.22;
 
+// Style objects that used to be literals in the JSX — one allocation per
+// element per render, and a changed identity for anything comparing props.
+// Constants now; none of them depend on props.
+const TOOLTIP_ANCHOR_STYLE = { display: 'inline-flex' };
+const COUNT_STYLE = { cursor: 'pointer', marginRight: 4, marginLeft: -4 };
+const COMMENTS_DISABLED_STYLE = { opacity: 0.5 };
+const COMMENTS_ICON_STYLE = { color: 'inherit' };
+const COMMENTS_COUNT_STYLE = { cursor: 'pointer', marginRight: 4, marginLeft: -4 };
+const COMMENTS_COUNT_DISABLED_STYLE = { cursor: 'default', marginRight: 4, marginLeft: -4 };
+const ESTIMATE_MARK_STYLE = { opacity: 0.666, marginRight: 2 };
+const FIAT_MARK_STYLE = { opacity: 0.666 };
+const SUPRA_ICON_STYLE = { width: '22px', height: '22px', verticalAlign: 'middle', marginLeft: -6 };
+
 const styles = theme => ({
     voted: {
         color: '#eee',
@@ -289,7 +302,7 @@ function VoteButton({
     if (loggedOut) {
         return (
             <Tooltip title={t("words.log_in_or_create_an_account_to_2")} arrow>
-                <span style={{ display: 'inline-flex' }}>{button}</span>
+                <span style={TOOLTIP_ANCHOR_STYLE}>{button}</span>
             </Tooltip>
         );
     }
@@ -297,18 +310,20 @@ function VoteButton({
     return button;
 }
 
-// Number Component
-function Number({
-                    classes,
-                    count,
-                    isVoted,
-                    onClick,
-                }) {
+// Vote count next to a vote button. (This component used to be called
+// `Number`, which shadowed the global for the whole module — Payout below
+// had to avoid Number.isFinite because of it.)
+function VoteCount({
+                       classes,
+                       count,
+                       isVoted,
+                       onClick,
+                   }) {
     return (
         <span
             onClick={onClick}
             className={'monospace ' + (isVoted ? classes.voted : classes.vote)}
-            style={{ cursor: 'pointer', marginRight: 4, marginLeft: -4 }}
+            style={COUNT_STYLE}
         >
             {count}
         </span>
@@ -322,8 +337,7 @@ function Number({
 // tab through onCommentsClick. The dim/disabled look only survives for a
 // host that renders the card without a handler.
 function Comments({ classes, commentsNumber, onCommentsClick }) {
-    // `Number` is shadowed by the local component below, so coerce with a
-    // unary plus (the count may arrive as a string from older payloads).
+    // Unary plus: the count may arrive as a string from older payloads.
     const count = +commentsNumber || 0;
     if (count <= 0) return null;
 
@@ -331,23 +345,19 @@ function Comments({ classes, commentsNumber, onCommentsClick }) {
     const handleClick = disabled ? undefined : onCommentsClick;
     const colorClass = disabled ? classes.comments : classes.commentsActive;
     return (
-        <span className={colorClass} style={disabled ? { opacity: 0.5 } : undefined}>
+        <span className={colorClass} style={disabled ? COMMENTS_DISABLED_STYLE : undefined}>
             <IconButton
                 aria-label={t("words.comments")}
                 onClick={handleClick}
                 disabled={disabled}
-                style={{color: "inherit"}}
+                style={COMMENTS_ICON_STYLE}
             >
                 <CommentRounded />
             </IconButton>
             <span
                 onClick={handleClick}
                 className={'monospace'}
-                style={{
-                    cursor: disabled ? 'default' : 'pointer',
-                    marginRight: 4,
-                    marginLeft: -4
-                }}
+                style={disabled ? COMMENTS_COUNT_DISABLED_STYLE : COMMENTS_COUNT_STYLE}
             >
                 {count}
             </span>
@@ -363,9 +373,6 @@ function Payout({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPrice, c
     // `payout` already includes the estimated value of that vote (see
     // useVotePayoutEstimate in VoteButtons) and `isEstimate` marks the
     // headline with "≈" until the chain figure replaces it.
-    // NOTE: a local component named `Number` shadows the global in this module,
-    // so `Number.isFinite`/`Number(...)` are unavailable here — use the global
-    // `isFinite` and plain coercion-free guards instead.
     const rate = (isFinite(fiatRate) && fiatRate > 0) ? fiatRate : 1;
     const cur = currency || 'USD';
     // Same last-resort seed as usePrices / PricesAPI (design Big Mac price),
@@ -395,11 +402,11 @@ function Payout({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPrice, c
         >
             <span className={classes.payoutWrap}>
                 <span className={classes.payout + " monospace"}>
-                    {isEstimate && <span style={{ opacity: 0.666, marginRight: 2 }}>≈</span>}
-                    {payout.toFixed(1)} <PixaSupra style={{ width: '24px', height: '24px', verticalAlign: 'bottom' }} />
+                    {isEstimate && <span style={ESTIMATE_MARK_STYLE}>≈</span>}
+                    {payout.toFixed(1)} <PixaSupra style={SUPRA_ICON_STYLE} />
                 </span>
                 <span className={classes.payoutFiat + " monospace"}>
-                    <span style={{opacity: 0.666}}>≈</span> {fiatValue} {cur}
+                    <span style={FIAT_MARK_STYLE}>≈</span> {fiatValue} {cur}
                 </span>
             </span>
         </Tooltip>
@@ -466,7 +473,7 @@ function VoteButtons({
                 loggedOut={loggedOut}
                 voteNonce={voteNonce}
             />
-            <Number
+            <VoteCount
                 classes={classes}
                 count={upVotesNumber}
                 isVoted={voted > 0}
@@ -483,7 +490,7 @@ function VoteButtons({
                 loggedOut={loggedOut}
                 voteNonce={voteNonce}
             />
-            <Number
+            <VoteCount
                 classes={classes}
                 count={downVotesNumber}
                 isVoted={voted < 0}

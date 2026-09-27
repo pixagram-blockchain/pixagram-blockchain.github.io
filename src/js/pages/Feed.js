@@ -23,9 +23,8 @@ import Tab from "@material-ui/core/Tab";
 import Tabs from "@material-ui/core/Tabs";
 import PaperCardMenuOption from "../components/PaperCardMenuOption";
 import { ProfileHoverCardLayer } from "../components/ProfileHoverCard";
-import PhotoCameraRounded from "@material-ui/icons/PhotoCameraRounded";
+import CreateFab from "../components/CreateFab";
 import MonetizationOnRounded from "@material-ui/icons/MonetizationOnRounded";
-import Fab from "@material-ui/core/Fab";
 import Community from "../icons/Community";
 import NewBox from "../icons/NewBox";
 import Fire from "../icons/Fire";
@@ -211,6 +210,41 @@ const findNavigableIndex = (list, from, dir, nsfwEnabled, getPost) => {
 const LABEL_ROW = { display: "inline-flex", alignItems: "center" };
 const LABEL_TEXT = { marginLeft: 8 };
 const SORT_TAB_ICONS = [<NewBox />, <Fire />, <TrendingUp />, <MonetizationOnRounded />];
+
+// Initial value for the Masonry key-mapper ref, before ImageMeasurer has
+// handed over its first `itemsWithSizes` (see renderMasonry in the component).
+const EMPTY_ITEMS = [];
+
+// ── Page chrome, isolated from the feed render ─────────────────────────
+// The sort tabs used to be inlined in Feed's JSX with a fresh `style` object
+// each render. Feed re-renders on every scroll tick (useMasonryGrid's 500 ms
+// poll), so every tick re-rendered MUI's <Tabs>, whose indicator effect has
+// no dependency list — a pair of forced layouts (getBoundingClientRect) per
+// tick, right after the Masonry's DOM patch. This takes primitives / stable
+// references only and builds its style object inside, so a tick on which
+// `hidden` didn't flip costs it nothing at all. (The create FAB is the
+// shared <CreateFab>, built the same way — FeedPersonal renders it too.)
+const SortTabs = memo(function SortTabs({ className, hidden, value, isMobile, labels, onChange }) {
+    const style = useMemo(() => ({ transform: `translateY(${hidden ? -72 : 0}px)` }), [hidden]);
+    return (
+        <Tabs
+            style={style}
+            className={className}
+            value={value}
+            variant="fullWidth"
+            indicatorColor="primary"
+            textColor="primary"
+            onChange={onChange}
+            fullwidth={true}
+            data-tour="feed-tabs"
+        >
+            <Tab icon={isMobile ? SORT_TAB_ICONS[0] : undefined} label={isMobile ? undefined : labels[0]} />
+            <Tab icon={isMobile ? SORT_TAB_ICONS[1] : undefined} label={isMobile ? undefined : labels[1]} />
+            <Tab icon={isMobile ? SORT_TAB_ICONS[2] : undefined} label={isMobile ? undefined : labels[2]} />
+            <Tab icon={isMobile ? SORT_TAB_ICONS[3] : undefined} label={isMobile ? undefined : labels[3]} />
+        </Tabs>
+    );
+});
 
 const parseSortFromPathname = (pathname) => {
     const match = (pathname || '').match(/^\/(created|hot|trending|promoted)(?:\/|$)/);
@@ -1033,6 +1067,14 @@ const FEED_COLUMN_COUNT = (width) => {
     return 1;
 };
 
+// Scroll-driven chrome: the two flags this page reads off the scroll
+// position. The grid hook keeps the position in refs and re-renders the
+// page only when one of these flips (see the note in useMasonryGrid).
+const FEED_CHROME = (scrollTop, scrollY) => ({
+    hideTab: scrollY < 0 && scrollTop > 72,
+    hideFab: scrollY > 0 && scrollTop > 512,
+});
+
 const useFeedGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels, loadMoreThreshold, loadMorePosts, loadingMore }) => {
     const core = useMasonryGrid({
         windowWidth, windowHeight, isMobile, overscanByPixels,
@@ -1040,15 +1082,14 @@ const useFeedGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels, lo
         getColumnCount: FEED_COLUMN_COUNT,
         fallbackColumnWidth: 356,
         defaultHeight: 600,
-        scrollReloadDivisor: 2,
+        deriveChrome: FEED_CHROME,
     });
 
-    // Page chrome derived from the grid — Feed-specific, so it lives here
-    // rather than in the shared hook.
+    // Page layout derived from the viewport — Feed-specific, so it lives
+    // here rather than in the shared hook.
     const pageWidth = isMobile ? windowWidth - 32 : windowWidth - 284 - 28;
     const postListHeight = windowHeight - (isMobile ? 64 : 96);
-    const hideTab = core.scrollY < 0 && core.scrollTop > 72;
-    const hideFab = core.scrollY > 0 && core.scrollTop > 512;
+    const { hideTab, hideFab } = core.chrome;
 
     return { ...core, pageWidth, postListHeight, hideTab, hideFab };
 };
@@ -1497,6 +1538,7 @@ const Feed = ({ classes, settings, pathname, api }) => {
         <span style={LABEL_ROW}><TrendingUp /><span style={LABEL_TEXT}>{trendingLabel}</span></span>,
         <span style={LABEL_ROW}><MonetizationOnRounded /><span style={LABEL_TEXT}>{promotedLabel}</span></span>,
     ], [newerLabel, hottestLabel, trendingLabel, promotedLabel]);
+    const createLabel = t("words.create", { TUC: true });
 
     const {
         sorting, posts, loggedInUser, dataVersion,
@@ -1682,13 +1724,19 @@ const Feed = ({ classes, settings, pathname, api }) => {
     // which used to re-create this renderer — and hand MasonryExtended a new
     // cellRenderer prop — every 380 ms while scrolling. The fields below are
     // all referentially stable between layout changes.
+    //
+    // `posts` is deliberately NOT a dependency either: the renderer reads its
+    // rows from parent.props.itemsWithSizes, and the forceUpdate effect on
+    // [posts] above already re-runs it for appends and vote patches. Keying
+    // it on `posts` handed MasonryExtended a new cellRenderer on every list
+    // change for nothing.
     const {
         columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
         selectedPostIndex, postListHeight, pageWidth,
     } = grid;
     const { openPost, openPostComments } = postNav;
     const cellRenderer = useCallback((data) => {
-        const { index, key, parent, style, isScrolling } = data;
+        const { index, key, parent, style, isScrolling, top: placedTop } = data;
         if (!parent?.props?.itemsWithSizes?.[index | 0]) return null;
 
         const { item, size } = parent.props.itemsWithSizes[index | 0];
@@ -1699,7 +1747,13 @@ const Feed = ({ classes, settings, pathname, api }) => {
         const imageHeight = Math.ceil(columnWidth * (size.height / size.width)) || 0;
         style.width = columnWidth;
 
-        trackElementPosition(index, +style.top, +style.height, rowIdx, colIdx);
+        // Where the cell sits: the Masonry's `top` param (under useTransform
+        // the style's `top` is 0 and the position is a transform). NaN on the
+        // measurement pass, where the cell has no position yet — the tracker
+        // ignores that, and the band below reads it as not visible.
+        // `style.top` is the fallback for a Masonry build without the param.
+        const top = placedTop !== undefined ? +placedTop : +style.top;
+        trackElementPosition(index, top, +style.height, rowIdx, colIdx);
 
         // Visibility tracking — use the scroll container's actual viewport dimensions,
         // NOT rootDimensions (the root div has height≈0 because Masonry is position:absolute)
@@ -1707,7 +1761,7 @@ const Feed = ({ classes, settings, pathname, api }) => {
         const st = container ? container.scrollTop : 0;
         const viewH = container ? container.clientHeight : postListHeight;
         const viewW = container ? container.clientWidth : pageWidth;
-        const top = +style.top, bottom = top + (+style.height);
+        const bottom = top + (+style.height);
         const threshold = viewH * (viewH / (viewW || 1));
         const visible = threshold + bottom > st && top < st + viewH + threshold;
         cellMeasurerCache.visible_ids[size.id] = visible || (cellMeasurerCache.visible_ids[size.id] || false);
@@ -1741,29 +1795,63 @@ const Feed = ({ classes, settings, pathname, api }) => {
                 />
             </CellMeasurer>
         );
-    }, [posts, columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
+    }, [columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
         selectedPostIndex, postListHeight, pageWidth, openPost, openPostComments,
         locales, settings, openCardMenu, api, loggedInUser, onVoteChange]);
+
+    // ── Masonry render-prop ────────────────────────────────────────────
+    // Two things here used to be fresh closures on every Feed render:
+    //   • the Masonry `keyMapper` (`index => itemsWithSizes[index]…`), which
+    //     alone was enough to fail MasonryExtended's shallow prop compare;
+    //   • the ImageMeasurer render-prop itself, which fails ImageMeasurer's
+    //     PureComponent compare — so it re-rendered, rebuilt (now: reused) its
+    //     output, and re-rendered the Masonry — on every tick.
+    // The key-mapper reads the latest `itemsWithSizes` through a ref that the
+    // render-prop refreshes synchronously before the Masonry vnode is created,
+    // so it is created once and never goes stale. The render-prop is memoized
+    // on the grid fields it forwards — all of which only change on a layout
+    // change, so it is stable across scroll ticks and vote patches alike.
+    //
+    // No `scrollTop` prop: the Masonry is uncontrolled and tracks its own
+    // scroll events (see the note in MasonryExtended).
+    const itemsRef = useRef(EMPTY_ITEMS);
+    const masonryKeyMapper = useCallback((index) => itemsRef.current[index]?.size?.id, []);
+    // (overscanByPixels is the useWindowDimensions value already in scope —
+    // the grid hook passes it through unchanged.)
+    const { scrollingResetTimeInterval, cellPositioner, setMasonryElement } = grid;
+    const renderMasonry = useCallback((itemsWithSizes) => {
+        itemsRef.current = itemsWithSizes || EMPTY_ITEMS;
+        return (
+            <MasonryExtended
+                key="masonry-extended-feed"
+                scrollingResetTimeInterval={scrollingResetTimeInterval}
+                height={postListHeight}
+                cellCount={(itemsWithSizes || []).length | 0}
+                itemsWithSizes={itemsWithSizes}
+                keyMapper={masonryKeyMapper}
+                cellMeasurerCache={cellMeasurerCache}
+                cellPositioner={cellPositioner}
+                cellRenderer={cellRenderer}
+                overscanByPixels={overscanByPixels}
+                ref={setMasonryElement}
+                width={pageWidth}
+            />
+        );
+    }, [scrollingResetTimeInterval, postListHeight, masonryKeyMapper,
+        cellMeasurerCache, cellPositioner, cellRenderer, overscanByPixels,
+        setMasonryElement, pageWidth]);
 
     // ── Render ─────────────────────────────────────────────────────────
     return (
         <React.Fragment>
-            <Tabs
-                style={{ transform: `translateY(${grid.hideTab ? -72 : 0}px)` }}
+            <SortTabs
                 className={classes.mainTab}
+                hidden={grid.hideTab}
                 value={sorting}
-                variant="fullWidth"
-                indicatorColor="primary"
-                textColor="primary"
+                isMobile={isMobile}
+                labels={sortTabLabels}
                 onChange={handleSortingChangeWithScroll}
-                fullwidth={true}
-                data-tour="feed-tabs"
-            >
-                <Tab icon={isMobile ? SORT_TAB_ICONS[0] : undefined} label={isMobile ? undefined : sortTabLabels[0]} />
-                <Tab icon={isMobile ? SORT_TAB_ICONS[1] : undefined} label={isMobile ? undefined : sortTabLabels[1]} />
-                <Tab icon={isMobile ? SORT_TAB_ICONS[2] : undefined} label={isMobile ? undefined : sortTabLabels[2]} />
-                <Tab icon={isMobile ? SORT_TAB_ICONS[3] : undefined} label={isMobile ? undefined : sortTabLabels[3]} />
-            </Tabs>
+            />
 
             <div ref={grid.setRootElement}>
                 <ImageMeasurer
@@ -1772,38 +1860,16 @@ const Feed = ({ classes, settings, pathname, api }) => {
                     image={GET_ITEM_IMAGE}
                     keyMapper={GET_ITEM_ID}
                 >
-                    {(itemsWithSizes) => (
-                        <MasonryExtended
-                            key="masonry-extended-feed"
-                            scrollTop={grid.scrollTop}
-                            scrollingResetTimeInterval={grid.scrollingResetTimeInterval}
-                            height={grid.postListHeight}
-                            cellCount={(itemsWithSizes || []).length | 0}
-                            itemsWithSizes={itemsWithSizes}
-                            keyMapper={index => itemsWithSizes[index]?.size?.id}
-                            cellMeasurerCache={grid.cellMeasurerCache}
-                            cellPositioner={grid.cellPositioner}
-                            cellRenderer={cellRenderer}
-                            overscanByPixels={grid.overscanByPixels}
-                            ref={grid.setMasonryElement}
-                            width={grid.pageWidth}
-                        />
-                    )}
+                    {renderMasonry}
                 </ImageMeasurer>
             </div>
 
-            <div
-                onClick={openCreateDialog}
+            <CreateFab
                 className={classes.mainFab}
-                style={{ transform: grid.hideFab
-                        ? "translateY(calc(96px + env(safe-area-inset-bottom, 0px)))"
-                        : "translateY(-8px)" }}
-            >
-                <Fab variant="extended" size="large">
-                    <PhotoCameraRounded style={{ marginRight: 12 }} />
-                    <span>{t("words.create", {TUC: true})}</span>
-                </Fab>
-            </div>
+                hidden={grid.hideFab}
+                label={createLabel}
+                onClick={openCreateDialog}
+            />
 
             <PaperCardMenuOption xy={menuCardXY} data={menuCardData} onClose={closeCardMenu}
                                  viewer={loggedInUser} onEditPost={onEditPost} onDeletePost={onDeletePost} />

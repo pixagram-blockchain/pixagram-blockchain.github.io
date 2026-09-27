@@ -2,11 +2,8 @@ import { ready, hashBase58, toBytes } from '@pixagram/pixahash';
 
 import { default as decodeWEBP } from '@jsquash/webp/decode';
 import { default as decodePNG } from '@jsquash/png/decode';
-import { B64chromium } from 'chromium-base64';
+import { base64ToBytes, bytesToBase64 } from './b64';
 import { probeImageSync } from './image-probe';
-
-const _b64 = new B64chromium();
-const base64ToBytes = _b64.base64ToBytes.bind(_b64);
 
 // Warm up the WASM hasher during module load so the first hash doesn't wait on
 // instantiation. `ready()` is memoized, so awaiting this promise later is free.

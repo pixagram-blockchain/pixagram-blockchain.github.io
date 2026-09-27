@@ -7,10 +7,9 @@ import Card from '@material-ui/core/Card';
 import CardHeader from '@material-ui/core/CardHeader';
 import CardContent from '@material-ui/core/CardContent';
 import IconButton from '@material-ui/core/IconButton';
-import Tooltip from '@material-ui/core/Tooltip';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
 import Chip from '@material-ui/core/Chip';
-import useLiveTimeAgo from '../hooks/useLiveTimeAgo';
+import DateLabel from './DateLabel';
 import { HISTORY, COMMUNITY_TAG_REGEX, buildCommentFocusHash } from '../utils/constants';
 import { t, useLanguage } from '../utils/text';
 import * as actions from '../actions/utils';
@@ -282,15 +281,17 @@ function PaperCardReplyInner({
     const [downvoteLoading, setDownvoteLoading] = useState(false);
     const historyRef = useRef(HISTORY);
 
-    // Live relative date — re-renders the card exactly when the label is
-    // due to change (per-second under a minute old, per-minute under an
-    // hour, per-hour under a day, then daily); watcher released on unmount.
-    const liveTimeAgo = useLiveTimeAgo(data.date);
+    // The live relative date (and its full-date tooltip) is the shared
+    // <DateLabel> leaf in the subheader, so its per-second / per-minute
+    // ticks re-render that span only — never this card.
 
-    // Memoized: the live-date ticks re-render this component up to once a
-    // second while the comment is fresh — the WASM render+sanitize pass
-    // must run once per body, not once per tick.
-    const bodyHTML = useMemo(() => renderCommentBody(api, data.body), [api, data.body]);
+    // Both sanitize passes, memoized together. The comment-tier render
+    // (renderCommentBody) was already pinned to the body, but the POST-tier
+    // safeHTML() that wraps it sat in the JSX, so that WASM pass ran on
+    // every render of every card — every scroll-driven Masonry render of
+    // the comments and replies tabs included. It now runs once per body.
+    // The output is the same string it always was.
+    const bodyHTML = useMemo(() => safeHTML(renderCommentBody(api, data.body)), [api, data.body]);
 
 
     const openAuthor = useCallback((username) => {
@@ -440,13 +441,18 @@ function PaperCardReplyInner({
 
     const typeLabel = rootTypeLabel(data);
 
-    const move_style = is_scrolling ? { pointerEvents: 'none', touchActions: 'pan-y' } : {};
+    // While the list is scrolling the card ignores the pointer, so a fling
+    // doesn't light up hover states under the finger. (`touchAction` — it
+    // was spelled `touchActions`, a property no browser knows.) The style
+    // object is only rebuilt while scrolling; at rest the Masonry's own
+    // object is passed straight through.
+    const cardStyle = is_scrolling ? { ...style, pointerEvents: 'none', touchAction: 'pan-y' } : style;
 
     return (
         <Card
             key={id}
             className={classes.card + (selected ? ' Mui-selected' : '')}
-            style={{ ...style, ...move_style }}
+            style={cardStyle}
         >
             <CardHeader
                 className={classes.cardHeader}
@@ -478,16 +484,7 @@ function PaperCardReplyInner({
                 }
                 subheader={
                     <span>
-                        <Tooltip
-                            arrow
-                            title={new Date(data.date || Date.now()).toLocaleDateString(locales, {
-                                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: 'numeric',
-                            })}
-                        >
-                            <span className={classes.subheaderDate}>
-                                {liveTimeAgo}
-                            </span>
-                        </Tooltip>
+                        <DateLabel date={data.date} locales={locales} className={classes.subheaderDate} />
                         <span className={classes.subheaderBy}> {t('words.by')} </span>
                         {/* Rich author hover card instead of the old raw-@username
                             Tooltip. The anchor adds no element: it attaches its
@@ -513,7 +510,7 @@ function PaperCardReplyInner({
                 }
             />
             <CardContent>
-                <div dangerouslySetInnerHTML={{ __html: safeHTML(bodyHTML) }} />
+                <div dangerouslySetInnerHTML={{ __html: bodyHTML }} />
             </CardContent>
             <PaperCardActions
                 api={api}
@@ -536,6 +533,42 @@ function PaperCardReplyInner({
     );
 }
 
-const PaperCardReply = withStyles(styles)(PaperCardReplyInner);
+// Same shallow style compare PaperCard and PaperCardBlog use: the Masonry
+// hands every cell a fresh style object per render, so identity would
+// re-render on each scroll tick, while ignoring it is the opposite bug.
+function shallowEqual(a, b) {
+    if (a === b) return true;
+    if (typeof a !== 'object' || typeof b !== 'object' || !a || !b) return false;
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) return false;
+    for (let i = 0; i < keysA.length; i++) {
+        const k = keysA[i];
+        if (a[k] !== b[k]) return false;
+    }
+    return true;
+}
+
+// This card was the only one of the four with no memo at all: every render
+// of the Masonry above it — each scroll tick, each scroll-end settle —
+// re-ran every visible comment card in full. Now it re-renders only when
+// something it shows or handles actually changes. The handlers are
+// compared by identity on purpose (Profile hands down stable useCallbacks),
+// so a handler swap can never leave a card holding a stale one.
+// `renderer` is received but never read, so it is not compared.
+const PaperCardReply = memo(withStyles(styles)(PaperCardReplyInner), (prev, next) =>
+    prev.data === next.data &&
+    prev.id === next.id &&
+    prev.locales === next.locales &&
+    prev.voter === next.voter &&
+    prev.api === next.api &&
+    prev.selected === next.selected &&
+    prev.visible === next.visible &&
+    prev.is_scrolling === next.is_scrolling &&
+    prev.column_width === next.column_width &&
+    prev.onOpen === next.onOpen &&
+    prev.onMenuClick === next.onMenuClick &&
+    shallowEqual(prev.style, next.style)
+);
 
 export default PaperCardReply;

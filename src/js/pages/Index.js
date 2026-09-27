@@ -1745,7 +1745,7 @@ const ToolbarMenuButton = React.memo(
                     data-tour="nav-menu-button"
                 >
                     {showImage ? (
-                        <Avatar src={avatar} imgProps={imgProps} className={"pixelated " + classes.toolbarMenuAvatar}>
+                        <Avatar src={avatar} imgProps={imgProps} className={classes.toolbarMenuAvatar}>
                             <MenuIcon />
                         </Avatar>
                     ) : <MenuIcon />}
@@ -2212,7 +2212,7 @@ const styles = (theme) => {
         toolbarMenu: {
             display: "none",
             [theme.breakpoints.down("sm")]: {
-                left: 8, top: 8, position: "absolute", display: "inherit",
+                left: 6, top: 6, position: "absolute", display: "inherit",
             },
         },
         // The profile image standing in for the hamburger (compact, logged
@@ -2220,7 +2220,7 @@ const styles = (theme) => {
         // the hamburger's 48px footprint and position. Rounded square like
         // every other avatar tile of the app.
         toolbarMenuAvatar: {
-            width: 32, height: 32, borderRadius: 10,
+            width: 40, height: 40, borderRadius: 12,
             // MUI's image-failed fallback (children = the hamburger) would
             // sit in a grey box; make that state read as the plain icon.
             "&.MuiAvatar-colorDefault": { backgroundColor: "transparent", color: "inherit" },
@@ -2349,7 +2349,7 @@ const styles = (theme) => {
             color: "#ccc",
             "&:focus": { outline: "none" },
             "&::placeholder": { color: "#666" },
-            [theme.breakpoints.down("sm")]: { lineHeight: "32px", fontSize: 14, height: 32 },
+            [theme.breakpoints.down("sm")]: { lineHeight: "32px", fontSize: 14, height: 40 },
         },
         content: {
             position: "absolute",

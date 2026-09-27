@@ -9,13 +9,12 @@ import { CellMeasurerCache, createMasonryCellPositioner } from "@pixagram/virtua
 // (Profile keeps its multi-tab variant: it juggles three masonry refs and
 // per-tab caches — a genuinely different shape, not drift.)
 //
-// Page-specific layout numbers (pageWidth, postListHeight, hideTab /
-// hideFab / shouldCollapseMobileCard, paddingX, viewWidth) stay in the
-// pages: they're page chrome, not grid mechanics. Pages spread them next
-// to this hook's return:
+// Page-specific layout numbers (pageWidth, postListHeight, paddingX,
+// viewWidth) stay in the pages: they're page chrome, not grid mechanics.
+// Pages spread them next to this hook's return:
 //
-//     const core = useMasonryGrid({ ... });
-//     const grid = { ...core, pageWidth, postListHeight, hideFab };
+//     const core = useMasonryGrid({ ..., deriveChrome: FEED_CHROME });
+//     const grid = { ...core, pageWidth, postListHeight, ...core.chrome };
 //
 // Differences captured as options:
 //   getColumnCount      Feed: width breakpoints → 1..4. Others: fixed 1.
@@ -26,15 +25,46 @@ import { CellMeasurerCache, createMasonryCellPositioner } from "@pixagram/virtua
 //   defaultHeight       measurer default (600, Community: 400).
 //   visibleIdsInit      Feed/FP used {}, Community used [] — kept per page
 //                       so existing cellRenderer indexing is untouched.
-//   scrollReloadDivisor Feed/Community reset the scroll-accumulator at
-//                       overscan/2, FeedPersonal at overscan/1.
+//   deriveChrome        (scrollTop, scrollY) => the page's scroll-driven
+//                       chrome flags — see "Scroll tracking" below.
 //   loadMorePosts/…     infinite scroll is optional (Community: none).
+//
+// ── Scroll position is NOT React state ─────────────────────────────────
+// This hook used to keep scrollTop / scrollY in state and set both on
+// every 500 ms poll tick that moved. Nothing consumed the raw numbers
+// except a handful of booleans (hide the tab bar past 72 px scrolling
+// down, hide the FAB past 512 px scrolling up …), yet each tick
+// re-rendered the whole page: MUI's Tabs (whose indicator effect forces a
+// layout), every dialog kept mounted, the ImageMeasurer and the Masonry —
+// which, handed the polled value as a controlled `scrollTop` prop, then
+// rendered a window up to a tick behind the real scroll and scheduled a
+// reset render after it. The live position now lives in refs; the page
+// hands in `deriveChrome`, a pure function of (scrollTop, scrollY) that
+// returns the flags it needs, and the only state here is that object —
+// replaced when a flag flips, kept by identity otherwise. A page that
+// still needs the raw numbers (Community, whose tab bar and header take
+// them) returns them from deriveChrome and gets the previous behaviour.
+// The Masonry is rendered uncontrolled (no scrollTop prop): it tracks its
+// own scroll events, and scrollTo below writes the container directly.
 
 export const GUTTER_SIZE = 16;
 export const SCROLL_INTERVAL_MS = 500;
 
 const defaultGetColumnWidth = ({ rootWidth, columnCount, gutter }) =>
     Math.floor((rootWidth - (columnCount + 1) * gutter) / columnCount);
+
+const NO_CHROME = Object.freeze({});
+const defaultDeriveChrome = () => NO_CHROME;
+
+// Shallow key/value compare of two chrome objects.
+const sameChrome = (a, b) => {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    const ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    for (let i = 0; i < ka.length; i++) if (a[ka[i]] !== b[ka[i]]) return false;
+    return true;
+};
 
 const useMasonryGrid = ({
                             // viewport (from useWindowDimensions)
@@ -51,26 +81,36 @@ const useMasonryGrid = ({
                             defaultHeight = 600,
                             minHeight = 144,
                             visibleIdsInit = () => ({}),
+                            // scroll-driven page chrome (see the header note)
+                            deriveChrome = defaultDeriveChrome,
                             // infinite scroll (all three optional — omit to disable)
                             loadMorePosts = null,
                             loadingMore = false,
                             loadMoreThreshold = 2048,
-                            scrollReloadDivisor = 2,
                         }) => {
     const masonryRef = useRef(null);
     const rootRef = useRef(null);
 
-    const [scrollTop, setScrollTop] = useState(0);
-    const [scrollY, setScrollY] = useState(0);
     const [rootDimensions, setRootDimensions] = useState({ width: 0, height: 0 });
     const [selectedPostIndex, setSelectedPostIndex] = useState(0);
 
+    // Live scroll position — refs, never state (see the header note).
     const scrollTopRef = useRef(0);
     const scrollYRef = useRef(0);
     const topScrollByIndex = useRef([]);
     const heightByIndex = useRef([]);
     const xyByIndex = useRef([]);
-    const lastScrollCheckHeight = useRef(0);
+
+    // The page's scroll-driven flags: the one piece of scroll-derived state.
+    // deriveChrome is read through a ref so the poll never resubscribes when
+    // a page passes an inline function.
+    const deriveChromeRef = useRef(deriveChrome);
+    deriveChromeRef.current = deriveChrome;
+    const [chrome, setChrome] = useState(() => deriveChrome(0, 0));
+    const applyChrome = useCallback((top, y) => {
+        const next = deriveChromeRef.current(top, y);
+        setChrome(prev => (sameChrome(prev, next) ? prev : next));
+    }, []);
 
     // ── Column layout ──────────────────────────────────────────────────
     const columnCount = useMemo(
@@ -207,9 +247,9 @@ const useMasonryGrid = ({
             const currentST = container.scrollTop;
             const yDiff = currentST - prevST;
 
-            lastScrollCheckHeight.current += yDiff;
-            const scrollReload =
-                Math.abs(lastScrollCheckHeight.current) > (overscanByPixels / scrollReloadDivisor);
+            // Direction accumulator: drifts negative while scrolling down,
+            // positive while scrolling up, clamped — what the chrome flags
+            // read for "hide on the way down, show on the way up".
             const newY = Math.min(Math.max(-64, prevSY - yDiff), 64);
 
             // Infinite scroll detection (only when the page wired a loader).
@@ -236,23 +276,26 @@ const useMasonryGrid = ({
             if (prevST !== currentST || prevSY !== newY) {
                 scrollTopRef.current = currentST;
                 scrollYRef.current = newY;
-                setScrollTop(currentST);
-                setScrollY(newY);
-                if (scrollReload) lastScrollCheckHeight.current = 0;
+                applyChrome(currentST, newY);
             }
         }, SCROLL_INTERVAL_MS);
         return () => clearInterval(interval);
-    }, [overscanByPixels, loadMoreThreshold, scrollReloadDivisor]);
+    }, [loadMoreThreshold, applyChrome]);
 
     // ── Scroll control ─────────────────────────────────────────────────
+    // Writes the container; the Masonry (uncontrolled) picks the new offset
+    // up from the scroll event that follows. The forceUpdate covers the case
+    // where the write lands inside the current cell range — the event then
+    // changes nothing, and a reset of the caches (the usual reason to scroll
+    // to 0) still needs a render.
     const scrollTo = useCallback((top) => {
         const masonry = masonryRef.current;
         if (!masonry?._scrollingContainer) return;
         masonry._scrollingContainer.scrollTop = top;
         scrollTopRef.current = top;
-        setScrollTop(top);
+        applyChrome(top, scrollYRef.current);
         masonry.forceUpdate();
-    }, []);
+    }, [applyChrome]);
 
     const scrollToIndex = useCallback((index) => {
         const idx = index ?? selectedPostIndex;
@@ -342,7 +385,7 @@ const useMasonryGrid = ({
         masonryRef, setMasonryElement, setRootElement,
         cellMeasurerCache, cellPositioner, columnWidth, columnCount,
         scrollingResetTimeInterval: SCROLL_INTERVAL_MS,
-        scrollTop, scrollY, scrollTo, scrollToIndex,
+        chrome, scrollTo, scrollToIndex,
         getScrollTop, restoreScrollTop,
         rootDimensions, overscanByPixels,
         selectedPostIndex, setSelectedPostIndex, trackElementPosition,

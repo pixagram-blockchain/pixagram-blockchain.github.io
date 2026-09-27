@@ -2439,6 +2439,13 @@ function NewPost(props) {
         return validation.valid && base64;
     }, [title, description, tags, base64]);
 
+    // Whether the dialog holds an image the user would lose by closing it:
+    // a picture picked in the upload zone (it stays in the draft on the
+    // "Create image" tab too), one being converted or generated right now,
+    // or a conversion result (every step past "Create" shows one). Closing
+    // only asks "Are you sure?" when this is true — see handleRequestClose.
+    const hasImage = currentStep > 0 || !!inputFile || !!isGenerating;
+
     // ========================================================================
     // EFFECTS
     // ========================================================================
@@ -3316,6 +3323,19 @@ function NewPost(props) {
         window.open(url, "_blank", "noopener,noreferrer");
     }, []);
 
+    // Close the dialog: the "Close" button, a click on the backdrop and
+    // Escape all land here. "Are you sure?" only guards an image — with one
+    // in the dialog it asks first (its "Close" runs handleCloseConfirmOk);
+    // with none there is nothing to lose, so the dialog closes right away.
+    const handleRequestClose = useCallback(() => {
+        if (hasImage) {
+            dispatch({ type: actionTypes.SET_FIELD, field: 'closeConfirmOpen', value: true });
+            return;
+        }
+        resetProps();
+        onClose();
+    }, [hasImage, resetProps, onClose]);
+
     // Handle back/cancel
     const handleBackOrCancel = useCallback((force = false) => {
         if (currentStep === 0) {
@@ -3323,7 +3343,7 @@ function NewPost(props) {
                 resetProps();
                 onClose();
             } else {
-                dispatch({ type: actionTypes.SET_FIELD, field: 'closeConfirmOpen', value: true });
+                handleRequestClose();
             }
         } else if (currentStep === 1) {
             // Going back from Adjust: drop the conversion result but keep the
@@ -3334,7 +3354,7 @@ function NewPost(props) {
             // Going back from step 2 to step 1 - use GO_TO_STEP to trigger canvas re-render
             dispatch({ type: actionTypes.GO_TO_STEP, step: currentStep - 1 });
         }
-    }, [currentStep, resetProps, resetUploadState, onClose]);
+    }, [currentStep, resetProps, resetUploadState, onClose, handleRequestClose]);
 
     // Publish the post. There is no confirmation step — clicking "Publish"
     // goes straight to broadcasting (the button shows a spinner while it's in
@@ -3734,7 +3754,7 @@ function NewPost(props) {
                 maxWidth={false}
                 fullWidth={false}
                 disablePortal={false}
-                onClose={() => dispatch({ type: actionTypes.SET_FIELD, field: 'closeConfirmOpen', value: true })}
+                onClose={handleRequestClose}
                 keepMounted={false}
             >
                 <DialogContent style={{ position: "relative" }}>

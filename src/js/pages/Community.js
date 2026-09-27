@@ -689,6 +689,18 @@ const COMMUNITY_COLUMN_WIDTH = ({ rootWidth, isMobile, gutter }) =>
 
 const COMMUNITY_VISIBLE_IDS_INIT = () => [];
 
+// Scroll-driven chrome. Unlike the feeds, this page still hands the RAW
+// scroll numbers to SortingTabs and CommunityHeader (they animate on them),
+// so they are part of the chrome object and the page keeps re-rendering per
+// scroll tick exactly as before. Converting those two components to take
+// booleans (as Feed's SortTabs does) is what would end that — the shared
+// hook is already built for it.
+const COMMUNITY_CHROME = (scrollTop, scrollY) => ({
+    scrollTop,
+    scrollY,
+    shouldCollapseMobileCard: scrollY < 0 && scrollTop >= 72,
+});
+
 const useCommunityGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels }) => {
     const core = useMasonryGrid({
         windowWidth, windowHeight, isMobile, overscanByPixels,
@@ -696,15 +708,15 @@ const useCommunityGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixel
         fallbackColumnWidth: 800,
         defaultHeight: 400,
         visibleIdsInit: COMMUNITY_VISIBLE_IDS_INIT,
-        scrollReloadDivisor: 2,
+        deriveChrome: COMMUNITY_CHROME,
     });
 
     // Page chrome — Community-specific, derived from the shared core.
     const pageWidth = isMobile ? windowWidth : windowWidth - 396 - 300;
     const postListHeight = windowHeight - (isMobile ? 80 : 96);
-    const shouldCollapseMobileCard = core.scrollY < 0 && core.scrollTop >= 72;
+    const { scrollTop, scrollY, shouldCollapseMobileCard } = core.chrome;
 
-    return { ...core, pageWidth, postListHeight, shouldCollapseMobileCard };
+    return { ...core, pageWidth, postListHeight, scrollTop, scrollY, shouldCollapseMobileCard };
 };
 
 // ── usePostNavigation ──────────────────────────────────────────────────
@@ -1893,8 +1905,17 @@ const Community = ({ classes, settings, pathname, api }) => {
         selectedPostIndex, masonryRef, rootDimensions,
     } = grid;
     const { openPost, openPostComments } = postNav;
+
+    // The Masonry `keyMapper` (`index => posts[index]?.id`) was an inline
+    // lambda — a fresh prop on every Community render, which alone fails
+    // MasonryExtended's shallow prop compare. It now reads the list through a
+    // ref refreshed during render (before the Masonry vnode is created), so
+    // it is created once and never goes stale.
+    const postsForKeysRef = useRef(posts);
+    postsForKeysRef.current = posts;
+    const masonryKeyMapper = useCallback((index) => postsForKeysRef.current?.[index]?.id, []);
     const cellRenderer = useCallback((data) => {
-        const { index, key, parent, style, isScrolling } = data;
+        const { index, key, parent, style, isScrolling, top: placedTop } = data;
         const item = posts[index | 0];
         if (!item) return null;
 
@@ -1902,10 +1923,15 @@ const Community = ({ classes, settings, pathname, api }) => {
         const rowIndex = (index - columnIndex) / columnCount;
         style.width = columnWidth;
 
-        trackElementPosition(index, +style.top, +style.height, rowIndex, columnIndex);
+        // Where the cell sits: the Masonry's `top` param (under useTransform
+        // the style's `top` is 0 and the position is a transform). NaN on the
+        // measurement pass — ignored by the tracker, "not visible" below.
+        // `style.top` is the fallback for a Masonry build without the param.
+        const top = placedTop !== undefined ? +placedTop : +style.top;
+        trackElementPosition(index, top, +style.height, rowIndex, columnIndex);
 
         const st = masonryRef.current?._scrollingContainer?.scrollTop || 0;
-        const top = +style.top, bottom = top + (+style.height);
+        const bottom = top + (+style.height);
         const threshold = rootDimensions.height * (rootDimensions.height / rootDimensions.width);
         const visible = threshold + bottom > st && top < st + rootDimensions.height + threshold;
         cellMeasurerCache.visible_ids[item.id] = visible || (cellMeasurerCache.visible_ids[item.id] || false);
@@ -1984,10 +2010,9 @@ const Community = ({ classes, settings, pathname, api }) => {
                 <div className={classes.masonry} key="posts">
                     <MasonryExtended
                         key="masonry-extended-blog-posts"
-                        scrollTop={grid.scrollTop}
                         scrollingResetTimeInterval={grid.scrollingResetTimeInterval}
                         cellCount={(posts || []).length | 0} items={posts}
-                        keyMapper={index => posts[index]?.id}
+                        keyMapper={masonryKeyMapper}
                         cellMeasurerCache={grid.cellMeasurerCache}
                         cellPositioner={grid.cellPositioner}
                         cellRenderer={cellRenderer}

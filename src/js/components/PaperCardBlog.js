@@ -7,12 +7,11 @@ import Card from '@material-ui/core/Card';
 import CardHeader from '@material-ui/core/CardHeader';
 import CardContent from '@material-ui/core/CardContent';
 import IconButton from '@material-ui/core/IconButton';
-import Tooltip from '@material-ui/core/Tooltip';
 import Typography from '@material-ui/core/Typography';
 import Chip from '@material-ui/core/Chip';
 import ButtonBase from '@material-ui/core/ButtonBase';
 import MoreVert from '@material-ui/icons/MoreVert';
-import useLiveTimeAgo from '../hooks/useLiveTimeAgo';
+import DateLabel from './DateLabel';
 import usePostPortal from '../hooks/usePostPortal';
 import { HISTORY } from '../utils/constants';
 import * as actions from '../actions/utils';
@@ -25,8 +24,19 @@ import FadeAvatar from './FadeAvatar';
 import { t, useLanguage } from "../utils/text";
 
 // Stable empty list for posts without tags — a fresh [] per render would
-// re-run the header's tag memo on every live-date tick.
+// re-run the header's tag memo on every render.
 const EMPTY_TAGS = [];
+
+// The "#tag" chips over the cover. Their two classes (`tags`, `tag` below)
+// are `display: none`, so the chips were being built — one MUI Chip, i.e. a
+// ButtonBase with its ripple, per tag, TWICE per card (inline cover + side
+// cover) — for nothing to show. They are not rendered at all until this is
+// flipped back on; the JSX and the classes are kept intact for that day.
+const SHOW_COVER_TAGS = false;
+
+// The actions bar's style object — a constant, not a literal in the JSX,
+// so PaperCardActions isn't handed a fresh `style` on every render.
+const ACTIONS_STYLE = { padding: '0px 16px 0px 4px', marginTop: 'auto' };
 
 const styles = theme => ({
     card: {
@@ -340,10 +350,9 @@ function PaperCardBlog({
     // Behind memo(withStyles(...)(PaperCardBlog)) — a language swap changes no
     // prop, so without this the reading-time line keeps its old wording.
     useLanguage();
-    // Live relative date — re-renders the card exactly when the label is
-    // due to change (per-second under a minute old, per-minute under an
-    // hour, per-hour under a day, then daily); watcher released on unmount.
-    const liveTimeAgo = useLiveTimeAgo(data.date, { labels: 'narrow' });
+    // The live relative date (and its full-date tooltip) is the shared
+    // <DateLabel> leaf in the subheader, so its per-second / per-minute
+    // ticks re-render that span only — never this card.
     // Detect initial vote state from active_votes (reactive to external changes)
     const initialVoted = useMemo(() => {
         if (!voter || !Array.isArray(data.active_votes)) return 0;
@@ -521,9 +530,8 @@ function PaperCardBlog({
         [postPortal, tags]
     );
     const authorLabel = (typeof author.name === 'string' && author.name.trim()) || author.username || '';
-    // Memoized: the live-date ticks re-render this component up to once a
-    // second while the post is fresh, and stripping tags out of the whole
-    // content string is the one per-render cost worth pinning down.
+    // Memoized: stripping tags out of the whole content string is the one
+    // per-render cost worth pinning down (vote patches re-render the card).
     const excerpt = useMemo(
         () => data.excerpt || (data.content ? data.content.replace(/<[^>]*>/g, '').substring(0, 200) + '...' : ''),
         [data.excerpt, data.content]
@@ -539,7 +547,7 @@ function PaperCardBlog({
                 decoding="async"
             />
             <div className={classes.cardImageElements}>
-                {tags.length > 0 && (
+                {SHOW_COVER_TAGS && tags.length > 0 && (
                     <div className={classes.tags}>
                         {tags.map((tag, index) => (
                             <Chip
@@ -592,16 +600,7 @@ function PaperCardBlog({
                                ellipsized line; the reading time keeps the right edge. */
                             <>
                                 <span className={classes.subheaderLine}>
-                                    <Tooltip
-                                        arrow
-                                        title={new Date(data.date || Date.now()).toLocaleDateString(locales, {
-                                            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: 'numeric',
-                                        })}
-                                    >
-                                        <span className={classes.subheaderDate}>
-                                            {liveTimeAgo}
-                                        </span>
-                                    </Tooltip>
+                                    <DateLabel date={data.date} locales={locales} className={classes.subheaderDate} narrow />
                                     <span className={classes.subheaderBy}> {t('words.by')} </span>
                                     {/* Rich author hover card instead of the old raw-@username
                                         Tooltip. The anchor adds no element: it attaches its
@@ -688,10 +687,7 @@ function PaperCardBlog({
                         payout={payout}
                         data={data}
                         voter={voter}
-                        style={{
-                            padding: '0px 16px 0px 4px',
-                            marginTop: 'auto',
-                        }}
+                        style={ACTIONS_STYLE}
                     />
                 </div>
 
