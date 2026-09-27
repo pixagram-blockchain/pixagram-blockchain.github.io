@@ -74,14 +74,48 @@ const useWindowDimensions = () => {
     }, []);
 
     const isMobile = dims.width <= 960;
-    const overscanByPixels = dims.height * (dims.height / dims.width) * 8;
-    const loadMoreThreshold = dims.height * (dims.height / dims.width) * 4;
+
+    // ── Look-ahead windows ─────────────────────────────────────────────
+    // All three distances are multiples of one unit: the viewport height
+    // scaled by its own aspect ratio (h × h/w). That keeps them measured in
+    // CARDS rather than pixels — a phone shows one tall full-width card per
+    // screen, a four-column desktop several short rows, and h²/w grows
+    // exactly where the cards are taller. From the outside in:
+    //
+    //   overscanByPixels   8×  cells are mounted (measured, placed) this far
+    //                          beyond the viewport on either side — the
+    //                          Masonry's own render window.
+    //   artworkAheadPx     4×  a mounted card renders its artwork once it is
+    //                          within this distance of the viewport — the
+    //                          `visible` band applied by the pages' cell
+    //                          renderers. Used to be 1× in Feed / Profile,
+    //                          2× in FeedPersonal and ≈0 in Community (its
+    //                          band read a 0-height root), so cards were
+    //                          placed ~5 screens ahead but stayed blank until
+    //                          under a screen away — artwork popped in late
+    //                          while scrolling. Kept at half the mount window
+    //                          so a card is always measured before it draws.
+    //   loadMoreThreshold  6×  the next page is fetched once LESS than this
+    //                          remains below the viewport (was 4× — equal to
+    //                          the new artwork band, so the fetch would only
+    //                          have started once the band reached the tail
+    //                          of the loaded list). Half a band further out,
+    //                          the page is already in flight when the band
+    //                          gets there.
+    //
+    //   1920×1080: unit ≈ 608 px → mount 4 860 · artwork 2 430 · fetch 3 645
+    //    390×844:  unit ≈ 1 827 px → mount 14 610 · artwork 7 310 · fetch 10 960
+    const lookAheadUnit = dims.height * (dims.height / dims.width);
+    const overscanByPixels = lookAheadUnit * 8;
+    const artworkAheadPx = lookAheadUnit * 4;
+    const loadMoreThreshold = lookAheadUnit * 6;
 
     return {
         windowWidth: dims.width,
         windowHeight: dims.height,
         isMobile,
         overscanByPixels,
+        artworkAheadPx,
         loadMoreThreshold,
     };
 };

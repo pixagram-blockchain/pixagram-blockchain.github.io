@@ -701,9 +701,9 @@ const COMMUNITY_CHROME = (scrollTop, scrollY) => ({
     shouldCollapseMobileCard: scrollY < 0 && scrollTop >= 72,
 });
 
-const useCommunityGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels }) => {
+const useCommunityGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx }) => {
     const core = useMasonryGrid({
-        windowWidth, windowHeight, isMobile, overscanByPixels,
+        windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx,
         getColumnWidth: COMMUNITY_COLUMN_WIDTH,
         fallbackColumnWidth: 800,
         defaultHeight: 400,
@@ -1575,7 +1575,7 @@ const ModerationReasonDialog = memo(({
 // ╚══════════════════════════════════════════════════════════════════════╝
 
 const Community = ({ classes, settings, pathname, api }) => {
-    const { windowWidth, windowHeight, isMobile, overscanByPixels } = useWindowDimensions();
+    const { windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx } = useWindowDimensions();
 
     const {
         communityName, sorting, community, posts, members, rules,
@@ -1583,7 +1583,7 @@ const Community = ({ classes, settings, pathname, api }) => {
         handleVoteChange, patchPostStats, toggleJoined, confirmLeave, reload,
     } = useCommunityData(api, pathname);
 
-    const grid = useCommunityGrid({ windowWidth, windowHeight, isMobile, overscanByPixels });
+    const grid = useCommunityGrid({ windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx });
 
     // ── Community picture viewer ───────────────────────────────────────
     // Click on the community picture (CommunityHeader / CommunityInfo call
@@ -1898,11 +1898,10 @@ const Community = ({ classes, settings, pathname, api }) => {
     // identity changes on every scroll tick (scrollTop/scrollY live in it),
     // which used to re-create this renderer — and hand MasonryExtended a new
     // cellRenderer prop — on every tick while scrolling. The fields below
-    // are all referentially stable between layout changes (masonryRef is a
-    // ref; rootDimensions only changes on a resize/measure).
+    // are all referentially stable between layout changes.
     const {
         columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
-        selectedPostIndex, masonryRef, rootDimensions,
+        selectedPostIndex, postListHeight,
     } = grid;
     const { openPost, openPostComments } = postNav;
 
@@ -1930,10 +1929,21 @@ const Community = ({ classes, settings, pathname, api }) => {
         const top = placedTop !== undefined ? +placedTop : +style.top;
         trackElementPosition(index, top, +style.height, rowIndex, columnIndex);
 
-        const st = masonryRef.current?._scrollingContainer?.scrollTop || 0;
+        // Artwork band — the card draws its artwork once it comes within
+        // `artworkAheadPx` of the viewport, on either side (sticky: once
+        // drawn, a card stays drawn). Shared with the feeds and Profile and
+        // sized by useWindowDimensions against the Masonry's mount window.
+        // Viewport height comes from the scroll container (`parent` is the
+        // Masonry instance): the previous band was derived from
+        // rootDimensions, but this page's root is a 0-height absolute
+        // wrapper — the shared grid hook measures its width only — so the
+        // band collapsed to the viewport's top edge and a card only turned
+        // `visible` once it had been scrolled past.
+        const container = parent._scrollingContainer;
+        const st = container ? container.scrollTop : 0;
+        const viewH = container ? container.clientHeight : postListHeight;
         const bottom = top + (+style.height);
-        const threshold = rootDimensions.height * (rootDimensions.height / rootDimensions.width);
-        const visible = threshold + bottom > st && top < st + rootDimensions.height + threshold;
+        const visible = artworkAheadPx + bottom > st && top < st + viewH + artworkAheadPx;
         cellMeasurerCache.visible_ids[item.id] = visible || (cellMeasurerCache.visible_ids[item.id] || false);
 
         // Muted-by-mods styling: everyone sees a grayscale+dim filter on the
@@ -1960,7 +1970,7 @@ const Community = ({ classes, settings, pathname, api }) => {
             </CellMeasurer>
         );
     }, [posts, columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
-        selectedPostIndex, masonryRef, rootDimensions, openPost, openPostComments,
+        selectedPostIndex, postListHeight, artworkAheadPx, openPost, openPostComments,
         locales, openCardMenu, api, loggedInUser, onVoteChange, portal]);
 
     // ── Shared props for header/info ───────────────────────────────────

@@ -28,6 +28,8 @@ import { CellMeasurerCache, createMasonryCellPositioner } from "@pixagram/virtua
 //   deriveChrome        (scrollTop, scrollY) => the page's scroll-driven
 //                       chrome flags — see "Scroll tracking" below.
 //   loadMorePosts/…     infinite scroll is optional (Community: none).
+//   artworkAheadPx      the page's artwork band (useWindowDimensions) —
+//                       sets the band refresh cadence, see below.
 //
 // ── Scroll position is NOT React state ─────────────────────────────────
 // This hook used to keep scrollTop / scrollY in state and set both on
@@ -46,9 +48,32 @@ import { CellMeasurerCache, createMasonryCellPositioner } from "@pixagram/virtua
 // them) returns them from deriveChrome and gets the previous behaviour.
 // The Masonry is rendered uncontrolled (no scrollTop prop): it tracks its
 // own scroll events, and scrollTo below writes the container directly.
+//
+// ── Band refresh while scrolling ───────────────────────────────────────
+// The pages decide which cards are `visible` — within artworkAheadPx of
+// the viewport, the point at which a card draws its artwork — inside their
+// cellRenderer, so the band is only re-evaluated when the Masonry renders.
+// Uncontrolled, the Masonry renders during a scroll only when its mounted
+// cell range moves (a scroll event inside the current range "changes
+// nothing", see scrollTo below) — and with the overscan several screens
+// deep and a page or two loaded, the range is the whole list and never
+// moves. In practice it rendered twice per scroll: at the first event
+// (isScrolling → true) and at the settle, scrollingResetTimeInterval after
+// the last one (isScrolling → false). Nothing new started drawing until the
+// user stopped. So the poll effect also listens to the container's own
+// scroll events (passive, coalesced to one animation frame) and forces a
+// Masonry render whenever the offset has moved BAND_REFRESH_FRACTION of the
+// band since the band was last evaluated — with the band 2–3 screens deep
+// that is a render every ~600 px on a desktop, and a card is always
+// activated with at least three quarters of the band still ahead of it. A
+// forced render is cheap: the cellRenderer does no measuring, and the
+// memo'd cards bail unless their `visible` flag flipped.
 
 export const GUTTER_SIZE = 16;
 export const SCROLL_INTERVAL_MS = 500;
+// Fraction of artworkAheadPx the container must move before the band is
+// re-evaluated mid-scroll (see "Band refresh while scrolling").
+export const BAND_REFRESH_FRACTION = 0.25;
 
 const defaultGetColumnWidth = ({ rootWidth, columnCount, gutter }) =>
     Math.floor((rootWidth - (columnCount + 1) * gutter) / columnCount);
@@ -72,6 +97,10 @@ const useMasonryGrid = ({
                             windowHeight,
                             isMobile,
                             overscanByPixels,
+                            // how far ahead of the viewport the page's cellRenderer marks a
+                            // card `visible` (useWindowDimensions.artworkAheadPx) — sets the
+                            // cadence of the band refresh; half the overscan when omitted
+                            artworkAheadPx = 0,
                             // layout
                             getColumnCount,
                             getColumnWidth = defaultGetColumnWidth,
@@ -236,10 +265,53 @@ const useMasonryGrid = ({
     loadMoreRef.current = loadMorePosts;
     loadingMoreRef.current = loadingMore;
 
+    // Band refresh step (see the header note). Read through a ref so a
+    // resize never resubscribes the listener below.
+    const bandStepRef = useRef(0);
+    bandStepRef.current = Math.max(64, (artworkAheadPx || (overscanByPixels || 0) / 2) * BAND_REFRESH_FRACTION);
+
     useEffect(() => {
+        // ── Band refresh while scrolling ───────────────────────────────
+        // Bound lazily, from the poll, to whichever scrolling container the
+        // Masonry currently owns: it is null until the Masonry's first real
+        // render (MasonryExtended's placeholder has none), and the poll is
+        // already the place that watches for it. Rebinds if the Masonry or
+        // its container is replaced; unbound with the interval.
+        const band = { el: null, masonry: null, onScroll: null, raf: 0, lastTop: 0 };
+        const unbindBand = () => {
+            if (band.el && band.onScroll) band.el.removeEventListener("scroll", band.onScroll);
+            if (band.raf) cancelAnimationFrame(band.raf);
+            band.el = null; band.masonry = null; band.onScroll = null; band.raf = 0;
+        };
+        const bindBand = (masonry) => {
+            const el = masonry._scrollingContainer;
+            if (band.el === el && band.masonry === masonry) return;
+            unbindBand();
+            band.el = el;
+            band.masonry = masonry;
+            band.lastTop = el.scrollTop;
+            band.onScroll = () => {
+                if (band.raf) return;
+                band.raf = requestAnimationFrame(() => {
+                    band.raf = 0;
+                    const top = el.scrollTop;
+                    if (Math.abs(top - band.lastTop) < bandStepRef.current) return;
+                    band.lastTop = top;
+                    // Re-runs the cellRenderer over the mounted cells with the
+                    // live scrollTop; the Masonry's own range is unchanged by
+                    // definition (its scroll handler would have rendered
+                    // otherwise), so this is a band evaluation and nothing
+                    // more. Cards whose flag flipped re-render and latch.
+                    masonry.forceUpdate();
+                });
+            };
+            el.addEventListener("scroll", band.onScroll, { passive: true });
+        };
+
         const interval = setInterval(() => {
             const masonry = masonryRef.current;
             if (!masonry?._scrollingContainer) return;
+            bindBand(masonry);
 
             const prevST = scrollTopRef.current;
             const prevSY = scrollYRef.current;
@@ -279,7 +351,7 @@ const useMasonryGrid = ({
                 applyChrome(currentST, newY);
             }
         }, SCROLL_INTERVAL_MS);
-        return () => clearInterval(interval);
+        return () => { clearInterval(interval); unbindBand(); };
     }, [loadMoreThreshold, applyChrome]);
 
     // ── Scroll control ─────────────────────────────────────────────────

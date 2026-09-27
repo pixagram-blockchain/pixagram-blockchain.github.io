@@ -9,6 +9,7 @@ import * as actions from "../actions/utils";
 import { CellMeasurer, CellMeasurerCache, createMasonryCellPositioner } from "@pixagram/virtualized/dist/es/index";
 import MasonryExtended from "../components/MasonryExtended";
 import useWindowDimensions from "../hooks/useWindowDimensions";
+import { BAND_REFRESH_FRACTION } from "../hooks/useMasonryGrid";
 import useVoteSync from "../hooks/useVoteSync";
 import { usePictureDialog } from "../hooks/usePictureDialog";
 import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto } from "../utils/voteSync";
@@ -1418,7 +1419,7 @@ const useTabData = (api, account, category) => {
 const GUTTER = 16;
 const SCROLL_MS = 380;
 
-const useMasonryGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels, loadMoreThreshold, category, loadMoreFn, tabLoading }) => {
+const useMasonryGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx, loadMoreThreshold, category, loadMoreFn, tabLoading }) => {
     const masonryRefs = useRef([null,null,null,null]);
     const rootRef = useRef(null);
     const [scrollTops, setScrollTops] = useState([0,0,0,0]);
@@ -1535,11 +1536,49 @@ const useMasonryGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels,
         cellPositioner.reset(cellPositionerConfig); m.clearCellPositions(); m.forceUpdate();
     }, [columnWidth, cellMeasurerCache, cellPositioner, cellPositionerConfig, category]);
 
+    // Band refresh step — same mechanism as the shared hook (see "Band
+    // refresh while scrolling" in hooks/useMasonryGrid): the posts renderer
+    // evaluates its artwork band only when its Masonry renders, and an
+    // uncontrolled Masonry renders mid-scroll only when its mounted range
+    // moves, which with the overscan this deep it hardly ever does — so
+    // cards only started drawing once the reader stopped scrolling. Read
+    // through a ref so a resize never resubscribes the effect below.
+    const bandStepRef = useRef(0);
+    bandStepRef.current = Math.max(64, (artworkAheadPx || (overscanByPixels || 0) / 2) * BAND_REFRESH_FRACTION);
+
     // Scroll tracking
     useEffect(() => {
+        // Band refresh listener — bound to the ACTIVE tab's scrolling
+        // container from the poll (null until that Masonry's first real
+        // render), rebinding when the tab or its Masonry changes.
+        const band = { el: null, masonry: null, onScroll: null, raf: 0, lastTop: 0 };
+        const unbindBand = () => {
+            if (band.el && band.onScroll) band.el.removeEventListener("scroll", band.onScroll);
+            if (band.raf) cancelAnimationFrame(band.raf);
+            band.el = null; band.masonry = null; band.onScroll = null; band.raf = 0;
+        };
+        const bindBand = (masonry) => {
+            const el = masonry._scrollingContainer;
+            if (band.el === el && band.masonry === masonry) return;
+            unbindBand();
+            band.el = el; band.masonry = masonry; band.lastTop = el.scrollTop;
+            band.onScroll = () => {
+                if (band.raf) return;
+                band.raf = requestAnimationFrame(() => {
+                    band.raf = 0;
+                    const top = el.scrollTop;
+                    if (Math.abs(top - band.lastTop) < bandStepRef.current) return;
+                    band.lastTop = top;
+                    masonry.forceUpdate(); // band evaluation only — the range is unchanged
+                });
+            };
+            el.addEventListener("scroll", band.onScroll, { passive: true });
+        };
+
         const interval = setInterval(() => {
             const cat = categoryRef.current;
             const m = masonryRefs.current[cat]; if (!m?._scrollingContainer) return;
+            bindBand(m);
             const prevST = scrollTopRef.current[cat]; const prevSY = scrollYRef.current;
             const curST = m._scrollingContainer.scrollTop;
             const yDiff = curST - prevST;
@@ -1562,7 +1601,7 @@ const useMasonryGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels,
                 if (reload) lastScrollCheckH.current = 0;
             }
         }, SCROLL_MS);
-        return () => clearInterval(interval);
+        return () => { clearInterval(interval); unbindBand(); };
     }, [overscanByPixels, loadMoreThreshold]);
 
     const scrollTo = useCallback((top) => {
@@ -2037,7 +2076,7 @@ const EMPTY_ITEMS = [];
 
 const Profile = ({ classes, settings, pathname, api }) => {
     useLanguage();
-    const { windowWidth, windowHeight, isMobile, overscanByPixels, loadMoreThreshold } = useWindowDimensions();
+    const { windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx, loadMoreThreshold } = useWindowDimensions();
 
     // ── Live pathname (memo-trap workaround) ───────────────────────────
     // Profile is wrapped in memo at the default export. The parent (Index)
@@ -2084,7 +2123,7 @@ const Profile = ({ classes, settings, pathname, api }) => {
         return () => {};
     }, [category, tabData.loadMorePosts, tabData.loadMoreComments, tabData.loadMoreTimeline]);
 
-    const grid = useMasonryGrid({ windowWidth, windowHeight, isMobile, overscanByPixels, loadMoreThreshold, category, loadMoreFn, tabLoading: tabData.tabLoading });
+    const grid = useMasonryGrid({ windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx, loadMoreThreshold, category, loadMoreFn, tabLoading: tabData.tabLoading });
 
     // NSFW filtering for the posts tab: when the filter is ON (_nsfw_filter
     // truthy) drop posts flagged nsfw before the masonry sees them. Blur of
@@ -2334,7 +2373,7 @@ const Profile = ({ classes, settings, pathname, api }) => {
     // 380 ms while scrolling. The fields below only change on layout changes.
     const {
         columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
-        selectedPostIndex, postListHeight, pageWidth,
+        selectedPostIndex, postListHeight,
     } = grid;
     const { openPost, openPostComments, openCommentArtwork } = postNav;
     // Stable comment/reply open handler — replaces the per-cell inline
@@ -2371,17 +2410,20 @@ const Profile = ({ classes, settings, pathname, api }) => {
         // `style.top` is the fallback for a Masonry build without the param.
         const top = placedTop !== undefined ? +placedTop : +style.top;
         trackElementPosition(index, top, +style.height, rowIdx, colIdx);
+        // Artwork band — the card draws its artwork once it comes within
+        // `artworkAheadPx` of the viewport, on either side (sticky: once
+        // drawn, a card stays drawn). Shared with the feeds and Community and
+        // sized by useWindowDimensions against the Masonry's mount window.
         const container = parent._scrollingContainer; const st = container?container.scrollTop:0;
         const bottom = top+(+style.height);
-        const viewH = container?container.clientHeight:postListHeight, viewW = container?container.clientWidth:pageWidth;
-        const threshold = viewH*(viewH/(viewW||1));
-        const visible = threshold+bottom>st && top<st+viewH+threshold;
+        const viewH = container?container.clientHeight:postListHeight;
+        const visible = artworkAheadPx+bottom>st && top<st+viewH+artworkAheadPx;
         cellMeasurerCache.visible_ids[size.id] = visible||(cellMeasurerCache.visible_ids[size.id]||false);
         return (<CellMeasurer cache={cellMeasurerCache} index={index} key={key} parent={parent}>
             <PaperCard onOpen={openPost} onCommentsClick={openPostComments} locales={locales} nsfw={settings._nsfw_enabled} data={item} renderer={settings._renderer} mode={settings._mode} onMenuClick={openCardMenu} api={api} voter={profile.loggedInUser} onVoteChange={onVoteChange} is_scrolling={isScrolling} selected={selectedPostIndex===index} size={size} visible={cellMeasurerCache.visible_ids[size.id]} column_width={columnWidth} image_height={ih} image_width={columnWidth} id={size.id} key={size.id} rowIndex={rowIdx} columnIndex={colIdx} style={style} />
         </CellMeasurer>);
     }, [columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
-        selectedPostIndex, postListHeight, pageWidth, openPost, openPostComments,
+        selectedPostIndex, postListHeight, artworkAheadPx, openPost, openPostComments,
         locales, settings, openCardMenu, api, profile.loggedInUser, onVoteChange]);
 
     const cellRendererComments = useCallback((data) => {

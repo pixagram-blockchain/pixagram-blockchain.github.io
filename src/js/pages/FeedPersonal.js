@@ -740,9 +740,9 @@ const FEED_PERSONAL_CHROME = (scrollTop, scrollY) => ({
     hideFab: scrollY > 0 && scrollTop > 512,
 });
 
-const useFeedPersonalGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels, loadMoreThreshold, loadMorePosts, loadingMore }) => {
+const useFeedPersonalGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx, loadMoreThreshold, loadMorePosts, loadingMore }) => {
     const core = useMasonryGrid({
-        windowWidth, windowHeight, isMobile, overscanByPixels,
+        windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx,
         loadMoreThreshold, loadMorePosts, loadingMore,
         // columnCount: fixed 1 (no getColumnCount)
         fallbackColumnWidth: 640,
@@ -1322,13 +1322,13 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
     // Resolved here, where useLanguage() re-renders on a language switch,
     // and handed to the memo'd <CreateFab> as a string.
     const createLabel = t("words.create", { TUC: true });
-    const { windowWidth, windowHeight, isMobile, overscanByPixels, loadMoreThreshold } = useWindowDimensions();
+    const { windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx, loadMoreThreshold } = useWindowDimensions();
     const {
         posts, isLoading, loadingMore, hasMore, loggedInUser, dataVersion,
         handleVoteChange, loadMorePosts,
         consumePendingScrollRestore, hasPendingScrollRestore, saveScrollPosition,
     } = useFeedPersonalData(api, pathname);
-    const grid = useFeedPersonalGrid({ windowWidth, windowHeight, isMobile, overscanByPixels, loadMoreThreshold, loadMorePosts, loadingMore });
+    const grid = useFeedPersonalGrid({ windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx, loadMoreThreshold, loadMorePosts, loadingMore });
 
     // NSFW filtering: when the filter is ON (_nsfw_filter truthy) drop posts
     // flagged nsfw before they reach the masonry. Blur of shown posts is handled
@@ -1652,7 +1652,7 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
     // change for nothing.
     const {
         columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
-        selectedPostIndex, postListHeight, pageWidth,
+        selectedPostIndex, postListHeight,
     } = grid;
     const { openPost, openPostComments } = postNav;
     const cellRenderer = useCallback((data) => {
@@ -1668,14 +1668,17 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
         const top = placedTop !== undefined ? +placedTop : +style.top;
         trackElementPosition(index, top, +style.height, rowIdx, colIdx);
 
-        // Visibility — use container dimensions, 2× threshold (original uses 2*root_height)
+        // Artwork band — the card draws its artwork once it comes within
+        // `artworkAheadPx` of the viewport, on either side (sticky: once
+        // drawn, a card stays drawn). Shared with Feed / Community / Profile
+        // and sized by useWindowDimensions against the Masonry's mount
+        // window (this page used to run its own 2× band). Viewport height
+        // from the scroll container, not the ~0-height root wrapper.
         const container = parent._scrollingContainer;
         const st = container ? container.scrollTop : 0;
         const viewH = container ? container.clientHeight : postListHeight;
-        const viewW = container ? container.clientWidth : pageWidth;
         const bottom = top + (+style.height);
-        const threshold = 2 * viewH * (viewH / (viewW || 1));
-        const visible = threshold + bottom > st && top < st + viewH + threshold;
+        const visible = artworkAheadPx + bottom > st && top < st + viewH + artworkAheadPx;
         cellMeasurerCache.visible_ids[size.id] = visible || (cellMeasurerCache.visible_ids[size.id] || false);
 
         // Seen tracking — settled render only (see the SEEN_* constants):
@@ -1723,7 +1726,7 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
             </CellMeasurer>
         );
     }, [columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
-        selectedPostIndex, postListHeight, pageWidth, openPost, openPostComments,
+        selectedPostIndex, postListHeight, artworkAheadPx, openPost, openPostComments,
         locales, settings, openCardMenu, api, loggedInUser, onVoteChange, hasMore, noteSeen]);
 
     // ── Masonry render-prop ────────────────────────────────────────────

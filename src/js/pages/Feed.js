@@ -1060,10 +1060,15 @@ const useFeedData = (api, pathname) => {
 // ── Grid configuration (shared hook in ../hooks/useMasonryGrid) ───────
 // Module-level so the option functions stay referentially stable across
 // renders (the hook treats them as static).
+//
+// Two columns hold down to a 600 px window (was 768): with the mobile
+// layout's 32 px side gutters and the 16 px spacer that still leaves a
+// ≥ 260 px column at the low end, wide enough for a pixel-art card; only
+// narrower phones fall back to the single column.
 const FEED_COLUMN_COUNT = (width) => {
     if (width >= 1920) return 4;
     if (width >= 1280) return 3;
-    if (width >= 768) return 2;
+    if (width >= 600) return 2;
     return 1;
 };
 
@@ -1075,9 +1080,9 @@ const FEED_CHROME = (scrollTop, scrollY) => ({
     hideFab: scrollY > 0 && scrollTop > 512,
 });
 
-const useFeedGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels, loadMoreThreshold, loadMorePosts, loadingMore }) => {
+const useFeedGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx, loadMoreThreshold, loadMorePosts, loadingMore }) => {
     const core = useMasonryGrid({
-        windowWidth, windowHeight, isMobile, overscanByPixels,
+        windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx,
         loadMoreThreshold, loadMorePosts, loadingMore,
         getColumnCount: FEED_COLUMN_COUNT,
         fallbackColumnWidth: 356,
@@ -1523,7 +1528,7 @@ const usePostNavigation = ({ api, posts, masonryRef, scrollToIndex, scrollTo, se
 
 const Feed = ({ classes, settings, pathname, api }) => {
     useLanguage();
-    const { windowWidth, windowHeight, isMobile, overscanByPixels, loadMoreThreshold } = useWindowDimensions();
+    const { windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx, loadMoreThreshold } = useWindowDimensions();
 
     // Resolved every render (four cheap catalogue lookups); the vnodes rebuild
     // only when a label actually changes, so <Tabs> keeps a stable child
@@ -1555,7 +1560,7 @@ const Feed = ({ classes, settings, pathname, api }) => {
     );
 
     const grid = useFeedGrid({
-        windowWidth, windowHeight, isMobile, overscanByPixels,
+        windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx,
         loadMoreThreshold, loadMorePosts, loadingMore,
     });
 
@@ -1755,15 +1760,18 @@ const Feed = ({ classes, settings, pathname, api }) => {
         const top = placedTop !== undefined ? +placedTop : +style.top;
         trackElementPosition(index, top, +style.height, rowIdx, colIdx);
 
-        // Visibility tracking — use the scroll container's actual viewport dimensions,
-        // NOT rootDimensions (the root div has height≈0 because Masonry is position:absolute)
+        // Artwork band — the card draws its artwork once it comes within
+        // `artworkAheadPx` of the viewport, on either side (sticky: once
+        // drawn, a card stays drawn). useWindowDimensions sizes the band
+        // against the Masonry's mount window, so a card is always measured
+        // and placed well before it is asked to draw. Viewport height comes
+        // from the scroll container itself, NOT rootDimensions (the root div
+        // has height≈0 because Masonry is position:absolute).
         const container = parent._scrollingContainer;
         const st = container ? container.scrollTop : 0;
         const viewH = container ? container.clientHeight : postListHeight;
-        const viewW = container ? container.clientWidth : pageWidth;
         const bottom = top + (+style.height);
-        const threshold = viewH * (viewH / (viewW || 1));
-        const visible = threshold + bottom > st && top < st + viewH + threshold;
+        const visible = artworkAheadPx + bottom > st && top < st + viewH + artworkAheadPx;
         cellMeasurerCache.visible_ids[size.id] = visible || (cellMeasurerCache.visible_ids[size.id] || false);
 
         return (
@@ -1796,7 +1804,7 @@ const Feed = ({ classes, settings, pathname, api }) => {
             </CellMeasurer>
         );
     }, [columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
-        selectedPostIndex, postListHeight, pageWidth, openPost, openPostComments,
+        selectedPostIndex, postListHeight, artworkAheadPx, openPost, openPostComments,
         locales, settings, openCardMenu, api, loggedInUser, onVoteChange]);
 
     // ── Masonry render-prop ────────────────────────────────────────────
