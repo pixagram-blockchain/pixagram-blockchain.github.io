@@ -16,7 +16,6 @@ import Slide from "@material-ui/core/Slide";
 import Snackbar from "@material-ui/core/Snackbar";
 import SwipeableDrawer from "@material-ui/core/SwipeableDrawer";
 import Tooltip from "@material-ui/core/Tooltip";
-import ClickAwayListener from "@material-ui/core/ClickAwayListener";
 import IconButton from "@material-ui/core/IconButton";
 import MoreVertIcon from "@material-ui/icons/MoreVert";
 import CloseIcon from "@material-ui/icons/Close";
@@ -32,23 +31,23 @@ import { PAGE_ROUTES, isPostUrl, hostPageForPostUrl } from "../utils/constants";
 import LogoutModal from "../components/LogoutModal";
 import MenuContent from "../components/MenuContent";
 import ToolbarMenuOption from "../components/ToolbarMenuOption";
+// The toolbar search (hook, bar, dropdown, rows, artwork masonry) lives in
+// components/search. useSearch keeps useBlockchainSearch's contract and adds
+// user/community profiles and the artwork leg (pixagram-search Worker).
+import { useSearch, SearchBar, artworkPath } from "../components/search";
 import VoteIcon from "../icons/Vote";
 import SaleIcon from "../icons/Sale";
 import SettingsIcon from "@material-ui/icons/Settings";
 import HelpIcon from "@material-ui/icons/Help";
 import Button from "@material-ui/core/Button";
 import ListSubheader from "@material-ui/core/ListSubheader";
-import Popper from "@material-ui/core/Popper";
 import ListItem from "@material-ui/core/ListItem";
 import ListItemText from "@material-ui/core/ListItemText";
 import List from "@material-ui/core/List";
-import Typography from "@material-ui/core/Typography";
 import Portal from "@material-ui/core/Portal";
 import ListItemIcon from "@material-ui/core/ListItemIcon";
 import Backdrop from "@material-ui/core/Backdrop";
-import ArrowBackRounded from "@material-ui/icons/ArrowBackRounded";
 import Fade from "@material-ui/core/Fade";
-import GroupIcon from "@material-ui/icons/Group";
 import CircularProgress from "@material-ui/core/CircularProgress";
 import shareContent from "../utils/share";
 import { idle, cancelIdle } from "../utils/idle";
@@ -65,7 +64,6 @@ import getIT from "../data/pixaLogoWhite";
 // stays lazy via PAGE_IMPORTERS below.
 import HomeEager from "./Home";
 
-import { T } from "../utils/T";
 import { t, setLanguage, subscribe as subscribe_language, useLanguage } from "../utils/text";
 
 const pixaLogoWhite = getIT();
@@ -122,11 +120,6 @@ const EMPTY_ARRAY = Object.freeze([]);
 const EMPTY_I32 = new Int32Array(0);
 
 // ── Hoisted static props (avoid re-creation inside memoized components) ───
-const POPPER_MODIFIERS = Object.freeze({
-    flip: { enabled: false },
-    preventOverflow: { enabled: true, boundariesElement: "scrollParent" },
-    arrow: { enabled: false },
-});
 const SNACKBAR_TRANSITION_PROPS = Object.freeze({ direction: "up" });
 const SNACKBAR_ANCHOR = Object.freeze({ vertical: "bottom", horizontal: "center" });
 const SNACKBAR_STYLE = Object.freeze({ zIndex: 2147483647 });
@@ -736,142 +729,8 @@ function useMediaQuery() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// §6 — useBlockchainSearch
+// §6 — search: see components/search (useSearch replaces useBlockchainSearch)
 // ═════════════════════════════════════════════════════════════════════════════
-
-const SEARCH_IDLE = { users: EMPTY_ARRAY, tags: EMPTY_ARRAY, communities: EMPTY_ARRAY, loading: false };
-
-function searchReducer(state, action) {
-    switch (action.type) {
-        case "loading":
-            return { ...state, loading: true };
-        case "results":
-            return { users: action.users, tags: action.tags, communities: action.communities, loading: false };
-        case "reset":
-            return SEARCH_IDLE;
-        default:
-            return state;
-    }
-}
-
-function useBlockchainSearch(apiRef) {
-    const [query, setQuery] = useState("");
-    const [results, dispatch] = useReducer(searchReducer, SEARCH_IDLE);
-    const debounceRef = useRef(null);
-    const abortRef = useRef(null);
-    const cacheRef = useRef(new Map());
-    // Query-INDEPENDENT list (trending tags only): the per-term cache above
-    // only helps when the same term repeats, but this read returns the same
-    // payload for EVERY term — it's filtered client-side. Cache it once with
-    // the same 10-min TTL so a new search term doesn't re-pay the round-trip.
-    // Communities deliberately left this cache: they now go through
-    // listCommunities({ query }), whose payload is query-DEPENDENT, so the
-    // per-term cache above is the right (and only) cache for them.
-    const browseTagsRef = useRef(null);
-
-    const executeSearch = useCallback(async (trimmed) => {
-        const pixaAPI = apiRef.current;
-        if (abortRef.current) abortRef.current.abort();
-        abortRef.current = new AbortController();
-        const { signal } = abortRef.current;
-
-        if (!pixaAPI) {
-            dispatch({ type: "reset" });
-            return;
-        }
-
-        try {
-            const now = Date.now();
-            const browse = browseTagsRef.current;
-            const browseFresh = !!browse && now - browse._ts < 600_000;
-
-            const [usersRaw, tagsRaw, communitiesRaw] = await Promise.allSettled([
-                pixaAPI.accounts.lookupAccounts(trimmed, 8),
-                browseFresh ? browse.tags : pixaAPI.tags.getTrendingTags(null, 100),
-                // Server-side community search: `query` matches title/about on
-                // the bridge, so the section follows the typed term instead of
-                // echoing the same popular list for every search.
-                pixaAPI.communities.listCommunities({ query: trimmed, limit: 10, sort: "rank" }),
-            ]);
-
-            if (signal.aborted) return;
-
-            const users = usersRaw.status === "fulfilled" && Array.isArray(usersRaw.value)
-                ? usersRaw.value.filter((u) => u.toLowerCase().includes(trimmed))
-                : [];
-
-            const tagsAll = tagsRaw.status === "fulfilled" && Array.isArray(tagsRaw.value)
-                ? tagsRaw.value
-                : [];
-            // Already query-matched by the node — no client-side filter.
-            const communities = communitiesRaw.status === "fulfilled" && Array.isArray(communitiesRaw.value)
-                ? communitiesRaw.value
-                : [];
-
-            // Refresh the tags cache only after a real fetch (a cache-served
-            // pass would just rewrite the same array with a newer timestamp,
-            // silently extending the TTL forever).
-            if (!browseFresh && tagsAll.length) {
-                browseTagsRef.current = { tags: tagsAll, _ts: now };
-            }
-
-            const tags = tagsAll
-                .filter((t) => t?.name?.toLowerCase().includes(trimmed) && t.name !== "")
-                .slice(0, 10);
-
-            // Cache with eviction
-            const cache = cacheRef.current;
-            cache.set(trimmed, { users, tags, communities, _ts: Date.now() });
-            if (cache.size > 50) cache.delete(cache.keys().next().value);
-
-            dispatch({ type: "results", users, tags, communities });
-        } catch (e) {
-            if (!signal.aborted) {
-                console.warn("[Index] Blockchain search failed:", e.message);
-                dispatch({ type: "reset" });
-            }
-        }
-    }, [apiRef]);
-
-    const handleChange = useCallback((e) => {
-        const value = e.target.value;
-        setQuery(value);
-
-        if (debounceRef.current) clearTimeout(debounceRef.current);
-
-        const trimmed = value.trim().toLowerCase();
-        if (!trimmed) {
-            dispatch({ type: "reset" });
-            return;
-        }
-
-        // Check cache (10 min TTL)
-        const cached = cacheRef.current.get(trimmed);
-        if (cached && Date.now() - cached._ts < 600_000) {
-            dispatch({ type: "results", users: cached.users, tags: cached.tags, communities: cached.communities });
-            return;
-        }
-        if (cached) cacheRef.current.delete(trimmed);
-
-        dispatch({ type: "loading" });
-        debounceRef.current = setTimeout(() => executeSearch(trimmed), 250);
-    }, [executeSearch]);
-
-    const reset = useCallback(() => {
-        if (debounceRef.current) clearTimeout(debounceRef.current);
-        setQuery("");
-        dispatch({ type: "reset" });
-    }, []);
-
-    useEffect(() => () => {
-        if (debounceRef.current) clearTimeout(debounceRef.current);
-        if (abortRef.current) abortRef.current.abort();
-        cacheRef.current.clear();
-        browseTagsRef.current = null;
-    }, []);
-
-    return { query, results, handleChange, reset, isOpen: query.length > 0 };
-}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // §7 — useSoundManager
@@ -1569,157 +1428,7 @@ const Wordmark = React.memo(
     (prev, next) => prev.classes === next.classes && prev.onGoHome === next.onGoHome,
 );
 
-// ── SearchResults (extracted from toolbar for isolation) ──────────────────────
-
-// Case-insensitive first-match highlight built from React nodes. Replaces the
-// old innerHTML path (per-row `new RegExp` + safeHTML + dangerouslySetInnerHTML):
-// account names and tags are chain-restricted character sets, but the node form
-// needs no sanitizer at all — it renders any input literally by construction —
-// and it is what let the static sanitizer import above be deleted.
-const highlightNode = (text, query) => {
-    const s = String(text);
-    const at = query ? s.toLowerCase().indexOf(String(query).toLowerCase()) : -1;
-    if (at === -1) return s;
-    return (
-        <React.Fragment>
-            {s.slice(0, at)}
-            <b style={{ color: "#ffffff" }}>{s.slice(at, at + query.length)}</b>
-            {s.slice(at + query.length)}
-        </React.Fragment>
-    );
-};
-
-const SearchResults = React.memo(
-    ({
-         classes, searchInputText, usersFound, tagsFound, communitiesFound,
-         searchLoading, searchInput, history,
-         onGoToUsername, onGoToTag, onGoToCommunity, onSetTagNavigation,
-     }) => {
-        useLanguage();
-        return (
-            <Popper
-                open
-                placement="bottom-start"
-                className={classes.searchBarOpenMenu}
-                disablePortal
-                anchorEl={searchInput}
-                modifiers={POPPER_MODIFIERS}
-            >
-                <div
-                    className={classes.searchBarResult}
-                    style={{ width: searchInput.width ? `${searchInput.width}px` : "100%" }}
-                >
-                    {searchLoading ? (
-                        <div style={{ display: "flex", justifyContent: "center", padding: "16px 0" }}>
-                            <CircularProgress size={24} style={{ color: "#666" }} />
-                        </div>
-                    ) : (usersFound.length || tagsFound.length || communitiesFound.length) ? (
-                        <List dense>
-                            {usersFound.length > 0 && (
-                                <ListSubheader className={classes.subheaderSticky}>{t("components.index.users")}</ListSubheader>
-                            )}
-                            {usersFound.map((username) => (
-                                <ListItem key={"@" + username}>
-                                    <ListItemText
-                                        className={classes.listItemText}
-                                        onClick={() => onGoToUsername(username)}
-                                        primary={
-                                            <span style={{ color: "#bbb" }}>@{highlightNode(username, searchInputText)}</span>
-                                        }
-                                    />
-                                </ListItem>
-                            ))}
-
-                            <ListSubheader className={classes.subheaderSticky}>{t("words.tags")}</ListSubheader>
-                            {[{ name: searchInputText, isExact: true }]
-                                .concat(tagsFound.filter((t) => t.name !== searchInputText).map((t) => ({ ...t, isExact: false })))
-                                .map((tag) => (
-                                    <ListItem key={"#" + tag.name}>
-                                        <ListItemText
-                                            className={classes.listItemText}
-                                            onClick={() => onGoToTag(tag.name)}
-                                            primary={
-                                                <span style={{ color: "#bbb" }}>
-                                                    #{tag.isExact ? tag.name : highlightNode(tag.name, searchInputText)}
-                                                </span>
-                                            }
-                                        />
-                                    </ListItem>
-                                ))}
-
-                            {communitiesFound.length > 0 && (
-                                <ListSubheader className={classes.subheaderSticky}>{t("components.index.communities")}</ListSubheader>
-                            )}
-                            {communitiesFound.map((community) => {
-                                const title = community.title || community.name;
-                                // Same match-highlight as users/tags, but built
-                                // from React nodes instead of innerHTML: titles
-                                // are free on-chain text (unlike account names
-                                // and tags they may contain markup-looking
-                                // characters) and must keep rendering literally.
-                                // A miss (query matched `about`, not the title)
-                                // simply renders the plain title.
-                                const matchAt = title.toLowerCase().indexOf(searchInputText.toLowerCase());
-                                const titleNode = matchAt === -1 ? title : (
-                                    <React.Fragment>
-                                        {title.slice(0, matchAt)}
-                                        <b style={{ color: "#ffffff" }}>{title.slice(matchAt, matchAt + searchInputText.length)}</b>
-                                        {title.slice(matchAt + searchInputText.length)}
-                                    </React.Fragment>
-                                );
-                                return (
-                                    <ListItem key={"c-" + community.name}>
-                                        <ListItemText
-                                            className={classes.listItemText}
-                                            onClick={() => onGoToCommunity(community.name)}
-                                            primary={
-                                                <span style={{ color: "#bbb", display: "flex", alignItems: "center", gap: 6 }}>
-                                                <GroupIcon style={{ fontSize: 16, color: "#666" }} />
-                                                <span>{titleNode}</span>
-                                                    {community.subscribers != null && (
-                                                        <span style={{ color: "#555", fontSize: "0.8em", marginLeft: "auto" }}>
-                                                        {community.subscribers} subs
-                                                    </span>
-                                                    )}
-                                            </span>
-                                            }
-                                        />
-                                    </ListItem>
-                                );
-                            })}
-                            {history}
-                        </List>
-                    ) : (
-                        <React.Fragment>
-                            <Typography
-                                style={{ margin: "12px 8px 12px 8px", color: "#999999" }}
-                                variant="body2"
-                                component="p"
-                            ><T
-                                k="components.index.no_result_found_for_0_0"
-                                vars={{
-                                    searchInputText: searchInputText
-                                }}
-                                slots={[<span
-                                    style={{ textDecoration: "underline", cursor: "pointer" }}
-                                    onClick={() => onSetTagNavigation(searchInputText)}
-                                    key="0" />]} /></Typography>
-                            <List dense>{history}</List>
-                        </React.Fragment>
-                    )}
-                </div>
-            </Popper>
-        );
-    },
-    (prev, next) =>
-        prev.searchInputText === next.searchInputText &&
-        prev.searchLoading === next.searchLoading &&
-        prev.usersFound === next.usersFound &&
-        prev.tagsFound === next.tagsFound &&
-        prev.communitiesFound === next.communitiesFound &&
-        prev.searchInput === next.searchInput &&
-        prev.history === next.history,
-);
+// ── SearchResults: components/search/SearchResults (rendered by SearchBar) ────
 
 // ── ToolbarMenuButton ────────────────────────────────────────────────────────
 // The drawer opener of the compact layout (styles.toolbarMenu hides it on
@@ -1765,10 +1474,10 @@ const ToolbarComponent = React.memo(
     ({
          classes, compact, wordmark, menuAvatar,
          searchOpen, searchInputText, searchBarPlaceholder,
-         searchInput, searchResults, searchLoading, history,
+         searchResults, history,
          onOpenMenuDrawer, onResetSearch, onSearchChange,
-         onGoHome, onGoToUsername, onGoToTag, onGoToCommunity,
-         onSetTagNavigation, onSetSearchBarRef,
+         onGoHome, onGoToUsername, onGoToTag, onGoToCommunity, onGoToArtwork,
+         onSetTagNavigation,
          onIco, onWitnesses, onAppinfo, onSettings, onToolbarMenu,
      }) => {
         useLanguage();
@@ -1776,46 +1485,21 @@ const ToolbarComponent = React.memo(
             <div className={classes.toolbar}>
                 <ToolbarMenuButton classes={classes} avatar={menuAvatar} onClick={onOpenMenuDrawer} />
                 {compact ? null : wordmark}
-                <ClickAwayListener onClickAway={onResetSearch}>
-                    <div className={classes.searchBarWrapper}>
-                        <Fade in timeout={600}>
-                            <div
-                                className={searchOpen ? classes.searchBarOpen : classes.searchBar}
-                                ref={onSetSearchBarRef}
-                            >
-                                <input
-                                    className={classes.searchInput}
-                                    type="text"
-                                    value={searchInputText}
-                                    placeholder={searchBarPlaceholder}
-                                    onChange={onSearchChange}
-                                />
-                                <IconButton
-                                    className={classes.searchButton}
-                                    onClick={() => searchInputText.length ? onResetSearch() : onGoHome()}
-                                >
-                                    {searchOpen ? <CloseIcon /> : <ArrowBackRounded />}
-                                </IconButton>
-                            </div>
-                        </Fade>
-                        {searchOpen && (
-                            <SearchResults
-                                classes={classes}
-                                searchInputText={searchInputText}
-                                usersFound={searchResults.users}
-                                tagsFound={searchResults.tags}
-                                communitiesFound={searchResults.communities}
-                                searchLoading={searchLoading}
-                                searchInput={searchInput}
-                                history={history}
-                                onGoToUsername={onGoToUsername}
-                                onGoToTag={onGoToTag}
-                                onGoToCommunity={onGoToCommunity}
-                                onSetTagNavigation={onSetTagNavigation}
-                            />
-                        )}
-                    </div>
-                </ClickAwayListener>
+                <SearchBar
+                    open={searchOpen}
+                    value={searchInputText}
+                    placeholder={searchBarPlaceholder}
+                    onChange={onSearchChange}
+                    onReset={onResetSearch}
+                    onGoHome={onGoHome}
+                    results={searchResults}
+                    history={history}
+                    onGoToUsername={onGoToUsername}
+                    onGoToTag={onGoToTag}
+                    onGoToCommunity={onGoToCommunity}
+                    onGoToArtwork={onGoToArtwork}
+                    onSetTagNavigation={onSetTagNavigation}
+                />
                 <Tooltip title={t("components.index.exclusive_discount_for_a_limited_time_only")}>
                     <Button className={classes.toolbarPrimaryButton} onClick={onIco}>
                         <SaleIcon className={classes.icoSaleHidden} />
@@ -1866,18 +1550,16 @@ const ToolbarComponent = React.memo(
         prev.searchInputText === next.searchInputText &&
         prev.searchBarPlaceholder === next.searchBarPlaceholder &&
         prev.searchResults === next.searchResults &&
-        prev.searchLoading === next.searchLoading &&
-        // wordmark, searchInput and history are rendered here (or passed
-        // straight into SearchResults) and CAN change identity: history
-        // (the memoized history dropdown) is rebuilt whenever historyTags
-        // change, and searchInput (the search-bar anchor el) is set on mount.
-        // Omitting them let the toolbar bail out of a re-render and feed a
-        // stale `history`/anchor down to SearchResults — whose own comparator
-        // never gets a chance to run. All the on* callbacks are stable
-        // (useCallback with ref-backed deps), so they're deliberately left
-        // out: comparing them would only add work, never catch a real change.
+        // wordmark and history are rendered here (or passed straight into
+        // SearchBar) and CAN change identity: history (the memoized history
+        // dropdown) is rebuilt whenever historyTags change. Omitting them let
+        // the toolbar bail out of a re-render and feed a stale `history` down
+        // to the dropdown — whose own comparator never gets a chance to run.
+        // The search-bar anchor now lives inside SearchBar. All the on*
+        // callbacks are stable (useCallback with ref-backed deps), so they're
+        // deliberately left out: comparing them would only add work, never
+        // catch a real change.
         prev.wordmark === next.wordmark &&
-        prev.searchInput === next.searchInput &&
         prev.history === next.history &&
         prev.classes === next.classes,
 );
@@ -2116,28 +1798,7 @@ const SnackbarComponent = React.memo(
 // ═════════════════════════════════════════════════════════════════════════════
 
 const styles = (theme) => {
-    const searchBarBase = {
-        boxShadow: "inset 0px 3px 2px 0px rgba(0,0,0,0.2), inset 0px 2px 2px 1px rgba(0,0,0,0.14), inset 0px 2px 5px 2px rgba(0,0,0,0.12)",
-        display: "inline-block",
-        padding: "12px 32px",
-        backgroundColor: "#222222",
-        verticalAlign: "top",
-        height: 32,
-        width: 320,
-        boxSizing: "content-box",
-        margin: "24px 32px 16px 32px",
-        position: "relative",
-        transition: `border-radius 150ms ${EASE}`,
-        [theme.breakpoints.down("md")]: { width: 256, margin: "24px 16px 16px 32px" },
-        [theme.breakpoints.down("sm")]: {
-            maxWidth: "calc(100% - 176px)",
-            height: 24,
-            margin: "12px 16px 8px 64px",
-            padding: "8px 24px",
-            position: "absolute",
-        },
-    };
-
+    // Search-bar styles moved to components/search/styles.js (SearchBar owns them).
     const buttonTransition = `225ms ${EASE}`;
 
     return {
@@ -2293,64 +1954,6 @@ const styles = (theme) => {
             fontFamily: '"Normative Pro"',
         },
         icoSaleHidden: { [theme.breakpoints.down("md")]: { display: "none" } },
-        searchBarWrapper: {
-            zIndex: 9,
-            position: "relative",
-            display: "inline-block",
-            verticalAlign: "top",
-            width: "auto",
-            [theme.breakpoints.down("sm")]: { width: "100%" },
-        },
-        searchBar: {
-            ...searchBarBase,
-            borderRadius: 28,
-            [theme.breakpoints.down("sm")]: { ...searchBarBase[theme.breakpoints.down("sm")], borderRadius: 16 },
-        },
-        searchBarOpen: {
-            ...searchBarBase,
-            boxShadow: "none",
-            borderRadius: "28px 28px 0 0",
-            [theme.breakpoints.down("sm")]: { ...searchBarBase[theme.breakpoints.down("sm")], borderRadius: "16px 16px 0 0" },
-        },
-        searchBarOpenMenu: {
-            zIndex: 9,
-            width: 320,
-            [theme.breakpoints.down("md")]: { width: 256 },
-            [theme.breakpoints.down("sm")]: { maxWidth: "calc(100% - 176px)" },
-        },
-        searchBarResult: {
-            padding: "0 16px",
-            contain: "style layout",
-            borderRadius: "0 0 28px 28px",
-            margin: 0,
-            backgroundColor: "#222222",
-            maxHeight: "min(75vh, 386px)",
-            overflow: "overlay",
-            boxShadow: "#22222233 0px 7px 8px -4px, #22222224 0px 12px 17px 2px, #2222221f 0px 5px 22px 4px",
-            [theme.breakpoints.down("sm")]: { borderRadius: "0 0 16px 16px" },
-            "& .MuiListSubheader-sticky": { backgroundColor: "#222222" },
-            "& .MuiList-padding": { paddingTop: 0 },
-        },
-        searchButton: {
-            position: "absolute",
-            right: 8,
-            top: 4,
-            [theme.breakpoints.down("sm")]: { right: 0, top: -4, color: "#666" },
-        },
-        searchInput: {
-            width: "100%",
-            backgroundColor: "transparent",
-            border: "none",
-            marginTop: -8,
-            marginLeft: -8,
-            lineHeight: "48px",
-            fontSize: 18,
-            height: 48,
-            color: "#ccc",
-            "&:focus": { outline: "none" },
-            "&::placeholder": { color: "#666" },
-            [theme.breakpoints.down("sm")]: { lineHeight: "32px", fontSize: 14, height: 40 },
-        },
         content: {
             position: "absolute",
             overflow: "hidden",
@@ -2412,7 +2015,6 @@ const styles = (theme) => {
 function Index({ classes, history, settings: rawSettings }) {
     // ── Refs for latest values (avoids stale closures) ────────────────────
     const settingsRef = useRef({ _know_the_settings: false });
-    const [searchBarAnchor, setSearchBarAnchor] = useState(null);
 
     // ── Settings processing ───────────────────────────────────────────────
     // settingsVersion is bumped by the SETTINGS_UPDATE dispatcher event
@@ -2679,7 +2281,7 @@ function Index({ classes, history, settings: rawSettings }) {
     // switch), forcing a full page reconcile for props already flowing.
 
     // ── Search ────────────────────────────────────────────────────────────
-    const search = useBlockchainSearch(apiRef);
+    const search = useSearch(apiRef);
 
     // ── First-visit tour ──────────────────────────────────────────────────
     const [tourSteps, setTourSteps] = useState(null);
@@ -2803,6 +2405,12 @@ function Index({ classes, history, settings: rawSettings }) {
         history.push("/" + name);
         searchReset();
     }, [history, searchReset]);
+    const goToArtwork = useCallback((item) => {
+        const path = artworkPath(item);
+        if (!path) return;
+        history.push(path);
+        searchReset();
+    }, [history, searchReset]);
     const setTagNavigation = useCallback((tagname) => {
         history.push("/trending/" + tagname);
     }, [history]);
@@ -2843,15 +2451,6 @@ function Index({ classes, history, settings: rawSettings }) {
             },
         });
     }, [openDialog, closeDialog]);
-
-    // ── SearchBar ref ─────────────────────────────────────────────────────
-    const setSearchBarRef = useCallback((el) => {
-        if (el) {
-            const rect = el.getBoundingClientRect();
-            el.width = rect.width;
-            setSearchBarAnchor(el);
-        }
-    }, []);
 
     // ── Dispatcher ────────────────────────────────────────────────────────
     // All callbacks are stable now, but we use a ref as a firewall:
@@ -3065,9 +2664,7 @@ function Index({ classes, history, settings: rawSettings }) {
                             searchOpen={search.isOpen}
                             searchInputText={search.query}
                             searchBarPlaceholder={searchBarPlaceholder}
-                            searchInput={searchBarAnchor}
                             searchResults={search.results}
-                            searchLoading={search.results.loading}
                             history={historyList}
                             onOpenMenuDrawer={openDrawer}
                             onResetSearch={search.reset}
@@ -3076,8 +2673,8 @@ function Index({ classes, history, settings: rawSettings }) {
                             onGoToUsername={goToUsername}
                             onGoToTag={goToTag}
                             onGoToCommunity={goToCommunity}
+                            onGoToArtwork={goToArtwork}
                             onSetTagNavigation={setTagNavigation}
-                            onSetSearchBarRef={setSearchBarRef}
                             onIco={openIco}
                             onWitnesses={openWitnesses}
                             onAppinfo={openAppinfo}
