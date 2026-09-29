@@ -26,7 +26,10 @@ import dispatcher from "../dispatcher";
 import * as actions from "../actions/utils";
 import * as api from "../utils/settings";
 import { update_meta_title } from "../utils/meta-tags";
-import { PAGE_ROUTES, isPostUrl, hostPageForPostUrl } from "../utils/constants";
+import {
+    PAGE_ROUTES, isPostUrl, hostPageForPostUrl,
+    splitMetaPath, parseMeta, formatMeta, isHomePath, parseFeedFocusHash,
+} from "../utils/constants";
 
 import LogoutModal from "../components/LogoutModal";
 import MenuContent from "../components/MenuContent";
@@ -34,7 +37,7 @@ import ToolbarMenuOption from "../components/ToolbarMenuOption";
 // The toolbar search (hook, bar, dropdown, rows, artwork masonry) lives in
 // components/search. useSearch keeps useBlockchainSearch's contract and adds
 // user/community profiles and the artwork leg (pixagram-search Worker).
-import { useSearch, SearchBar, artworkPath } from "../components/search";
+import { useSearch, SearchBar, artworkPath, compactFilters } from "../components/search";
 import VoteIcon from "../icons/Vote";
 import SaleIcon from "../icons/Sale";
 import SettingsIcon from "@material-ui/icons/Settings";
@@ -483,12 +486,19 @@ const DIALOG_REGISTRY = {
         sfxOpen: "state-change_confirm-down",
         sfxClose: "labactive",
     },
+    // settings, witnesses and appinfo are the meta overlays (§8b): the address
+    // drives them. useMetaDialogs opens them with `meta` (the address's
+    // overlay, parsed), `onMetaChange` for tab moves and an `onClose` that goes
+    // through the address. Open them with openMeta or the META dispatcher
+    // event, never openDialog: a dialog the address doesn't name is taken down
+    // again by useMetaDialogs.
     settings: {
         load: () => import("../components/SettingsDialog"),
         props: (api, close, options, settings) => ({
             open: true,
             settings,
-            onClose: close,
+            onClose: options.onClose || close,
+            meta: options.meta || null,
         }),
         sfxOpen: "state-change_confirm-down",
         sfxClose: "labactive",
@@ -515,7 +525,13 @@ const DIALOG_REGISTRY = {
     },
     witnesses: {
         load: () => import("../components/GovernanceDialog"),
-        props: (api, close) => ({ open: true, onClose: close, api }),
+        props: (api, close, options) => ({
+            open: true,
+            api,
+            onClose: options.onClose || close,
+            meta: options.meta || null,
+            onMetaChange: options.onMetaChange || null,
+        }),
     },
     favorites: {
         load: () => import("../components/FavoriteManagerDialog"),
@@ -525,7 +541,12 @@ const DIALOG_REGISTRY = {
     },
     appinfo: {
         load: () => import("../components/AppInfoDialog.js"),
-        props: (api, close) => ({ open: true, onClose: close }),
+        props: (api, close, options) => ({
+            open: true,
+            onClose: options.onClose || close,
+            meta: options.meta || null,
+            onMetaChange: options.onMetaChange || null,
+        }),
     },
     voting: {
         load: () => import("../components/VotingListModal"),
@@ -573,6 +594,19 @@ function dialogReducer(state, action) {
             // Only close if it's the dialog we think is open (prevents stale closes)
             if (state.name === action.name || action.name == null) return DIALOG_IDLE;
             return state;
+        case "update": {
+            // Merge into the open dialog's props — only for the named dialog,
+            // and only when a value actually differs, so a no-op update is no
+            // render at all.
+            if (state.name !== action.name || !state.props) return state;
+            const patch = action.patch || {};
+            const changed = Object.keys(patch).some((key) => !Object.is(state.props[key], patch[key]));
+            return changed ? { ...state, props: { ...state.props, ...patch } } : state;
+        }
+        case "settle":
+            // An open failed: same slot, new identity, so whatever was waiting
+            // on that open (useMetaDialogs) runs again.
+            return { ...state };
         default:
             return state;
     }
@@ -583,6 +617,11 @@ function useDialogManager(apiRef, settingsRef) {
     const lockRef = useRef(null); // prevents double-open of same dialog
     const cancelledAtRef = useRef(0); // vote-weight cancel suppression
     const dialogNameRef = useRef(null);
+    // The dialog whose chunk is loading (null when none), and a ticket per
+    // open: only the LATEST open may land, so two opens racing on their
+    // chunks end on the one asked for last, not on the one that loaded last.
+    const pendingRef = useRef(null);
+    const ticketRef = useRef(0);
 
     // Passive mirror — no render, just keeps the ref current
     dialogNameRef.current = dialog.name;
@@ -603,8 +642,13 @@ function useDialogManager(apiRef, settingsRef) {
         // Re-entrance guard
         if (lockRef.current === name) return;
         lockRef.current = name;
+        pendingRef.current = name;
+        const ticket = ++ticketRef.current;
 
         entry.load().then((module) => {
+            // Superseded by a later open, or cancelled: land nowhere.
+            if (ticket !== ticketRef.current) return;
+            pendingRef.current = null;
             const Component = module.default;
             const api = apiRef.current;
             const settings = settingsRef.current;
@@ -636,13 +680,33 @@ function useDialogManager(apiRef, settingsRef) {
 
             dispatch({ type: "open", name, Component, props });
         }).catch(() => {
+            if (ticket !== ticketRef.current) return;
+            pendingRef.current = null;
             lockRef.current = null;
+            // The caller hears about it (an overlay drops its suffix, so its
+            // button works again); otherwise re-render, so whatever waited
+            // on this open takes another look.
+            if (typeof options.onFail === "function") options.onFail();
+            else dispatch({ type: "settle" });
         });
 
         if (entry.sfxOpen) actions.trigger_sfx(entry.sfxOpen);
     }, [closeDialog, apiRef, settingsRef]);
 
-    return { dialog, openDialog, closeDialog, cancelledAtRef };
+    // Drop an open whose chunk is still loading: it lands nowhere.
+    const cancelDialog = useCallback((name) => {
+        if (!pendingRef.current || (name && pendingRef.current !== name)) return;
+        ticketRef.current += 1;
+        pendingRef.current = null;
+        lockRef.current = dialogNameRef.current; // the dialog actually up keeps its guard
+    }, []);
+
+    // New props for the open dialog (see the reducer's "update").
+    const updateDialog = useCallback((name, patch) => {
+        dispatch({ type: "update", name, patch });
+    }, []);
+
+    return { dialog, openDialog, closeDialog, cancelDialog, updateDialog, pendingRef, cancelledAtRef };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -927,7 +991,11 @@ function usePageRouter(history, settingsRef, apiRef) {
     }, [settingsRef, pushHistoryTag]);
 
     const navigate = useCallback((newPathname) => {
-        const _pathname = String(newPathname || history.location.pathname);
+        // Only the page part routes. A "+meta" suffix is an overlay on this
+        // page (useMetaRoute, §8b), so opening or closing one returns just
+        // below as "same pathname" and never swaps, remounts or re-renders
+        // the page — which is also why pages never see the suffix.
+        const _pathname = splitMetaPath(String(newPathname || history.location.pathname)).path;
         const oldPathname = String(pathnameRef.current);
 
         if (_pathname === "/index.html") {
@@ -1026,6 +1094,346 @@ function usePageRouter(history, settingsRef, apiRef) {
         livePathname,
         setPageComponent,
     };
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// §8b — useMetaRoute: the "+meta" overlay suffix
+// ═════════════════════════════════════════════════════════════════════════════
+// Settings, Info, Governance and the search live in the address as a suffix on
+// the page (utils/constants: splitMetaPath / parseMeta / formatMeta). The
+// address, not a click handler, is what opens them: a button pushes the
+// suffix, the back arrow pops it, a shared link lands with it, and
+// useMetaDialogs (§8c) brings the dialog slot in line with it.
+//
+//   openMeta(meta)    push `page+meta` — or swap the suffix in place when an
+//                     overlay is already up, so the page stays one step back
+//   updateMeta(meta)  the open overlay moved (tab, section, query): replace
+//   closeMeta()       step back onto the page when this document pushed the
+//                     overlay; otherwise (shared link, reload) drop the suffix
+//                     in place
+//   readMeta()        the overlay in the address right now, between renders
+//   visit, visitRef   counts moves onto another entry (push, back/forward)
+//
+// A non-canonical address (any case, a missing tab, "%2B", a trailing "/", a
+// meta on the landing page) is rewritten in place to formatMeta's form.
+
+// A path starting with "//" reads back as a protocol-relative URL — another
+// origin, so writing it throws. No route matches one anyway: the suffix is
+// neither honoured nor rewritten there.
+const isWritablePath = (path) => !path.startsWith("//");
+
+function useMetaRoute(history) {
+    const [loc, setLoc] = useState(() => splitMetaPath(history.location.pathname));
+    // Keys of the overlay entries THIS document pushed. Only those have the
+    // page itself one entry below, in the same document: after a reload the
+    // entry below belongs to the previous document, and stepping back onto
+    // it would be a full page load. So only those close with history.back().
+    const pushedKeysRef = useRef(null);
+    if (pushedKeysRef.current === null) pushedKeysRef.current = new Set();
+    // Key of the entry a deferred back() is on its way from (see closeMeta).
+    const closingKeyRef = useRef(null);
+    // Moves onto another history entry — a push, the back/forward arrows —
+    // but not in-place replaces, which keep the entry. The search (§8d)
+    // writes only onto the entry it was typed on, and reads the address again
+    // after every move, even onto an entry that holds the same search.
+    const [visit, setVisit] = useState(0);
+    const visitRef = useRef(0);
+
+    useEffect(() => {
+        const sync = (location) => {
+            closingKeyRef.current = null;
+            const next = splitMetaPath(location.pathname);
+            // Same page, same suffix (a drawer-hash change): no render.
+            setLoc((prev) => (prev.path === next.path && prev.meta === next.meta ? prev : next));
+        };
+        sync(history.location);
+        return history.listen(({ action, location }) => {
+            if (action !== "REPLACE") {
+                visitRef.current += 1;
+                setVisit(visitRef.current);
+            }
+            sync(location);
+        });
+    }, [history]);
+
+    // The canonical suffix the address asks for — "" for none, for junk and on
+    // the landing page — and its parsed form, whose identity changes only when
+    // the overlay really does: the dialogs retarget on a new object.
+    const metaKey = useMemo(() => {
+        if (!loc.meta || isHomePath(loc.path) || !isWritablePath(loc.path)) return "";
+        const parsed = parseMeta(loc.meta);
+        return parsed ? formatMeta(parsed) : "";
+    }, [loc]);
+    const meta = useMemo(() => (metaKey ? parseMeta(metaKey) : null), [metaKey]);
+
+    // history.replace, carrying "this document pushed it" over to the new key
+    // (every replace mints one).
+    const replaceEntry = useCallback((url, state) => {
+        const pushed = pushedKeysRef.current.has(history.location.key);
+        history.replace(url, state);
+        if (pushed) pushedKeysRef.current.add(history.location.key);
+    }, [history]);
+
+    useEffect(() => {
+        const location = history.location;
+        const current = splitMetaPath(location.pathname);
+        if (current.path !== loc.path || current.meta !== loc.meta) return; // moved on already
+        if (!isWritablePath(loc.path)) return;
+        const canonical = metaKey ? loc.path + "+" + metaKey : loc.path;
+        if (canonical !== location.pathname) {
+            replaceEntry(canonical + location.search + location.hash, location.state);
+        }
+    }, [history, loc, metaKey, replaceEntry]);
+
+    const openMeta = useCallback((next) => {
+        const raw = formatMeta(next);
+        if (!raw) return;
+        const location = history.location;
+        const { path, meta: current } = splitMetaPath(location.pathname);
+        if (isHomePath(path) || !isWritablePath(path) || current === raw) return;
+        const url = path + "+" + raw + location.search;
+        if (current) {
+            replaceEntry(url + location.hash, location.state);
+            return;
+        }
+        // FeedPersonal's #focus= is a one-shot order it carries out on every
+        // PUSH. It was carried out on the way in, so it stays behind.
+        const hash = parseFeedFocusHash(location.hash) ? "" : location.hash;
+        history.push(url + hash, location.state);
+        pushedKeysRef.current.add(history.location.key);
+    }, [history, replaceEntry]);
+
+    const updateMeta = useCallback((next) => {
+        const raw = formatMeta(next);
+        const location = history.location;
+        const { path, meta: current } = splitMetaPath(location.pathname);
+        if (!raw || !current || current === raw || !isWritablePath(path)) return;
+        // A late report from an overlay the address has already moved past.
+        const shown = parseMeta(current);
+        if (!shown || shown.kind !== next.kind) return;
+        replaceEntry(path + "+" + raw + location.search + location.hash, location.state);
+    }, [history, replaceEntry]);
+
+    const closeMeta = useCallback(() => {
+        const location = history.location;
+        const { path, meta: current } = splitMetaPath(location.pathname);
+        if (!current || !isWritablePath(path)) return;
+        const key = location.key;
+        if (pushedKeysRef.current.has(key)) {
+            // Step back onto the page, so the overlay leaves no entry behind
+            // (forward reopens it). Deferred by one task: a view that closes
+            // and navigates in the same handler (GDDisruptions' portal tiles)
+            // has pushed by then, the key no longer matches, and the new page
+            // stays — with the overlay one step back. back() before a push
+            // would race it.
+            if (closingKeyRef.current === key) return; // already on its way
+            closingKeyRef.current = key;
+            setTimeout(() => {
+                if (closingKeyRef.current === key && history.location.key === key) history.back();
+            }, 0);
+            return;
+        }
+        history.replace(path + location.search + location.hash, location.state);
+    }, [history]);
+
+    // The overlay the address shows right now (canonical, parsed; null for
+    // none) — for callers acting between renders, before `meta` catches up.
+    const readMeta = useCallback(() => {
+        const { path, meta: raw } = splitMetaPath(history.location.pathname);
+        if (!raw || isHomePath(path) || !isWritablePath(path)) return null;
+        return parseMeta(raw);
+    }, [history]);
+
+    return { meta, visit, visitRef, openMeta, updateMeta, closeMeta, readMeta };
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// §8c — useMetaDialogs: the address's overlay drives the dialog slot
+// ═════════════════════════════════════════════════════════════════════════════
+// Whenever the meta, the slot or readiness moves, the single dialog slot (§3)
+// is brought in line with the address: open the overlay's dialog, hand it the
+// new `meta` (it retargets its tab), or close it — never at another dialog's
+// expense. When a PIN prompt, a wallet… takes the slot while the suffix is
+// still in the address, the overlay comes back once that dialog closes; and a
+// dialog on its way in (LOGIN hands over to ACCOUNT by closing and opening in
+// one go) is let land first.
+
+const META_DIALOG_BY_KIND = Object.freeze({ settings: "settings", info: "appinfo", governance: "witnesses" });
+const META_DIALOG_NAMES = Object.freeze({ settings: true, appinfo: true, witnesses: true });
+
+function useMetaDialogs(meta, route, manager, gate) {
+    const { dialog, pendingRef, openDialog, closeDialog, cancelDialog, updateDialog } = manager;
+    const { updateMeta, closeMeta } = route;
+    const { pageName, apiReady, settingsKnown } = gate;
+
+    useEffect(() => {
+        // "+search-…" is not a dialog: it belongs to the toolbar search.
+        const want = meta ? META_DIALOG_BY_KIND[meta.kind] || null : null;
+        const current = dialog.name;
+        // An overlay's dialog the address no longer names, still loading: drop it.
+        if (META_DIALOG_NAMES[pendingRef.current] && pendingRef.current !== want) {
+            cancelDialog(pendingRef.current);
+        }
+        const pending = pendingRef.current;
+
+        if (pending && !META_DIALOG_NAMES[pending]) return;  // someone else's, on its way: let it land
+        if (current === want) {
+            if (want) updateDialog(want, { meta });
+            return;
+        }
+        if (current && !META_DIALOG_NAMES[current]) return;  // not ours to replace
+        if (want && pending === want) return;                // on its way
+        // The slot is empty or holds another overlay's dialog.
+        const canOpen = !!want
+            // a shell to show it in: not at cold start, nor on the landing
+            // page still mounted while the router swaps the page in
+            && !!pageName && pageName !== "home"
+            && (want !== "witnesses" || apiReady)            // reads the chain on mount
+            && (want !== "settings" || settingsKnown);       // not the pre-hydration bag
+        if (canOpen) {
+            openDialog(want, { meta, onMetaChange: updateMeta, onClose: closeMeta, onFail: closeMeta });
+        } else if (current) {
+            // Never leave one overlay's dialog up under another's address
+            // (or none): the wanted one opens when it can.
+            closeDialog(current);
+        }
+    }, [meta, dialog, pendingRef, pageName, apiReady, settingsKnown,
+        openDialog, closeDialog, cancelDialog, updateDialog, updateMeta, closeMeta]);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// §8d — useSearchMeta: the toolbar search ↔ "+search-<payload>"
+// ═════════════════════════════════════════════════════════════════════════════
+// The search is an overlay like the dialogs, but its state lives in useSearch
+// (query, filters, filter panel), not in the slot. Both sides are compared as
+// canonical keys (formatMeta) and reconciled whenever either moves:
+//
+//   the person opens it (types, pulls the filter panel out)   → push
+//   types or filters while it is open                         → replace, once
+//                                                               per pause
+//   closes it (✕, click-away, input emptied)                  → step back
+//   the address moves (back/forward, a link, a reload)        → restore the
+//                                                               search, or reset it
+//
+// A result click pushes its page and resets the search in one go, so the
+// search entry stays one step back: the back arrow returns to the results.
+// When both sides moved at once, the address wins — navigating is the explicit
+// act — and a write still waiting for its pause lands only on the entry it was
+// typed on (route.visit), never on one navigated to since. The address is read
+// live (readMeta), not from this render: a delayed write may have landed
+// since. Nothing happens until the shell and the API are up, since a restored
+// search queries the chain right away.
+//
+// Returns { flush }: write the search onto the current entry now, for a
+// navigation that takes it along (setTagNavigation), so the entry left behind
+// holds it as it is, not as it was at the last pause.
+
+const SEARCH_ADDRESS_DELAY_MS = 400; // one address update per typing pause (Safari caps history calls)
+
+// The address key of a search state; "" while it is closed.
+function searchKey(open, query, filters, panel) {
+    return open ? formatMeta({ kind: "search", query, filters: compactFilters(filters), panel }) : "";
+}
+
+function useSearchMeta(search, meta, route, ready) {
+    const { query, results, isOpen, restore, reset } = search;
+    const { visit, visitRef, openMeta, updateMeta, closeMeta, readMeta } = route;
+
+    const stateKey = useMemo(
+        () => searchKey(isOpen, query, results.filters, results.filtersOpen),
+        [isOpen, query, results.filters, results.filtersOpen],
+    );
+    // Only a dependency (with `visit`): it re-runs the effect when the address moves.
+    const urlKey = meta && meta.kind === "search" ? formatMeta(meta) : "";
+
+    const seenRef = useRef({ url: "", state: "", visit: 0 }); // as last reconciled
+    const latestRef = useRef(stateKey);
+    latestRef.current = stateKey;
+    const timerRef = useRef(0);
+    const pendingVisitRef = useRef(null); // the entry visit a pending write belongs to
+
+    const addressKey = useCallback(() => {
+        const shown = readMeta();
+        return shown && shown.kind === "search" ? formatMeta(shown) : "";
+    }, [readMeta]);
+
+    const cancel = useCallback(() => {
+        clearTimeout(timerRef.current);
+        timerRef.current = 0;
+        pendingVisitRef.current = null;
+    }, []);
+
+    const write = useCallback((key) => {
+        updateMeta(parseMeta(key));
+        seenRef.current = { url: addressKey(), state: key, visit: visitRef.current };
+    }, [updateMeta, addressKey, visitRef]);
+
+    // A pause is over: write onto the entry it was typed on, or not at all
+    // (after a navigation the effect has the last word).
+    const writePending = useCallback(() => {
+        const forVisit = pendingVisitRef.current;
+        cancel();
+        const key = latestRef.current;
+        if (forVisit !== null && key && visitRef.current === forVisit) write(key);
+    }, [cancel, write, visitRef]);
+
+    const flush = useCallback(() => {
+        cancel();
+        const key = latestRef.current;
+        if (key && addressKey()) write(key);
+    }, [cancel, write, addressKey]);
+
+    useEffect(() => cancel, [cancel]);
+
+    useEffect(() => {
+        if (!ready) return;
+        const url = addressKey();
+        const now = visitRef.current;
+        const seen = seenRef.current;
+        if (url === stateKey) {
+            seenRef.current = { url, state: stateKey, visit: now };
+            return;
+        }
+        if (url !== seen.url || now !== seen.visit) {
+            // The address moved — to another search, to none, or onto another
+            // entry holding the same search — and it wins.
+            cancel();
+            if (!url) {
+                reset();
+                seenRef.current = { url, state: "", visit: now };
+                return;
+            }
+            const r = restore(readMeta());
+            const got = searchKey(r.open, r.query, r.filters, r.panel);
+            // A link can hold what the search can't show as such (junk
+            // filters, nothing left open): the address takes the search's word.
+            if (got !== url) {
+                if (got) updateMeta(parseMeta(got));
+                else closeMeta();
+            }
+            seenRef.current = { url: addressKey(), state: got, visit: visitRef.current };
+            return;
+        }
+        if (stateKey === seen.state) return; // our own write is on its way
+        cancel();
+        if (!stateKey) {
+            // `url` is a search key here (any other overlay reads as "" and
+            // matched the closed search above), so this never takes down a
+            // dialog that replaced the search.
+            closeMeta();
+        } else if (!url) {
+            openMeta(parseMeta(stateKey));
+        } else {
+            pendingVisitRef.current = now;
+            timerRef.current = setTimeout(writePending, SEARCH_ADDRESS_DELAY_MS);
+            seenRef.current = { url: seen.url, state: stateKey, visit: now };
+            return;
+        }
+        seenRef.current = { url: addressKey(), state: stateKey, visit: visitRef.current };
+    }, [ready, urlKey, visit, stateKey, restore, reset, openMeta, updateMeta, closeMeta, readMeta,
+        visitRef, addressKey, cancel, writePending]);
+
+    return useMemo(() => ({ flush }), [flush]);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1475,6 +1883,7 @@ const ToolbarComponent = React.memo(
          classes, compact, wordmark, menuAvatar,
          searchOpen, searchInputText, searchBarPlaceholder,
          searchResults, history,
+         searchControls,
          onOpenMenuDrawer, onResetSearch, onSearchChange,
          onGoHome, onGoToUsername, onGoToTag, onGoToCommunity, onGoToArtwork,
          onSetTagNavigation,
@@ -1499,6 +1908,7 @@ const ToolbarComponent = React.memo(
                     onGoToCommunity={onGoToCommunity}
                     onGoToArtwork={onGoToArtwork}
                     onSetTagNavigation={onSetTagNavigation}
+                    controls={searchControls}
                 />
                 <Tooltip title={t("components.index.exclusive_discount_for_a_limited_time_only")}>
                     <Button className={classes.toolbarPrimaryButton} onClick={onIco}>
@@ -1556,9 +1966,10 @@ const ToolbarComponent = React.memo(
         // the toolbar bail out of a re-render and feed a stale `history` down
         // to the dropdown — whose own comparator never gets a chance to run.
         // The search-bar anchor now lives inside SearchBar. All the on*
-        // callbacks are stable (useCallback with ref-backed deps), so they're
-        // deliberately left out: comparing them would only add work, never
-        // catch a real change.
+        // callbacks and searchControls (useSearch's memoized filter API) are
+        // stable (useCallback with ref-backed deps), so they're deliberately
+        // left out: comparing them would only add work, never catch a real
+        // change.
         prev.wordmark === next.wordmark &&
         prev.history === next.history &&
         prev.classes === next.classes,
@@ -2045,7 +2456,8 @@ function Index({ classes, history, settings: rawSettings }) {
     const apiRef = useRef(null);
 
     // ── Dialog manager (single slot) ─────────────────────────────────────
-    const { dialog, openDialog, closeDialog } = useDialogManager(apiRef, settingsRef);
+    const dialogs = useDialogManager(apiRef, settingsRef);
+    const { dialog, openDialog, closeDialog } = dialogs;
 
     // Resolved node URL, reactive to processedSettings. This — rather than a
     // ref read inside usePixaAPI on mount only — is what lets picking a
@@ -2111,6 +2523,15 @@ function Index({ classes, history, settings: rawSettings }) {
     // Browse-button exit into /feed/ when it flips.
     const autoEnterFeed = useLandingAutoEnter(apiRef, apiReady, apiGeneration, page.name);
 
+    // ── Meta overlays (+settings, +info-…, +governance-…, +search-…) ─────
+    const metaRoute = useMetaRoute(history);
+    const { meta, openMeta, closeMeta } = metaRoute;
+    useMetaDialogs(meta, metaRoute, dialogs, {
+        pageName: page.name,
+        apiReady,
+        settingsKnown: !!processedSettings._know_the_settings,
+    });
+
     // Re-route when locale changes or on initial settings load.
     // Other settings changes (renderer, nsfw, payout…) propagate to pages
     // via ContentComponent's cloneElement — no async page rebuild needed.
@@ -2135,7 +2556,7 @@ function Index({ classes, history, settings: rawSettings }) {
             // one is live — the subscription below turns that into a re-render.
             setLanguage(locale);
 
-            const pathname = history.location.pathname;
+            const pathname = splitMetaPath(history.location.pathname).path;
             for (const route of PAGE_ROUTES) {
                 if (route.page_name !== "unknown" && pathname.match(route.page_regex)) {
                     setPageComponent(route.page_name, pathname);
@@ -2282,6 +2703,8 @@ function Index({ classes, history, settings: rawSettings }) {
 
     // ── Search ────────────────────────────────────────────────────────────
     const search = useSearch(apiRef);
+    // It lives in the address too (+search-…): §8d.
+    const searchAddress = useSearchMeta(search, meta, metaRoute, apiReady && !!page.name && page.name !== "home");
 
     // ── First-visit tour ──────────────────────────────────────────────────
     const [tourSteps, setTourSteps] = useState(null);
@@ -2324,6 +2747,7 @@ function Index({ classes, history, settings: rawSettings }) {
         const name = page.name;
         if (!TOURABLE_PAGES[name]) return;
         if (isPostUrl(history.location.pathname)) return; // post overlay is open
+        if (meta) return;                                 // a meta overlay is up
         if (readTourState()[name]) return;
 
         const timer = setTimeout(() => {
@@ -2340,7 +2764,7 @@ function Index({ classes, history, settings: rawSettings }) {
             setTourSteps(steps);
         }, 900);
         return () => clearTimeout(timer);
-    }, [apiReady, processedSettings, page.name, compact, tourSteps, history, renderNonce]);
+    }, [apiReady, processedSettings, page.name, compact, tourSteps, history, renderNonce, meta]);
 
     // Navigating away mid-tour closes it and marks that page as seen, so the
     // tour doesn't ambush the user again on the way back.
@@ -2411,9 +2835,18 @@ function Index({ classes, history, settings: rawSettings }) {
         history.push(path);
         searchReset();
     }, [history, searchReset]);
+    // The one way out of the search that keeps it open (there is no reset
+    // here), so its suffix rides along to the tag page and the search stays
+    // in the address. The entry it came from stays one step back — flushed
+    // first, so it holds the search as it is now, not as at the last pause.
+    const readMeta = metaRoute.readMeta;
+    const flushSearchAddress = searchAddress.flush;
     const setTagNavigation = useCallback((tagname) => {
-        history.push("/trending/" + tagname);
-    }, [history]);
+        flushSearchAddress();
+        const shown = readMeta();
+        const suffix = shown && shown.kind === "search" ? "+" + formatMeta(shown) : "";
+        history.push("/trending/" + tagname + suffix);
+    }, [history, readMeta, flushSearchAddress]);
 
     // ── ICO link ──────────────────────────────────────────────────────────
     const openIco = useCallback(() => {
@@ -2421,9 +2854,17 @@ function Index({ classes, history, settings: rawSettings }) {
     }, []);
 
     // ── Dialog convenience openers ────────────────────────────────────────
-    const openWitnesses = useCallback(() => openDialog("witnesses"), [openDialog]);
-    const openAppinfo = useCallback(() => openDialog("appinfo"), [openDialog]);
-    const openSettings = useCallback(() => openDialog("settings"), [openDialog]);
+    // Governance, Info and Settings open through the address (§8b): these
+    // push the overlay's suffix and useMetaDialogs opens the dialog. Toolbar
+    // buttons pass a click event, which carries no tab/section, so only a
+    // dispatcher payload like { tab: "disruptions" } picks a tab.
+    const openWitnesses = useCallback((data) => openMeta({
+        kind: "governance",
+        tab: data?.tab,
+        section: data?.section,
+    }), [openMeta]);
+    const openAppinfo = useCallback((data) => openMeta({ kind: "info", tab: data?.tab }), [openMeta]);
+    const openSettings = useCallback(() => openMeta({ kind: "settings" }), [openMeta]);
     const openTextDialog = useCallback((options = {}) => {
         const gradient = options?.gradient || (typeof options !== 'object' ? options : undefined);
         openDialog("text", {
@@ -2464,7 +2905,10 @@ function Index({ classes, history, settings: rawSettings }) {
             case "TRIGGER_SFX":
                 if (_sfx_enabled) sound.play("sfx", event.data.pack, event.data.name, event.data.volume / 1.25, false);
                 break;
-            case "WITNESSES":    openWitnesses(); break;
+            case "WITNESSES":    openWitnesses(event.data); break;
+            // Any overlay by its meta, e.g. { kind: "info", tab: "terms" } —
+            // the way for a component to link one without building the URL.
+            case "META":         openMeta(event.data); break;
             case "ICO":          openIco(); break;
             case "OPEN_QR":      openDialog("qr"); break;
             case "WALLET":       openDialog("wallet"); break;
@@ -2493,7 +2937,12 @@ function Index({ classes, history, settings: rawSettings }) {
                     forceUpdate();                    // and repaint the subtree
                 }
             }); break;
-            case "CLOSE_MODAL":     closeDialog(null); break;
+            case "CLOSE_MODAL":
+                // An overlay closes through the address, or the address
+                // would open it again.
+                if (META_DIALOG_NAMES[dialog.name]) closeMeta();
+                else closeDialog(null);
+                break;
             case "SHARE_CONTENT":
                 shareContent(event.data.title, event.data.text, event.data.url);
                 break;
@@ -2669,6 +3118,7 @@ function Index({ classes, history, settings: rawSettings }) {
                             onOpenMenuDrawer={openDrawer}
                             onResetSearch={search.reset}
                             onSearchChange={search.handleChange}
+                            searchControls={search.controls}
                             onGoHome={goHome}
                             onGoToUsername={goToUsername}
                             onGoToTag={goToTag}

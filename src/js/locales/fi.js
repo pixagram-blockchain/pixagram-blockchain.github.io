@@ -208,7 +208,12 @@ export default {
         "risks": "Riskit",
         "bug_reports": "Virheraportit",
         "community": "Yhteisö",
-        "development": "Kehitys"
+        "development": "Kehitys",
+        "search": "Hae",
+        "artworks": "Teokset",
+        "posts": "Julkaisut",
+        "communities": "Yhteisöt",
+        "subscribers_count": "Tilaajia: {{count}}"
     },
 
     components: {
@@ -229,6 +234,9 @@ export default {
             "available": "Käytettävissä: ",
             "in_savings": "Säästöissä: "
         },
+        "post_result": {
+            "in_community": "yhteisössä {{community}}"
+        },
         "radial_context_menu": {
             "bold": "Lihavointi",
             "italic": "Kursivointi",
@@ -246,6 +254,55 @@ export default {
             "insert_column_right": "Lisää sarake oikealle",
             "delete_column": "Poista sarake",
             "delete_table": "Poista taulukko"
+        },
+        "search_bar": {
+            "filters": "Suodattimet"
+        },
+        "search_filters": {
+            "show": "Näytä",
+            "all": "Kaikki",
+            "time": "Aika",
+            "any_time": "Milloin vain",
+            "last_24_hours": "24 h",
+            "past_week": "Viikko",
+            "past_month": "Kuukausi",
+            "past_year": "Vuosi",
+            "custom": "Mukautettu",
+            "from": "Alkaen",
+            "to": "Asti",
+            "color": "Väri",
+            "dominant": "Hallitseva",
+            "anywhere": "Missä tahansa",
+            "artworks_only": "Vain teokset",
+            "authors": "Tekijät",
+            "community_name": "Yhteisön nimi",
+            "reset_filters": "Nollaa suodattimet",
+            "color_black": "Musta",
+            "color_white": "Valkoinen",
+            "color_gray": "Harmaa",
+            "color_red": "Punainen",
+            "color_orange": "Oranssi",
+            "color_yellow": "Keltainen",
+            "color_green": "Vihreä",
+            "color_lime": "Limenvihreä",
+            "color_teal": "Sinivihreä",
+            "color_cyan": "Syaani",
+            "color_sky": "Taivaansininen",
+            "color_blue": "Sininen",
+            "color_navy": "Laivastonsininen",
+            "color_purple": "Violetti",
+            "color_magenta": "Magenta",
+            "color_pink": "Vaaleanpunainen",
+            "color_brown": "Ruskea",
+            "color_tan": "Beige",
+            "color_olive": "Oliivinvihreä",
+            "color_maroon": "Viininpunainen"
+        },
+        "search_results": {
+            "users": "Käyttäjät",
+            "no_result_found_for_0_0": "Ei tuloksia haulle ” <0> #{{searchInputText}} </0> ”.",
+            "no_result_found_for_query": "Ei tuloksia haulle ”{{query}}”.",
+            "nothing_matches_these_filters_yet": "Mikään ei vielä vastaa näitä suodattimia."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Älä suodata NSFW-sisältöä",
@@ -295,6 +352,9 @@ export default {
             "falls_back_to_english": "englanti",
             "the_nsfw_filter_and_the_toxic_comment": "NSFW-suodatin ja Vihamielisten kommenttien apuri toimivat pienillä tekoälymalleilla täysin offline-tilassa — turvallisuuden, leikkisyyden ja ilon vuoksi. Mitään tietoja ei koskaan lähetetä palvelimelle. Niiden poistaminen käytöstä voi parantaa suorituskykyä.",
             "this_functionality_makes_age_restricted_material": "Tämä toiminto tekee ikärajoitetun aineiston näkyväksi, mukaan lukien (mutta ei rajoittuen) alastomuus ja mahdollisesti väkivalta. Ottamalla sen käyttöön vakuutat olevasi vähintään 18-vuotias tai täysi-ikäinen sillä lainkäyttöalueella, jolta käytät sivustoa, ja suostut katsomaan seksuaalista tai muuten sopimatonta sisältöä."
+        },
+        "token_field": {
+            "remove": "Poista"
         },
         "toolbar_menu_option": {
             "shop": "Kauppa",

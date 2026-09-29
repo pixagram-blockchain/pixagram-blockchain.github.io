@@ -208,7 +208,12 @@ export default {
         "risks": "இடர்கள்",
         "bug_reports": "பிழை அறிக்கைகள்",
         "community": "சமூகம்",
-        "development": "மேம்பாடு"
+        "development": "மேம்பாடு",
+        "search": "தேடு",
+        "artworks": "கலைப்படைப்புகள்",
+        "posts": "இடுகைகள்",
+        "communities": "சமூகங்கள்",
+        "subscribers_count": "சந்தாதாரர்கள்: {{count}}"
     },
 
     components: {
@@ -229,6 +234,9 @@ export default {
             "available": "கிடைக்கக்கூடியது: ",
             "in_savings": "சேமிப்பில்: "
         },
+        "post_result": {
+            "in_community": "{{community}} இல்"
+        },
         "radial_context_menu": {
             "bold": "தடித்த",
             "italic": "சாய்வு",
@@ -246,6 +254,55 @@ export default {
             "insert_column_right": "வலதுபுறம் நெடுவரிசையைச் செருகு",
             "delete_column": "நெடுவரிசையை நீக்கு",
             "delete_table": "அட்டவணையை நீக்கு"
+        },
+        "search_bar": {
+            "filters": "வடிப்பான்கள்"
+        },
+        "search_filters": {
+            "show": "காட்டு",
+            "all": "அனைத்தும்",
+            "time": "காலம்",
+            "any_time": "எந்த நேரமும்",
+            "last_24_hours": "24 மணி",
+            "past_week": "வாரம்",
+            "past_month": "மாதம்",
+            "past_year": "ஆண்டு",
+            "custom": "தனிப்பயன்",
+            "from": "இருந்து",
+            "to": "வரை",
+            "color": "நிறம்",
+            "dominant": "முதன்மை",
+            "anywhere": "எங்கும்",
+            "artworks_only": "கலைப்படைப்புகள் மட்டும்",
+            "authors": "ஆசிரியர்கள்",
+            "community_name": "சமூகத்தின் பெயர்",
+            "reset_filters": "வடிப்பான்களை மீட்டமை",
+            "color_black": "கருப்பு",
+            "color_white": "வெள்ளை",
+            "color_gray": "சாம்பல்",
+            "color_red": "சிவப்பு",
+            "color_orange": "ஆரஞ்சு",
+            "color_yellow": "மஞ்சள்",
+            "color_green": "பச்சை",
+            "color_lime": "எலுமிச்சை பச்சை",
+            "color_teal": "நீலப்பச்சை",
+            "color_cyan": "சியான்",
+            "color_sky": "வான நீலம்",
+            "color_blue": "நீலம்",
+            "color_navy": "கடற்படை நீலம்",
+            "color_purple": "ஊதா",
+            "color_magenta": "மெஜந்தா",
+            "color_pink": "இளஞ்சிவப்பு",
+            "color_brown": "பழுப்பு",
+            "color_tan": "வெளிர் பழுப்பு",
+            "color_olive": "ஆலிவ்",
+            "color_maroon": "மரூன்"
+        },
+        "search_results": {
+            "users": "பயனர்கள்",
+            "no_result_found_for_0_0": "\" <0> #{{searchInputText}} </0> \" க்கு முடிவு எதுவும் இல்லை.",
+            "no_result_found_for_query": "\"{{query}}\" க்கு முடிவு எதுவும் இல்லை.",
+            "nothing_matches_these_filters_yet": "இந்த வடிப்பான்களுடன் இதுவரை எதுவும் பொருந்தவில்லை."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "NSFW உள்ளடக்கத்தை வடிகட்ட வேண்டாம்",
@@ -295,6 +352,9 @@ export default {
             "falls_back_to_english": "ஆங்கிலம்",
             "the_nsfw_filter_and_the_toxic_comment": "NSFW வடிகட்டியும் நச்சுக் கருத்து உதவியாளரும் முழுவதும் ஆஃப்லைனில் இயங்கும் சிறிய AI மாதிரிகள் மூலம் செயல்படுகின்றன — தளத்தில் பாதுகாப்பு, விளையாட்டுத்தனம், மகிழ்ச்சிக்காக. எந்தத் தரவும் ஒருபோதும் சேவையகத்திற்கு அனுப்பப்படுவதில்லை. இவற்றை முடக்குவது சிறந்த செயல்திறனுக்கு வழிவகுக்கலாம்.",
             "this_functionality_makes_age_restricted_material": "இந்த வசதி வயது வரம்புள்ள உள்ளடக்கங்களை — நிர்வாணம் மற்றும் சில சமயம் வன்முறை உட்பட (ஆனால் அவை மட்டும் அல்ல) — காணக்கூடியதாக்கும். இதை இயக்குவதன் மூலம், உங்களுக்குக் குறைந்தது 18 வயது அல்லது நீங்கள் இணையதளத்தை அணுகும் அதிகார வரம்பில் வயது முதிர்வு அடைந்துள்ளீர்கள் எனவும், வெளிப்படையான உள்ளடக்கத்தைக் காண ஒப்புக்கொள்கிறீர்கள் எனவும் உறுதிப்படுத்துகிறீர்கள்."
+        },
+        "token_field": {
+            "remove": "நீக்கு"
         },
         "toolbar_menu_option": {
             "shop": "கடை",

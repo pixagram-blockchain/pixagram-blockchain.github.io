@@ -620,7 +620,11 @@ export const COMMUNITY_PORTALS = Object.freeze([
 ]);
 
 // ── Post overlay URL helpers ──────────────────────────────────────────
-export const POST_URL_REGEX = /^\/([a-z0-9\-]+)\/@([a-z0-9\.\-]+)\/([a-z0-9\.\-]+)\/?$/;
+// The optional non-capturing tail accepts a "+meta" overlay suffix (see
+// "Meta overlays" below), so a post stays a post while Settings or Info is
+// open over it — also for code that tests the raw history pathname. The
+// three captures are unchanged.
+export const POST_URL_REGEX = /^\/([a-z0-9\-]+)\/@([a-z0-9\.\-]+)\/([a-z0-9\.\-]+)\/?(?:(?:\+|%2[bB])[^\/]*\/?)?$/;
 export const COMMUNITY_TAG_REGEX = /^portal-[0-9]+$/;
 
 export function isPostUrl(pathname) {
@@ -816,4 +820,237 @@ export function parseFeedFocusHash(rawHash) {
     const h = (rawHash || "").replace(/^#/, "");
     if (h.indexOf("focus=") !== 0) return null;
     return decodePostRef(h.split("&")[0].slice(6));
+}
+
+// ── Meta overlays: the "+meta" path suffix ─────────────────────────────
+// The shell-level overlays — Settings, Info, Governance and the toolbar
+// search — are addressed by a suffix on whatever page is showing, so they
+// deep-link, survive a reload and answer the browser's back arrow:
+//
+//   /trending/pixelart+settings
+//   /@primerz/comments+info-privacy
+//   /portal-156480+governance-viability-vote
+//   /created+search-eyJxIjoiY2F0In0            base64url of {"q":"cat"}
+//
+// The first "+" of the pathname starts the meta. Nothing in front of it can
+// hold one (tags, account names and permlinks are [a-z0-9.-]), so the page
+// part routes exactly as before: Index.js splits the suffix off, PAGE_ROUTES
+// only ever sees the page part, and so does every page's `pathname` prop. It
+// rides the pathname because the hash already belongs to the post drawer
+// (#info, #replies, #nft) and to FeedPersonal (#focus=…). The landing page
+// ("/") has no overlays; a meta on it is dropped.
+//
+// Grammar: "<kind>[-<arg>…]", one "-" per level (so no slug may contain one):
+//   settings                          no argument
+//   info-<tab>                        INFO_TABS
+//   governance-<tab>[-<section>]      GOVERNANCE_TABS; a tab with sub-levels
+//                                     (GOVERNANCE_SECTIONS) always names one
+//   search[-<payload>]                base64url(UTF-8 JSON {q, f, p}); that
+//                                     alphabet has "-" in it, so everything
+//                                     after "search-" is the payload
+//
+// parseMeta is lenient — any case, a missing or unknown tab falls back to the
+// first one, anything unreadable is null — and always answers with the
+// CANONICAL meta; formatMeta writes the canonical string. Index.js rewrites a
+// non-canonical address in place, so the address bar only ever shows what
+// formatMeta produced.
+
+// Tab slugs, in tab order. AppInfoDialog's tab arrays are index-aligned with
+// INFO_TABS; GovernanceDialog's TAB_CONFIG ids ARE the GOVERNANCE_TABS slugs.
+// Like the portal ids above, this vocabulary lives here and nowhere else: a
+// tab missing from these lists can't be linked to.
+export const INFO_TABS = Object.freeze(["ip", "terms", "privacy", "team", "faq", "ethos"]);
+export const GOVERNANCE_TABS = Object.freeze(["viability", "attributes", "methods", "disruptions"]);
+
+// Sub-levels of a governance tab, in the tab view's own order. Only Viability
+// Management has them: GDViabilityManagement's rail — TAB_PROPOSALS,
+// TAB_WITNESSES ("vote": the witness election, the HowToVote tab),
+// TAB_TOKENOMICS. A tab listed here always names one of its sections in the
+// address (the first by default); the others never carry one.
+export const GOVERNANCE_SECTIONS = Object.freeze({
+    viability: Object.freeze(["proposals", "vote", "tokenomics"]),
+});
+
+const META_SEPARATOR_REGEX = /\+|%2b/i; // a "+" some client percent-encoded is still one
+const META_MAX_LENGTH = 2048;
+const SEARCH_MAX_QUERY = 256;
+const SEARCH_MAX_PAYLOAD = 2000;
+
+// "/trending+info-privacy" → { path: "/trending", meta: "info-privacy" }.
+// `meta` is the raw text after the separator ("" when there is none), minus
+// any trailing slash; `path` is what PAGE_ROUTES and the pages get to see.
+export function splitMetaPath(pathname) {
+    const p = String(pathname || "");
+    const m = META_SEPARATOR_REGEX.exec(p);
+    if (!m) return { path: p || "/", meta: "" };
+    return {
+        path: p.slice(0, m.index) || "/",
+        meta: p.slice(m.index + m[0].length).replace(/\/+$/, ""),
+    };
+}
+
+// The landing page: the one route rendered without the app shell, hence
+// without overlays.
+export function isHomePath(path) {
+    return path === "/" || path === "";
+}
+
+export function parseMeta(raw) {
+    const s = String(raw || "");
+    if (!s || s.length > META_MAX_LENGTH) return null;
+    const dash = s.indexOf("-");
+    const kind = (dash < 0 ? s : s.slice(0, dash)).toLowerCase();
+    const rest = dash < 0 ? "" : s.slice(dash + 1);
+    switch (kind) {
+        case "settings":
+            return { kind };
+        case "info": {
+            const tab = rest.split("-")[0].toLowerCase();
+            return { kind, tab: INFO_TABS.indexOf(tab) >= 0 ? tab : INFO_TABS[0] };
+        }
+        case "governance": {
+            const [tabRaw, sectionRaw] = rest.toLowerCase().split("-");
+            const known = GOVERNANCE_TABS.indexOf(tabRaw) >= 0;
+            const tab = known ? tabRaw : GOVERNANCE_TABS[0];
+            return { kind, tab, section: sectionFor(tab, known ? sectionRaw : null) };
+        }
+        case "search": {
+            const { query, filters, panel } = decodeSearchPayload(rest);
+            return { kind, query, filters, panel };
+        }
+        default:
+            return null;
+    }
+}
+
+// The canonical suffix for `meta`, without the "+"; "" when it isn't one.
+// Governance: a section is taken only under an explicitly valid tab, and a
+// tab with sections gets its first when none is named. Search: pass
+// `filters: null` when no filter is active — the codec can't tell the search
+// module's defaults from a choice, so whatever object it gets, it carries
+// (components/search compactFilters() is the input it wants). Filters that
+// would overflow the payload are dropped, the query kept. `panel` is the
+// filter panel; an empty search (no query, no filter) is only ever open with
+// its panel out, so it reads back with `panel: true`.
+export function formatMeta(meta) {
+    if (!meta || typeof meta !== "object") return "";
+    switch (meta.kind) {
+        case "settings":
+            return "settings";
+        case "info":
+            return "info-" + (INFO_TABS.indexOf(meta.tab) >= 0 ? meta.tab : INFO_TABS[0]);
+        case "governance": {
+            const known = GOVERNANCE_TABS.indexOf(meta.tab) >= 0;
+            const tab = known ? meta.tab : GOVERNANCE_TABS[0];
+            const section = sectionFor(tab, known ? meta.section : null);
+            return "governance-" + tab + (section ? "-" + section : "");
+        }
+        case "search": {
+            const payload = encodeSearchPayload(meta.query, meta.filters, meta.panel);
+            return payload ? "search-" + payload : "search";
+        }
+        default:
+            return "";
+    }
+}
+
+// `pathname` with `meta` as its overlay suffix, replacing any it had; an
+// empty or invalid meta gives the bare page path. Search and hash are the
+// caller's to append.
+export function buildMetaPath(pathname, meta) {
+    const { path } = splitMetaPath(pathname);
+    const raw = formatMeta(meta);
+    return raw ? path + "+" + raw : path;
+}
+
+// `wanted` when it is one of `tab`'s sections, else the tab's first; null for
+// a tab without sections.
+function sectionFor(tab, wanted) {
+    const sections = GOVERNANCE_SECTIONS[tab];
+    if (!sections) return null;
+    return sections.indexOf(wanted) >= 0 ? wanted : sections[0];
+}
+
+// ── Search payload: base64url(UTF-8 JSON) ──
+// { q: "<query>", f: {<filters>}, p: 1 }, each key left out when empty (p:
+// the filter panel is out). The query can be any script, hence UTF-8 before
+// btoa (which is Latin-1 only).
+// The filters are URL input: the search module must run them through
+// normalizeFilters before use. The codec only guarantees a plain object, and
+// JSON.parse's own "__proto__"-style keys never survive it.
+function isPlainObject(v) {
+    return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+function dropUnsafeKeys(key, value) {
+    return key === "__proto__" || key === "constructor" || key === "prototype" ? undefined : value;
+}
+
+function clampQuery(q) {
+    if (typeof q !== "string") return "";
+    let s = q.length > SEARCH_MAX_QUERY ? q.slice(0, SEARCH_MAX_QUERY) : q;
+    if (/[\uD800-\uDBFF]$/.test(s)) s = s.slice(0, -1); // never keep half a surrogate pair
+    return s;
+}
+
+// A JSON round trip, so what gets encoded is exactly what decoding yields
+// (undefined members and unsafe keys gone) and formatMeta stays canonical.
+function jsonFilters(filters) {
+    if (!isPlainObject(filters)) return null;
+    let f = null;
+    try { f = JSON.parse(JSON.stringify(filters), dropUnsafeKeys); } catch (e) { return null; }
+    return isPlainObject(f) && Object.keys(f).length ? f : null;
+}
+
+function utf8ToBase64Url(text) {
+    if (typeof btoa !== "function" || typeof TextEncoder !== "function") return "";
+    try {
+        const bytes = new TextEncoder().encode(text);
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    } catch (e) { return ""; }
+}
+
+function base64UrlToUtf8(b64) {
+    if (!b64 || !/^[A-Za-z0-9_-]+$/.test(b64)) return null;
+    if (typeof atob !== "function" || typeof TextDecoder !== "function") return null;
+    let raw = b64.replace(/-/g, "+").replace(/_/g, "/");
+    while (raw.length % 4) raw += "=";
+    try {
+        const binary = atob(raw);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch (e) { return null; }
+}
+
+function encodeSearchPayload(query, filters, panel) {
+    const q = clampQuery(query);
+    const f = jsonFilters(filters);
+    if (!q && !f) return ""; // bare "search": the panel alone
+    const encode = (body) => {
+        const out = utf8ToBase64Url(JSON.stringify(panel ? { ...body, p: 1 } : body));
+        return out.length <= SEARCH_MAX_PAYLOAD ? out : "";
+    };
+    if (f) {
+        const withFilters = encode(q ? { q, f } : { f });
+        if (withFilters) return withFilters;
+    }
+    return q ? encode({ q }) : "";
+}
+
+function decodeSearchPayload(payload) {
+    const empty = { query: "", filters: null, panel: true };
+    if (!payload || payload.length > SEARCH_MAX_PAYLOAD) return empty;
+    const json = base64UrlToUtf8(payload);
+    if (json === null) return empty;
+    let body = null;
+    try { body = JSON.parse(json, dropUnsafeKeys); } catch (e) { return empty; }
+    if (!isPlainObject(body)) return empty;
+    const query = clampQuery(body.q);
+    const filters = isPlainObject(body.f) && Object.keys(body.f).length ? body.f : null;
+    // An empty search is only ever open with its panel out.
+    const panel = body.p === 1 || body.p === true || (!query && !filters);
+    return { query, filters, panel };
 }

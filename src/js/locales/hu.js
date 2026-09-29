@@ -208,7 +208,12 @@ export default {
         "risks": "Kockázatok",
         "bug_reports": "Hibajelentések",
         "community": "Közösség",
-        "development": "Fejlesztés"
+        "development": "Fejlesztés",
+        "search": "Keresés",
+        "artworks": "Alkotások",
+        "posts": "Bejegyzések",
+        "communities": "Közösségek",
+        "subscribers_count": "Feliratkozók: {{count}}"
     },
 
     components: {
@@ -229,6 +234,9 @@ export default {
             "available": "Elérhető: ",
             "in_savings": "Megtakarításban: "
         },
+        "post_result": {
+            "in_community": "itt: {{community}}"
+        },
         "radial_context_menu": {
             "bold": "Félkövér",
             "italic": "Dőlt",
@@ -246,6 +254,55 @@ export default {
             "insert_column_right": "Oszlop beszúrása jobbra",
             "delete_column": "Oszlop törlése",
             "delete_table": "Táblázat törlése"
+        },
+        "search_bar": {
+            "filters": "Szűrők"
+        },
+        "search_filters": {
+            "show": "Megjelenítés",
+            "all": "Mind",
+            "time": "Időszak",
+            "any_time": "Bármikor",
+            "last_24_hours": "24 óra",
+            "past_week": "Hét",
+            "past_month": "Hónap",
+            "past_year": "Év",
+            "custom": "Egyéni",
+            "from": "Ettől",
+            "to": "Eddig",
+            "color": "Szín",
+            "dominant": "Domináns",
+            "anywhere": "Bárhol",
+            "artworks_only": "Csak alkotások",
+            "authors": "Szerzők",
+            "community_name": "Közösség neve",
+            "reset_filters": "Szűrők visszaállítása",
+            "color_black": "Fekete",
+            "color_white": "Fehér",
+            "color_gray": "Szürke",
+            "color_red": "Piros",
+            "color_orange": "Narancssárga",
+            "color_yellow": "Sárga",
+            "color_green": "Zöld",
+            "color_lime": "Limezöld",
+            "color_teal": "Kékeszöld",
+            "color_cyan": "Cián",
+            "color_sky": "Égszínkék",
+            "color_blue": "Kék",
+            "color_navy": "Sötétkék",
+            "color_purple": "Lila",
+            "color_magenta": "Magenta",
+            "color_pink": "Rózsaszín",
+            "color_brown": "Barna",
+            "color_tan": "Bézs",
+            "color_olive": "Olajzöld",
+            "color_maroon": "Bordó"
+        },
+        "search_results": {
+            "users": "Felhasználók",
+            "no_result_found_for_0_0": "Nincs találat erre: „ <0> #{{searchInputText}} </0> ”.",
+            "no_result_found_for_query": "Nincs találat erre: „{{query}}”.",
+            "nothing_matches_these_filters_yet": "Ezeknek a szűrőknek még semmi sem felel meg."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Ne szűrje az NSFW tartalmat",
@@ -295,6 +352,9 @@ export default {
             "falls_back_to_english": "angol",
             "the_nsfw_filter_and_the_toxic_comment": "Az NSFW-szűrő és a Bántó hozzászólások segédje apró AI-modelleken fut, teljesen offline — a biztonságért, a játékosságért és az örömért a platformon. Semmilyen adat nem kerül soha szerverre. Kikapcsolásuk jobb teljesítményt eredményezhet.",
             "this_functionality_makes_age_restricted_material": "Ez a funkció korhatáros tartalmakat tesz láthatóvá, beleértve (de nem kizárólag) a meztelenséget és esetenként az erőszakot. Bekapcsolásával megerősíted, hogy elmúltál 18 éves, vagy nagykorú vagy abban a joghatóságban, ahonnan a weboldalt eléred, és hozzájárulsz az explicit tartalmak megtekintéséhez."
+        },
+        "token_field": {
+            "remove": "Eltávolítás"
         },
         "toolbar_menu_option": {
             "shop": "Bolt",

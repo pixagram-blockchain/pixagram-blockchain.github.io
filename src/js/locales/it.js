@@ -208,7 +208,12 @@ export default {
         "risks": "Rischi",
         "bug_reports": "Segnalazioni di bug",
         "community": "Community",
-        "development": "Sviluppo"
+        "development": "Sviluppo",
+        "search": "Cerca",
+        "artworks": "Opere",
+        "posts": "Post",
+        "communities": "Community",
+        "subscribers_count": "Iscritti: {{count}}"
     },
 
     components: {
@@ -229,6 +234,9 @@ export default {
             "available": "Disponibile: ",
             "in_savings": "Nel risparmio: "
         },
+        "post_result": {
+            "in_community": "in {{community}}"
+        },
         "radial_context_menu": {
             "bold": "Grassetto",
             "italic": "Corsivo",
@@ -246,6 +254,55 @@ export default {
             "insert_column_right": "Inserisci colonna a destra",
             "delete_column": "Elimina colonna",
             "delete_table": "Elimina tabella"
+        },
+        "search_bar": {
+            "filters": "Filtri"
+        },
+        "search_filters": {
+            "show": "Mostra",
+            "all": "Tutto",
+            "time": "Periodo",
+            "any_time": "Qualsiasi",
+            "last_24_hours": "24 ore",
+            "past_week": "Settimana",
+            "past_month": "Mese",
+            "past_year": "Anno",
+            "custom": "Personalizzato",
+            "from": "Dal",
+            "to": "Al",
+            "color": "Colore",
+            "dominant": "Dominante",
+            "anywhere": "Ovunque",
+            "artworks_only": "Solo opere",
+            "authors": "Autori",
+            "community_name": "Nome della community",
+            "reset_filters": "Reimposta filtri",
+            "color_black": "Nero",
+            "color_white": "Bianco",
+            "color_gray": "Grigio",
+            "color_red": "Rosso",
+            "color_orange": "Arancione",
+            "color_yellow": "Giallo",
+            "color_green": "Verde",
+            "color_lime": "Verde lime",
+            "color_teal": "Verde petrolio",
+            "color_cyan": "Ciano",
+            "color_sky": "Azzurro",
+            "color_blue": "Blu",
+            "color_navy": "Blu navy",
+            "color_purple": "Viola",
+            "color_magenta": "Magenta",
+            "color_pink": "Rosa",
+            "color_brown": "Marrone",
+            "color_tan": "Beige",
+            "color_olive": "Verde oliva",
+            "color_maroon": "Bordeaux"
+        },
+        "search_results": {
+            "users": "Utenti",
+            "no_result_found_for_0_0": "Nessun risultato per « <0> #{{searchInputText}} </0> ».",
+            "no_result_found_for_query": "Nessun risultato per «{{query}}».",
+            "nothing_matches_these_filters_yet": "Ancora nulla corrisponde a questi filtri."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Non filtrare i contenuti NSFW",
@@ -295,6 +352,9 @@ export default {
             "falls_back_to_english": "Inglese",
             "the_nsfw_filter_and_the_toxic_comment": "Il filtro NSFW e l’assistente per i commenti tossici girano su modelli di IA minuscoli che funzionano completamente offline — per sicurezza, leggerezza e piacere sulla piattaforma. Nessun dato viene mai inviato a un server. Disattivarli può migliorare le prestazioni.",
             "this_functionality_makes_age_restricted_material": "Questa funzione rende visibili contenuti riservati ai maggiorenni, compresi (ma non solo) nudità ed eventualmente violenza. Attivandola dichiari di avere almeno 18 anni o l’età della maggiorità nella giurisdizione da cui accedi al sito, e acconsenti a visualizzare contenuti espliciti."
+        },
+        "token_field": {
+            "remove": "Rimuovi"
         },
         "toolbar_menu_option": {
             "shop": "Negozio",

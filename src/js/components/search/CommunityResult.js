@@ -6,7 +6,9 @@ import ListItemAvatar from "@material-ui/core/ListItemAvatar";
 import ListItemText from "@material-ui/core/ListItemText";
 import GroupIcon from "@material-ui/icons/Group";
 
-import { highlightNode } from "./highlight";
+import { T } from "../../utils/T";
+
+import { highlightNode, NO_SLOTS } from "./highlight";
 import { ARTWORK_RADIUS } from "./config";
 
 // ── CommunityResult ───────────────────────────────────────────────────────────
@@ -14,7 +16,9 @@ import { ARTWORK_RADIUS } from "./config";
 // chain carries no avatar_url; the picture is the profile image of the account
 // behind the community, e.g. portal-156480), the title with the match
 // highlighted (a query that matched `about` simply shows the plain title), and
-// the subscriber count. Group icon when there is no picture.
+// the subscriber count ("Subscribers: 12", words.subscribers_count, the same
+// label + number form as the member count elsewhere). Group icon when there is
+// no picture.
 
 const AVATAR_STYLE = { width: 36, height: 36, borderRadius: ARTWORK_RADIUS, backgroundColor: "#3a3a3a", color: "#888" };
 const PRIMARY_STYLE = { color: "#bbb", display: "flex", alignItems: "center", gap: 6, minWidth: 0 };
@@ -46,7 +50,9 @@ export const CommunityResult = React.memo(
                         <span style={PRIMARY_STYLE}>
                             <span style={TITLE_STYLE}>{highlightNode(title, query)}</span>
                             {community.subscribers != null && (
-                                <span style={SUBS_STYLE}>{community.subscribers} subs</span>
+                                <span style={SUBS_STYLE}>
+                                    <T k="words.subscribers_count" vars={{ count: community.subscribers }} slots={NO_SLOTS} />
+                                </span>
                             )}
                         </span>
                     }

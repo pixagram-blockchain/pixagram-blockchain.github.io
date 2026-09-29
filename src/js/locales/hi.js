@@ -209,7 +209,12 @@ export default {
         "risks": "जोखिम",
         "bug_reports": "बग रिपोर्ट",
         "community": "समुदाय",
-        "development": "डेवलपमेंट"
+        "development": "डेवलपमेंट",
+        "search": "खोजें",
+        "artworks": "कलाकृतियाँ",
+        "posts": "पोस्ट",
+        "communities": "समुदाय",
+        "subscribers_count": "सब्सक्राइबर: {{count}}"
     },
 
     components: {
@@ -230,6 +235,9 @@ export default {
             "available": "उपलब्ध: ",
             "in_savings": "बचत में: "
         },
+        "post_result": {
+            "in_community": "{{community}} में"
+        },
         "radial_context_menu": {
             "bold": "बोल्ड",
             "italic": "इटैलिक",
@@ -247,6 +255,55 @@ export default {
             "insert_column_right": "दाईं ओर कॉलम जोड़ें",
             "delete_column": "कॉलम हटाएँ",
             "delete_table": "तालिका हटाएँ"
+        },
+        "search_bar": {
+            "filters": "फ़िल्टर"
+        },
+        "search_filters": {
+            "show": "दिखाएँ",
+            "all": "सभी",
+            "time": "समय",
+            "any_time": "कभी भी",
+            "last_24_hours": "24 घंटे",
+            "past_week": "सप्ताह",
+            "past_month": "महीना",
+            "past_year": "वर्ष",
+            "custom": "कस्टम",
+            "from": "से",
+            "to": "तक",
+            "color": "रंग",
+            "dominant": "प्रमुख",
+            "anywhere": "कहीं भी",
+            "artworks_only": "केवल कलाकृतियाँ",
+            "authors": "लेखक",
+            "community_name": "समुदाय का नाम",
+            "reset_filters": "फ़िल्टर रीसेट करें",
+            "color_black": "काला",
+            "color_white": "सफ़ेद",
+            "color_gray": "स्लेटी",
+            "color_red": "लाल",
+            "color_orange": "नारंगी",
+            "color_yellow": "पीला",
+            "color_green": "हरा",
+            "color_lime": "नींबू हरा",
+            "color_teal": "टील",
+            "color_cyan": "सियान",
+            "color_sky": "आसमानी",
+            "color_blue": "नीला",
+            "color_navy": "गहरा नीला",
+            "color_purple": "बैंगनी",
+            "color_magenta": "मैजेंटा",
+            "color_pink": "गुलाबी",
+            "color_brown": "भूरा",
+            "color_tan": "हल्का भूरा",
+            "color_olive": "जैतूनी",
+            "color_maroon": "मैरून"
+        },
+        "search_results": {
+            "users": "उपयोगकर्ता",
+            "no_result_found_for_0_0": "« <0> #{{searchInputText}} </0> » के लिए कोई परिणाम नहीं मिला।",
+            "no_result_found_for_query": "«{{query}}» के लिए कोई परिणाम नहीं मिला।",
+            "nothing_matches_these_filters_yet": "इन फ़िल्टरों से अभी तक कुछ मेल नहीं खाता।"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "NSFW सामग्री फ़िल्टर न करें",
@@ -296,6 +353,9 @@ export default {
             "falls_back_to_english": "अंग्रेज़ी",
             "the_nsfw_filter_and_the_toxic_comment": "NSFW फ़िल्टर और विषाक्त-टिप्पणी सहायक अत्यंत छोटे AI मॉडलों पर चलते हैं जो पूर्णतः ऑफ़लाइन काम करते हैं — मंच पर सुरक्षा, सहजता और आनंद के लिए। कोई भी डेटा कभी सर्वर पर नहीं भेजा जाता। इन्हें बंद करने से प्रदर्शन बेहतर हो सकता है।",
             "this_functionality_makes_age_restricted_material": "यह सुविधा आयु-प्रतिबंधित सामग्री दृश्यमान करती है, जिसमें नग्नता और संभवतः हिंसा भी शामिल है (परंतु इन्हीं तक सीमित नहीं)। इसे सक्षम करके आप पुष्टि करते हैं कि आपकी आयु कम से कम 18 वर्ष है, या जिस क्षेत्राधिकार से आप वेबसाइट देख रहे हैं वहाँ की वयस्कता की आयु है, और आप स्पष्ट सामग्री देखने की सहमति देते हैं।"
+        },
+        "token_field": {
+            "remove": "हटाएँ"
         },
         "toolbar_menu_option": {
             "shop": "दुकान",

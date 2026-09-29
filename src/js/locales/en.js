@@ -215,7 +215,12 @@ export default {
         "risks": "Risks",
         "bug_reports": "Bug Reports",
         "community": "Community",
-        "development": "Development"
+        "development": "Development",
+        "search": "Search",
+        "artworks": "Artworks",
+        "posts": "Posts",
+        "communities": "Communities",
+        "subscribers_count": "Subscribers: {{count}}"
     },
 
     components: {
@@ -2316,6 +2321,9 @@ export default {
             "purchased_edition": "Purchased edition #{{edition}}",
             "items_floor": "{{count}} items • Floor: {{floorPrice}} {{currency}}"
         },
+        "post_result": {
+            "in_community": "in {{community}}"
+        },
         "post_unavailable": {
             "deleted_title": "This post has been deleted",
             "deleted_by": "Deleted by {{author}}",
@@ -2467,6 +2475,55 @@ export default {
         "rules_section": {
             "this_portal_has_not_set_any_rules": "This portal has not set any rules yet.",
             "community_rules": "Community Rules"
+        },
+        "search_bar": {
+            "filters": "Filters"
+        },
+        "search_filters": {
+            "show": "Show",
+            "all": "All",
+            "time": "Time",
+            "any_time": "Any",
+            "last_24_hours": "24h",
+            "past_week": "Week",
+            "past_month": "Month",
+            "past_year": "Year",
+            "custom": "Custom",
+            "from": "From",
+            "to": "To",
+            "color": "Color",
+            "dominant": "Dominant",
+            "anywhere": "Anywhere",
+            "artworks_only": "Artworks only",
+            "authors": "Authors",
+            "community_name": "Community name",
+            "reset_filters": "Reset filters",
+            "color_black": "Black",
+            "color_white": "White",
+            "color_gray": "Gray",
+            "color_red": "Red",
+            "color_orange": "Orange",
+            "color_yellow": "Yellow",
+            "color_green": "Green",
+            "color_lime": "Lime",
+            "color_teal": "Teal",
+            "color_cyan": "Cyan",
+            "color_sky": "Sky blue",
+            "color_blue": "Blue",
+            "color_navy": "Navy",
+            "color_purple": "Purple",
+            "color_magenta": "Magenta",
+            "color_pink": "Pink",
+            "color_brown": "Brown",
+            "color_tan": "Tan",
+            "color_olive": "Olive",
+            "color_maroon": "Maroon"
+        },
+        "search_results": {
+            "users": "Users",
+            "no_result_found_for_0_0": "No result found for \" <0> #{{searchInputText}} </0> \".",
+            "no_result_found_for_query": "No result found for \"{{query}}\".",
+            "nothing_matches_these_filters_yet": "Nothing matches these filters yet."
         },
         "seed_phrase_menu": {
             "entropy_selection": "Entropy Selection",
@@ -2784,6 +2841,9 @@ export default {
             "earned_pxp_for": "Earned {{pxp}} PXP{{extra}} for <0></0>",
             "entitled_post": "Entitled <0></0>{{where}}",
             "on_post": "On <0></0>{{preview}}"
+        },
+        "token_field": {
+            "remove": "Remove"
         },
         "toolbar_menu_option": {
             "shop": "Shop",

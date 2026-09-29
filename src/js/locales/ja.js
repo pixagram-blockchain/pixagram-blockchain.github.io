@@ -209,7 +209,12 @@ export default {
         "risks": "リスク",
         "bug_reports": "バグ報告",
         "community": "コミュニティ",
-        "development": "開発"
+        "development": "開発",
+        "search": "検索",
+        "artworks": "作品",
+        "posts": "投稿",
+        "communities": "コミュニティ",
+        "subscribers_count": "登録者：{{count}}"
     },
 
     components: {
@@ -230,6 +235,9 @@ export default {
             "available": "利用可能：",
             "in_savings": "貯蓄残高："
         },
+        "post_result": {
+            "in_community": "{{community}} 内"
+        },
         "radial_context_menu": {
             "bold": "太字",
             "italic": "斜体",
@@ -247,6 +255,55 @@ export default {
             "insert_column_right": "右に列を挿入",
             "delete_column": "列を削除",
             "delete_table": "表を削除"
+        },
+        "search_bar": {
+            "filters": "フィルター"
+        },
+        "search_filters": {
+            "show": "表示",
+            "all": "すべて",
+            "time": "期間",
+            "any_time": "指定なし",
+            "last_24_hours": "24時間",
+            "past_week": "1週間",
+            "past_month": "1か月",
+            "past_year": "1年",
+            "custom": "カスタム",
+            "from": "開始",
+            "to": "終了",
+            "color": "色",
+            "dominant": "主な色",
+            "anywhere": "含まれる",
+            "artworks_only": "作品のみ",
+            "authors": "作者",
+            "community_name": "コミュニティ名",
+            "reset_filters": "フィルターをリセット",
+            "color_black": "黒",
+            "color_white": "白",
+            "color_gray": "グレー",
+            "color_red": "赤",
+            "color_orange": "オレンジ",
+            "color_yellow": "黄色",
+            "color_green": "緑",
+            "color_lime": "黄緑",
+            "color_teal": "青緑",
+            "color_cyan": "シアン",
+            "color_sky": "空色",
+            "color_blue": "青",
+            "color_navy": "紺色",
+            "color_purple": "紫",
+            "color_magenta": "マゼンタ",
+            "color_pink": "ピンク",
+            "color_brown": "茶色",
+            "color_tan": "ベージュ",
+            "color_olive": "オリーブ",
+            "color_maroon": "えんじ色"
+        },
+        "search_results": {
+            "users": "ユーザー",
+            "no_result_found_for_0_0": "「 <0> #{{searchInputText}} </0> 」に一致する結果はありません。",
+            "no_result_found_for_query": "「{{query}}」に一致する結果はありません。",
+            "nothing_matches_these_filters_yet": "これらのフィルターに一致するものはまだありません。"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "NSFWコンテンツをフィルターしない",
@@ -296,6 +353,9 @@ export default {
             "falls_back_to_english": "英語",
             "the_nsfw_filter_and_the_toxic_comment": "NSFWフィルターと攻撃的コメント判定は、完全にオフラインで動作するごく小さなAIモデルの上で動いています — 安全に、そして気持ちよく使えるようにするためです。データがサーバーへ送られることは一切ありません。無効にすると動作が軽くなる場合があります。",
             "this_functionality_makes_age_restricted_material": "この機能は年齢制限のあるコンテンツ（ヌードや場合により暴力表現を含み、それらに限りません）を表示します。有効にすることで、あなたは18歳以上であるか、アクセス元の法域における成年に達していること、および露骨な表現の閲覧に同意することを表明します。"
+        },
+        "token_field": {
+            "remove": "削除"
         },
         "toolbar_menu_option": {
             "shop": "ショップ",

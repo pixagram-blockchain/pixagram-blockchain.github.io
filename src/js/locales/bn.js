@@ -210,7 +210,12 @@ export default {
         "risks": "ঝুঁকি",
         "bug_reports": "বাগ রিপোর্ট",
         "community": "কমিউনিটি",
-        "development": "ডেভেলপমেন্ট"
+        "development": "ডেভেলপমেন্ট",
+        "search": "অনুসন্ধান",
+        "artworks": "শিল্পকর্ম",
+        "posts": "পোস্ট",
+        "communities": "কমিউনিটি",
+        "subscribers_count": "সাবস্ক্রাইবার: {{count}}"
     },
 
     components: {
@@ -231,6 +236,9 @@ export default {
             "available": "উপলব্ধ: ",
             "in_savings": "সঞ্চয়ে: "
         },
+        "post_result": {
+            "in_community": "{{community}}-এ"
+        },
         "radial_context_menu": {
             "bold": "বোল্ড",
             "italic": "ইটালিক",
@@ -248,6 +256,55 @@ export default {
             "insert_column_right": "ডানে কলাম যোগ করুন",
             "delete_column": "কলাম মুছুন",
             "delete_table": "টেবিল মুছুন"
+        },
+        "search_bar": {
+            "filters": "ফিল্টার"
+        },
+        "search_filters": {
+            "show": "দেখান",
+            "all": "সব",
+            "time": "সময়",
+            "any_time": "যেকোনো",
+            "last_24_hours": "24 ঘণ্টা",
+            "past_week": "সপ্তাহ",
+            "past_month": "মাস",
+            "past_year": "বছর",
+            "custom": "কাস্টম",
+            "from": "থেকে",
+            "to": "পর্যন্ত",
+            "color": "রং",
+            "dominant": "প্রধান",
+            "anywhere": "যেকোনো স্থানে",
+            "artworks_only": "শুধু শিল্পকর্ম",
+            "authors": "লেখক",
+            "community_name": "কমিউনিটির নাম",
+            "reset_filters": "ফিল্টার রিসেট করুন",
+            "color_black": "কালো",
+            "color_white": "সাদা",
+            "color_gray": "ধূসর",
+            "color_red": "লাল",
+            "color_orange": "কমলা",
+            "color_yellow": "হলুদ",
+            "color_green": "সবুজ",
+            "color_lime": "লেবু সবুজ",
+            "color_teal": "নীলচে সবুজ",
+            "color_cyan": "সায়ান",
+            "color_sky": "আকাশি",
+            "color_blue": "নীল",
+            "color_navy": "গাঢ় নীল",
+            "color_purple": "বেগুনি",
+            "color_magenta": "ম্যাজেন্টা",
+            "color_pink": "গোলাপি",
+            "color_brown": "বাদামি",
+            "color_tan": "হালকা বাদামি",
+            "color_olive": "জলপাই",
+            "color_maroon": "মেরুন"
+        },
+        "search_results": {
+            "users": "ব্যবহারকারী",
+            "no_result_found_for_0_0": "“ <0> #{{searchInputText}} </0> ”-এর জন্য কোনো ফলাফল নেই।",
+            "no_result_found_for_query": "“{{query}}”-এর জন্য কোনো ফলাফল নেই।",
+            "nothing_matches_these_filters_yet": "এই ফিল্টারগুলোর সাথে এখনো কিছু মেলেনি।"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "প্রাপ্তবয়স্ক কনটেন্ট ফিল্টার করবেন না",
@@ -297,6 +354,9 @@ export default {
             "falls_back_to_english": "English",
             "the_nsfw_filter_and_the_toxic_comment": "NSFW ফিল্টার ও টক্সিক মন্তব্য সহায়ক ছোট AI মডেলে চলে যা সম্পূর্ণ অফলাইনে কাজ করে — প্ল্যাটফর্মে নিরাপত্তা, খেলাচ্ছলে আনন্দ ও উচ্ছ্বাসের জন্য। কোনো ডেটা কখনও কোনো সার্ভারে পাঠানো হয় না। এগুলো বন্ধ করলে পারফরম্যান্স ভালো হতে পারে।",
             "this_functionality_makes_age_restricted_material": "এই সুবিধা বয়স-সীমিত উপাদান দৃশ্যমান করে, যার মধ্যে (তবে শুধু এতেই সীমাবদ্ধ নয়) নগ্নতা এবং সম্ভাব্য সহিংসতাও আছে। এটি চালু করে আপনি নিশ্চিত করছেন যে আপনার বয়স কমপক্ষে 18 বছর, বা আপনি যে এখতিয়ার থেকে ওয়েবসাইটটি ব্যবহার করছেন সেখানকার সাবালকত্বের বয়সে পৌঁছেছেন, এবং আপনি স্পষ্ট কনটেন্ট দেখতে সম্মতি দিচ্ছেন।"
+        },
+        "token_field": {
+            "remove": "সরান"
         },
         "toolbar_menu_option": {
             "shop": "শপ",

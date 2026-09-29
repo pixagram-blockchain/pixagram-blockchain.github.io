@@ -208,7 +208,12 @@ export default {
         "risks": "Risker",
         "bug_reports": "Felrapporter",
         "community": "Gemenskap",
-        "development": "Utveckling"
+        "development": "Utveckling",
+        "search": "Sök",
+        "artworks": "Konstverk",
+        "posts": "Inlägg",
+        "communities": "Gemenskaper",
+        "subscribers_count": "Prenumeranter: {{count}}"
     },
 
     components: {
@@ -229,6 +234,9 @@ export default {
             "available": "Tillgängligt: ",
             "in_savings": "I sparande: "
         },
+        "post_result": {
+            "in_community": "i {{community}}"
+        },
         "radial_context_menu": {
             "bold": "Fet",
             "italic": "Kursiv",
@@ -246,6 +254,55 @@ export default {
             "insert_column_right": "Infoga kolumn till höger",
             "delete_column": "Radera kolumn",
             "delete_table": "Radera tabell"
+        },
+        "search_bar": {
+            "filters": "Filter"
+        },
+        "search_filters": {
+            "show": "Visa",
+            "all": "Alla",
+            "time": "Period",
+            "any_time": "När som helst",
+            "last_24_hours": "24 h",
+            "past_week": "Vecka",
+            "past_month": "Månad",
+            "past_year": "År",
+            "custom": "Anpassad",
+            "from": "Från",
+            "to": "Till",
+            "color": "Färg",
+            "dominant": "Dominerande",
+            "anywhere": "Var som helst",
+            "artworks_only": "Endast konstverk",
+            "authors": "Författare",
+            "community_name": "Gemenskapens namn",
+            "reset_filters": "Återställ filter",
+            "color_black": "Svart",
+            "color_white": "Vit",
+            "color_gray": "Grå",
+            "color_red": "Röd",
+            "color_orange": "Orange",
+            "color_yellow": "Gul",
+            "color_green": "Grön",
+            "color_lime": "Limegrön",
+            "color_teal": "Blågrön",
+            "color_cyan": "Cyan",
+            "color_sky": "Himmelsblå",
+            "color_blue": "Blå",
+            "color_navy": "Marinblå",
+            "color_purple": "Lila",
+            "color_magenta": "Magenta",
+            "color_pink": "Rosa",
+            "color_brown": "Brun",
+            "color_tan": "Beige",
+            "color_olive": "Olivgrön",
+            "color_maroon": "Vinröd"
+        },
+        "search_results": {
+            "users": "Användare",
+            "no_result_found_for_0_0": "Inga resultat hittades för ” <0> #{{searchInputText}} </0> ”.",
+            "no_result_found_for_query": "Inga resultat hittades för ”{{query}}”.",
+            "nothing_matches_these_filters_yet": "Inget matchar de här filtren ännu."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Filtrera inte NSFW-innehåll",
@@ -295,6 +352,9 @@ export default {
             "falls_back_to_english": "Engelska",
             "the_nsfw_filter_and_the_toxic_comment": "NSFW-filtret och Hjälpen för toxiska kommentarer körs på pyttesmå AI-modeller som fungerar helt offline — för trygghet, lekfullhet och glädje på plattformen. Ingen data skickas någonsin till en server. Att stänga av dem kan ge bättre prestanda.",
             "this_functionality_makes_age_restricted_material": "Den här funktionen gör åldersbegränsat material synligt, inklusive (men inte begränsat till) nakenhet och potentiellt våld. Genom att aktivera den intygar du att du är minst 18 år, eller myndig i den jurisdiktion du besöker webbplatsen från, och att du samtycker till att se explicit innehåll."
+        },
+        "token_field": {
+            "remove": "Ta bort"
         },
         "toolbar_menu_option": {
             "shop": "Butik",

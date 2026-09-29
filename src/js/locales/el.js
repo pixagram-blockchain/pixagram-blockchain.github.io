@@ -218,7 +218,12 @@ export default {
         "risks": "Κίνδυνοι",
         "bug_reports": "Αναφορές σφαλμάτων",
         "community": "Κοινότητα",
-        "development": "Ανάπτυξη"
+        "development": "Ανάπτυξη",
+        "search": "Αναζήτηση",
+        "artworks": "Έργα",
+        "posts": "Δημοσιεύσεις",
+        "communities": "Κοινότητες",
+        "subscribers_count": "Συνδρομητές: {{count}}"
     },
 
     components: {
@@ -239,6 +244,9 @@ export default {
             "available": "Διαθέσιμο: ",
             "in_savings": "Στις αποταμιεύσεις: "
         },
+        "post_result": {
+            "in_community": "στην κοινότητα {{community}}"
+        },
         "radial_context_menu": {
             "bold": "Έντονα",
             "italic": "Πλάγια",
@@ -256,6 +264,55 @@ export default {
             "insert_column_right": "Εισαγωγή στήλης δεξιά",
             "delete_column": "Διαγραφή στήλης",
             "delete_table": "Διαγραφή πίνακα"
+        },
+        "search_bar": {
+            "filters": "Φίλτρα"
+        },
+        "search_filters": {
+            "show": "Εμφάνιση",
+            "all": "Όλα",
+            "time": "Περίοδος",
+            "any_time": "Οποτεδήποτε",
+            "last_24_hours": "24 ώρες",
+            "past_week": "Εβδομάδα",
+            "past_month": "Μήνας",
+            "past_year": "Έτος",
+            "custom": "Προσαρμογή",
+            "from": "Από",
+            "to": "Έως",
+            "color": "Χρώμα",
+            "dominant": "Κυρίαρχο",
+            "anywhere": "Οπουδήποτε",
+            "artworks_only": "Μόνο έργα",
+            "authors": "Δημιουργοί",
+            "community_name": "Όνομα κοινότητας",
+            "reset_filters": "Επαναφορά φίλτρων",
+            "color_black": "Μαύρο",
+            "color_white": "Λευκό",
+            "color_gray": "Γκρι",
+            "color_red": "Κόκκινο",
+            "color_orange": "Πορτοκαλί",
+            "color_yellow": "Κίτρινο",
+            "color_green": "Πράσινο",
+            "color_lime": "Λαχανί",
+            "color_teal": "Πετρόλ",
+            "color_cyan": "Κυανό",
+            "color_sky": "Γαλάζιο",
+            "color_blue": "Μπλε",
+            "color_navy": "Σκούρο μπλε",
+            "color_purple": "Μωβ",
+            "color_magenta": "Ματζέντα",
+            "color_pink": "Ροζ",
+            "color_brown": "Καφέ",
+            "color_tan": "Μπεζ",
+            "color_olive": "Λαδί",
+            "color_maroon": "Μπορντό"
+        },
+        "search_results": {
+            "users": "Χρήστες",
+            "no_result_found_for_0_0": "Δεν βρέθηκε αποτέλεσμα για « <0> #{{searchInputText}} </0> ».",
+            "no_result_found_for_query": "Δεν βρέθηκε αποτέλεσμα για «{{query}}».",
+            "nothing_matches_these_filters_yet": "Τίποτα δεν ταιριάζει ακόμη με αυτά τα φίλτρα."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Να μη φιλτράρεται το περιεχόμενο NSFW",
@@ -305,6 +362,9 @@ export default {
             "falls_back_to_english": "Αγγλικά",
             "the_nsfw_filter_and_the_toxic_comment": "Το φίλτρο NSFW και ο Βοηθός τοξικών σχολίων τρέχουν σε μικροσκοπικά μοντέλα AI που λειτουργούν εξ ολοκλήρου εκτός σύνδεσης — για ασφάλεια, παιχνιδιάρικη διάθεση και χαρά μέσα στην πλατφόρμα. Κανένα δεδομένο δεν στέλνεται ποτέ σε διακομιστή. Η απενεργοποίησή τους μπορεί να βελτιώσει τις επιδόσεις.",
             "this_functionality_makes_age_restricted_material": "Αυτή η λειτουργία καθιστά ορατό υλικό με ηλικιακό περιορισμό, όπως — ενδεικτικά και όχι περιοριστικά — γυμνό και ενδεχομένως βία. Ενεργοποιώντας την, δηλώνετε ότι είστε τουλάχιστον 18 ετών ή έχετε την ηλικία ενηλικίωσης της δικαιοδοσίας από την οποία επισκέπτεστε τον ιστότοπο, και συναινείτε στην προβολή περιεχομένου για ενηλίκους."
+        },
+        "token_field": {
+            "remove": "Αφαίρεση"
         },
         "toolbar_menu_option": {
             "shop": "Κατάστημα",

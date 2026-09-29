@@ -212,7 +212,12 @@ export default {
         "risks": "Riziká",
         "bug_reports": "Hlásenia chýb",
         "community": "Komunita",
-        "development": "Vývoj"
+        "development": "Vývoj",
+        "search": "Hľadať",
+        "artworks": "Diela",
+        "posts": "Príspevky",
+        "communities": "Komunity",
+        "subscribers_count": "Odberatelia: {{count}}"
     },
 
     components: {
@@ -233,6 +238,9 @@ export default {
             "available": "K dispozícii: ",
             "in_savings": "V úsporách: "
         },
+        "post_result": {
+            "in_community": "v komunite {{community}}"
+        },
         "radial_context_menu": {
             "bold": "Tučné",
             "italic": "Kurzíva",
@@ -250,6 +258,55 @@ export default {
             "insert_column_right": "Vložiť stĺpec vpravo",
             "delete_column": "Vymazať stĺpec",
             "delete_table": "Vymazať tabuľku"
+        },
+        "search_bar": {
+            "filters": "Filtre"
+        },
+        "search_filters": {
+            "show": "Zobraziť",
+            "all": "Všetko",
+            "time": "Obdobie",
+            "any_time": "Kedykoľvek",
+            "last_24_hours": "24 h",
+            "past_week": "Týždeň",
+            "past_month": "Mesiac",
+            "past_year": "Rok",
+            "custom": "Vlastné",
+            "from": "Od",
+            "to": "Do",
+            "color": "Farba",
+            "dominant": "Prevládajúca",
+            "anywhere": "Kdekoľvek",
+            "artworks_only": "Iba diela",
+            "authors": "Autori",
+            "community_name": "Názov komunity",
+            "reset_filters": "Resetovať filtre",
+            "color_black": "Čierna",
+            "color_white": "Biela",
+            "color_gray": "Sivá",
+            "color_red": "Červená",
+            "color_orange": "Oranžová",
+            "color_yellow": "Žltá",
+            "color_green": "Zelená",
+            "color_lime": "Limetková",
+            "color_teal": "Modrozelená",
+            "color_cyan": "Azúrová",
+            "color_sky": "Blankytná",
+            "color_blue": "Modrá",
+            "color_navy": "Tmavomodrá",
+            "color_purple": "Fialová",
+            "color_magenta": "Purpurová",
+            "color_pink": "Ružová",
+            "color_brown": "Hnedá",
+            "color_tan": "Béžová",
+            "color_olive": "Olivová",
+            "color_maroon": "Vínová"
+        },
+        "search_results": {
+            "users": "Používatelia",
+            "no_result_found_for_0_0": "Nenašiel sa žiadny výsledok pre \" <0> #{{searchInputText}} </0> \".",
+            "no_result_found_for_query": "Nenašiel sa žiadny výsledok pre \"{{query}}\".",
+            "nothing_matches_these_filters_yet": "Týmto filtrom zatiaľ nič nezodpovedá."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Nefiltrovať NSFW obsah",
@@ -299,6 +356,9 @@ export default {
             "falls_back_to_english": "Angličtina",
             "the_nsfw_filter_and_the_toxic_comment": "NSFW filter a Pomocník toxických komentárov bežia na drobných AI modeloch úplne offline — pre bezpečnosť, hravosť a radosť na platforme. Žiadne dáta sa nikdy neposielajú na server. Ich vypnutie môže zlepšiť výkon.",
             "this_functionality_makes_age_restricted_material": "Táto funkcia zviditeľňuje vekovo obmedzené materiály vrátane (a nielen) nahoty a potenciálne násilia. Jej zapnutím potvrdzujete, že máte aspoň 18 rokov alebo ste plnoletí v jurisdikcii, z ktorej na stránku pristupujete, a súhlasíte so zobrazovaním explicitného obsahu."
+        },
+        "token_field": {
+            "remove": "Odstrániť"
         },
         "toolbar_menu_option": {
             "shop": "Obchod",

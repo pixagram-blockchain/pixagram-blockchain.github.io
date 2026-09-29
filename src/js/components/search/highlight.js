@@ -19,9 +19,17 @@ export function highlightNode(text, query) {
     );
 }
 
-/** Translation with a literal fallback for keys the locale files may not have yet. */
+/**
+ * Translation with a literal fallback. utils/text.js renders a missing key as
+ * its own last segment ("components.search_bar.filters" → "filters"), so that
+ * counts as a miss too: the fallback shows instead of a bare key fragment.
+ */
 export function tr(t, key, fallback) {
     let v;
     try { v = t(key); } catch (e) { v = null; }
-    return v && v !== key ? v : fallback;
+    const last = key.slice(key.lastIndexOf(".") + 1);
+    return v && v !== key && v !== last ? v : fallback;
 }
+
+/** No slots: for <T> messages that only interpolate {{variables}}. */
+export const NO_SLOTS = Object.freeze([]);

@@ -211,7 +211,12 @@ export default {
         "risks": "Ризики",
         "bug_reports": "Звіти про помилки",
         "community": "Спільнота",
-        "development": "Розробка"
+        "development": "Розробка",
+        "search": "Пошук",
+        "artworks": "Твори",
+        "posts": "Дописи",
+        "communities": "Спільноти",
+        "subscribers_count": "Підписники: {{count}}"
     },
 
     components: {
@@ -232,6 +237,9 @@ export default {
             "available": "Доступно: ",
             "in_savings": "У заощадженнях: "
         },
+        "post_result": {
+            "in_community": "у спільноті {{community}}"
+        },
         "radial_context_menu": {
             "bold": "Жирний",
             "italic": "Курсив",
@@ -249,6 +257,55 @@ export default {
             "insert_column_right": "Вставити стовпець праворуч",
             "delete_column": "Видалити стовпець",
             "delete_table": "Видалити таблицю"
+        },
+        "search_bar": {
+            "filters": "Фільтри"
+        },
+        "search_filters": {
+            "show": "Показати",
+            "all": "Усі",
+            "time": "Період",
+            "any_time": "Будь-коли",
+            "last_24_hours": "24 год",
+            "past_week": "Тиждень",
+            "past_month": "Місяць",
+            "past_year": "Рік",
+            "custom": "Власний",
+            "from": "Від",
+            "to": "До",
+            "color": "Колір",
+            "dominant": "Основний",
+            "anywhere": "Будь-де",
+            "artworks_only": "Лише твори",
+            "authors": "Автори",
+            "community_name": "Назва спільноти",
+            "reset_filters": "Скинути фільтри",
+            "color_black": "Чорний",
+            "color_white": "Білий",
+            "color_gray": "Сірий",
+            "color_red": "Червоний",
+            "color_orange": "Помаранчевий",
+            "color_yellow": "Жовтий",
+            "color_green": "Зелений",
+            "color_lime": "Лаймовий",
+            "color_teal": "Синьо-зелений",
+            "color_cyan": "Ціан",
+            "color_sky": "Блакитний",
+            "color_blue": "Синій",
+            "color_navy": "Темно-синій",
+            "color_purple": "Фіолетовий",
+            "color_magenta": "Пурпуровий",
+            "color_pink": "Рожевий",
+            "color_brown": "Коричневий",
+            "color_tan": "Бежевий",
+            "color_olive": "Оливковий",
+            "color_maroon": "Бордовий"
+        },
+        "search_results": {
+            "users": "Користувачі",
+            "no_result_found_for_0_0": "Нічого не знайдено за запитом \" <0> #{{searchInputText}} </0> \".",
+            "no_result_found_for_query": "Нічого не знайдено за запитом \"{{query}}\".",
+            "nothing_matches_these_filters_yet": "Поки що нічого не відповідає цим фільтрам."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Не фільтрувати NSFW-контент",
@@ -298,6 +355,9 @@ export default {
             "falls_back_to_english": "Англійська",
             "the_nsfw_filter_and_the_toxic_comment": "NSFW-фільтр і Помічник токсичних коментарів працюють на крихітних AI-моделях повністю офлайн — заради безпеки, грайливості й радості на платформі. Жодні дані ніколи не надсилаються на сервер. Їх вимкнення може покращити продуктивність.",
             "this_functionality_makes_age_restricted_material": "Ця функціональність робить видимими матеріали з віковим обмеженням, включно з (але не обмежуючись) оголеністю та потенційно насильством. Вмикаючи її, ви підтверджуєте, що вам щонайменше 18 років або ви досягли повноліття в юрисдикції, з якої відвідуєте сайт, і даєте згоду на перегляд відвертого контенту."
+        },
+        "token_field": {
+            "remove": "Видалити"
         },
         "toolbar_menu_option": {
             "shop": "Крамниця",

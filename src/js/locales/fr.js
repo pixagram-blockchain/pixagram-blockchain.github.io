@@ -208,7 +208,12 @@ export default {
         "risks": "Risques",
         "bug_reports": "Rapports de bugs",
         "community": "Communauté",
-        "development": "Développement"
+        "development": "Développement",
+        "search": "Rechercher",
+        "artworks": "Œuvres",
+        "posts": "Publications",
+        "communities": "Communautés",
+        "subscribers_count": "Abonnés : {{count}}"
     },
 
     components: {
@@ -229,6 +234,9 @@ export default {
             "available": "Disponible : ",
             "in_savings": "Sur l’épargne : "
         },
+        "post_result": {
+            "in_community": "dans {{community}}"
+        },
         "radial_context_menu": {
             "bold": "Gras",
             "italic": "Italique",
@@ -246,6 +254,55 @@ export default {
             "insert_column_right": "Insérer une colonne à droite",
             "delete_column": "Supprimer la colonne",
             "delete_table": "Supprimer le tableau"
+        },
+        "search_bar": {
+            "filters": "Filtres"
+        },
+        "search_filters": {
+            "show": "Afficher",
+            "all": "Tout",
+            "time": "Période",
+            "any_time": "Toutes",
+            "last_24_hours": "24 h",
+            "past_week": "Semaine",
+            "past_month": "Mois",
+            "past_year": "Année",
+            "custom": "Personnalisée",
+            "from": "Du",
+            "to": "Au",
+            "color": "Couleur",
+            "dominant": "Dominante",
+            "anywhere": "Partout",
+            "artworks_only": "Œuvres uniquement",
+            "authors": "Auteurs",
+            "community_name": "Nom de la communauté",
+            "reset_filters": "Réinitialiser les filtres",
+            "color_black": "Noir",
+            "color_white": "Blanc",
+            "color_gray": "Gris",
+            "color_red": "Rouge",
+            "color_orange": "Orange",
+            "color_yellow": "Jaune",
+            "color_green": "Vert",
+            "color_lime": "Vert citron",
+            "color_teal": "Bleu canard",
+            "color_cyan": "Cyan",
+            "color_sky": "Bleu ciel",
+            "color_blue": "Bleu",
+            "color_navy": "Bleu marine",
+            "color_purple": "Violet",
+            "color_magenta": "Magenta",
+            "color_pink": "Rose",
+            "color_brown": "Marron",
+            "color_tan": "Beige",
+            "color_olive": "Vert olive",
+            "color_maroon": "Bordeaux"
+        },
+        "search_results": {
+            "users": "Utilisateurs",
+            "no_result_found_for_0_0": "Aucun résultat pour « <0> #{{searchInputText}} </0> ».",
+            "no_result_found_for_query": "Aucun résultat pour « {{query}} ».",
+            "nothing_matches_these_filters_yet": "Rien ne correspond encore à ces filtres."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Ne pas filtrer le contenu NSFW",
@@ -295,6 +352,9 @@ export default {
             "falls_back_to_english": "Anglais",
             "the_nsfw_filter_and_the_toxic_comment": "Le filtre NSFW et l’assistant de commentaires toxiques reposent sur de tout petits modèles d’IA qui fonctionnent entièrement hors ligne — pour la sécurité, le plaisir et la légèreté sur la plateforme. Aucune donnée n’est jamais envoyée à un serveur. Les désactiver peut améliorer les performances.",
             "this_functionality_makes_age_restricted_material": "Cette fonctionnalité rend visibles des contenus réservés aux adultes, notamment (sans s’y limiter) la nudité et éventuellement la violence. En l’activant, vous affirmez avoir au moins 18 ans ou l’âge de la majorité dans la juridiction depuis laquelle vous accédez au site, et vous consentez à voir des contenus explicites."
+        },
+        "token_field": {
+            "remove": "Retirer"
         },
         "toolbar_menu_option": {
             "shop": "Boutique",

@@ -211,7 +211,12 @@ export default {
         "risks": "Riscuri",
         "bug_reports": "Rapoarte de erori",
         "community": "Comunitate",
-        "development": "Dezvoltare"
+        "development": "Dezvoltare",
+        "search": "Căutare",
+        "artworks": "Opere",
+        "posts": "Postări",
+        "communities": "Comunități",
+        "subscribers_count": "Abonați: {{count}}"
     },
 
     components: {
@@ -232,6 +237,9 @@ export default {
             "available": "Disponibil: ",
             "in_savings": "În economii: "
         },
+        "post_result": {
+            "in_community": "în {{community}}"
+        },
         "radial_context_menu": {
             "bold": "Aldin",
             "italic": "Cursiv",
@@ -249,6 +257,55 @@ export default {
             "insert_column_right": "Inserează coloană la dreapta",
             "delete_column": "Șterge coloana",
             "delete_table": "Șterge tabelul"
+        },
+        "search_bar": {
+            "filters": "Filtre"
+        },
+        "search_filters": {
+            "show": "Afișează",
+            "all": "Toate",
+            "time": "Perioadă",
+            "any_time": "Oricând",
+            "last_24_hours": "24h",
+            "past_week": "Săptămână",
+            "past_month": "Lună",
+            "past_year": "An",
+            "custom": "Personalizat",
+            "from": "De la",
+            "to": "Până la",
+            "color": "Culoare",
+            "dominant": "Dominantă",
+            "anywhere": "Oriunde",
+            "artworks_only": "Doar opere",
+            "authors": "Autori",
+            "community_name": "Numele comunității",
+            "reset_filters": "Resetează filtrele",
+            "color_black": "Negru",
+            "color_white": "Alb",
+            "color_gray": "Gri",
+            "color_red": "Roșu",
+            "color_orange": "Portocaliu",
+            "color_yellow": "Galben",
+            "color_green": "Verde",
+            "color_lime": "Verde lime",
+            "color_teal": "Verde-albăstrui",
+            "color_cyan": "Cyan",
+            "color_sky": "Bleu",
+            "color_blue": "Albastru",
+            "color_navy": "Bleumarin",
+            "color_purple": "Mov",
+            "color_magenta": "Magenta",
+            "color_pink": "Roz",
+            "color_brown": "Maro",
+            "color_tan": "Bej",
+            "color_olive": "Oliv",
+            "color_maroon": "Vișiniu"
+        },
+        "search_results": {
+            "users": "Utilizatori",
+            "no_result_found_for_0_0": "Niciun rezultat pentru „ <0> #{{searchInputText}} </0> ”.",
+            "no_result_found_for_query": "Niciun rezultat pentru „{{query}}”.",
+            "nothing_matches_these_filters_yet": "Încă nimic nu corespunde acestor filtre."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Nu filtra conținutul NSFW",
@@ -298,6 +355,9 @@ export default {
             "falls_back_to_english": "Engleză",
             "the_nsfw_filter_and_the_toxic_comment": "Filtrul NSFW și Toxic Comment Helper rulează pe modele AI minuscule care funcționează complet offline — pentru siguranță, joacă și bucurie pe platformă. Nicio dată nu este trimisă vreodată către un server. Dezactivarea lor poate duce la performanțe mai bune.",
             "this_functionality_makes_age_restricted_material": "Această funcționalitate face vizibile materiale restricționate în funcție de vârstă, inclusiv (dar fără a se limita la) nuditate și, potențial, violență. Activând-o, confirmi că ai cel puțin 18 ani sau vârsta majoratului în jurisdicția din care accesezi site-ul și îți dai acordul pentru vizualizarea de conținut explicit."
+        },
+        "token_field": {
+            "remove": "Elimină"
         },
         "toolbar_menu_option": {
             "shop": "Magazin",

@@ -3,7 +3,9 @@ import React, { useCallback } from "preact/compat";
 import ListItem from "@material-ui/core/ListItem";
 import ListItemText from "@material-ui/core/ListItemText";
 
-import { highlightNode } from "./highlight";
+import { T } from "../../utils/T";
+
+import { highlightNode, NO_SLOTS } from "./highlight";
 
 // ── PostResult ────────────────────────────────────────────────────────────────
 // One blog-post row (community/portal posts included): title in "Industry Book" with
@@ -34,7 +36,12 @@ export const PostResult = React.memo(
                     primary={<span style={TITLE_STYLE}>{highlightNode(post.title || post.permlink, query)}</span>}
                     secondary={
                         <React.Fragment>
-                            <span style={META_STYLE}>@{post.author}{where ? <span> · in {where}</span> : null}</span>
+                            <span style={META_STYLE}>
+                                @{post.author}
+                                {where ? (
+                                    <span> · <T k="components.post_result.in_community" vars={{ community: where }} slots={NO_SLOTS} /></span>
+                                ) : null}
+                            </span>
                             {text ? <span style={SUMMARY_STYLE}>{highlightNode(text, query)}</span> : null}
                         </React.Fragment>
                     }

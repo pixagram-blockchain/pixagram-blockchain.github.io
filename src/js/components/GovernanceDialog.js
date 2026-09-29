@@ -36,6 +36,12 @@ import { t, subscribe as subscribe_language } from "../utils/text";
 // Copy is resolved at render time (thunks), so a language switch repaints
 // the header; the dialog subscribes to language changes itself because its
 // shouldComponentUpdate is a hard `false`.
+//
+// Each `id` is also the tab's name in the address (+governance-<id>), and
+// GOVERNANCE_TABS in utils/constants lists the same ids — that list is what
+// the router accepts, so a tab enabled here must be added there too. An id
+// can't contain "-" (it separates the levels): re-enabling "control-tower"
+// means giving it a new id.
 const TAB_CONFIG = [
     {
         id: "viability",
@@ -80,6 +86,13 @@ const TAB_CONFIG = [
         icon: WarningIcon
     }
 ];
+
+// Tab index for the address's governance meta; missing or unknown → the
+// first tab.
+function tabIndexOf(meta) {
+    const i = meta ? TAB_CONFIG.findIndex((tab) => tab.id === meta.tab) : -1;
+    return i >= 0 ? i : 0;
+}
 
 const styles = theme => ({
     dialog: {
@@ -218,8 +231,19 @@ class GovernanceDialog extends React.PureComponent {
         super(props);
         this.state = {
             open: props.open,
-            _tab_value: 0
+            _tab_value: tabIndexOf(props.meta)
         };
+        // Each tab view's own sub-level, as the address names it ("vote" in
+        // +governance-viability-vote). The views stay mounted across tab
+        // switches, so a section is remembered while another tab is shown and
+        // named again on the way back. Read at render and by the handlers
+        // only: an instance field, never a reason to render by itself.
+        this._sections = {};
+        this._keepSection(props.meta);
+    }
+
+    _keepSection(meta) {
+        if (meta && meta.section) this._sections[meta.tab] = meta.section;
     }
 
     shouldComponentUpdate(nextProps, nextState, nextContext) {
@@ -248,13 +272,48 @@ class GovernanceDialog extends React.PureComponent {
                 this.forceUpdate();
             });
         }
+        // A new `meta` means the address moved (back arrow, a link to another
+        // tab or section). The echo of our own change names the tab and the
+        // section already shown, so it changes nothing.
+        if (nextProps.meta && nextProps.meta !== this.props.meta) {
+            const meta = nextProps.meta;
+            const tab = tabIndexOf(meta);
+            const sectionMoved = !!meta.section && meta.section !== this._sections[meta.tab];
+            this._keepSection(meta);
+            if (tab !== this.state._tab_value) {
+                this.setState({ _tab_value: tab }, () => this.forceUpdate());
+            } else if (sectionMoved) {
+                this.forceUpdate(); // hand the tab's view its new section
+            }
+        }
     }
 
     _handleTabChange = (e, value) => {
+        const changed = value !== this.state._tab_value;
         this.setState({ _tab_value: value }, () => {
             this._swipeableViewScrollTop();
             this.forceUpdate();
         });
+        // Mirror the tab in the address (+governance-<id>[-<section>]), with
+        // the section its view still shows. Index replaces the entry, so the
+        // back arrow still closes the dialog.
+        const tab = TAB_CONFIG[value];
+        if (changed && tab && this.props.onMetaChange) {
+            this.props.onMetaChange({ kind: "governance", tab: tab.id, section: this._sections[tab.id] || null });
+        }
+    }
+
+    // The Viability view moved along its own rail: remember it, re-render so
+    // the view's `section` prop keeps up with what it shows (a later address
+    // change back to the old value must still read as a change), and mirror it
+    // in the address.
+    _handleViabilitySection = (section) => {
+        this._sections.viability = section;
+        this.forceUpdate();
+        const shown = TAB_CONFIG[this.state._tab_value];
+        if (shown && shown.id === "viability" && this.props.onMetaChange) {
+            this.props.onMetaChange({ kind: "governance", tab: "viability", section });
+        }
     }
 
     _swipeableViewScrollTop = () => {
@@ -349,7 +408,11 @@ class GovernanceDialog extends React.PureComponent {
                     onChangeIndex={(v) => this._handleTabChange({}, v)}
                     disabled={false}
                 >
-                    <GDViabilityManagement api={api} />
+                    <GDViabilityManagement
+                        api={api}
+                        section={this._sections.viability || null}
+                        onSectionChange={this._handleViabilitySection}
+                    />
                     <GDAttributes api={api} />
                     <GDMethods api={api} />
                     {/* <GDMetrics api={api} /> */}

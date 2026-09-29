@@ -208,7 +208,12 @@ export default {
         "risks": "Risico's",
         "bug_reports": "Bugmeldingen",
         "community": "Community",
-        "development": "Ontwikkeling"
+        "development": "Ontwikkeling",
+        "search": "Zoeken",
+        "artworks": "Kunstwerken",
+        "posts": "Posts",
+        "communities": "Communities",
+        "subscribers_count": "Abonnees: {{count}}"
     },
 
     components: {
@@ -229,6 +234,9 @@ export default {
             "available": "Beschikbaar: ",
             "in_savings": "Op spaarrekening: "
         },
+        "post_result": {
+            "in_community": "in {{community}}"
+        },
         "radial_context_menu": {
             "bold": "Vet",
             "italic": "Cursief",
@@ -246,6 +254,55 @@ export default {
             "insert_column_right": "Kolom rechts invoegen",
             "delete_column": "Kolom verwijderen",
             "delete_table": "Tabel verwijderen"
+        },
+        "search_bar": {
+            "filters": "Filters"
+        },
+        "search_filters": {
+            "show": "Tonen",
+            "all": "Alles",
+            "time": "Periode",
+            "any_time": "Altijd",
+            "last_24_hours": "24u",
+            "past_week": "Week",
+            "past_month": "Maand",
+            "past_year": "Jaar",
+            "custom": "Aangepast",
+            "from": "Van",
+            "to": "Tot",
+            "color": "Kleur",
+            "dominant": "Dominant",
+            "anywhere": "Overal",
+            "artworks_only": "Alleen kunstwerken",
+            "authors": "Auteurs",
+            "community_name": "Naam van de community",
+            "reset_filters": "Filters resetten",
+            "color_black": "Zwart",
+            "color_white": "Wit",
+            "color_gray": "Grijs",
+            "color_red": "Rood",
+            "color_orange": "Oranje",
+            "color_yellow": "Geel",
+            "color_green": "Groen",
+            "color_lime": "Limoengroen",
+            "color_teal": "Blauwgroen",
+            "color_cyan": "Cyaan",
+            "color_sky": "Hemelsblauw",
+            "color_blue": "Blauw",
+            "color_navy": "Marineblauw",
+            "color_purple": "Paars",
+            "color_magenta": "Magenta",
+            "color_pink": "Roze",
+            "color_brown": "Bruin",
+            "color_tan": "Beige",
+            "color_olive": "Olijfgroen",
+            "color_maroon": "Bordeauxrood"
+        },
+        "search_results": {
+            "users": "Gebruikers",
+            "no_result_found_for_0_0": "Geen resultaten gevonden voor ‘<0> #{{searchInputText}} </0>’.",
+            "no_result_found_for_query": "Geen resultaten gevonden voor ‘{{query}}’.",
+            "nothing_matches_these_filters_yet": "Nog niets komt overeen met deze filters."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "NSFW-inhoud niet filteren",
@@ -295,6 +352,9 @@ export default {
             "falls_back_to_english": "Engels",
             "the_nsfw_filter_and_the_toxic_comment": "De NSFW-filter en de Assistent voor toxische reacties draaien op kleine AI-modellen die volledig offline werken — voor veiligheid, speelsheid en plezier op het platform. Er worden nooit gegevens naar een server verstuurd. Uitschakelen kan de prestaties verbeteren.",
             "this_functionality_makes_age_restricted_material": "Deze functie maakt inhoud met leeftijdsbeperking zichtbaar, waaronder (maar niet beperkt tot) naaktheid en mogelijk geweld. Door dit in te schakelen bevestig je dat je minstens 18 jaar oud bent of meerderjarig bent in het rechtsgebied van waaruit je de website bezoekt, en stem je in met het bekijken van expliciete inhoud."
+        },
+        "token_field": {
+            "remove": "Verwijderen"
         },
         "toolbar_menu_option": {
             "shop": "Winkel",

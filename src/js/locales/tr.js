@@ -212,7 +212,12 @@ export default {
         "risks": "Riskler",
         "bug_reports": "Hata Raporları",
         "community": "Topluluk",
-        "development": "Geliştirme"
+        "development": "Geliştirme",
+        "search": "Ara",
+        "artworks": "Eserler",
+        "posts": "Gönderiler",
+        "communities": "Topluluklar",
+        "subscribers_count": "Aboneler: {{count}}"
     },
 
     components: {
@@ -233,6 +238,9 @@ export default {
             "available": "Kullanılabilir: ",
             "in_savings": "Tasarrufta: "
         },
+        "post_result": {
+            "in_community": "{{community}} içinde"
+        },
         "radial_context_menu": {
             "bold": "Kalın",
             "italic": "İtalik",
@@ -250,6 +258,55 @@ export default {
             "insert_column_right": "Sağa sütun ekle",
             "delete_column": "Sütunu sil",
             "delete_table": "Tabloyu sil"
+        },
+        "search_bar": {
+            "filters": "Filtreler"
+        },
+        "search_filters": {
+            "show": "Göster",
+            "all": "Tümü",
+            "time": "Dönem",
+            "any_time": "Tüm zamanlar",
+            "last_24_hours": "24 saat",
+            "past_week": "Hafta",
+            "past_month": "Ay",
+            "past_year": "Yıl",
+            "custom": "Özel",
+            "from": "Başlangıç",
+            "to": "Bitiş",
+            "color": "Renk",
+            "dominant": "Baskın",
+            "anywhere": "Herhangi bir yerde",
+            "artworks_only": "Yalnızca eserler",
+            "authors": "Yazarlar",
+            "community_name": "Topluluk adı",
+            "reset_filters": "Filtreleri sıfırla",
+            "color_black": "Siyah",
+            "color_white": "Beyaz",
+            "color_gray": "Gri",
+            "color_red": "Kırmızı",
+            "color_orange": "Turuncu",
+            "color_yellow": "Sarı",
+            "color_green": "Yeşil",
+            "color_lime": "Fıstık yeşili",
+            "color_teal": "Petrol yeşili",
+            "color_cyan": "Camgöbeği",
+            "color_sky": "Gök mavisi",
+            "color_blue": "Mavi",
+            "color_navy": "Lacivert",
+            "color_purple": "Mor",
+            "color_magenta": "Macenta",
+            "color_pink": "Pembe",
+            "color_brown": "Kahverengi",
+            "color_tan": "Bej",
+            "color_olive": "Zeytin yeşili",
+            "color_maroon": "Bordo"
+        },
+        "search_results": {
+            "users": "Kullanıcılar",
+            "no_result_found_for_0_0": "\" <0> #{{searchInputText}} </0> \" için sonuç bulunamadı.",
+            "no_result_found_for_query": "\"{{query}}\" için sonuç bulunamadı.",
+            "nothing_matches_these_filters_yet": "Bu filtrelere henüz uyan bir şey yok."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "NSFW içeriği filtreleme",
@@ -299,6 +356,9 @@ export default {
             "falls_back_to_english": "İngilizce",
             "the_nsfw_filter_and_the_toxic_comment": "NSFW filtresi ve Toksik Yorum Yardımcısı, tamamen çevrimdışı çalışan minik yapay zekâ modelleriyle işler — platformda güvenlik, oyunculuk ve keyif için. Hiçbir veri asla bir sunucuya gönderilmez. Bunları devre dışı bırakmak daha iyi performans sağlayabilir.",
             "this_functionality_makes_age_restricted_material": "Bu işlev; çıplaklık ve yer yer şiddet dâhil (ancak bunlarla sınırlı olmamak üzere) yaş kısıtlamalı içerikleri görünür kılar. Etkinleştirerek, en az 18 yaşında ya da siteye eriştiğin yargı bölgesindeki reşitlik yaşında olduğunu beyan eder ve açık içerik görüntülemeyi kabul edersin."
+        },
+        "token_field": {
+            "remove": "Kaldır"
         },
         "toolbar_menu_option": {
             "shop": "Mağaza",

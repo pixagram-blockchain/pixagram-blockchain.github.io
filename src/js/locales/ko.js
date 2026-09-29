@@ -209,7 +209,12 @@ export default {
         "risks": "리스크",
         "bug_reports": "버그 신고",
         "community": "커뮤니티",
-        "development": "개발"
+        "development": "개발",
+        "search": "검색",
+        "artworks": "작품",
+        "posts": "게시물",
+        "communities": "커뮤니티",
+        "subscribers_count": "구독자: {{count}}"
     },
 
     components: {
@@ -230,6 +235,9 @@ export default {
             "available": "사용 가능: ",
             "in_savings": "저축 잔액: "
         },
+        "post_result": {
+            "in_community": "{{community}}에서"
+        },
         "radial_context_menu": {
             "bold": "굵게",
             "italic": "기울임",
@@ -247,6 +255,55 @@ export default {
             "insert_column_right": "오른쪽에 열 삽입",
             "delete_column": "열 삭제",
             "delete_table": "표 삭제"
+        },
+        "search_bar": {
+            "filters": "필터"
+        },
+        "search_filters": {
+            "show": "표시",
+            "all": "전체",
+            "time": "기간",
+            "any_time": "전체 기간",
+            "last_24_hours": "24시간",
+            "past_week": "1주",
+            "past_month": "1개월",
+            "past_year": "1년",
+            "custom": "사용자 지정",
+            "from": "시작",
+            "to": "종료",
+            "color": "색상",
+            "dominant": "주요 색상",
+            "anywhere": "포함",
+            "artworks_only": "작품만",
+            "authors": "작성자",
+            "community_name": "커뮤니티 이름",
+            "reset_filters": "필터 초기화",
+            "color_black": "검정",
+            "color_white": "흰색",
+            "color_gray": "회색",
+            "color_red": "빨강",
+            "color_orange": "주황",
+            "color_yellow": "노랑",
+            "color_green": "초록",
+            "color_lime": "연두",
+            "color_teal": "청록",
+            "color_cyan": "시안",
+            "color_sky": "하늘색",
+            "color_blue": "파랑",
+            "color_navy": "남색",
+            "color_purple": "보라",
+            "color_magenta": "마젠타",
+            "color_pink": "분홍",
+            "color_brown": "갈색",
+            "color_tan": "황갈색",
+            "color_olive": "올리브색",
+            "color_maroon": "와인색"
+        },
+        "search_results": {
+            "users": "사용자",
+            "no_result_found_for_0_0": "“ <0> #{{searchInputText}} </0> ”에 대한 결과가 없습니다.",
+            "no_result_found_for_query": "“{{query}}”에 대한 결과가 없습니다.",
+            "nothing_matches_these_filters_yet": "아직 이 필터와 일치하는 항목이 없습니다."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "NSFW 콘텐츠를 필터링하지 않음",
@@ -296,6 +353,9 @@ export default {
             "falls_back_to_english": "영어",
             "the_nsfw_filter_and_the_toxic_comment": "NSFW 필터와 악성 댓글 도우미는 완전히 오프라인으로 동작하는 아주 작은 AI 모델로 실행됩니다 — 플랫폼의 안전함과 즐거움을 위해서입니다. 어떤 데이터도 서버로 전송되지 않습니다. 끄면 성능이 나아질 수 있습니다.",
             "this_functionality_makes_age_restricted_material": "이 기능은 연령 제한 콘텐츠를 노출합니다. 여기에는 노출과 경우에 따라 폭력적 표현이 포함되며 그에 국한되지 않습니다. 이 기능을 켜면 만 18세 이상이거나 접속 지역의 성년 연령에 도달했음을 확인하고, 노골적인 콘텐츠 열람에 동의하는 것으로 간주됩니다."
+        },
+        "token_field": {
+            "remove": "삭제"
         },
         "toolbar_menu_option": {
             "shop": "상점",

@@ -208,7 +208,12 @@ export default {
         "risks": "Riesgos",
         "bug_reports": "Informes de errores",
         "community": "Comunidad",
-        "development": "Desarrollo"
+        "development": "Desarrollo",
+        "search": "Buscar",
+        "artworks": "Obras",
+        "posts": "Publicaciones",
+        "communities": "Comunidades",
+        "subscribers_count": "Suscriptores: {{count}}"
     },
 
     components: {
@@ -229,6 +234,9 @@ export default {
             "available": "Disponible: ",
             "in_savings": "En ahorros: "
         },
+        "post_result": {
+            "in_community": "en {{community}}"
+        },
         "radial_context_menu": {
             "bold": "Negrita",
             "italic": "Cursiva",
@@ -246,6 +254,55 @@ export default {
             "insert_column_right": "Insertar columna a la derecha",
             "delete_column": "Eliminar columna",
             "delete_table": "Eliminar tabla"
+        },
+        "search_bar": {
+            "filters": "Filtros"
+        },
+        "search_filters": {
+            "show": "Mostrar",
+            "all": "Todo",
+            "time": "Periodo",
+            "any_time": "Cualquiera",
+            "last_24_hours": "24 h",
+            "past_week": "Semana",
+            "past_month": "Mes",
+            "past_year": "Año",
+            "custom": "Personalizado",
+            "from": "Desde",
+            "to": "Hasta",
+            "color": "Color",
+            "dominant": "Dominante",
+            "anywhere": "En cualquier parte",
+            "artworks_only": "Solo obras",
+            "authors": "Autores",
+            "community_name": "Nombre de la comunidad",
+            "reset_filters": "Restablecer filtros",
+            "color_black": "Negro",
+            "color_white": "Blanco",
+            "color_gray": "Gris",
+            "color_red": "Rojo",
+            "color_orange": "Naranja",
+            "color_yellow": "Amarillo",
+            "color_green": "Verde",
+            "color_lime": "Verde lima",
+            "color_teal": "Verde azulado",
+            "color_cyan": "Cian",
+            "color_sky": "Celeste",
+            "color_blue": "Azul",
+            "color_navy": "Azul marino",
+            "color_purple": "Morado",
+            "color_magenta": "Magenta",
+            "color_pink": "Rosa",
+            "color_brown": "Marrón",
+            "color_tan": "Beige",
+            "color_olive": "Verde oliva",
+            "color_maroon": "Granate"
+        },
+        "search_results": {
+            "users": "Usuarios",
+            "no_result_found_for_0_0": "No se encontró ningún resultado para « <0> #{{searchInputText}} </0> ».",
+            "no_result_found_for_query": "No se encontró ningún resultado para «{{query}}».",
+            "nothing_matches_these_filters_yet": "Aún no hay nada que coincida con estos filtros."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "No filtrar el contenido NSFW",
@@ -295,6 +352,9 @@ export default {
             "falls_back_to_english": "Inglés",
             "the_nsfw_filter_and_the_toxic_comment": "El filtro NSFW y el Asistente de Comentarios Tóxicos funcionan con modelos de IA diminutos que operan totalmente sin conexión: por seguridad, por juego y por gusto en la plataforma. Nunca se envía ningún dato a un servidor. Desactivarlos puede mejorar el rendimiento.",
             "this_functionality_makes_age_restricted_material": "Esta función hace visible material restringido por edad, incluido (sin limitarse a ello) desnudez y posiblemente violencia. Al activarla, afirmas que tienes al menos 18 años o la mayoría de edad en la jurisdicción desde la que accedes al sitio, y consientes ver contenido explícito."
+        },
+        "token_field": {
+            "remove": "Eliminar"
         },
         "toolbar_menu_option": {
             "shop": "Tienda",

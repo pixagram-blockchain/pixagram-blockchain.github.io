@@ -5,6 +5,7 @@ import Tab from "@material-ui/core/Tab";
 import Tabs from "@material-ui/core/Tabs";
 import SwipeableViews from "react-swipeable-views";
 import JSLoader from "../utils/JSLoader";
+import { GOVERNANCE_SECTIONS } from "../utils/constants";
 import DescriptionIcon from "@material-ui/icons/Description";
 import HowToVoteIcon from "@material-ui/icons/HowToVote";
 import AccountBalanceIcon from "@material-ui/icons/AccountBalance";
@@ -19,6 +20,15 @@ import GDVMTokenomics from "./GDVMTokenomics";
 const TAB_PROPOSALS = 0;
 const TAB_WITNESSES = 1;
 const TAB_TOKENOMICS = 2;
+
+// The rail's tabs by name in the address (+governance-viability-<name>):
+// GOVERNANCE_SECTIONS.viability in utils/constants, index-aligned with the
+// indices above — "proposals", "vote" (the witnesses), "tokenomics".
+const SECTIONS = GOVERNANCE_SECTIONS.viability;
+function tabOfSection(section) {
+    const i = SECTIONS.indexOf(section);
+    return i >= 0 ? i : TAB_PROPOSALS;
+}
 
 const styles = theme => ({
     root: {
@@ -183,7 +193,7 @@ class GDViabilityManagement extends React.PureComponent {
         super(props);
         this._mql = null;
         this.state = {
-            _sub_tab_value: 0,
+            _sub_tab_value: tabOfSection(props.section),
             _authors: [],
             _is_mobile: typeof window !== "undefined" && window.innerWidth <= 600
         };
@@ -203,6 +213,19 @@ class GDViabilityManagement extends React.PureComponent {
         }
     }
 
+    componentDidUpdate(prevProps) {
+        // A new section from the address (the back arrow, a link): show it.
+        // Our own report comes back naming the tab already shown.
+        if (this.props.section && this.props.section !== prevProps.section) {
+            const tab = tabOfSection(this.props.section);
+            if (tab !== this.state._sub_tab_value) {
+                this.setState({ _sub_tab_value: tab }, () => {
+                    this.forceUpdate();
+                });
+            }
+        }
+    }
+
     componentWillUnmount() {
         if (this._mql) {
             this._mql.removeEventListener("change", this._handleMediaChange);
@@ -216,9 +239,14 @@ class GDViabilityManagement extends React.PureComponent {
     }
 
     _handleSubTabChange = (e, value) => {
+        const changed = value !== this.state._sub_tab_value;
         this.setState({ _sub_tab_value: value }, () => {
             this.forceUpdate();
         });
+        // Mirror the rail tab in the address (+governance-viability-<name>).
+        if (changed && this.props.onSectionChange && SECTIONS[value]) {
+            this.props.onSectionChange(SECTIONS[value]);
+        }
     }
 
     _openProposals = () => {

@@ -209,7 +209,12 @@ export default {
         "risks": "Risiko",
         "bug_reports": "Laporan bug",
         "community": "Komunitas",
-        "development": "Pengembangan"
+        "development": "Pengembangan",
+        "search": "Cari",
+        "artworks": "Karya",
+        "posts": "Kiriman",
+        "communities": "Komunitas",
+        "subscribers_count": "Pelanggan: {{count}}"
     },
 
     components: {
@@ -230,6 +235,9 @@ export default {
             "available": "Tersedia: ",
             "in_savings": "Di tabungan: "
         },
+        "post_result": {
+            "in_community": "di {{community}}"
+        },
         "radial_context_menu": {
             "bold": "Tebal",
             "italic": "Miring",
@@ -247,6 +255,55 @@ export default {
             "insert_column_right": "Sisipkan kolom di kanan",
             "delete_column": "Hapus kolom",
             "delete_table": "Hapus tabel"
+        },
+        "search_bar": {
+            "filters": "Filter"
+        },
+        "search_filters": {
+            "show": "Tampilkan",
+            "all": "Semua",
+            "time": "Waktu",
+            "any_time": "Kapan saja",
+            "last_24_hours": "24 jam",
+            "past_week": "Minggu",
+            "past_month": "Bulan",
+            "past_year": "Tahun",
+            "custom": "Kustom",
+            "from": "Dari",
+            "to": "Sampai",
+            "color": "Warna",
+            "dominant": "Dominan",
+            "anywhere": "Di mana saja",
+            "artworks_only": "Hanya karya",
+            "authors": "Pembuat",
+            "community_name": "Nama komunitas",
+            "reset_filters": "Setel ulang filter",
+            "color_black": "Hitam",
+            "color_white": "Putih",
+            "color_gray": "Abu-abu",
+            "color_red": "Merah",
+            "color_orange": "Oranye",
+            "color_yellow": "Kuning",
+            "color_green": "Hijau",
+            "color_lime": "Hijau limau",
+            "color_teal": "Hijau toska",
+            "color_cyan": "Sian",
+            "color_sky": "Biru langit",
+            "color_blue": "Biru",
+            "color_navy": "Biru dongker",
+            "color_purple": "Ungu",
+            "color_magenta": "Magenta",
+            "color_pink": "Merah muda",
+            "color_brown": "Cokelat",
+            "color_tan": "Krem",
+            "color_olive": "Hijau zaitun",
+            "color_maroon": "Merah marun"
+        },
+        "search_results": {
+            "users": "Pengguna",
+            "no_result_found_for_0_0": "Tidak ada hasil untuk \" <0> #{{searchInputText}} </0> \".",
+            "no_result_found_for_query": "Tidak ada hasil untuk \"{{query}}\".",
+            "nothing_matches_these_filters_yet": "Belum ada yang cocok dengan filter ini."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Jangan filter konten NSFW",
@@ -296,6 +353,9 @@ export default {
             "falls_back_to_english": "Inggris",
             "the_nsfw_filter_and_the_toxic_comment": "Filter NSFW dan Toxic Comment Helper berjalan pada model AI mungil yang bekerja sepenuhnya luring — demi keamanan, keceriaan, dan kenyamanan di platform ini. Tidak ada data yang pernah dikirim ke server. Menonaktifkannya bisa meningkatkan performa.",
             "this_functionality_makes_age_restricted_material": "Fitur ini menampilkan materi dengan batasan usia, termasuk (namun tidak terbatas pada) ketelanjangan dan kemungkinan kekerasan. Dengan mengaktifkannya, Anda menyatakan telah berusia setidaknya 18 tahun atau usia dewasa di yurisdiksi tempat Anda mengakses situs ini, dan menyetujui untuk melihat konten eksplisit."
+        },
+        "token_field": {
+            "remove": "Hapus"
         },
         "toolbar_menu_option": {
             "shop": "Toko",

@@ -208,7 +208,12 @@ export default {
         "risks": "Risici",
         "bug_reports": "Fejlrapporter",
         "community": "Fællesskab",
-        "development": "Udvikling"
+        "development": "Udvikling",
+        "search": "Søg",
+        "artworks": "Kunstværker",
+        "posts": "Indlæg",
+        "communities": "Fællesskaber",
+        "subscribers_count": "Abonnenter: {{count}}"
     },
 
     components: {
@@ -229,6 +234,9 @@ export default {
             "available": "Tilgængeligt: ",
             "in_savings": "På opsparing: "
         },
+        "post_result": {
+            "in_community": "i {{community}}"
+        },
         "radial_context_menu": {
             "bold": "Fed",
             "italic": "Kursiv",
@@ -246,6 +254,55 @@ export default {
             "insert_column_right": "Indsæt kolonne til højre",
             "delete_column": "Slet kolonne",
             "delete_table": "Slet tabel"
+        },
+        "search_bar": {
+            "filters": "Filtre"
+        },
+        "search_filters": {
+            "show": "Vis",
+            "all": "Alle",
+            "time": "Periode",
+            "any_time": "Når som helst",
+            "last_24_hours": "24 t",
+            "past_week": "Uge",
+            "past_month": "Måned",
+            "past_year": "År",
+            "custom": "Tilpasset",
+            "from": "Fra",
+            "to": "Til",
+            "color": "Farve",
+            "dominant": "Dominerende",
+            "anywhere": "Hvor som helst",
+            "artworks_only": "Kun kunstværker",
+            "authors": "Forfattere",
+            "community_name": "Fællesskabets navn",
+            "reset_filters": "Nulstil filtre",
+            "color_black": "Sort",
+            "color_white": "Hvid",
+            "color_gray": "Grå",
+            "color_red": "Rød",
+            "color_orange": "Orange",
+            "color_yellow": "Gul",
+            "color_green": "Grøn",
+            "color_lime": "Limegrøn",
+            "color_teal": "Blågrøn",
+            "color_cyan": "Cyan",
+            "color_sky": "Himmelblå",
+            "color_blue": "Blå",
+            "color_navy": "Marineblå",
+            "color_purple": "Lilla",
+            "color_magenta": "Magenta",
+            "color_pink": "Lyserød",
+            "color_brown": "Brun",
+            "color_tan": "Beige",
+            "color_olive": "Olivengrøn",
+            "color_maroon": "Vinrød"
+        },
+        "search_results": {
+            "users": "Brugere",
+            "no_result_found_for_0_0": "Intet resultat fundet for ” <0> #{{searchInputText}} </0> ”.",
+            "no_result_found_for_query": "Intet resultat fundet for ”{{query}}”.",
+            "nothing_matches_these_filters_yet": "Intet matcher disse filtre endnu."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Filtrér ikke NSFW-indhold",
@@ -295,6 +352,9 @@ export default {
             "falls_back_to_english": "Engelsk",
             "the_nsfw_filter_and_the_toxic_comment": "NSFW-filteret og hjælperen mod toksiske kommentarer kører på bittesmå AI-modeller, der fungerer helt offline — for tryghed, leg og glæde på platformen. Der sendes aldrig data til en server. At slå dem fra kan give bedre ydeevne.",
             "this_functionality_makes_age_restricted_material": "Denne funktion gør aldersbegrænset materiale synligt, herunder (men ikke begrænset til) nøgenhed og potentielt vold. Ved at aktivere den bekræfter du, at du er mindst 18 år eller myndig i den jurisdiktion, du tilgår webstedet fra, og at du giver samtykke til at se eksplicit indhold."
+        },
+        "token_field": {
+            "remove": "Fjern"
         },
         "toolbar_menu_option": {
             "shop": "Shop",

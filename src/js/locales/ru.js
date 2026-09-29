@@ -211,7 +211,12 @@ export default {
         "risks": "Риски",
         "bug_reports": "Сообщения об ошибках",
         "community": "Сообщество",
-        "development": "Разработка"
+        "development": "Разработка",
+        "search": "Поиск",
+        "artworks": "Работы",
+        "posts": "Посты",
+        "communities": "Сообщества",
+        "subscribers_count": "Подписчики: {{count}}"
     },
 
     components: {
@@ -232,6 +237,9 @@ export default {
             "available": "Доступно: ",
             "in_savings": "В сбережениях: "
         },
+        "post_result": {
+            "in_community": "в сообществе {{community}}"
+        },
         "radial_context_menu": {
             "bold": "Полужирный",
             "italic": "Курсив",
@@ -249,6 +257,55 @@ export default {
             "insert_column_right": "Вставить столбец справа",
             "delete_column": "Удалить столбец",
             "delete_table": "Удалить таблицу"
+        },
+        "search_bar": {
+            "filters": "Фильтры"
+        },
+        "search_filters": {
+            "show": "Показать",
+            "all": "Все",
+            "time": "Период",
+            "any_time": "Любой",
+            "last_24_hours": "24 ч",
+            "past_week": "Неделя",
+            "past_month": "Месяц",
+            "past_year": "Год",
+            "custom": "Свой",
+            "from": "С",
+            "to": "По",
+            "color": "Цвет",
+            "dominant": "Основной",
+            "anywhere": "Где угодно",
+            "artworks_only": "Только работы",
+            "authors": "Авторы",
+            "community_name": "Название сообщества",
+            "reset_filters": "Сбросить фильтры",
+            "color_black": "Чёрный",
+            "color_white": "Белый",
+            "color_gray": "Серый",
+            "color_red": "Красный",
+            "color_orange": "Оранжевый",
+            "color_yellow": "Жёлтый",
+            "color_green": "Зелёный",
+            "color_lime": "Лаймовый",
+            "color_teal": "Сине-зелёный",
+            "color_cyan": "Циан",
+            "color_sky": "Голубой",
+            "color_blue": "Синий",
+            "color_navy": "Тёмно-синий",
+            "color_purple": "Фиолетовый",
+            "color_magenta": "Пурпурный",
+            "color_pink": "Розовый",
+            "color_brown": "Коричневый",
+            "color_tan": "Бежевый",
+            "color_olive": "Оливковый",
+            "color_maroon": "Бордовый"
+        },
+        "search_results": {
+            "users": "Пользователи",
+            "no_result_found_for_0_0": "Ничего не найдено по запросу « <0> #{{searchInputText}} </0> ».",
+            "no_result_found_for_query": "Ничего не найдено по запросу «{{query}}».",
+            "nothing_matches_these_filters_yet": "Пока ничего не подходит под эти фильтры."
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "Не фильтровать контент NSFW",
@@ -298,6 +355,9 @@ export default {
             "falls_back_to_english": "Английский",
             "the_nsfw_filter_and_the_toxic_comment": "Фильтр NSFW и помощник по токсичным комментариям работают на крошечных ИИ-моделях полностью офлайн — ради безопасности, легкости и удовольствия на платформе. Никакие данные не отправляются на сервер. Их отключение может повысить производительность.",
             "this_functionality_makes_age_restricted_material": "Эта функция открывает материалы с возрастными ограничениями, включая (но не только) наготу и, возможно, сцены насилия. Включая её, вы подтверждаете, что вам не менее 18 лет или вы достигли совершеннолетия в юрисдикции, из которой заходите на сайт, и соглашаетесь просматривать откровенный контент."
+        },
+        "token_field": {
+            "remove": "Удалить"
         },
         "toolbar_menu_option": {
             "shop": "Магазин",

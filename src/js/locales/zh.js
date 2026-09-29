@@ -209,7 +209,12 @@ export default {
         "risks": "风险",
         "bug_reports": "错误报告",
         "community": "社区",
-        "development": "开发"
+        "development": "开发",
+        "search": "搜索",
+        "artworks": "作品",
+        "posts": "帖子",
+        "communities": "社区",
+        "subscribers_count": "订阅者：{{count}}"
     },
 
     components: {
@@ -230,6 +235,9 @@ export default {
             "available": "可用：",
             "in_savings": "储蓄余额："
         },
+        "post_result": {
+            "in_community": "发布于 {{community}}"
+        },
         "radial_context_menu": {
             "bold": "加粗",
             "italic": "斜体",
@@ -247,6 +255,55 @@ export default {
             "insert_column_right": "在右侧插入列",
             "delete_column": "删除列",
             "delete_table": "删除表格"
+        },
+        "search_bar": {
+            "filters": "筛选"
+        },
+        "search_filters": {
+            "show": "显示",
+            "all": "全部",
+            "time": "时间",
+            "any_time": "不限",
+            "last_24_hours": "24 小时",
+            "past_week": "一周",
+            "past_month": "一个月",
+            "past_year": "一年",
+            "custom": "自定义",
+            "from": "起",
+            "to": "至",
+            "color": "颜色",
+            "dominant": "主色",
+            "anywhere": "包含",
+            "artworks_only": "仅限作品",
+            "authors": "作者",
+            "community_name": "社区名称",
+            "reset_filters": "重置筛选",
+            "color_black": "黑色",
+            "color_white": "白色",
+            "color_gray": "灰色",
+            "color_red": "红色",
+            "color_orange": "橙色",
+            "color_yellow": "黄色",
+            "color_green": "绿色",
+            "color_lime": "黄绿色",
+            "color_teal": "青绿色",
+            "color_cyan": "青色",
+            "color_sky": "天蓝色",
+            "color_blue": "蓝色",
+            "color_navy": "藏青色",
+            "color_purple": "紫色",
+            "color_magenta": "品红色",
+            "color_pink": "粉色",
+            "color_brown": "棕色",
+            "color_tan": "棕褐色",
+            "color_olive": "橄榄色",
+            "color_maroon": "栗色"
+        },
+        "search_results": {
+            "users": "用户",
+            "no_result_found_for_0_0": "未找到与“ <0> #{{searchInputText}} </0> ”相关的结果。",
+            "no_result_found_for_query": "未找到与“{{query}}”相关的结果。",
+            "nothing_matches_these_filters_yet": "暂时没有符合这些筛选条件的内容。"
         },
         "settings_dialog": {
             "dont_filter_nsfw_content": "不过滤 NSFW 内容",
@@ -296,6 +353,9 @@ export default {
             "falls_back_to_english": "英语",
             "the_nsfw_filter_and_the_toxic_comment": "NSFW 过滤器与不当评论助手运行在完全离线的微型 AI 模型上 —— 为了平台的安全、轻松与愉悦。任何数据都不会发送到服务器。关闭它们可能提升性能。",
             "this_functionality_makes_age_restricted_material": "该功能会显示有年龄限制的内容，包括（但不限于）裸露以及可能的暴力内容。启用即表示你确认自己已满 18 周岁，或已达到你访问本站所在司法辖区的成年年龄，并同意查看露骨内容。"
+        },
+        "token_field": {
+            "remove": "移除"
         },
         "toolbar_menu_option": {
             "shop": "商店",

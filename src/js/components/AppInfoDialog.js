@@ -18,6 +18,7 @@ import FAQ from "./FAQ";
 import CommunityPrinciples from "./CommunityPrinciples";
 import { t } from "../utils/text";
 import { withLanguage } from "../utils/withLanguage";
+import { INFO_TABS } from "../utils/constants";
 
 // Hoisted static styles — were inline literals re-created on every render.
 const ST_D_FLEX__M_0PX_0PX_16PX_0 = { display: "flex", margin: "0px 0px 16px 0px" };
@@ -114,6 +115,14 @@ const TAB_LABEL_KEYS = [
     "components.app_info_dialog.tab_ethos",
 ];
 
+// The address names these tabs by INFO_TABS (utils/constants), in the same
+// order as the key arrays above: "+info-privacy" is tab 2. Missing or
+// unknown → the first tab.
+function tabIndexOf(meta) {
+    const i = meta ? INFO_TABS.indexOf(meta.tab) : -1;
+    return i >= 0 ? i : 0;
+}
+
 class AppInfoDialog extends React.PureComponent {
 
     constructor(props) {
@@ -121,7 +130,7 @@ class AppInfoDialog extends React.PureComponent {
         this.state = {
             classes: props.classes,
             open: props.open,
-            _tab_value: 0,
+            _tab_value: tabIndexOf(props.meta),
         };
     };
 
@@ -130,8 +139,15 @@ class AppInfoDialog extends React.PureComponent {
     }
 
     componentWillReceiveProps(nextProps, nextContext) {
-
-        this.setState(nextProps, this.forceUpdate);
+        // A new `meta` means the address moved (back arrow, a link to another
+        // tab). The echo of our own tab change names the tab already shown,
+        // so it changes nothing.
+        const patch = { ...nextProps };
+        if (nextProps.meta && nextProps.meta !== this.props.meta) {
+            const tab = tabIndexOf(nextProps.meta);
+            if (tab !== this.state._tab_value) patch._tab_value = tab;
+        }
+        this.setState(patch, this.forceUpdate);
     }
 
     _on_close = (event) => {
@@ -140,10 +156,17 @@ class AppInfoDialog extends React.PureComponent {
     };
 
     _handleTabChange = (e, value) => {
+        const changed = value !== this.state._tab_value;
         this.setState({_tab_value: value}, () => {
             this.swipeableViewScrollTop();
             this.forceUpdate();
         })
+        // Mirror the tab in the address (+info-<tab>). Index replaces the
+        // entry, so the back arrow still closes the dialog instead of walking
+        // back through its tabs.
+        if (changed && this.props.onMetaChange) {
+            this.props.onMetaChange({ kind: "info", tab: INFO_TABS[value] });
+        }
     }
 
     swipeableViewScrollTop = () => {
