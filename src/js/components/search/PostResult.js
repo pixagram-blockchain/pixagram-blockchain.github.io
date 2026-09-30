@@ -10,7 +10,9 @@ import { highlightNode, NO_SLOTS } from "./highlight";
 // ── PostResult ────────────────────────────────────────────────────────────────
 // One blog-post row (community/portal posts included): title in "Industry Book" with
 // the match highlighted, "@author · in <community>" and the résumé in "Normative Pro"
-// (the first words of the post stand in while the résumé is pending).
+// (the first words of the post stand in while the résumé is pending). No picture in
+// the row, so it carries more padding (classes.postRow) to keep the text clear of the
+// hover background's rounded corners.
 
 // Same faces as the toolbar wordmark: "Industry Book" for titles, "Normative Pro" for text.
 const TITLE_FONT = '"Industry Book"';
@@ -29,7 +31,7 @@ export const PostResult = React.memo(
         const where = post.community ? (communityTitles && communityTitles[post.community]) || post.community : null;
         const text = post.summary || post.excerpt;
         return (
-            <ListItem button dense onClick={onClick} className={classes.row}>
+            <ListItem button dense onClick={onClick} className={classes.row + " " + classes.postRow}>
                 <ListItemText
                     className={classes.rowText}
                     disableTypography

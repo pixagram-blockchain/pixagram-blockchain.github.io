@@ -59,12 +59,22 @@ const SLIDER_MARKS = [
     { value: 100, label: "100%" },
 ];
 
+// Round DOWN to `d` decimals. Rounding to nearest could push the amount above
+// the balance (9.278 -> 9.28 > 9.278), so 100% would be rejected. The epsilon
+// absorbs float noise (9.278 * 1000 = 9277.999999...).
+const floorTo = (v, d) => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    const f = Math.pow(10, d);
+    return Math.floor(n * f + 1e-9) / f;
+};
+
 // MUI TextField inputComponent must forward ref. The grouping and decimal
 // characters follow the Settings locale (numericInputProps); the value the
 // wallet receives stays a "." decimal string whatever is displayed.
 const NumberFormatCustom = React.memo(
     React.forwardRef(function NumberFormatCustom(props, ref) {
-        const { onChange, currency, locale, name, ...other } = props;
+        const { onChange, currency, locale, decimals, name, ...other } = props;
         return (
             <NumericFormat
                 {...other}
@@ -76,7 +86,7 @@ const NumberFormatCustom = React.memo(
                 }}
                 {...numericInputProps(locale)}
                 thousandsGroupStyle="thousand"
-                decimalScale={2}
+                decimalScale={decimals ?? 3}
                 fixedDecimalScale={false}
                 allowNegative={false}
                 allowLeadingZeros={true}
@@ -141,6 +151,9 @@ class PixaWalletPowerDialog extends React.PureComponent {
 
     _currency = () => (this._isPowerDown() ? "PXP" : "PXA");
 
+    // PXA has 3 decimals on chain, PXP (vests) 6.
+    _decimals = () => (this._isPowerDown() ? 6 : 3);
+
     _description = () => {
         if (this._isPowerDown()) {
             return t("components.pixa_wallet_power_dialog.if_you_change_the_power_down");
@@ -151,13 +164,13 @@ class PixaWalletPowerDialog extends React.PureComponent {
     _handleAmountFromPercent = (percent) => {
         const max = this._currentMax();
         const p = this._clamp(Number(percent) || 0, 0, 100);
-        const amount = (max * p) / 100;
+        const amount = floorTo((max * p) / 100, this._decimals());
         this.setState({ _amount_percent: p, _amount: amount });
     };
 
     _handlePercentFromAmount = (amount) => {
         const max = this._currentMax();
-        const a = this._clamp(Number(amount) || 0, 0, max);
+        const a = floorTo(this._clamp(Number(amount) || 0, 0, max), this._decimals());
         const p = max > 0 ? (a / max) * 100 : 0;
         this.setState({ _amount: a, _amount_percent: p, _tempPercent: p });
     };
@@ -266,14 +279,15 @@ class PixaWalletPowerDialog extends React.PureComponent {
 
         // Use temp value while dragging, committed value otherwise
         const displayPercent = _isDragging ? Math.round(_tempPercent) : Math.round(_amount_percent);
-        const displayAmount = Number.isFinite(_amount) ? Number(_amount.toFixed(2)) : 0;
+        const decimals = this._decimals();
+        const displayAmount = floorTo(_amount, decimals);
 
         const noBalance = max <= 0;
         const disabledTooltip = noBalance
             ? t("components.pixa_wallet_power_dialog.you_dont_have_any_to", {
-            currency: currency,
-            title: title.toLowerCase()
-        })
+                currency: currency,
+                title: title.toLowerCase()
+            })
             : "";
 
         return (
@@ -319,10 +333,10 @@ class PixaWalletPowerDialog extends React.PureComponent {
                                 inputComponent: NumberFormatCustom,
                                 // `locale` doubles as the memo-buster: a language switch
                                 // re-formats the field even though its value did not move.
-                                inputProps: { currency, locale: resolveLocale() },
+                                inputProps: { currency, decimals, locale: resolveLocale() },
                                 startAdornment: startAdornment
                             }}
-                            helperText={t("components.pixa_wallet_power_dialog.max", { max: formatNumber(max, { min: 0, max: 2 }), currency })}
+                            helperText={t("components.pixa_wallet_power_dialog.max", { max: formatNumber(floorTo(max, decimals), { min: 0, max: decimals }), currency })}
                         />
                     </form>
 
@@ -338,7 +352,7 @@ class PixaWalletPowerDialog extends React.PureComponent {
                                 variant="contained"
                                 color="primary"
                                 autoFocus
-                                onClick={() => onConfirm?.(_username, Number(_amount.toFixed(2)))}
+                                onClick={() => onConfirm?.(_username, displayAmount)}
                                 disabled={noBalance || displayAmount <= 0}
                             >{t("words.confirm", {TUC: true})} </Button>
                         </span>

@@ -11,6 +11,7 @@ import { T } from "../../utils/T";
 import { t, useLanguage } from "../../utils/text";
 
 import { NO_SLOTS, tr } from "./highlight";
+import { COMMUNITY_ACCOUNT_RE } from "./config";
 import { hasFilters } from "./filters";
 import { isValidTag, normalizeTag } from "./tags";
 import { SearchFilters } from "./SearchFilters";
@@ -23,14 +24,16 @@ import { ArtworkMasonry } from "./ArtworkMasonry";
 // ── SearchResults ─────────────────────────────────────────────────────────────
 // The dropdown under the search bar:
 //   filter panel (pinned, expands from the bar's filter button)
-//   ─ scrolling: Users · Tags · Communities · History · Posts · Artworks
+//   ─ scrolling: Users (two per row) · Tags (three per row) · Communities · History · Posts · Artworks
 // Chain sections render as soon as the node answers; posts and the artwork
 // masonry fill in when the search Worker answers (a small spinner holds their
 // place; on a filter change the previous ones stay, dimmed, until the new ones
 // land). `width` and `maxHeight` are measured live by SearchBar.
 //
-// The Tags section offers the typed term itself ("#term") only when it is a
-// valid tag (see tags.js) or a tag the chain already lists.
+// The Tags section offers the typed term itself ("#term") on a line of its own,
+// above the other matches, only when it is a valid tag (see tags.js) or a tag the
+// chain already lists — and never for a portal-<id>: that is a community (its
+// posts carry it as their first tag), which the Communities section covers.
 
 const EMPTY = Object.freeze([]);
 
@@ -74,12 +77,9 @@ export const SearchResults = React.memo(
         const goToPost = onGoToPost || onGoToArtwork; // same route shape: /<category>/@author/permlink
 
         const tag = normalizeTag(query);
-        const tagIsValid = !!tag && (isValidTag(tag) || tags.some((x) => x.name === tag));
-        const tagRows = useMemo(() => {
-            if (!tag) return EMPTY;
-            const rest = tags.filter((x) => x.name !== tag).map((x) => ({ name: x.name, exact: false }));
-            return tagIsValid ? [{ name: tag, exact: true }].concat(rest) : rest;
-        }, [tags, tag, tagIsValid]);
+        const tagIsValid = !!tag && !COMMUNITY_ACCOUNT_RE.test(tag) && (isValidTag(tag) || tags.some((x) => x.name === tag));
+        // Every match but the typed term itself: the grid under its line.
+        const otherTags = useMemo(() => (tag ? tags.filter((x) => x.name !== tag) : EMPTY), [tags, tag]);
 
         // The synthetic "#term" row alone does not count as a result: with nothing
         // else found, the no-result message (with its "browse the tag" link) shows.
@@ -161,16 +161,27 @@ export const SearchResults = React.memo(
                                 {users.length > 0 && (
                                     <ListSubheader className={classes.subheaderSticky}>{tr(t, "components.search_results.users", "Users")}</ListSubheader>
                                 )}
-                                {users.map((user) => (
-                                    <UserResult key={"@" + user.username} classes={classes} user={user} query={query} onGoToUsername={onGoToUsername} />
-                                ))}
+                                {users.length > 0 && (
+                                    <li className={classes.userGrid}>
+                                        {users.map((user) => (
+                                            <UserResult key={"@" + user.username} classes={classes} user={user} query={query} onGoToUsername={onGoToUsername} />
+                                        ))}
+                                    </li>
+                                )}
 
-                                {tagRows.length > 0 && (
+                                {(tagIsValid || otherTags.length > 0) && (
                                     <ListSubheader className={classes.subheaderSticky}>{tr(t, "words.tags", "Tags")}</ListSubheader>
                                 )}
-                                {tagRows.map((row) => (
-                                    <TagResult key={"#" + row.name} classes={classes} name={row.name} exact={row.exact} query={tag} onGoToTag={onGoToTag} />
-                                ))}
+                                {tagIsValid && (
+                                    <TagResult classes={classes} name={tag} exact query={tag} onGoToTag={onGoToTag} />
+                                )}
+                                {otherTags.length > 0 && (
+                                    <li className={classes.tagGrid}>
+                                        {otherTags.map((x) => (
+                                            <TagResult key={"#" + x.name} classes={classes} name={x.name} query={tag} onGoToTag={onGoToTag} />
+                                        ))}
+                                    </li>
+                                )}
 
                                 {communities.length > 0 && (
                                     <ListSubheader className={classes.subheaderSticky}>{tr(t, "words.communities", "Communities")}</ListSubheader>

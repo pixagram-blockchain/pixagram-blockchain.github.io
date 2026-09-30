@@ -188,13 +188,17 @@ export const searchStyles = (theme) => {
             [theme.breakpoints.down("sm")]: { borderRadius: "0 0 16px 16px" },
         },
         filterCollapse: { flex: "0 0 auto" },
+        // The results scroll in a rounded window inset from the dropdown's sides (the
+        // same inset as the filter panel above it). Section headers are dark rounded
+        // bars in the filter panel's colour.
         searchScroll: {
             flex: "1 1 auto",
             minHeight: 0,
             overflowY: "auto",
-            padding: "0 16px",
-            [theme.breakpoints.down("sm")]: { padding: "0 12px" },
-            "& .MuiListSubheader-sticky": { backgroundColor: "#222222" },
+            margin: "0 16px",
+            borderRadius: 16,
+            [theme.breakpoints.down("sm")]: { margin: "0 12px" },
+            "& .MuiListSubheader-sticky": { backgroundColor: PANEL_BG, borderRadius: 16, margin: "8px 0" },
             "& .MuiList-padding": { paddingTop: 0 },
         },
         subheaderSticky: { color: "white", fontWeight: "bold", fontSize: 16 },
@@ -217,6 +221,28 @@ export const searchStyles = (theme) => {
         },
         rowAvatar: { minWidth: 44 },
         rowText: { margin: 0, minWidth: 0 },
+        // Users two per row, tags three per row: grids of ordinary rows (same hover,
+        // same radius). minmax(0, 1fr) lets a long name or tag ellipsize instead of
+        // widening its column.
+        userGrid: {
+            display: "grid",
+            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            columnGap: 8,
+        },
+        tagGrid: {
+            display: "grid",
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+            columnGap: 4,
+        },
+        // Post rows have no picture in the corner, so the title sat right inside the
+        // hover background's rounded corner: they get room on every side (after
+        // `row`, so these paddings win).
+        postRow: {
+            paddingLeft: 12,
+            paddingRight: 12,
+            paddingTop: 6,
+            paddingBottom: 6,
+        },
         loading: { display: "flex", justifyContent: "center", padding: "16px 0" },
         noResult: { margin: "12px 8px 12px 8px", color: "#999999" },
         noResultLink: { textDecoration: "underline", cursor: "pointer" },

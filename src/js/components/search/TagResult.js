@@ -6,16 +6,17 @@ import ListItemText from "@material-ui/core/ListItemText";
 import { highlightNode } from "./highlight";
 
 // ── TagResult ─────────────────────────────────────────────────────────────────
-// "#tag" row, as before. `exact` marks the synthetic first row that always
-// offers the typed term itself (it has no partial match to highlight).
+// "#tag" row on one line. `exact` marks the synthetic row that offers the typed
+// term itself (it has no partial match to highlight) on a line of its own; the
+// other tags sit three per row, ellipsized, the full name in the native tooltip.
 
-const PRIMARY_STYLE = { color: "#bbb" };
+const PRIMARY_STYLE = { color: "#bbb", display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 
 export const TagResult = React.memo(
     ({ classes, name, query, exact, onGoToTag }) => {
         const onClick = useCallback(() => onGoToTag(name), [onGoToTag, name]);
         return (
-            <ListItem button dense onClick={onClick} className={classes.row}>
+            <ListItem button dense onClick={onClick} className={classes.row} title={exact ? undefined : "#" + name}>
                 <ListItemText
                     className={classes.rowText}
                     disableTypography

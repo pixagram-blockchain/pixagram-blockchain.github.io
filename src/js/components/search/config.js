@@ -7,15 +7,15 @@
 // staging Worker can be pointed at without a rebuild.
 export const SEARCH_API_URL = (
     (typeof window !== "undefined" && window.__PIXAGRAM_SEARCH_API__) ||
-    "https://pixagram-search.p1x4.workers.dev"
+    "https://pixagram-search-v2.p1x4.workers.dev"
 ).replace(/\/+$/, "");
 
 export const LIMITS = Object.freeze({
-    users: 8,
-    tags: 10,
-    communities: 10,
-    artworks: 12,
-    posts: 5,
+    users: 12,
+    tags: 24,
+    communities: 12,
+    artworks: 16,
+    posts: 12,
 });
 
 // Community accounts are named portal-<id>; lookup_accounts returns them like any
@@ -29,16 +29,16 @@ export const CACHE_MAX_TERMS = 50;
 // Masonry: two columns, gap in px, corner radius of the artwork cards (shared by
 // the avatars and the colour swatches' rounding).
 export const MASONRY_COLUMNS = 2;
-export const MASONRY_GAP = 6;
-export const ARTWORK_RADIUS = 8;
+export const MASONRY_GAP = 8;
+export const ARTWORK_RADIUS = 12;
 
 // Desktop (MUI md and up): the open search widens by up to SEARCH_EXPAND_PX when
 // the viewport has room to its right. The dropdown runs from the bar's bottom edge
 // down to the viewport's (minus a gutter), within these bounds.
 export const DESKTOP_MIN_WIDTH = 960;
-export const SEARCH_EXPAND_PX = 128;
-export const DROPDOWN_MIN_HEIGHT = 280;
-export const DROPDOWN_MAX_HEIGHT = 780;
+export const SEARCH_EXPAND_PX = 192;
+export const DROPDOWN_MIN_HEIGHT = 320;
+export const DROPDOWN_MAX_HEIGHT = 786;
 
 // Filter panel: suggestions shown under the author / community text fields.
 export const SUGGEST_LIMIT = 6;

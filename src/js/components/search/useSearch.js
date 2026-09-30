@@ -227,8 +227,13 @@ export function useSearch(apiRef) {
         ).slice(0, LIMITS.communities);
 
         if (!browseFresh && tagsAll.length) browseTagsRef.current = { tags: tagsAll, _ts: now };
+        // A portal-<id> in the trending list is a community (its posts carry it as their
+        // first tag), not a tag: the Communities section covers it, so it never shows here.
         const tags = tagTerm
-            ? tagsAll.filter((t) => t?.name && t.name.toLowerCase().includes(tagTerm)).slice(0, LIMITS.tags)
+            ? tagsAll.filter((t) => {
+                const name = t?.name ? String(t.name).toLowerCase() : "";
+                return !!name && !COMMUNITY_ACCOUNT_RE.test(name) && name.includes(tagTerm);
+            }).slice(0, LIMITS.tags)
             : [];
 
         // Profiles for users AND communities (a community's picture is the

@@ -55,6 +55,18 @@ const SLIDER_MARKS = [
     { value: 100, label: "100%" },
 ];
 
+// Round DOWN to `d` decimals so the amount can never exceed the balance
+// (9.278 must not become 9.28). The epsilon absorbs float noise.
+const floorTo = (v, d) => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    const f = Math.pow(10, d);
+    return Math.floor(n * f + 1e-9) / f;
+};
+
+// Chain assets (PXA / PXS) carry 3 decimals.
+const DECIMALS = 3;
+
 const NumberFormatCustom = React.memo(
     React.forwardRef(function NumberFormatCustom(props, ref) {
         const { onChange, currency, locale, name, ...other } = props;
@@ -69,7 +81,7 @@ const NumberFormatCustom = React.memo(
                 }}
                 {...numericInputProps(locale)}
                 thousandsGroupStyle="thousand"
-                decimalScale={2}
+                decimalScale={DECIMALS}
                 fixedDecimalScale={false}
                 allowNegative={false}
                 allowLeadingZeros={true}
@@ -185,13 +197,13 @@ class PixaWalletSwapDialog extends React.PureComponent {
     _handleAmountFromPercent = (percent) => {
         const max = this._currentMax();
         const p = this._clamp(Number(percent) || 0, 0, 100);
-        const amount = (max * p) / 100;
+        const amount = floorTo((max * p) / 100, DECIMALS);
         this.setState({ _amount_percent: p, _amount: amount });
     };
 
     _handlePercentFromAmount = (amount) => {
         const max = this._currentMax();
-        const a = this._clamp(Number(amount) || 0, 0, max);
+        const a = floorTo(this._clamp(Number(amount) || 0, 0, max), DECIMALS);
         const p = max > 0 ? (a / max) * 100 : 0;
         this.setState({ _amount: a, _amount_percent: p, _tempPercent: p });
     };
@@ -248,9 +260,7 @@ class PixaWalletSwapDialog extends React.PureComponent {
         const displayPercent = _isDragging
             ? Math.round(_tempPercent)
             : Math.round(_amount_percent);
-        const displayAmount = Number.isFinite(_amount)
-            ? Number(_amount.toFixed(2))
-            : 0;
+        const displayAmount = floorTo(_amount, DECIMALS);
         const otherAmount = this._computeOtherAmount(displayAmount);
         const displayOtherAmount = Number.isFinite(otherAmount)
             ? Number(otherAmount.toFixed(2))
@@ -433,8 +443,8 @@ class PixaWalletSwapDialog extends React.PureComponent {
                         title={
                             noBalance
                                 ? t("components.pixa_wallet_swap_dialog.you_dont_have_any_to_swap", {
-                                currency: currency
-                            })
+                                    currency: currency
+                                })
                                 : ""
                         }
                         disableHoverListener={!noBalance && !amountInvalid}
@@ -446,7 +456,7 @@ class PixaWalletSwapDialog extends React.PureComponent {
                                     variant="contained"
                                     color="primary"
                                     autoFocus
-                                    onClick={() => onConfirm?.(Number(_amount.toFixed(2)), currency)}
+                                    onClick={() => onConfirm?.(displayAmount, currency)}
                                     disabled={noBalance || amountInvalid}
                                 >{t("words.confirm", {TUC: true})} </Button>
                             </span>
