@@ -1711,9 +1711,9 @@ function useSessionAvatar(apiRef, apiReady, apiGeneration) {
 // instantiated and the landing page is reached by navigating back to it,
 // nothing happens. It is the transition the Browse button plays: this hook
 // only decides WHEN, and hands Home a one-way `autoEnterFeed` flag; Home
-// then runs its own exit (canvas fade + HISTORY.push), and
-// RootAnimationOverlay plays the rainbow on the home→app flip exactly as it
-// does for a click — nothing here is a special path through the router.
+// then runs its own exit (HISTORY.push), and on the home→app flip
+// LandingLayer dissolves it while RootAnimationOverlay plays the rainbow,
+// exactly as for a click — nothing here is a special path through the router.
 //
 // One-shot, per page load — however that load came about (typed URL, link
 // from another site, reload, the browser's Back into the site: the app
@@ -2174,6 +2174,90 @@ const RootAnimationOverlay = React.memo(
     (prev, next) => prev.isHome === next.isHome && prev.classes === next.classes,
 );
 
+// ── LandingLayer: the landing page, and its dissolve into the app ────────────
+// On home the layer has no box of its own (display: contents) and simply
+// renders the landing. On the home→app flip — the very commit that mounts the
+// app shell — it keeps the landing mounted for one more beat, ON TOP of the
+// shell, hands it `departing` (Home stops its own loops and passes the strip's
+// drift to the compositor) and dissolves it with an opacity/scale animation,
+// under RootAnimationOverlay's rainbow. Both run on the compositor, so the
+// app's first render can hold the main thread without the exit stuttering.
+// Before, Home unmounted in the flip commit itself — a frame or two after the
+// click when the page chunk is warm, long before its 200 ms canvas fade could
+// play — so the page simply cut to the app.
+//
+// Unmounted on animationend, with a timer safety net like the rainbow's.
+// Every arrival on home is its own visit (the wrapper's key): coming back
+// while the previous landing is still dissolving drops it and mounts a fresh
+// one, rather than reviving a page that has already stopped its loops.
+const LANDING_EXIT_MS = 460;
+
+function withDeparting(element) {
+    const inner = element?.props?.children;
+    if (!inner) return element;
+    return React.cloneElement(element, null, React.cloneElement(inner, { departing: true }));
+}
+
+const LandingLayer = React.memo(
+    ({ classes, element }) => {
+        const lastRef = useRef(null);      // the landing element last shown
+        const departingRef = useRef(null); // its `departing` clone, while dissolving
+        const visitRef = useRef(0);
+        const [, forceRender] = useReducer((n) => n + 1, 0);
+
+        // Detected during render, like RootAnimationOverlay: the dissolving
+        // landing must be in the SAME commit as the shell, or the naked app
+        // flashes for a frame first.
+        if (element) {
+            if (!lastRef.current || departingRef.current) visitRef.current++;
+            lastRef.current = element;
+            departingRef.current = null;
+        } else if (lastRef.current && !departingRef.current) {
+            departingRef.current = withDeparting(lastRef.current);
+        }
+        const departing = departingRef.current;
+
+        const finish = useCallback(() => {
+            if (!departingRef.current) return;
+            departingRef.current = null;
+            lastRef.current = null;
+            forceRender();
+        }, []);
+
+        // animationend bubbles, and the landing is full of animations of its
+        // own (tile reveals, ripples) — only the layer's own end counts.
+        const onAnimationEnd = useCallback((e) => {
+            if (e.target === e.currentTarget) finish();
+        }, [finish]);
+
+        useEffect(() => {
+            if (!departing) return undefined;
+            const t = setTimeout(finish, LANDING_EXIT_MS * 2 + 200);
+            return () => clearTimeout(t);
+        }, [departing, finish]);
+
+        if (element) {
+            return (
+                <div key={visitRef.current} className={classes.landingLayer}>
+                    {element}
+                </div>
+            );
+        }
+        if (!departing) return null;
+        return (
+            <div
+                key={visitRef.current}
+                className={classes.landingDeparting}
+                onAnimationEnd={onAnimationEnd}
+                aria-hidden="true"
+            >
+                {departing}
+            </div>
+        );
+    },
+    (prev, next) => prev.element === next.element && prev.classes === next.classes,
+);
+
 // ── SnackbarComponent ────────────────────────────────────────────────────────
 
 const SnackbarComponent = React.memo(
@@ -2222,6 +2306,40 @@ const styles = (theme) => {
             color: theme.palette.primary.contrastText,
         },
         backdrop: { zIndex: 8 },
+        // ── LandingLayer ──
+        // At rest: no box of its own, so the landing lays out exactly as when
+        // it was rendered bare.
+        landingLayer: { display: "contents" },
+        // Dissolving over the freshly mounted app: pinned to the viewport,
+        // above the shell, just below the rainbow (rootAnimation, z 100), and
+        // click-through so the app is live from its first frame. The slight
+        // zoom-in follows the rainbow's flight toward the viewer.
+        landingDeparting: {
+            position: "fixed",
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            zIndex: 99,
+            overflow: "hidden",
+            pointerEvents: "none",
+            animationName: "$landing-dissolve",
+            animationDuration: `${LANDING_EXIT_MS}ms`,
+            animationTimingFunction: EASE,
+            // Holds opacity 0 after the last frame, until the unmount lands.
+            animationFillMode: "both",
+            "@media (prefers-reduced-motion: reduce)": {
+                animationName: "$landing-fade",
+            },
+        },
+        "@keyframes landing-dissolve": {
+            "0%": { opacity: 1, transform: "scale(1)" },
+            "100%": { opacity: 0, transform: "scale(1.04)" },
+        },
+        "@keyframes landing-fade": {
+            "0%": { opacity: 1 },
+            "100%": { opacity: 0 },
+        },
         rootAnimation: {
             overflow: "hidden",
             animationName: "$fast-slide-index",
@@ -3096,13 +3214,16 @@ function Index({ classes, history, settings: rawSettings }) {
     // would kill its slide animation and any in-flight autoHide timer. The
     // overlay itself only puts a node in the DOM while its home→app fade is
     // actually playing — see RootAnimationOverlay.
+    //
+    // The landing renders through LandingLayer, in a slot of its own AFTER
+    // the shell: on the home→app flip it stays mounted above the newly
+    // mounted shell for its dissolve (see LandingLayer), which is why it is
+    // no longer the other arm of the page-name branch.
     const isHome = page.name === "home";
 
     return (
         <React.Fragment>
-            {isHome ? (
-                landingElement
-            ) : (
+            {isHome ? null : (
                 <React.Fragment>
                     <main className={classes.root}>
                         <ToolbarComponent
@@ -3187,6 +3308,8 @@ function Index({ classes, history, settings: rawSettings }) {
                     )}
                 </React.Fragment>
             )}
+
+            <LandingLayer classes={classes} element={isHome ? landingElement : null} />
 
             <SnackbarComponent
                 classes={classes}

@@ -16,14 +16,64 @@ import getIT from "../data/pixaLogoWhite";
 // portraits) never taxes the landing page's critical-path bundle.
 const LearnMoreDialog = React.lazy(() => import("../components/LearnMoreDialog"));
 
+// Easing shared by the reveal and the CTA. EASE_OUT decelerates hard into
+// rest (quint-like); EASE_BACK overshoots a touch and settles.
+const EASE_OUT = "cubic-bezier(0.22, 1, 0.36, 1)";
+const EASE_BACK = "cubic-bezier(0.34, 1.56, 0.64, 1)";
+
+// ── Artwork reveal: one wave, driven by CSS ──
+// The strip used to reveal through a setState staircase: a timer chain
+// bumping state._y with gaps growing ×1.5. Every img onLoad (2 × N of them)
+// and every resize armed ANOTHER chain, and the re-keyed Fade around each
+// revealed tile remounted its img — whose onLoad armed yet another. The
+// result was a burst of tiles, then a near-stall (the shared gap compounded
+// across all chains), and ~2N re-renders of the page on the way. Now each
+// tile gets its delay once, at render, and the browser plays the whole wave
+// on the compositor. The gaps still grow, in the spirit of the old ×1.5,
+// but gently and with a ceiling.
+const REVEAL_DURATION_MS = 700;
+const REVEAL_STAGGER_MS = 90;      // gap between the first two tiles
+const REVEAL_STAGGER_GROWTH = 1.1; // each next gap is 10% longer
+const REVEAL_MAX_DELAY_MS = 1500;  // the wave never takes longer than this
+// Tiles past this index sit far beyond the right edge when the wave plays
+// (and only scroll in seconds later), so they're simply rendered visible.
+const REVEAL_MAX_ITEMS = 18;
+
+// Delay of tile k (k counts across both copies, left to right): the sum of
+// the k first gaps, capped.
+const revealDelay = (k) => Math.min(
+    REVEAL_MAX_DELAY_MS,
+    Math.round(REVEAL_STAGGER_MS * (Math.pow(REVEAL_STAGGER_GROWTH, k) - 1) / (REVEAL_STAGGER_GROWTH - 1))
+);
+
+// Decode every artwork BEFORE it enters the DOM and keep its intrinsic size.
+// The tiles then mount fully laid out (width/height attributes → aspect
+// ratio), so the strip has its final geometry on its first frame: no tiles
+// growing from 0 px wide one by one as each image finished loading, no loop
+// period re-measured 2N times, and no reveal fading in an empty box. An
+// image that fails to decode keeps w/h = 0 and simply lays out on load.
+const decodeArtworks = (urls) => Promise.all(urls.map((src) => new Promise((resolve) => {
+    const img = new Image();
+    const done = () => resolve({ src, w: img.naturalWidth | 0, h: img.naturalHeight | 0 });
+    img.decoding = "async";
+    if (typeof img.decode === "function") {
+        img.src = src;
+        img.decode().then(done, done);
+    } else {
+        img.onload = done;
+        img.onerror = done;
+        img.src = src;
+    }
+})));
+
 const styles = theme => ({
     // ── Scoped JSS keyframes ──
-    // They MUST live at the sheet top level: JSS only registers top-level
-    // "@keyframes" rules in the sheet's keyframes map, and that map is what
-    // resolves the "$name" animationName references below. Nested inside a
-    // rule (or under "@global") they never enter the map, so "$bounceGlow"
-    // etc. can't resolve. (The unreferenced hueRotate / slideUpFade /
-    // slideRightFade globals were removed with the same pass.)
+    // Kept at the sheet top level, the documented form, where the "$name"
+    // animationName references below resolve. (Placed directly inside a
+    // rule they make jss-plugin-nested throw; under a rule's "@global" they
+    // do resolve — that is how Index's rainbow is written, checked against
+    // MUI's JSS preset.) The unreferenced hueRotate / slideUpFade /
+    // slideRightFade globals were removed in an earlier pass.
     "@keyframes bounceGlow": {
         "0%": {
             boxShadow: "0 0 12px #ffffff66, 0 0 24px #ffffff99, 0 4px 20px rgba(0,0,0,0.2)",
@@ -42,19 +92,24 @@ const styles = theme => ({
             transform: "scale(1) translateY(0px)"
         },
     },
-    "@keyframes pulseHover": {
+    // (No `pulseHover` keyframes anymore — see homeActionLift.)
+    // Artwork reveal: one keyframes, staggered per tile by animation-delay
+    // (see revealDelay). Opacity + transform only, so the whole wave runs on
+    // the compositor — no setState per tile, no Transition instances.
+    "@keyframes artReveal": {
         "0%": {
-            boxShadow: "0 0 12px #ffffff66, 0 0 24px #ffffff99, 0 4px 20px rgba(0,0,0,0.2)",
-            transform: "scale(1) translateY(0px)"
-        },
-        "50%": {
-            boxShadow: "0 0 40px #ffffff99, 0 0 80px #ffffffdd, 0 15px 50px rgba(0,0,0,0.5)",
-            transform: "scale(1.09) translateY(-5px)"
+            opacity: 0,
+            transform: "translate3d(0, 14px, 0) scale(0.96)"
         },
         "100%": {
-            boxShadow: "0 0 30px #ffffff99, 0 0 60px #ffffffcc, 0 10px 40px rgba(0,0,0,0.4)",
-            transform: "scale(1.06) translateY(-3px)"
+            opacity: 1,
+            transform: "none"
         },
+    },
+    // Reduced-motion twin: the same wave, without the rise.
+    "@keyframes artFade": {
+        "0%": { opacity: 0 },
+        "100%": { opacity: 1 },
     },
     "@keyframes spiralReveal": {
         "0%": {
@@ -208,13 +263,73 @@ const styles = theme => ({
         // ripple gradients below are now grey AT THE SOURCE (exact
         // grayscale(1) luminance of the brand colors), same rendered pixels.
     },
+    // ── CTA hover, as transitions ──
+    // The hover used to SWAP animations on homeActionGroup (bounceGlow →
+    // pulseHover). A CSS animation owns its properties outright, so neither
+    // edge could ever be eased: entering restarted from pulseHover's 0% (a
+    // snap if the idle bounce was mid-flight) and leaving snapped straight
+    // from the lifted pose back to bounceGlow's 0%. Now the two motions live
+    // on two elements: the idle bounce stays an animation on the group, and
+    // this wrapper owns the hover lift as plain transitions — eased both
+    // ways, reversible mid-flight. The stronger hover glow is a pre-painted
+    // shadow on ::before whose OPACITY fades (compositor-only), instead of a
+    // box-shadow interpolated (and repainted) every frame.
+    homeActionLift: {
+        position: "relative",
+        display: "inline-block",
+        verticalAlign: "top",
+        borderRadius: "32px",
+        // Own stacking context, so the ::before glow (z-index -1) sits right
+        // behind the pill rather than behind the whole page.
+        zIndex: 0,
+        transform: "translate3d(0, 0, 0) scale(1)",
+        // Leaving: a calm settle back, no overshoot.
+        transition: `transform 520ms ${EASE_OUT}`,
+        willChange: "transform",
+        "&::before": {
+            content: "''",
+            position: "absolute",
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            zIndex: -1,
+            borderRadius: "inherit",
+            pointerEvents: "none",
+            boxShadow: "0 0 30px #ffffff99, 0 0 60px #ffffffcc, 0 10px 40px rgba(0,0,0,0.4)",
+            opacity: 0,
+            transition: `opacity 520ms ${EASE_OUT}`,
+        },
+        // Real hover only: on touch screens :hover sticks after a tap, which
+        // left the pill lifted under the Learn-More dialog until the next tap
+        // elsewhere. Touch feedback is the ripple.
+        "@media (hover: hover)": {
+            "&:hover": {
+                // Entering: a small overshoot (the old pulseHover's 1.09 peak
+                // settling to 1.06), as an easing curve instead of keyframes.
+                transform: "translate3d(0, -3px, 0) scale(1.06)",
+                transition: `transform 460ms ${EASE_BACK}`,
+            },
+            "&:hover::before": {
+                opacity: 1,
+                transition: `opacity 320ms ${EASE_OUT}`,
+            },
+            // The idle bounce holds still under the cursor — paused where it
+            // is (it rests 88% of its cycle), resumed from the same frame on
+            // leave. No restart, no snap.
+            "&:hover $homeActionGroup": {
+                animationPlayState: "paused",
+            },
+        },
+    },
     homeActionGroup: {
         display: "inline-flex",
         alignItems: "stretch",
         borderRadius: "32px",
         overflow: "hidden",
         transform: "scale(1)",
-        transition: "all 500ms cubic-bezier(0.25, 0.46, 0.45, 0.94) !important",
+        // No `transition: all` anymore: every property it could have eased is
+        // owned by the bounce animation, and the hover moved to the wrapper.
         animationName: "$bounceGlow",
         animationTimingFunction: "cubic-bezier(0.25, 0.46, 0.45, 0.94)",
         animationDuration: "4s",
@@ -227,18 +342,6 @@ const styles = theme => ({
         // shadow keyframes still repaint, but only ~0.5 s out of every 4 s
         // cycle (12% → 100% holds the base values).
         willChange: "transform",
-        // Hover lifts the WHOLE group so the square junction never shears apart;
-        // per-button feedback is background-only (see below).
-        "&:hover": {
-            animationName: "$pulseHover",
-            animationTimingFunction: "cubic-bezier(0.25, 0.46, 0.45, 0.94)",
-            animationDuration: "400ms",
-            animationFillMode: "both",
-            animationDelay: "0ms",
-            animationIterationCount: "1",
-            boxShadow: "0 0 30px #ffffff99, 0 0 60px #ffffffcc, 0 10px 40px rgba(0,0,0,0.4)",
-            transform: "scale(1.06) translateY(-3px)",
-        },
     },
     homeActionLearn: {
         background: "white",
@@ -350,8 +453,14 @@ const styles = theme => ({
         animationName: "$spiralReveal",
         animationTimingFunction: "cubic-bezier(0.25, 0.46, 0.45, 0.94)",
         animationDuration: "600ms",
-        animationFillMode: "both",
+        // `backwards`, not `both`: the resting pose is declared below as the
+        // element's own transform (identical to the 100% keyframe), so when
+        // the reveal ends the ring settles into plain styles. A filled
+        // animation kept `filter: opacity(1)` + the transform pinned on this
+        // 200% × 200% layer for the page's whole life.
+        animationFillMode: "backwards",
         animationDelay: "0ms",
+        transform: "translate(-25%, -50%)",
         left: "35%",
         top: "55%",
         // No willChange: this element is 200% × 200% of the viewport, and the
@@ -390,6 +499,14 @@ const styles = theme => ({
         flexDirection: "row",
         justifyContent: "flex-start",
         alignItems: "flex-start",
+        // Reserve the strip's height (tile 300 / 240 px + 2 × 16 px margin)
+        // from the first paint. The artworks arrive on idle, a beat after the
+        // text below has already faded in — without this the empty strip was
+        // 0 px tall and that text jumped down ~330 px when they landed.
+        minHeight: "332px",
+        [theme.breakpoints.down("md")]: {
+            minHeight: "272px",
+        },
         zIndex: -1,
         // The slide is driven from JS now (elastic marquee — see _stripLoop):
         // the old `smoothSlide` CSS keyframes owned `transform` for the whole
@@ -451,9 +568,27 @@ const styles = theme => ({
         "& > div img": {
             borderRadius: "32px",
             height: "100%",
+            // The imgs carry width/height attributes (their decoded size, see
+            // decodeArtworks) so every tile has its final width at its very
+            // first layout. `auto` stops the width attribute from applying
+            // as a literal px width; the attribute pair then only supplies
+            // the aspect ratio, and the width follows the 100% height.
+            width: "auto",
             // Kill the native image ghost-drag so the grab gesture wins
             // (draggable={false} on the imgs covers the rest).
             "-webkit-user-drag": "none",
+        },
+    },
+    // Applied to the img (not its tile): the tile's transform belongs to the
+    // hover pop, and `backwards` fill hands the img back to its plain styles
+    // the moment its reveal ends, so nothing stays pinned by the animation.
+    homeArtReveal: {
+        animationName: "$artReveal",
+        animationDuration: `${REVEAL_DURATION_MS}ms`,
+        animationTimingFunction: EASE_OUT,
+        animationFillMode: "backwards",
+        "@media (prefers-reduced-motion: reduce)": {
+            animationName: "$artFade",
         },
     },
     homeTiltedPictures: {
@@ -504,13 +639,84 @@ const PERF_SLOW_FRAME_STRIKES = 2; // consecutive slow frames before stopping
 const MAX_BACKING_DIM = 3072; // longest side, device px
 const DPR_CAP = 2;            // ignore DPR beyond 2× (diminishing returns)
 
-// Shader work per quality tier. Fewer fbm octaves / star layers = far cheaper
-// fragments — and crucially this does NOT affect sharpness (that comes from
-// resolution), so the bolt stays crisp on every tier. Pushed as uniforms each
-// frame, so the tier can change after the perf test with NO shader recompile.
+// Shader work per quality tier. Fewer fbm octaves = far cheaper fragments —
+// and crucially this does NOT affect sharpness (that comes from resolution),
+// so the bolt stays crisp on every tier. Pushed as a uniform each frame, so
+// the tier can change after the perf test with NO shader recompile.
+//
+// The star-layer count is NOT part of the tier anymore. Each layer's depth
+// phase and hash seed derive from 1 / layerCount, so going 4 → 5 layers
+// re-dealt EVERY star at once: the whole starfield visibly jumped ~2 s after
+// the page appeared, on exactly the machines that passed the perf test. The
+// count is fixed now; the tier only moves the bolt's octaves, and that move
+// is eased in fractionally (see uOctaves) instead of switched.
 const QUALITY = {
-    low:    { octaves: 4, layers: 4 },
-    normal: { octaves: 6, layers: 5 },
+    low:    { octaves: 4 },
+    normal: { octaves: 6 },
+};
+const STAR_LAYERS = 5;
+// How fast the octave count follows a tier change (per-second rate of the
+// exponential ease; ~0.6 s to settle).
+const OCTAVE_EASE_PER_S = 6;
+
+// ── Background frame pacing ──
+// The background renders at ~30 fps on purpose (ambient, battery). The old
+// gate (`now - last >= 33.3 ms`) sat exactly ON the vsync grid of a 60 Hz
+// screen, so timestamp jitter alternated 2- and 3-refresh gaps (33 / 50 ms)
+// — a visible judder — and on 144 Hz it alternated 4 and 5. The loop now
+// estimates the refresh interval and draws on every Nth refresh, N fixed for
+// the display: evenly spaced frames at the rate nearest the target.
+const BG_TARGET_FPS = 30;
+// Starfield fade-in from black after the GL init, done in the shader (uFade)
+// so the canvas stays opaque — fading the canvas element itself would show
+// whatever lies behind it instead of black.
+const BG_INTRO_MS = 900;
+
+// Returns tick(now) → "draw this frame?", to be called on EVERY rAF tick.
+// The refresh estimate only learns from gaps near itself, so dropped frames
+// (gaps of 2–3 refreshes while the main thread is busy) can't drag it; a
+// display that really changed rate is re-learned after a run of misses. The
+// gate then sits half a refresh BELOW the Nth refresh — never on the grid
+// itself, where timestamp jitter decides — so each drawn frame is exactly N
+// refreshes after the previous one: 60 Hz → every 2nd, 90 → 3rd, 120 → 4th,
+// 144 → 5th (28.8 fps), 240 → 8th.
+const createFramePacer = (targetFps) => {
+    const target = 1000 / targetFps;
+    let vsync = 0;     // refresh-interval estimate, ms (0 = not known yet)
+    let stride = 0;    // draw every `stride` refreshes
+    let prevTick = -1;
+    let lastDraw = -Infinity;
+    let misses = 0;
+    return (now) => {
+        if (prevTick >= 0) {
+            const d = now - prevTick;
+            if (d > 2 && d < 100) { // ignore tab-switch gaps outright
+                if (!vsync) {
+                    vsync = d;
+                } else if (d > vsync * 0.5 && d < vsync * 1.5) {
+                    vsync += (d - vsync) * 0.1;
+                    misses = 0;
+                } else if (++misses > 30) {
+                    vsync = d;
+                    misses = 0;
+                }
+            }
+        }
+        prevTick = now;
+        if (!vsync) { // very first tick: nothing to pace against yet
+            lastDraw = now;
+            return true;
+        }
+        // Hysteresis: re-pick N only when the estimate clearly calls for
+        // another one, so a rate sitting between two Ns can't flip-flop.
+        const ideal = target / vsync;
+        if (!stride || Math.abs(ideal - stride) > 0.6) stride = Math.max(1, Math.round(ideal));
+        if (now - lastDraw >= (stride - 0.5) * vsync) {
+            lastDraw = now;
+            return true;
+        }
+        return false;
+    };
 };
 
 // ── Elastic artwork strip ──
@@ -530,19 +736,38 @@ const STRIP_FOLLOW = 0.35;
 const STRIP_WHEEL_GAIN = 5;        // px/s of velocity impulse per wheel px
 const STRIP_MAX_SPEED = 6000;      // px/s clamp for flings + wheel bursts
 const STRIP_FLING_WINDOW_MS = 120; // pointer-sample window → release velocity
+// Below this speed, a strip that is settling toward a standstill (Learn-More
+// dialog open, reduced motion) is considered stopped — the loop then stops
+// writing a transform whose change would be sub-pixel.
+const STRIP_REST_SPEED = 1;        // px/s
+
+// ── Leaving the page ──
+// The exit is a dissolve that Index plays on this page while the app mounts
+// underneath (it keeps this page mounted and passes `departing`). The strip's
+// drift is handed to a linear CSS transition for that moment, so it keeps
+// gliding on the compositor while the main thread is busy mounting the app.
+// The glide only has to outlast Index's dissolve.
+const STRIP_EXIT_GLIDE_MS = 1200;
+// The hand-off is usually within a frame of the click (the page chunk is
+// warm). If it isn't — a cold chunk download — the starfield dims after this
+// grace period, so the click still visibly "took".
+const EXIT_FEEDBACK_DELAY_MS = 160;
 
 // ── Auto-enter (the app started on the landing page, logged in) ──
 // Index flips the `autoEnterFeed` prop once it knows the visitor whose page
 // load STARTED here is logged in (see useLandingAutoEnter there; a return
 // to this page inside the already-running app never flips it). The page
-// then plays the very same exit as the Browse button — canvas fade here,
-// rainbow overlay in Index on the home→app flip — into the personal feed.
+// then plays the very same exit as the Browse button — the route push here,
+// the dissolve and the rainbow in Index on the home→app flip — into the
+// personal feed.
 // If the session is known almost instantly (cached, local), the exit would
 // start while the entrance is still revealing (600 ms spiral, the
 // Fade-ins): this floor lets the landing finish arriving first, so the
 // sequence reads as home → rainbow → feed and never as a flash.
 const AUTO_ENTER_MIN_DWELL_MS = 900;
 const AUTO_ENTER_PATH = "/feed/";
+
+const HIDDEN_STYLE = Object.freeze({ visibility: "hidden" });
 
 class Home extends React.PureComponent {
     constructor(props) {
@@ -553,10 +778,9 @@ class Home extends React.PureComponent {
         // settings change re-render this page TWICE for a value nothing here
         // consumed.
         this.state = {
-            _y: 0,
-            _firstTimeRevealImage: 0,
-            _intervalTimeRevealImage: 150,
-            _intervalTimeRevealImageMultipier: 1.5,
+            // (The reveal staircase's _y / _firstTimeRevealImage /
+            // _intervalTimeRevealImage* state is gone — the reveal is a CSS
+            // wave now, see revealDelay.)
             _learn_more_opened: false,
             // Stays true after the first open, so the lazily-loaded dialog
             // keeps its exit transition instead of unmounting abruptly.
@@ -564,8 +788,9 @@ class Home extends React.PureComponent {
             // The artwork strip ships in its own chunk (../data/homeArts) and
             // is loaded on idle right after mount — see componentDidMount.
             // Keeping it out of this (eagerly imported) module keeps ~195 KB
-            // of base64 out of the critical-path entry bundle.
-            _artworks_url: [],
+            // of base64 out of the critical-path entry bundle. Each entry is
+            // { src, w, h }: the decoded size travels with the url.
+            _artworks: [],
             _lowPerformance: false,
             _performanceLocked: false, // Once set, don't change
             _svg_logo: getIT()
@@ -622,6 +847,10 @@ class Home extends React.PureComponent {
         this._leaving = false;
         this._mountedAt = 0;      // performance.now() at mount (dwell floor)
         this._autoEnterTimer = 0; // pending dwell-delayed auto-enter
+        this._exitFeedbackTimer = 0; // pending slow-hand-off canvas dim
+        // Set once Index starts dissolving this page (the `departing` prop):
+        // from then on nothing here draws, measures or reacts any more.
+        this._departed = false;
     }
 
     componentDidMount() {
@@ -649,28 +878,32 @@ class Home extends React.PureComponent {
         this._artsIdleId = idle(() => {
             this._artsIdleId = null;
             import("../data/homeArts")
-                .then((m) => {
-                    if (!this._mounted) return;
-                    // Callback re-measures the loop period once the items are
-                    // committed (each img onLoad re-measures again as widths
-                    // settle — the strip is width-agnostic until then).
-                    this.setState(
-                        { _artworks_url: (m && m.default) || [] },
-                        this._scheduleStripMeasure
-                    );
+                .then((m) => decodeArtworks((m && m.default) || []))
+                .then((artworks) => {
+                    if (!this._mounted || this._departed) return;
+                    // ONE commit with every tile already decoded and sized;
+                    // the callback measures the loop period once, right
+                    // after it. The reveal wave starts with the commit.
+                    this.setState({ _artworks: artworks }, this._scheduleStripMeasure);
                 })
                 .catch(() => { /* non-critical: marquee just stays empty */ });
         });
     }
 
-    // The only prop that changes over the page's life is `autoEnterFeed`
-    // (settings is baked once and nothing here reads it). It is acted on
-    // strictly as a false→true TRANSITION: a page that mounts with the flag
-    // already true is a return visit — the visitor left home before Index's
-    // flip landed — and a return to the landing page must never redirect.
+    // Two props change over the page's life (settings is baked once and
+    // nothing here reads it), and both are acted on strictly as false→true
+    // TRANSITIONS:
+    //   • autoEnterFeed — a page that mounts with the flag already true is a
+    //     return visit (the visitor left home before Index's flip landed),
+    //     and a return to the landing page must never redirect;
+    //   • departing — Index has swapped the app in underneath and is
+    //     dissolving this page over it (see _depart).
     componentDidUpdate(prevProps) {
         if (this.props.autoEnterFeed && !prevProps.autoEnterFeed) {
             this._scheduleAutoEnter();
+        }
+        if (this.props.departing && !prevProps.departing) {
+            this._depart();
         }
     }
 
@@ -682,6 +915,10 @@ class Home extends React.PureComponent {
         if (this._autoEnterTimer) {
             clearTimeout(this._autoEnterTimer);
             this._autoEnterTimer = 0;
+        }
+        if (this._exitFeedbackTimer) {
+            clearTimeout(this._exitFeedbackTimer);
+            this._exitFeedbackTimer = 0;
         }
 
         // Cancel a still-pending deferred artwork load
@@ -720,9 +957,6 @@ class Home extends React.PureComponent {
         if (this._stripRafId) {
             cancelAnimationFrame(this._stripRafId);
             this._stripRafId = 0;
-        }
-        if(this._imageAppearsTimeout) {
-            clearTimeout(this._imageAppearsTimeout)
         }
         if (this._stripMeasureRaf) {
             cancelAnimationFrame(this._stripMeasureRaf);
@@ -764,7 +998,9 @@ class Home extends React.PureComponent {
         if (this._resizeRaf) return;
         this._resizeRaf = requestAnimationFrame(() => {
             this._resizeRaf = 0;
-            if (!this._mounted) return;
+            // Departing: the canvas holds its last frame for the dissolve,
+            // and re-assigning its size would clear that frame to black.
+            if (!this._mounted || this._departed) return;
             if (this._canvas && this._gl) {
                 this._resizeCanvas();
             }
@@ -797,37 +1033,38 @@ class Home extends React.PureComponent {
     // overflow in some engines — scrollWidth / 2 would come up ~8 px short
     // and the wrap point would visibly jump once per revolution.
     _measureStrip = () => {
+        if (this._departed) return;
         const el = this._stripEl;
-        const count = this.state._artworks_url.length;
+        const count = this.state._artworks.length;
         if (!el || !count || el.children.length < count * 2) {
             this._stripHalf = 0;
             this._stripAutoSpeed = 0;
             return;
         }
-        this._stripHalf = Math.max(0, el.children[count].offsetLeft - el.children[0].offsetLeft);
-        this._stripAutoSpeed = this._stripHalf / STRIP_LOOP_SECONDS;
+        const prev = this._stripHalf;
+        const next = Math.max(0, el.children[count].offsetLeft - el.children[0].offsetLeft);
+        // The period changes when the tiles resize (the 300 ↔ 240 px
+        // breakpoint, a rotated phone). Every tile scales with it, so scale
+        // the position too: the same artwork stays under the viewport
+        // instead of the strip jumping to wherever the old px offset now
+        // lands. Drag anchors and velocity scale along, so a gesture in
+        // flight keeps its feel.
+        if (prev > 0 && next > 0 && next !== prev) {
+            const k = next / prev;
+            this._stripOffset *= k;
+            this._stripDragStartOffset *= k;
+            this._stripDragTarget *= k;
+            this._stripVelocity *= k;
+        }
+        this._stripHalf = next;
+        this._stripAutoSpeed = next / STRIP_LOOP_SECONDS;
     }
 
-    // Debounced through rAF: every img onLoad calls this (the base64 chunk
-    // decodes the whole strip in a burst) and one layout read per frame is
-    // plenty. The velocity model self-adapts — no reset needed on re-measure.
-    _showNextImage = () => {
-        return setTimeout(() => {
-            const newY = this.state._y + 1 | 0;
-            const newIntervalTimeRevealImage = this.state._intervalTimeRevealImage * this.state._intervalTimeRevealImageMultipier;
-
-            if(this.state._artworks_url.length >= newY){
-                this.setState({_y: newY, _intervalTimeRevealImage: newIntervalTimeRevealImage}, () => {
-                    this._imageAppearsTimeout = this._showNextImage();
-                });
-            }
-        }, this.state._intervalTimeRevealImage);
-    }
-
+    // Debounced through rAF: the artworks commit, the strip ref, resizes and
+    // any tile that had to lay out on load all land here, and one layout read
+    // per frame is plenty. It ONLY measures now — it used to also arm a new
+    // reveal chain on every call (see revealDelay for that story).
     _scheduleStripMeasure = () => {
-        setTimeout(() => {
-            this._imageAppearsTimeout = this._showNextImage();
-        }, this.state._firstTimeRevealImage);
         if (this._stripMeasureRaf) return;
         this._stripMeasureRaf = requestAnimationFrame(() => {
             this._stripMeasureRaf = 0;
@@ -836,7 +1073,8 @@ class Home extends React.PureComponent {
     }
 
     _stripLoop = (ts) => {
-        if (!this._mounted) return;
+        // Departed: the compositor glide owns the transform now (_depart).
+        if (!this._mounted || this._departed) return;
         this._stripRafId = requestAnimationFrame(this._stripLoop);
 
         const last = this._stripLastTs || ts;
@@ -848,11 +1086,6 @@ class Home extends React.PureComponent {
         const half = this._stripHalf;
         if (!el || half <= 0 || dt === 0) return;
 
-        // The Learn-More dialog covers the whole page: freeze the marquee (and
-        // its per-frame style write) while it's open. _stripLastTs kept
-        // updating above, so the resume dt is one frame, not the whole pause.
-        if (this.state._learn_more_opened) return;
-
         if (this._stripDragging) {
             // Elastic follow: chase the finger with a light rubber-band lag.
             const k = 1 - Math.pow(1 - STRIP_FOLLOW, dt * 60);
@@ -862,9 +1095,23 @@ class Home extends React.PureComponent {
             // itself: flings and wheel kicks relax back into the auto-
             // rotation (even from the "wrong" direction — the sign crossing
             // is smooth) instead of the strip ever stopping dead.
-            const auto = this._stripReducedMotion ? 0 : this._stripAutoSpeed;
+            //
+            // The Learn-More dialog covers the page. It used to freeze the
+            // marquee on the spot and restart it at full speed on close; now
+            // the drift's target just drops to 0 while it's open, so the
+            // strip glides to a halt behind the opening backdrop and glides
+            // back up on close — the same relaxation as after a fling.
+            const still = this._stripReducedMotion || this.state._learn_more_opened;
+            const auto = still ? 0 : this._stripAutoSpeed;
             const excess = (this._stripVelocity - auto) * Math.pow(STRIP_FRICTION, dt * 60);
             this._stripVelocity = auto + excess;
+            // An exponential decay never reaches 0 on its own: snap to a real
+            // standstill once it's imperceptible, so the write-on-change
+            // below goes quiet instead of nudging the transform by sub-pixel
+            // amounts for minutes.
+            if (auto === 0 && Math.abs(this._stripVelocity) < STRIP_REST_SPEED) {
+                this._stripVelocity = 0;
+            }
             this._stripOffset += this._stripVelocity * dt;
             // Wrap into [0, half) — the modulo keeps BOTH directions
             // seamless. (Not while dragging: the finger's target must stay
@@ -1079,20 +1326,90 @@ class Home extends React.PureComponent {
     }
 
     // ── Leaving the landing page ──
-    // ONE exit for both ways out (Browse click, auto-enter): the canvas
-    // fades here, the route is pushed at once (the fade runs in parallel
-    // with the swap) and Index's RootAnimationOverlay plays the rainbow on
-    // the home→app flip it detects — so the auto-enter is pixel-identical
-    // to the click, by construction rather than by copy.
+    // ONE exit for both ways out (Browse click, auto-enter): the route is
+    // pushed at once, and on the home→app flip Index keeps this page mounted
+    // above the freshly mounted app and dissolves it (LandingLayer), while
+    // RootAnimationOverlay plays the rainbow — so the auto-enter is pixel-
+    // identical to the click, by construction rather than by copy.
+    //
+    // The canvas no longer fades here on its own. Its 200 ms fade raced the
+    // swap: Home was unmounted a frame or two after the click, so the page
+    // simply cut to the app. The whole page now dissolves as one; the canvas
+    // only dims early when the hand-off is slow (cold page chunk), as
+    // feedback that the click took.
     _enterApp = (path) => {
         this._leaving = true;
-        // Fade the canvas before unmount so it doesn't visibly snap away
-        if (this._canvas) {
-            this._canvas.style.transition = "opacity 200ms ease-out";
-            this._canvas.style.opacity = "0";
+        if (this._canvas && !this._exitFeedbackTimer) {
+            this._exitFeedbackTimer = setTimeout(() => {
+                this._exitFeedbackTimer = 0;
+                if (!this._mounted || this._departed || !this._canvas) return;
+                this._canvas.style.transition = "opacity 240ms ease-out";
+                this._canvas.style.opacity = "0";
+            }, EXIT_FEEDBACK_DELAY_MS);
         }
-        // Navigate immediately — fade runs in parallel with the route change
         HISTORY.push(path);
+    }
+
+    // ── Departure: Index is dissolving this page over the app ──
+    // Everything that would cost main-thread time while the app mounts
+    // underneath stops here; everything still visible keeps moving on the
+    // compositor. Terminal by design: a return to the landing page mounts a
+    // fresh instance (Index keys the layer per visit), so nothing resumes.
+    _depart = () => {
+        if (this._departed) return;
+        this._departed = true;
+        this._leaving = true; // vetoes a pending auto-enter for good
+        if (this._autoEnterTimer) {
+            clearTimeout(this._autoEnterTimer);
+            this._autoEnterTimer = 0;
+        }
+        if (this._exitFeedbackTimer) {
+            clearTimeout(this._exitFeedbackTimer);
+            this._exitFeedbackTimer = 0;
+        }
+
+        // Starfield: stop drawing. The canvas keeps presenting its last frame
+        // through the dissolve (the GL context is only released at unmount),
+        // so the background fades out with the page instead of going black.
+        if (this._animationId) {
+            cancelAnimationFrame(this._animationId);
+            this._animationId = null;
+        }
+        if (this._initRafId) {
+            cancelAnimationFrame(this._initRafId);
+            this._initRafId = 0;
+        }
+        window.removeEventListener('mousemove', this._handleMouseMove);
+        window.removeEventListener('wheel', this._onStripWheel);
+
+        // Strip: the per-frame JS loop stops, and its current drift is handed
+        // to a linear transition — same speed, same direction, but run by
+        // the compositor, so it can't stutter while the app's first render
+        // holds the main thread.
+        if (this._stripRafId) {
+            cancelAnimationFrame(this._stripRafId);
+            this._stripRafId = 0;
+        }
+        const el = this._stripEl;
+        if (el) {
+            const v = this._stripDragging ? 0 : this._stripVelocity;
+            this._stripDragging = false;
+            el.classList.remove("dragging");
+            if (v && this._stripHalf > 0) {
+                // Kept inside the two copies, so even a fling caught mid-
+                // flight can't glide past the strip's end into blank space.
+                const ahead = Math.max(0, 2 * this._stripHalf - window.innerWidth - this._stripOffset);
+                const travel = Math.max(-this._stripOffset, Math.min(ahead, v * (STRIP_EXIT_GLIDE_MS / 1000)));
+                el.style.transition = `transform ${STRIP_EXIT_GLIDE_MS}ms linear`;
+                el.style.transform = `translate3d(${-(this._stripOffset + travel)}px, 0, 0)`;
+            }
+        }
+
+        // A dialog left open (the browser's Back while reading) closes with
+        // its own exit transition instead of vanishing with the page.
+        if (this.state._learn_more_opened) {
+            this.setState({ _learn_more_opened: false });
+        }
     }
 
     _goToFeed = () => {
@@ -1215,7 +1532,8 @@ class Home extends React.PureComponent {
     _resizeCanvas = () => {
         const canvas = this._canvas;
         const gl = this._gl;
-        if (!gl || !canvas) return;
+        // Departing: resizing the backing store would wipe the frozen frame.
+        if (!gl || !canvas || this._departed) return;
 
         const cssW = window.innerWidth;
         const cssH = window.innerHeight;
@@ -1268,7 +1586,7 @@ class Home extends React.PureComponent {
     _initBg = () => {
         const canvas = this._canvas;
         const gl = this._gl;
-        if (!gl || !canvas || !this._mounted) return;
+        if (!gl || !canvas || !this._mounted || this._departed) return;
 
         this._resizeCanvas();
 
@@ -1300,8 +1618,9 @@ class Home extends React.PureComponent {
             uniform float uTime;         // seconds (currentTime * 0.001)
             uniform vec2  uMouse;        // normalised, (0,0) = screen centre, +y up
             uniform vec2  uEnergyRes;    // lightning region px (left-anchored, full height)
-            uniform int   uOctaves;      // fbm octaves (quality tier)
-            uniform int   uNumLayers;    // star depth layers (quality tier)
+            uniform float uOctaves;      // fbm octaves (quality tier) — FRACTIONAL while a tier change eases in
+            uniform int   uNumLayers;    // star depth layers (fixed: STAR_LAYERS)
+            uniform float uFade;         // 0 → 1 intro fade from black
             uniform float uLayerStep;    // 1.0 / uNumLayers
 
             out vec4 fragColor;
@@ -1377,10 +1696,14 @@ class Home extends React.PureComponent {
                 float amplitude = 0.5;
                 // precomputed rotation for ~0.45 rad
                 mat2 rot = mat2(0.90045, -0.43497, 0.43497, 0.90045);
-                // 8 is the unrolled ceiling; the break stops early on cheaper tiers
+                // 8 is the unrolled ceiling; the break stops early on cheaper
+                // tiers. uOctaves is fractional while a tier change eases in:
+                // the last octave enters at a partial weight, so the bolt's
+                // detail grows (or recedes) smoothly instead of jumping.
                 for (int i = 0; i < 8; i++) {
-                    if (i >= uOctaves) break;
-                    value += amplitude * noise(p);
+                    float w = clamp(uOctaves - float(i), 0.0, 1.0);
+                    if (w <= 0.0) break;
+                    value += amplitude * noise(p) * w;
                     p = rot * p * 2.0;
                     amplitude *= 0.5;
                 }
@@ -1434,7 +1757,8 @@ class Home extends React.PureComponent {
                 // ---- composite: screen blend (matches the old stacked-canvas look) ----
                 vec3 col = 1.0 - (1.0 - clamp(starsGray, 0.0, 1.0)) * (1.0 - clamp(bolt, 0.0, 1.0));
 
-                fragColor = vec4(col, 1.0);
+                // Intro: scaled from black, the canvas itself stays opaque.
+                fragColor = vec4(col * uFade, 1.0);
             }`;
 
         try {
@@ -1492,12 +1816,26 @@ class Home extends React.PureComponent {
         const octavesLoc    = gl.getUniformLocation(program, 'uOctaves');
         const layersLoc     = gl.getUniformLocation(program, 'uNumLayers');
         const layerStepLoc  = gl.getUniformLocation(program, 'uLayerStep');
+        const fadeLoc       = gl.getUniformLocation(program, 'uFade');
 
-        let lastTime = 0;
-        const frameInterval = 1000 / 30; // cap at 30 FPS (ambient background — no need for 60)
+        // Fixed for the page's life (see STAR_LAYERS) — set once.
+        gl.uniform1i(layersLoc, STAR_LAYERS);
+        gl.uniform1f(layerStepLoc, 1.0 / STAR_LAYERS);
 
-        const render = (currentTime) => {
-            if (!this._mounted) return;
+        const pace = createFramePacer(BG_TARGET_FPS);
+        // Shader clock (ms). It advances by the time between DRAWN frames,
+        // each step capped, so whenever drawing pauses — the Learn-More dialog,
+        // a hidden tab — the stars and the bolt resume exactly where they
+        // stopped instead of jumping ahead by the length of the pause. It
+        // starts at the page clock, so the opening frame is the same as ever.
+        let clock = -1;
+        let lastDrawTs = -1;
+        let introStart = -1;
+        // Starts on the cheap tier; eased toward the tier the probe settles on.
+        let octaves = QUALITY.low.octaves;
+
+        const render = (now) => {
+            if (!this._mounted || this._departed) return;
 
             // The Learn-More dialog covers the page (near-fullscreen desktop,
             // fullscreen mobile) — don't burn GPU on a background nobody can
@@ -1506,20 +1844,29 @@ class Home extends React.PureComponent {
             // frames must not be measured as "fast shader frames".
             if (this.state._learn_more_opened) {
                 this._perfTestStart = 0;
+                lastDrawTs = -1; // the clock resumes from here, no catch-up
                 this._animationId = requestAnimationFrame(render);
                 return;
             }
 
-            this._checkPerformance(currentTime);
+            this._checkPerformance(now);
             // _checkPerformance may have just retired the shader (_stopBg
             // nulls _gl). The closure's `gl` would keep "drawing" silently on
             // the lost context and re-arm rAF forever without this guard.
             if (!this._gl) return;
 
-            if (currentTime - lastTime >= frameInterval) {
-                // smooth the cursor (lerp) — no setState
-                this._smoothMouseX += (this._targetMouseX - this._smoothMouseX) * 0.1;
-                this._smoothMouseY += (this._targetMouseY - this._smoothMouseY) * 0.1;
+            if (pace(now)) {
+                const dt = lastDrawTs < 0 ? 0 : Math.min(now - lastDrawTs, 100);
+                lastDrawTs = now;
+                clock = clock < 0 ? now : clock + dt;
+                if (introStart < 0) introStart = now;
+
+                // Smooth the cursor (lerp) — no setState. Time-based: the
+                // same 0.1-per-30-fps-frame glide whatever cadence the pacer
+                // picked for this display.
+                const follow = 1 - Math.pow(0.9, dt / (1000 / 30));
+                this._smoothMouseX += (this._targetMouseX - this._smoothMouseX) * follow;
+                this._smoothMouseY += (this._targetMouseY - this._smoothMouseY) * follow;
 
                 // Normalise so (0,0) = screen centre, range ~[-1,1], +y up.
                 // Done from window size (not framebuffer px), so it's DPR-independent
@@ -1529,35 +1876,70 @@ class Home extends React.PureComponent {
                 const mx = (this._smoothMouseX / w) * 2.0 - 1.0;
                 const my = (this._smoothMouseY / h) * 2.0 - 1.0;
 
-                // Use the richer tier only once the perf test confirms headroom.
-                // Octave count does NOT affect crispness (resolution does), so the
-                // bolt stays sharp during the warmup regardless.
-                const q = (this.state._performanceLocked && !this.state._lowPerformance)
-                    ? QUALITY.normal
-                    : QUALITY.low;
+                // Use the richer tier only once the perf test confirms headroom,
+                // eased in over ~0.6 s rather than switched in one frame.
+                // Octave count does NOT affect crispness (resolution does), so
+                // the bolt stays sharp during the warmup regardless.
+                const target = (this.state._performanceLocked && !this.state._lowPerformance)
+                    ? QUALITY.normal.octaves
+                    : QUALITY.low.octaves;
+                if (octaves !== target) {
+                    octaves += (target - octaves) * (1 - Math.exp(-OCTAVE_EASE_PER_S * dt / 1000));
+                    if (Math.abs(target - octaves) < 0.01) octaves = target;
+                }
+
+                // Intro: smoothstep from black over BG_INTRO_MS.
+                const p = Math.min(1, (now - introStart) / BG_INTRO_MS);
+                const fade = p * p * (3 - 2 * p);
 
                 gl.clear(gl.COLOR_BUFFER_BIT);
                 gl.uniform2f(resolutionLoc, canvas.width, canvas.height);
-                gl.uniform1f(timeLoc, currentTime * 0.001);
+                gl.uniform1f(timeLoc, clock * 0.001);
                 gl.uniform2f(mouseLoc, mx, -my);
                 gl.uniform2f(energyResLoc, this._energyW || canvas.width, this._energyH || canvas.height);
-                gl.uniform1i(octavesLoc, q.octaves);
-                gl.uniform1i(layersLoc, q.layers);
-                gl.uniform1f(layerStepLoc, 1.0 / q.layers);
+                gl.uniform1f(octavesLoc, octaves);
+                gl.uniform1f(fadeLoc, fade);
                 gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-                lastTime = currentTime;
             }
 
             this._animationId = requestAnimationFrame(render);
         };
 
-        requestAnimationFrame(render);
+        // Stored like every later frame, so a departure or unmount landing
+        // before the first frame can still cancel it.
+        this._animationId = requestAnimationFrame(render);
+    }
+
+    // One tile of the strip. `copy` is the loop's second half. k numbers the
+    // tiles left to right across BOTH copies, so with few artworks (both
+    // halves on screen) the wave simply runs on into the second copy.
+    _renderArtwork = (art, i, copy) => {
+        const k = copy ? this.state._artworks.length + i : i;
+        const reveal = k < REVEAL_MAX_ITEMS;
+        return (
+            <div key={(copy ? "img2-" : "img1-") + i}>
+                <img
+                    className={reveal ? "pixelated " + this.props.classes.homeArtReveal : "pixelated"}
+                    style={reveal ? { animationDelay: revealDelay(k) + "ms" } : undefined}
+                    src={art.src}
+                    width={art.w || undefined}
+                    height={art.h || undefined}
+                    decoding="async"
+                    draggable={false}
+                    // Sized tiles never re-lay out on load; only one whose
+                    // size couldn't be read up front re-measures the loop.
+                    onLoad={art.w ? undefined : this._scheduleStripMeasure}
+                    alt={copy
+                        ? t("components.home.artwork_duplicate", { i: i + 1 })
+                        : `Artwork ${i + 1}`}
+                />
+            </div>
+        );
     }
 
     render() {
-        const { classes } = this.props;
-        const { _y, _intervalTimeRevealImage, _artworks_url, _learn_more_opened, _learn_more_mounted, _svg_logo } = this.state;
+        const { classes, departing } = this.props;
+        const { _artworks, _learn_more_opened, _learn_more_mounted, _svg_logo } = this.state;
         return (
             <div className={classes.homeRoot}>
                 {/* Single WebGL background: greyscale stars + blue lightning, screen-blended */}
@@ -1582,75 +1964,64 @@ class Home extends React.PureComponent {
                         </h3>
                     </div>
                 </div>
-                <div className={classes.homeOverlay2 + " overlay"} />
+                {/* Hidden the moment the page departs: Index's rainbow starts
+                    from this exact ring and flies off, and a second copy left
+                    fading in place here would read as the ring splitting. */}
+                <div
+                    className={classes.homeOverlay2 + " overlay"}
+                    style={departing ? HIDDEN_STYLE : undefined}
+                />
                 <div className={classes.homeTiltedPictures}>
-                    <Fade in={true} timeout={600}>
-                        <div
-                            className={classes.homeExample}
-                            ref={this._setStripRef}
-                            onPointerDown={this._onStripPointerDown}
-                            onPointerMove={this._onStripPointerMove}
-                            onPointerUp={this._onStripPointerUp}
-                            onPointerCancel={this._onStripPointerCancel}
-                        >
-                            {_artworks_url.map((url, i) => (
-                                <div key={`img1-${i}`}>
-                                    <Fade key={`img1a-${i}-${Boolean(i <= _y-1)}`} in={Boolean(i <= _y-1)} timeout={{appear: 500, enter: 500, exit: 500}}><img
-                                        className="pixelated"
-                                        src={url}
-                                        draggable={false}
-                                        onLoad={this._scheduleStripMeasure}
-                                        alt={`Artwork ${i + 1}`}
-                                    /></Fade>
-                                </div>
-                            ))}
-                            {_artworks_url.map((url, i) => (
-                                <div key={`img2-${i}`}>
-                                    <img
-                                        loading="lazy"
-                                        decoding="async"
-                                        className="pixelated"
-                                        src={url}
-                                        draggable={false}
-                                        onLoad={this._scheduleStripMeasure}
-                                        alt={t("components.home.artwork_duplicate", {
-                                            i: i + 1
-                                        })}
-                                    />
-                                </div>
-                            ))}
-                        </div>
-                    </Fade>
+                    {/* No Fade around the strip anymore: it faded in an EMPTY
+                        box (the artworks arrive on idle, later). The tiles
+                        reveal themselves, see _renderArtwork. */}
+                    <div
+                        className={classes.homeExample}
+                        ref={this._setStripRef}
+                        onPointerDown={this._onStripPointerDown}
+                        onPointerMove={this._onStripPointerMove}
+                        onPointerUp={this._onStripPointerUp}
+                        onPointerCancel={this._onStripPointerCancel}
+                    >
+                        {_artworks.map((art, i) => this._renderArtwork(art, i, false))}
+                        {_artworks.map((art, i) => this._renderArtwork(art, i, true))}
+                    </div>
                 </div>
                 <div className={classes.homeText}>
                     <Fade in={true} timeout={1000}>
                         <h3>{t("components.home.get_tokens_for_every_posts_votes_and")} <br/> {t("components.home.trade_and_create_artworks_in_minutes")}</h3>
                     </Fade>
                 </div>
-                <div className={classes.homeActions}>
-                    <Fade in={true} timeout={1200}>
-                        <div className={classes.homeActionGroup}>
-                            <Button
-                                variant="contained"
-                                size="large"
-                                onClick={this._openLearnMore}
-                                className={classes.homeActionLearn}
-                                aria-label={t("components.home.learn_more_about_pixagram")}
-                            >
-                                <InfoIcon />
-                                <span className="homeActionLearnText">{t("components.home.learn_more")}</span>
-                            </Button>
-                            <Button
-                                variant="contained"
-                                size="large"
-                                onClick={this._goToFeed}
-                                className={classes.homeActionBrowse}
-                            >
-                                {t("components.home.browse_posts")} <ExploreIcon />
-                            </Button>
+                {/* Fade now wraps the positioned container rather than the
+                    pill: Fade writes an inline `transition` (opacity) on its
+                    child, which would wipe out homeActionLift's own hover
+                    transitions. */}
+                <Fade in={true} timeout={1200}>
+                    <div className={classes.homeActions}>
+                        <div className={classes.homeActionLift}>
+                            <div className={classes.homeActionGroup}>
+                                <Button
+                                    variant="contained"
+                                    size="large"
+                                    onClick={this._openLearnMore}
+                                    className={classes.homeActionLearn}
+                                    aria-label={t("components.home.learn_more_about_pixagram")}
+                                >
+                                    <InfoIcon />
+                                    <span className="homeActionLearnText">{t("components.home.learn_more")}</span>
+                                </Button>
+                                <Button
+                                    variant="contained"
+                                    size="large"
+                                    onClick={this._goToFeed}
+                                    className={classes.homeActionBrowse}
+                                >
+                                    {t("components.home.browse_posts")} <ExploreIcon />
+                                </Button>
+                            </div>
                         </div>
-                    </Fade>
-                </div>
+                    </div>
+                </Fade>
                 {_learn_more_mounted &&
                     <React.Suspense fallback={null}>
                         <LearnMoreDialog

@@ -1,5 +1,5 @@
 import * as React from "preact/compat";
-import { useState, useEffect, useCallback, useMemo, useReducer, useRef, memo } from "preact/compat";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useReducer, useRef, memo } from "preact/compat";
 // Coalesce co-arriving setState calls after an await into a single render
 // (Preact doesn't auto-batch in promise continuations).
 import { unstable_batchedUpdates as batch } from "preact/compat";
@@ -689,16 +689,23 @@ const COMMUNITY_COLUMN_WIDTH = ({ rootWidth, isMobile, gutter }) =>
 
 const COMMUNITY_VISIBLE_IDS_INIT = () => [];
 
-// Scroll-driven chrome. Unlike the feeds, this page still hands the RAW
-// scroll numbers to SortingTabs and CommunityHeader (they animate on them),
-// so they are part of the chrome object and the page keeps re-rendering per
-// scroll tick exactly as before. Converting those two components to take
-// booleans (as Feed's SortTabs does) is what would end that — the shared
-// hook is already built for it.
-const COMMUNITY_CHROME = (scrollTop, scrollY) => ({
-    scrollTop,
-    scrollY,
+// Scroll-driven chrome: the flags this page's chrome reads off the scroll
+// position, one set per layout. This page used to hand the RAW numbers to
+// SortingTabs and CommunityHeader, so the whole page re-rendered on every
+// scroll tick; both take a `hidden` flag now (same thresholds as before),
+// and the page re-renders only when one of these flips — a handful of times
+// per scroll instead of continuously. The desktop set pins the mobile-only
+// flags to false, so their flips don't re-render the page where nothing
+// reads them.
+const COMMUNITY_CHROME_MOBILE = (scrollTop, scrollY) => ({
+    tabsHidden: !(scrollY > 48 || scrollTop <= 72),   // bottom bar slides down
+    headerHidden: scrollY < 48 && scrollTop >= 72,    // community card slides up
     shouldCollapseMobileCard: scrollY < 0 && scrollTop >= 72,
+});
+const COMMUNITY_CHROME_DESKTOP = (scrollTop, scrollY) => ({
+    tabsHidden: scrollY < -48 && scrollTop >= 72,     // top bar slides up
+    headerHidden: false,
+    shouldCollapseMobileCard: false,
 });
 
 const useCommunityGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx }) => {
@@ -708,15 +715,15 @@ const useCommunityGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixel
         fallbackColumnWidth: 800,
         defaultHeight: 400,
         visibleIdsInit: COMMUNITY_VISIBLE_IDS_INIT,
-        deriveChrome: COMMUNITY_CHROME,
+        deriveChrome: isMobile ? COMMUNITY_CHROME_MOBILE : COMMUNITY_CHROME_DESKTOP,
     });
 
     // Page chrome — Community-specific, derived from the shared core.
     const pageWidth = isMobile ? windowWidth : windowWidth - 396 - 300;
     const postListHeight = windowHeight - (isMobile ? 80 : 96);
-    const { scrollTop, scrollY, shouldCollapseMobileCard } = core.chrome;
+    const { tabsHidden, headerHidden, shouldCollapseMobileCard } = core.chrome;
 
-    return { ...core, pageWidth, postListHeight, scrollTop, scrollY, shouldCollapseMobileCard };
+    return { ...core, pageWidth, postListHeight, tabsHidden, headerHidden, shouldCollapseMobileCard };
 };
 
 // ── usePostNavigation ──────────────────────────────────────────────────
@@ -1117,6 +1124,14 @@ const useCommunityData = (api, pathname) => {
     // switch (Index doesn't remount same-name pages), so without this a slow
     // avatar fetch from the previous community could land on the new one.
     const loadTokenRef = useRef(0);
+    // Same, for the post list alone: claimed by loadCommunity's posts branch
+    // AND by every refetchPosts (sort switch, publish/edit/delete refresh).
+    // refetchPosts had no guard at all, so two quick sort switches raced and
+    // the answer that landed LAST won — the grid jumped back to the previous
+    // sort's list a moment after showing the right one. Separate from
+    // loadTokenRef so a sort switch during the first load supersedes only
+    // that load's posts, not its member list or viewer state.
+    const postsTokenRef = useRef(0);
 
     // Resolve the active account and derive the viewer-scoped flags
     // (admin / joined / role) from the cached community meta. Shared by the
@@ -1146,6 +1161,36 @@ const useCommunityData = (api, pathname) => {
         setIsAdmin(admin);
         setUserRole(userEntry ? userEntry[1] : null);
         setIsJoined(joined);
+    }, [api]);
+
+    // Two-phase post commit, shared by loadCommunity and refetchPosts: the
+    // grid paints text-ready cards one round-trip sooner (with the masonry
+    // re-pack, via dataVersion), then avatars are patched in WITHOUT one —
+    // avatar swaps don't change card height. Both commits are guarded by the
+    // posts token. Both pass through overlayPendingVotes: a vote cast a
+    // moment ago isn't in the bridge rows yet (indexer lag) and the pending
+    // registry puts it back until the chain shows it.
+    //
+    // Ordering: enrichPostsList hands back the text-ready list only after an
+    // await, while the avatar callback fires from the account lookup's own
+    // promise — and a lookup the API answers from its cache settles FIRST.
+    // The text-ready commit then overwrote the avatars it had just received,
+    // and the grid stayed avatar-less until the next load. An avatar list
+    // that arrives early is held and committed in place of the text-ready one.
+    const commitPostsTwoPhase = useCallback(async (rawPosts, token) => {
+        let early = null, painted = false;
+        const textReady = await enrichPostsList(rawPosts, api, (withAvatars) => {
+            if (postsTokenRef.current !== token) return;
+            if (!painted) { early = withAvatars; return; }
+            setPosts(overlayPendingVotes(withAvatars));
+        });
+        painted = true;
+        if (postsTokenRef.current !== token) return;
+        batch(() => {
+            setPosts(overlayPendingVotes(early || textReady));
+            setDataVersion(v => v + 1);
+            setLoading(false);
+        });
     }, [api]);
 
     useEffect(() => {
@@ -1182,6 +1227,7 @@ const useCommunityData = (api, pathname) => {
     const loadCommunity = useCallback(async (name, sortIndex) => {
         if (!name) { console.warn('[Community] No community name'); setLoading(false); return; }
         const myToken = ++loadTokenRef.current; // claim this load
+        const myPostsToken = ++postsTokenRef.current; // …and its post list
         setLoading(true);
         try {
             const sort = SORT_METHODS[sortIndex] || 'trending';
@@ -1242,26 +1288,12 @@ const useCommunityData = (api, pathname) => {
             // grid waited on member-avatar enrichment AND the context call.
             // Now each branch commits its own slice the moment it resolves.
 
-            // 1) Posts — primary content, highest priority. TWO-PHASE: the grid
-            //    paints with text-ready cards (names, no avatars) one round-trip
-            //    sooner; the onAvatars callback patches avatars in afterwards
-            //    WITHOUT a dataVersion bump (avatar swaps don't change card
-            //    height, so the masonry geometry is preserved). Both commits are
-            //    token-guarded so a stale community's avatar fetch can't land.
-            //    Both commits pass through overlayPendingVotes: a vote cast a
-            //    moment ago isn't in the bridge rows yet (indexer lag) and the
-            //    pending registry puts it back until the chain shows it.
-            const postsBranch = enrichPostsList(rawPosts, api, (withAvatars) => {
-                if (loadTokenRef.current !== myToken) return;
-                setPosts(overlayPendingVotes(withAvatars));
-            }).then(enriched => {
-                if (loadTokenRef.current !== myToken) return;
-                batch(() => {
-                    setPosts(overlayPendingVotes(enriched));
-                    setDataVersion(v => v + 1);
-                    setLoading(false);
-                });
-            });
+            // 1) Posts — primary content, highest priority. Two-phase via
+            //    commitPostsTwoPhase: text-ready cards one round-trip sooner,
+            //    avatars patched in afterwards WITHOUT a dataVersion bump.
+            //    Guarded by the posts token, which a sort switch landing
+            //    mid-load claims too.
+            const postsBranch = commitPostsTwoPhase(rawPosts, myPostsToken);
 
             // 2) Members — independent of posts; backfills the sidebar list.
             const membersBranch = enrichMemberAccounts(
@@ -1279,22 +1311,30 @@ const useCommunityData = (api, pathname) => {
         } catch (e) {
             console.error('[Community] Failed to load:', e);
             if (loadTokenRef.current !== myToken) return;
+            // A sort switch that claimed the post list meanwhile keeps it.
+            const ownsPosts = postsTokenRef.current === myPostsToken;
             batch(() => {
                 setCommunity({ name, _name: name, title: name, description: '', image: '' });
-                setPosts([]); setMembers([]); setRules([]); setLoading(false);
-                setDataVersion(v => v + 1);
+                setMembers([]); setRules([]); setLoading(false);
+                if (ownsPosts) { setPosts([]); setDataVersion(v => v + 1); }
             });
         }
-    }, [api, refreshViewerState]);
+    }, [api, refreshViewerState, commitPostsTwoPhase]);
 
     const refetchPosts = useCallback(async (name, sortIndex) => {
         if (!api?.communities || !name) return;
+        // Claim the post list: an older refetch (or the first load's posts)
+        // still in flight can no longer land over this one.
+        const myPostsToken = ++postsTokenRef.current;
         try {
             const rawPosts = await api.communities.getRankedPosts({ sort: SORT_METHODS[sortIndex] || 'trending', tag: name, limit: 20 });
-            setPosts(overlayPendingVotes(await enrichPostsList(rawPosts, api)));
-            setDataVersion(v => v + 1);
+            if (postsTokenRef.current !== myPostsToken) return;
+            // Two-phase like the first load: a sort switch paints its cards
+            // one round-trip sooner instead of waiting on every author and
+            // voter account first.
+            await commitPostsTwoPhase(rawPosts, myPostsToken);
         } catch (e) { console.error('[Community] Failed to refetch posts:', e); }
-    }, [api]);
+    }, [api, commitPostsTwoPhase]);
 
     // ── Refresh posts when a new blog post lands in this community ─────
     // A community blog post is a top-level comment whose parent_permlink
@@ -1438,6 +1478,18 @@ const useCommunityData = (api, pathname) => {
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  5. SUB-COMPONENTS                                                  ║
 // ╚══════════════════════════════════════════════════════════════════════╝
+
+// The desktop sidebar (community card, members, rules, its tabs). Its props
+// — communityUIProps — are memoized and don't move with the scroll, but the
+// page re-renders whenever a chrome flag flips (see COMMUNITY_CHROME_*), and
+// the whole sidebar re-rendered with it — twice a second for as long as the
+// reader scrolled, back when the page took the raw scroll numbers. memo
+// stops that. useLanguage() keeps its text following a language switch on
+// its own — it can't rely on incidental re-renders.
+const CommunityInfoPanel = memo(function CommunityInfoPanel(props) {
+    useLanguage();
+    return <CommunityInfo {...props} />;
+});
 
 const LeaveConfirmDialog = memo(({ open, userRole, onCancel, onConfirm, dialogClass }) => {
         useLanguage();
@@ -1650,12 +1702,28 @@ const Community = ({ classes, settings, pathname, api }) => {
     // Full masonry reset when posts is fully replaced (initial load,
     // sort change, post_published refetch). Clears stale CellMeasurerCache
     // heights and Masonry's internal _positionCache so the new list lays
-    // out from scratch. Declared BEFORE the lighter [posts] forceUpdate
-    // effect so the cache flush happens first; the subsequent forceUpdate
-    // then renders against fresh measurements.
-    useEffect(() => {
+    // out from scratch. A layout effect (as FeedPersonal's re-pack): the
+    // flush lands before the commit paints, so the new list never shows a
+    // frame drawn on the previous list's heights (overlapping or gapped
+    // cards). Layout effects run before every passive effect, so it still
+    // precedes the lighter [posts] forceUpdate below.
+    useLayoutEffect(() => {
         grid.resetMasonry();
     }, [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // A different community in this same mounted page (Index reconciles
+    // same-name pages in place — a portal link from inside a post, say):
+    // start it at the top. Its posts used to re-pack under the previous
+    // community's scroll offset, landing the reader mid-list — or, with a
+    // shorter list, at whatever bottom the clamped offset came to rest on.
+    // A jump, not the container's smooth glide: a glide would travel up
+    // through the outgoing community's cards (see useMasonryGrid).
+    const shownCommunityRef = useRef(communityName);
+    useEffect(() => {
+        if (shownCommunityRef.current === communityName) return;
+        shownCommunityRef.current = communityName;
+        grid.scrollTo(0, 'instant');
+    }, [communityName]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Force masonry to re-render when posts arrive or change.
     // @pixagram/virtualized's Masonry doesn't auto-update when cellCount changes.
@@ -1685,12 +1753,20 @@ const Community = ({ classes, settings, pathname, api }) => {
         // No name means this component is mounted on a URL that is not a
         // community page (the feed owns /created/, /hot/ …). Rewriting the URL
         // from here would clobber the route the user is actually on.
+        //
+        // Every tab click starts at the top — a new sort as well as the
+        // current one, like the feed's tabs. The new sort's list used to
+        // re-pack under the old scroll offset: the reader landed mid-list
+        // (or on a clamped bottom) of a listing they had just opened. A new
+        // sort jumps (the list is about to be replaced; gliding up through
+        // it is wasted motion and wasted card renders); the current one
+        // keeps the smooth glide back to its top.
+        grid.scrollTo(0, sorting !== value ? 'instant' : undefined);
         if (sorting !== value && communityName) HISTORY.replace(buildCommunityUrl(communityName, SORT_METHODS[value] || 'trending'));
-        else grid.scrollTo(0);
         // grid.scrollTo is a stable callback; depending on it instead of the
-        // whole grid object (whose identity changes every scroll tick) keeps
-        // SortingTabs' onSortingChange prop from churning while scrolling —
-        // the same narrowing Feed applies to its tab handler.
+        // whole grid object (whose identity changes with every chrome flip)
+        // keeps SortingTabs' onSortingChange prop from churning while
+        // scrolling — the same narrowing Feed applies to its tab handler.
     }, [sorting, communityName, grid.scrollTo]);
 
     const handleTabChange = useCallback((e, value) => setTabValue(value), []);
@@ -1894,11 +1970,11 @@ const Community = ({ classes, settings, pathname, api }) => {
 
     // ── Cell renderer ──────────────────────────────────────────────────
     // Depend on the SPECIFIC grid fields the renderer reads, not the whole
-    // `grid` object: the shared masonry hook returns a fresh object whose
-    // identity changes on every scroll tick (scrollTop/scrollY live in it),
-    // which used to re-create this renderer — and hand MasonryExtended a new
-    // cellRenderer prop — on every tick while scrolling. The fields below
-    // are all referentially stable between layout changes.
+    // `grid` object: the page rebuilds it on every render — every chrome
+    // flip, and every scroll tick back when scrollTop/scrollY lived in it —
+    // which used to re-create this renderer and hand MasonryExtended a new
+    // cellRenderer prop each time. The fields below are all referentially
+    // stable between layout changes.
     const {
         columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
         selectedPostIndex, postListHeight,
@@ -1989,11 +2065,14 @@ const Community = ({ classes, settings, pathname, api }) => {
         // Community picture click → PictureDialog. Pass the click event
         // itself (its currentTarget is the element the picture flies out of).
         onOpenPicture: pictureNav.openPicture,
-        // Write FAB stepped aside for the picture's flight (see fabAway).
-        fabAway,
         classes,
+        // fabAway (the write FAB stepping aside for the picture's flight) is
+        // handed to the sidebar alone, below: it flips as the viewer opens,
+        // and in here it rebuilt this whole object — inline handlers
+        // included — so the mobile card re-rendered on the picture's first
+        // frame for a prop it never reads.
     }), [community, members, rules, postsCount, isJoined, tabValue, isAdmin,
-        handleToggleJoined, handleTabChange, handleTextEditor, classes, openDialog, pictureNav.openPicture, fabAway]);
+        handleToggleJoined, handleTabChange, handleTextEditor, classes, openDialog, pictureNav.openPicture]);
 
     // ── Render ─────────────────────────────────────────────────────────
     return (
@@ -2002,17 +2081,17 @@ const Community = ({ classes, settings, pathname, api }) => {
                 {isMobile && (
                     <CommunityHeader {...communityUIProps}
                                      mobileCardExpanded={mobileCardExpanded}
-                                     y={grid.scrollY} scrollTop={grid.scrollTop} height={windowHeight}
+                                     hidden={grid.headerHidden} height={windowHeight}
                                      onToggleMobileCard={toggleMobileCard} onCloseMobileCard={closeMobileCard}
                     />
                 )}
                 <div className={classes.viewRight}>
                     <SortingTabs sorting={sorting} onSortingChange={handleSortingChange}
                                  mainTabClass={classes.mainTab} lessThan960w={isMobile}
-                                 y={grid.scrollY} scrollTop={grid.scrollTop}
+                                 hidden={grid.tabsHidden}
                     />
                 </div>
-                {!isMobile && <CommunityInfo {...communityUIProps} />}
+                {!isMobile && <CommunityInfoPanel {...communityUIProps} fabAway={fabAway} />}
             </div>
 
             <div style={{ position: "absolute" }} ref={grid.setRootElement}>

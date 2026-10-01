@@ -413,7 +413,7 @@ class PixaWalletDelegateDialog extends React.PureComponent {
                                 InputProps={{
                                     inputComponent: NumberFormatCustom,
                                     inputProps: { locale: resolveLocale() },
-                                    startAdornment: <PixaPower style={{margin: "0px 8px -12px 0px", fontSize: "1em"}}/>
+                                    startAdornment: <PixaPower style={{margin: "0px 8px -24px 0px", fontSize: "1.5em"}}/>
                                 }}
                                 helperText={t("words.max_max_pxp", {
                                     max: formatNumber(max, { min: 0, max: 6 })

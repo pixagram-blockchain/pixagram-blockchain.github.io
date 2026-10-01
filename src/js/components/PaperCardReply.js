@@ -229,10 +229,17 @@ const styles = theme => ({
     },
 });
 
-function PaperCardReplyInner({
-                                 classes, data = {}, id, locales, selected, onOpen, onMenuClick,
-                                 api, voter, column_width, style, is_scrolling,
-                             }) {
+// Everything inside the card — header, body, actions, and all of the vote
+// state. Split out of the Card shell (PaperCardReplyInner, below) so that
+// the shell's one scroll-driven prop, is_scrolling, stops reaching it: the
+// Masonry flips that flag on every mounted cell when a scroll starts and
+// again when it settles, and each flip used to re-render every comment and
+// reply card in full — header, chip, hover anchors, date, the actions row
+// with its price hooks — on the very first frame of every scroll gesture.
+// Now a flip re-renders the shell's Card and this bails on its memo.
+const ReplyCardContent = memo(function ReplyCardContent({
+                                                            classes, data = {}, locales, onOpen, onMenuClick, api, voter,
+                                                        }) {
     // Re-render when the UI language changes, so the subheader and the
     // root-type chip follow a language switch without a remount.
     useLanguage();
@@ -441,19 +448,8 @@ function PaperCardReplyInner({
 
     const typeLabel = rootTypeLabel(data);
 
-    // While the list is scrolling the card ignores the pointer, so a fling
-    // doesn't light up hover states under the finger. (`touchAction` — it
-    // was spelled `touchActions`, a property no browser knows.) The style
-    // object is only rebuilt while scrolling; at rest the Masonry's own
-    // object is passed straight through.
-    const cardStyle = is_scrolling ? { ...style, pointerEvents: 'none', touchAction: 'pan-y' } : style;
-
     return (
-        <Card
-            key={id}
-            className={classes.card + (selected ? ' Mui-selected' : '')}
-            style={cardStyle}
-        >
+        <React.Fragment>
             <CardHeader
                 className={classes.cardHeader}
                 avatar={
@@ -529,6 +525,39 @@ function PaperCardReplyInner({
                 data={data}
                 voter={voter}
             />
+        </React.Fragment>
+    );
+});
+
+// The Card shell: the only part that reads is_scrolling (with the Masonry's
+// style and the selection). Same Card, same DOM as before — the content
+// renders straight into it.
+function PaperCardReplyInner({
+                                 classes, data, id, locales, selected, onOpen, onMenuClick,
+                                 api, voter, style, is_scrolling,
+                             }) {
+    // While the list is scrolling the card ignores the pointer, so a fling
+    // doesn't light up hover states under the finger. (`touchAction` — it
+    // was spelled `touchActions`, a property no browser knows.) The style
+    // object is only rebuilt while scrolling; at rest the Masonry's own
+    // object is passed straight through.
+    const cardStyle = is_scrolling ? { ...style, pointerEvents: 'none', touchAction: 'pan-y' } : style;
+
+    return (
+        <Card
+            key={id}
+            className={classes.card + (selected ? ' Mui-selected' : '')}
+            style={cardStyle}
+        >
+            <ReplyCardContent
+                classes={classes}
+                data={data}
+                locales={locales}
+                onOpen={onOpen}
+                onMenuClick={onMenuClick}
+                api={api}
+                voter={voter}
+            />
         </Card>
     );
 }
@@ -556,6 +585,8 @@ function shallowEqual(a, b) {
 // compared by identity on purpose (Profile hands down stable useCallbacks),
 // so a handler swap can never leave a card holding a stale one.
 // `renderer` is received but never read, so it is not compared.
+// is_scrolling (and style / selected) re-render the Card shell only — the
+// content inside bails on its own memo (see ReplyCardContent).
 const PaperCardReply = memo(withStyles(styles)(PaperCardReplyInner), (prev, next) =>
     prev.data === next.data &&
     prev.id === next.id &&

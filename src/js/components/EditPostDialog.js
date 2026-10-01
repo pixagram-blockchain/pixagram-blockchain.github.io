@@ -741,7 +741,6 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                                             </div>
                                         </Box>
                                         <Button
-                                            variant="outlined"
                                             fullWidth
                                             size="small"
                                             className={classes.licenseButton}
@@ -784,7 +783,6 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                                                 </Typography>
                                                 {!eraseArmed ? (
                                                     <Button
-                                                        variant="outlined"
                                                         size="small"
                                                         className={classes.dangerButton}
                                                         startIcon={<DeleteForeverRounded />}
@@ -795,7 +793,6 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                                                 ) : (
                                                     <Box display="flex" style={{ gap: 8 }}>
                                                         <Button
-                                                            variant="outlined"
                                                             size="small"
                                                             className={classes.dangerButton}
                                                             startIcon={<WarningRounded />}
@@ -916,43 +913,45 @@ function DeletePostDialogInner({ classes, open, onClose, api, data, onDeleted })
             fullWidth
             classes={{ paper: classes.dialogPaper }}
         >
-            <DialogTitle className={classes.dialogTitle} disableTypography>
-                <Typography variant="h6">{t("components.edit_post_dialog.delete_this_post")}</Typography>
-                <Typography className={classes.subtitle}>
-                    {data?.title ? `"${data.title}" — ` : ""}@{authorUsername}/{permlink}
-                </Typography>
-            </DialogTitle>
+            <Fade in timeout={200}>
+                <DialogTitle className={classes.dialogTitle} disableTypography>
+                    <Typography variant="h6">{t("components.edit_post_dialog.delete_this_post")}</Typography>
+                    <Typography className={classes.subtitle}>
+                        {data?.title ? `"${data.title}" — ` : ""}@{authorUsername}/{permlink}
+                    </Typography>
+                </DialogTitle>
+            </Fade>
             <DialogContent>
                 <Typography variant="body2" style={{ color: "#aaa" }}>
                     {t("components.edit_post_dialog.the_post_is_marked_as_deleted_in")}
                 </Typography>
                 {isPixelArt && (
-                    <Typography variant="body2" style={{ color: "#ccc", marginTop: 8 }}>
+                    <Fade in timeout={400}><Typography variant="body2" style={{ color: "#ccc", marginTop: 8 }}>
                         {t("components.edit_post_dialog.the_artwork_content_post_body_is_erased")}
-                    </Typography>
+                    </Typography></Fade>
                 )}
                 {!isPixelArt && (
-                    <Typography variant="body2" style={{ color: "#ccc", marginTop: 8 }}>
+                    <Fade in timeout={400}><Typography variant="body2" style={{ color: "#ccc", marginTop: 8 }}>
                         {t("components.edit_post_dialog.if_this_post_is_a_dao_proposal")}
-                    </Typography>
+                    </Typography></Fade>
                 )}
-                <Typography variant="caption" style={{ color: "#666", display: "block", marginTop: 12 }}>
+                <Fade in timeout={600}><Typography variant="caption" style={{ color: "#666", display: "block", marginTop: 12 }}>
                     {t("components.edit_post_dialog.blockchain_posts_with_votes_can_never_be")}
-                </Typography>
+                </Typography></Fade>
             </DialogContent>
             <DialogActions style={{ padding: "8px 24px 16px" }}>
-                <Button className={classes.cancelButton} onClick={onClose} disabled={deleting}>
+                <Fade in timeout={800}><Button className={classes.cancelButton} onClick={onClose} disabled={deleting}>
                     {t("words.cancel")}
-                </Button>
-                <Button
-                    variant="outlined"
-                    className={classes.dangerButton}
-                    startIcon={deleting ? <CircularProgress size={16} style={{ color: "#888" }} /> : <DeleteForeverRounded />}
+                </Button></Fade>
+                    <Fade in timeout={1000}><Button
+                    variant="contained"
+                    color="primary"
+                    startIcon={deleting ? <CircularProgress color="#000" size={16} /> : <DeleteForeverRounded style={{color: "#e1e1e1"}}/>}
                     onClick={handleConfirm}
                     disabled={deleting}
                 >
                     {deleting ? "Deleting…" : "Delete post"}
-                </Button>
+                </Button></Fade>
             </DialogActions>
         </Dialog>
     );

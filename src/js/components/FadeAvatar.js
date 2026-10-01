@@ -1,113 +1,48 @@
 import * as React from 'preact/compat';
 import { h } from 'preact';
 import { forwardRef } from 'preact/compat';
-import { useCallback, useMemo, useRef, useState } from 'preact/hooks';
-import withStyles from '@material-ui/core/styles/withStyles';
 import Avatar from '@material-ui/core/Avatar';
-import Person from '@material-ui/icons/Person';
 
 // ── FadeAvatar ───────────────────────────────────────────────────────
-// Drop-in for @material-ui/core/Avatar whose content always fades in
-// instead of popping: the picture once its bytes are actually decoded,
-// the blank silhouette as soon as it is on screen (no `src`, or the
-// picture failed and MUI swapped to its fallback).
+// Drop-in for @material-ui/core/Avatar. It no longer fades: the picture
+// paints as soon as the browser has it, and with no `src`, or once the
+// picture has failed, MUI's own silhouette (the same 75% box as before)
+// shows at once. The name is a leftover, kept so the card imports
+// (PaperCard, PaperCardBlog, PaperCardReply) stay unchanged. The fading
+// version is in the git history.
 //
-// Why the reveal is gated in JS rather than a mount-time CSS animation:
-// an <img> sits in the DOM long before its pixels do (lazy loading, slow
-// image hosts), so an animation started at mount would finish on an
-// empty box and the picture would still pop in afterwards. The root is
-// therefore held at opacity 0 until one of two signals fires:
-//   • the <img>'s own `load` event, wired in through imgProps, or
-//   • the fallback node mounting — seen through a callback ref on the
-//     silhouette we hand MUI as `children`, which is exactly what it
-//     renders when it has no usable picture. MUI decides the swap from
-//     its own preloader, so an onError on the (lazy) <img> would not be
-//     a reliable signal; the mount of the fallback is.
-// Fading the ROOT rather than the child means the grey default
-// background of the fallback fades in together with the icon instead of
-// appearing first as a bare square.
+// The opacity hold went with the animation. It only existed to give the
+// fade a starting point; on its own it would still hide every avatar until
+// its `load` event, which arrives as a separate task, so even a cached
+// picture could sit blank for a frame. A virtualized feed mounts avatars on
+// every recycle and every scroll-back, so there is no state, stylesheet or
+// load listener left here.
 //
-// Why the styled inner component is keyed on `src`:
-// virtualized cells are recycled — a live card is re-pointed at another
-// post instead of being remounted. Keying remounts the avatar subtree on
-// a src swap, which (a) resets the reveal state for free, (b) discards
-// the old <img> so the previous author's bitmap never lingers while the
-// new one loads, and (c) guarantees the CSS animation runs again even
-// when the new picture comes straight from cache — a class toggled off
-// and back on inside one frame would NOT restart it on a reused element.
-// Same author on consecutive posts → same src → no remount, no re-fade.
+// Why the Avatar is still keyed on `src`:
+// virtualized cells are recycled, so a live card is re-pointed at another
+// post instead of being remounted. Swapping the src of a live <img> keeps
+// the old picture on screen until the new one has loaded, so the PREVIOUS
+// author would sit next to the new post for that whole time. Keying
+// mounts a fresh <img> instead, which stays empty until the right picture
+// arrives. Same author on consecutive posts → same src → no remount.
 
-const styles = {
-    '@keyframes fadeAvatarIn': {
-        from: { opacity: 0 },
-        to: { opacity: 1 },
-    },
-    root: {
-        opacity: 0,
-        '&.revealed': {
-            animation: '$fadeAvatarIn 60ms cubic-bezier(0.4, 0, 0.2, 1) both',
-        },
-    },
-    // Same box MUI gives its built-in silhouette (classes.fallback).
-    fallback: {
-        width: '75%',
-        height: '75%',
-    },
-    '@media (prefers-reduced-motion: reduce)': {
-        root: {
-            '&.revealed': { animation: 'none', opacity: 1 },
-        },
-    },
-};
+// Shared defaults for the common case (no caller imgProps), so a render
+// doesn't allocate a fresh object. Caller imgProps still win.
+const DEFAULT_IMG_PROPS = { decoding: 'async', loading: 'lazy' };
 
-const FadeAvatarInner = forwardRef(function FadeAvatarInner(
-    { classes, className, src, imgProps, ...rest },
-    ref,
-) {
-    const [revealed, setRevealed] = useState(false);
-
-    // Latest imgProps for the stable load handler below, so a caller's own
-    // onLoad still runs without re-binding the listener on every render.
-    const imgPropsRef = useRef(imgProps);
-    imgPropsRef.current = imgProps;
-
-    // Picture decoded → reveal.
-    const handleLoad = useCallback((e) => {
-        setRevealed(true);
-        const fn = imgPropsRef.current && imgPropsRef.current.onLoad;
-        if (fn) fn(e);
-    }, []);
-
-    // MUI mounted the silhouette (no src, or the picture failed) → reveal.
-    const fallbackRef = useCallback((node) => {
-        if (node) setRevealed(true);
-    }, []);
-
-    const mergedImgProps = useMemo(
-        () => ({ decoding: 'async', loading: 'lazy', ...imgProps, onLoad: handleLoad }),
-        [imgProps, handleLoad],
-    );
-
+const FadeAvatar = forwardRef(function FadeAvatar({ src, imgProps, ...rest }, ref) {
+    // '' / null / undefined all mean "no picture" to MUI; normalise so the
+    // key and MUI's own hasImg check see one value.
+    const url = src || undefined;
     return (
         <Avatar
+            key={url || ''}
             ref={ref}
             {...rest}
-            src={src}
-            className={classes.root + (revealed ? ' revealed' : '') + (className ? ' ' + className : '')}
-            imgProps={mergedImgProps}
-        >
-            <Person ref={fallbackRef} className={classes.fallback} />
-        </Avatar>
+            src={url}
+            imgProps={imgProps ? { ...DEFAULT_IMG_PROPS, ...imgProps } : DEFAULT_IMG_PROPS}
+        />
     );
-});
-
-const StyledFadeAvatarInner = withStyles(styles, { name: 'FadeAvatar' })(FadeAvatarInner);
-
-const FadeAvatar = forwardRef(function FadeAvatar(props, ref) {
-    // '' / null / undefined all mean "no picture" to MUI; normalise so the
-    // key (and MUI's own hasImg check) see one value.
-    const src = props.src || undefined;
-    return <StyledFadeAvatarInner key={src || ''} {...props} src={src} ref={ref} />;
 });
 
 export default FadeAvatar;

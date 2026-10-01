@@ -1,5 +1,5 @@
 import * as React from "preact/compat";
-import { useState, useEffect, useCallback, useMemo, useReducer, useRef, memo } from "preact/compat";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useReducer, useRef, memo } from "preact/compat";
 // Coalesce co-arriving setState calls after an await into one render (Preact
 // doesn't auto-batch in promise continuations).
 import { unstable_batchedUpdates as batch } from "preact/compat";
@@ -772,8 +772,20 @@ const useProfileData = (api, pathname) => {
     const [vpMana, setVpMana] = useState(null);
     const [rcMana, setRcMana] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
+    // Name of the profile whose real fetch has completed (found or not).
+    // The `{ name }` placeholder committed while the API initializes does
+    // NOT count: the tab loader waits for this, because its own effect only
+    // re-runs on a NAME change — the placeholder already carries the name,
+    // so the tabs used to try once against a cold API, bail, and never
+    // retry (an empty "no posts yet" profile after a refresh).
+    const [readyName, setReadyName] = useState('');
 
     const prevUsernameRef = useRef('');
+    // Name a load chain is currently running for (its API-readiness poll
+    // included), so the URL sync's cold-entry recovery below doesn't start a
+    // second, identical chain next to the mount's — two full profile fetches
+    // and an isLoading flip-flop on every cold entry.
+    const loadingNameRef = useRef('');
     // Live api ref — `loadProfile` schedules a recursive setTimeout to poll
     // for api.initialized, and the original implementation closed over the
     // `api` prop value via useCallback's closure. On cold-entry, the api
@@ -791,6 +803,11 @@ const useProfileData = (api, pathname) => {
     useEffect(() => { apiRef.current = api; }, [api]);
 
     const loadProfile = useCallback(async (name) => {
+        // A newer navigation took over (prevUsernameRef is always set before
+        // a load is requested): drop this call — including a 250 ms
+        // API-readiness poll still running for a profile the reader left.
+        if (name && prevUsernameRef.current !== name) return;
+        if (name) loadingNameRef.current = name;
         const api = apiRef.current;
         if (!name || !api?.initialized) {
             if (name && !api?.initialized) {
@@ -822,7 +839,13 @@ const useProfileData = (api, pathname) => {
                 api.communities.getSubscriptions(name).catch(() => []),
                 api.follow.getFollowCount(name).catch(() => ({ follower_count: 0, following_count: 0 })),
             ]);
-            const acc = accs?.[0]; if (!acc) { setAccount({ name }); setIsLoading(false); return; }
+            // Superseded while in flight (A → B navigation, A answering last):
+            // committing now would put A's header over B's page. The newer
+            // load owns isLoading.
+            if (prevUsernameRef.current !== name) return;
+            if (loadingNameRef.current === name) loadingNameRef.current = '';
+            const acc = accs?.[0];
+            if (!acc) { batch(() => { setAccount({ name }); setIsLoading(false); setReadyName(name); }); return; }
             acc.follower_count = fc?.follower_count || 0; acc.following_count = fc?.following_count || 0;
             acc.image = acc._profile?.profile_image || ''; acc.cover_image = acc._profile?.cover_image || '';
             const isOwn = activeUser && activeUser.toLowerCase() === name.toLowerCase();
@@ -839,6 +862,7 @@ const useProfileData = (api, pathname) => {
                 setAccount(acc);
                 setSubscriptions(subs || []);
                 setIsLoading(false);
+                setReadyName(name);
             });
 
             // ── Backfill: do-I-follow-this-profile (Follow button only) ────
@@ -870,7 +894,11 @@ const useProfileData = (api, pathname) => {
                     }).catch(() => {});
                 }
             }
-        } catch (e) { console.error('[Profile] load error:', e); setIsLoading(false); }
+        } catch (e) {
+            console.error('[Profile] load error:', e);
+            if (loadingNameRef.current === name) loadingNameRef.current = '';
+            if (prevUsernameRef.current === name) batch(() => { setIsLoading(false); setReadyName(name); });
+        }
     }, []);
 
     useEffect(() => {
@@ -913,12 +941,19 @@ const useProfileData = (api, pathname) => {
     useEffect(() => { accountRef.current = account; }, [account]);
     useEffect(() => {
         const sync = (path) => {
+            // A post dialog on top of the page: its URL names the POST's
+            // author, not this page's profile — keep the loaded profile (see
+            // pagePathname in the component). Only a cold entry straight
+            // onto a post URL, with nothing requested yet, derives it there.
+            if (prevUsernameRef.current && isPostUrl(path)) return;
             const newName = parseProfilePathname(path).username;
             if (!newName) return;
             // Reload on (a) name change, OR (b) we still have no account
             // loaded for this name (cold-entry recovery when the initial
-            // load was racing with api init or returned an empty result).
-            if (newName !== prevUsernameRef.current || !accountNameRef.current) {
+            // load was racing with api init or returned an empty result) —
+            // unless a load chain for it is still running.
+            if (newName !== prevUsernameRef.current
+                || (!accountNameRef.current && loadingNameRef.current !== newName)) {
                 prevUsernameRef.current = newName;
                 loadProfile(newName);
             }
@@ -964,7 +999,9 @@ const useProfileData = (api, pathname) => {
         let cancelled = false;
         const refresh = async () => {
             try {
-                const name = parseProfilePathname(HISTORY.location.pathname || pathname).username;
+                // The profile this page shows — not a parse of the live URL,
+                // which names a post's author while a post dialog is open.
+                const name = prevUsernameRef.current || parseProfilePathname(pathname).username;
                 if (!name) return;
                 const user = await api.getActiveAccount().catch(() => null);
                 if (cancelled) return;
@@ -1025,19 +1062,89 @@ const useProfileData = (api, pathname) => {
     // setAccount is a stable useState setter, so it's intentionally not a dep.
     return useMemo(() => ({
         account, isOwnProfile, loggedInUser, following, subscriptions, vpMana,
-        rcMana, isLoading, toggleFollowing, refreshAccount, onFollowCountsUpdated,
+        rcMana, isLoading, readyName, toggleFollowing, refreshAccount, onFollowCountsUpdated,
         setAccount,
     }), [account, isOwnProfile, loggedInUser, following, subscriptions, vpMana,
-        rcMana, isLoading, toggleFollowing, refreshAccount, onFollowCountsUpdated]);
+        rcMana, isLoading, readyName, toggleFollowing, refreshAccount, onFollowCountsUpdated]);
 };
 
 // ── useTabData ─────────────────────────────────────────────────────────
-const useTabData = (api, account, category) => {
+// Per-tab bookkeeping (posts 0, comments 1, replies 2, history 3).
+const tabBit = (cat) => 1 << cat;
+const INITIAL_TAB_VERSIONS = [0, 0, 0, 0];
+const bumpTab = (cat) => (v) => { const n = v.slice(); n[cat] += 1; return n; };
+const bumpAllTabs = (v) => v.map((n) => n + 1);
+
+// Who a row is: author/permlink for posts, comments and replies, the
+// account-history id for timeline events.
+const rowIdentity = (x) => {
+    if (!x) return '';
+    if (x.permlink) {
+        const a = x.author;
+        const who = a && typeof a === 'object' ? (a.username || '') : (a || '');
+        return `${who}/${x.permlink}`;
+    }
+    return String(x.id);
+};
+
+// The height-relevant content of a row, per tab: what a reload has to
+// change for the cell heights cached at that index to go stale. Votes,
+// payouts and avatars repaint in place and are deliberately left out.
+const ROW_SHAPES = [
+    (p) => `${rowIdentity(p)}|${p.image}|${p.title}|${p.nsfw ? 1 : 0}|${p.deleted ? 1 : 0}|${(p.tags || []).join(',')}|${p._summary}|${(p._description_html || '').length}`,
+    (c) => `${rowIdentity(c)}|${c.title}|${c.body}`,
+    (r) => `${rowIdentity(r)}|${r.title}|${r.body}|${(r.replyTo && r.replyTo.username) || ''}`,
+    (e) => rowIdentity(e),
+];
+
+const sameRows = (a, b, shape) => {
+    if (a === b) return true;
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (!a[i] || !b[i] || shape(a[i]) !== shape(b[i])) return false;
+    }
+    return true;
+};
+
+// A reload fetches the first page again. When the reader had already paged
+// past it, keep the pages they loaded below the fresh first page instead of
+// truncating the list back to one page — which collapsed the grid under a
+// reader scrolled further down (6 s after any publish or edit) and made
+// them page everything in again. Aligned on the fresh page's LAST row, so
+// new rows at the top (the window slid down) and rows gone from the first
+// page both line up; when it can't be aligned, the fresh page stands alone,
+// as before.
+const keepLoadedTail = (prev, fresh) => {
+    if (!prev || !fresh || !fresh.length || prev.length <= fresh.length) return fresh;
+    const lastId = rowIdentity(fresh[fresh.length - 1]);
+    let at = -1;
+    for (let i = prev.length - 1; i >= 0; i--) { if (rowIdentity(prev[i]) === lastId) { at = i; break; } }
+    if (at === -1 || at === prev.length - 1) return fresh;
+    const inFresh = new Set(fresh.map(rowIdentity));
+    const tail = prev.slice(at + 1).filter((x) => !inFresh.has(rowIdentity(x)));
+    return tail.length ? fresh.concat(tail) : fresh;
+};
+
+// Phase-2 patch (voter profiles) onto a list that may carry a kept tail:
+// swap the patched rows in by identity and leave every other row — and its
+// object identity — alone.
+const patchRows = (list, patched) => {
+    if (!Array.isArray(list) || !patched || !patched.length) return list;
+    const byId = new Map(patched.map((x) => [rowIdentity(x), x]));
+    let touched = false;
+    const next = list.map((x) => {
+        const p = byId.get(rowIdentity(x));
+        if (p && p !== x) { touched = true; return p; }
+        return x;
+    });
+    return touched ? next : list;
+};
+
+const useTabData = (api, account, category, ready) => {
     const [posts, setPosts] = useState([]);
     const [comments, setComments] = useState([]);
     const [replies, setReplies] = useState([]);
     const [timeline, setTimeline] = useState([]);
-    const [tabLoading, setTabLoading] = useState(false);
     // ── End-of-feed flags ──────────────────────────────────────────────
     // Each paginated tab gets its own hasMore flag so an empty page response
     // (we've reached the bottom) prevents further pointless load-more
@@ -1053,14 +1160,35 @@ const useTabData = (api, account, category) => {
     // re-fetched those pages forever or read the empty result as "bottom
     // reached", ending the feed while older events still existed below.
     const timelineFloorRef = useRef(Infinity);
-    // Monotonic counter bumped whenever a tab's data is fully replaced
-    // (initial load, account switch, post_published / comment_published
-    // refetch). The main component watches this and drives a full Masonry
-    // reset on the currently-visible tab — clearing CellMeasurerCache, the
-    // positioner, and Masonry's internal _positionCache. Without it,
-    // @pixagram/virtualized keeps cached heights keyed to the previous list's
-    // ids and renders the new posts against stale geometry.
-    const [dataVersion, setDataVersion] = useState(0);
+    // Per-tab data version, bumped when THAT tab's rows are replaced by rows
+    // that lay out differently (see ROW_SHAPES). The page resets the visible
+    // tab's Masonry — CellMeasurerCache, positioner, the Masonry's own
+    // _positionCache — when the visible tab's version moves. It used to be
+    // one shared counter bumped by every load: the visible grid was reset
+    // (every visible cell re-measured, a forced reflow each) for a background
+    // refresh of ANOTHER tab 6 s after any publish or edit, and on every tab
+    // entry for a reload that returned exactly the rows already on screen.
+    const [dataVersions, setDataVersions] = useState(INITIAL_TAB_VERSIONS);
+    // Tabs whose first load for this profile has completed. The empty state
+    // waits for it — and stays up while a later reload revalidates. It used
+    // to follow a single global loading flag, so it flashed for a frame on
+    // every switch to a not-yet-loaded tab and on every profile switch, and
+    // blinked off and on again (replaying its fade-in) whenever ANY tab was
+    // refreshing in the background.
+    const [loadedMask, setLoadedMask] = useState(0);
+    // In-flight loads per tab. Ref-only — nothing renders from it any more.
+    // Per tab, so a background refresh of one tab no longer blocks load-more
+    // on the tab being read; counted, so two loads of one tab can't clear
+    // each other's flag (the first one back used to switch the shared flag
+    // off while the other was still running).
+    const busyRef = useRef([0, 0, 0, 0]);
+    const isTabBusy = useCallback((cat) => busyRef.current[cat] > 0, []);
+    // Newest full load per tab: a reload answering late must not overwrite
+    // a newer one's rows.
+    const loadGenRef = useRef([0, 0, 0, 0]);
+    // The lists as last rendered — what a reload merges into / compares with.
+    const listsRef = useRef(null);
+    listsRef.current = [posts, comments, replies, timeline];
 
     // Token bumped on every profile switch. Each loadTabData invocation
     // snapshots the active name at the time of the call; before it commits
@@ -1074,11 +1202,15 @@ const useTabData = (api, account, category) => {
 
     const loadTabData = useCallback(async (cat) => {
         if (!api?.initialized || !account?.name) return;
-        const name = account.name; setTabLoading(true);
-        // Helper: only commit if the profile we started fetching for is still
-        // the active one. Returns true when commit is safe.
-        const stillCurrent = () => currentNameRef.current === name;
+        const name = account.name;
+        const gen = ++loadGenRef.current[cat];
+        // Commit only while this is still the profile on screen AND the
+        // newest load of this tab.
+        const isLatest = () => currentNameRef.current === name && loadGenRef.current[cat] === gen;
+        busyRef.current[cat] += 1;
+        let changed = false;
         try {
+            const prev = () => listsRef.current[cat];
             switch (cat) {
                 case 0: {
                     // Fetch user's latest posts via database.getDiscussions("blog", { tag })
@@ -1086,7 +1218,6 @@ const useTabData = (api, account, category) => {
                     // get_account_posts path if the database call fails or returns
                     // empty (e.g. transient node hiccup, or accounts whose blog
                     // index hasn't been backfilled).
-                    setHasMorePosts(true);
                     let p = await api.content.getDiscussionsByBlog({ tag: name, limit: 20 })
                         .then(r => Array.isArray(r) ? r : [])
                         .catch(e => { console.warn('[Profile] database.getDiscussions(blog) failed:', e.message); return []; });
@@ -1095,7 +1226,7 @@ const useTabData = (api, account, category) => {
                             .then(r => Array.isArray(r) ? r : [])
                             .catch(() => []);
                     }
-                    if (!stillCurrent()) return;
+                    if (!isLatest()) return;
                     // Two-phase: every post here is authored by the profile owner,
                     // whose avatar is `account` — already loaded — so the grid is
                     // VISUALLY COMPLETE now, gated on the post fetch alone. Only
@@ -1105,16 +1236,24 @@ const useTabData = (api, account, category) => {
                     // Both phases pass through overlayPendingVotes: a vote cast
                     // a moment ago isn't in the fetched rows yet (indexer lag);
                     // the pending registry keeps it until the chain shows it.
-                    setPosts(overlayPendingVotes(p.map(x => enrichPostForCard(x, account, {}))));
+                    const fresh = overlayPendingVotes(p.map(x => enrichPostForCard(x, account, {})));
+                    const before = prev();
+                    const merged = keepLoadedTail(before, fresh);
+                    changed = !sameRows(before, merged, ROW_SHAPES[0]);
+                    if (merged === fresh) setHasMorePosts(true);
+                    setPosts(merged);
                     fetchVoterProfiles(p, account, api)
-                        .then(vp => { if (stillCurrent()) setPosts(overlayPendingVotes(p.map(x => enrichPostForCard(x, account, vp)))); })
+                        .then(vp => {
+                            if (!isLatest()) return;
+                            const patched = overlayPendingVotes(p.map(x => enrichPostForCard(x, account, vp)));
+                            setPosts(list => patchRows(list, patched));
+                        })
                         .catch(() => {});
                     break;
                 }
                 case 1: {
-                    setHasMoreComments(true);
                     const c = await api.content.getDiscussionsByComments({tag:name,start_author:name,limit:20}).then(r=>Array.isArray(r)?r:[]).catch(()=>[]);
-                    if (!stillCurrent()) return;
+                    if (!isLatest()) return;
                     // Two-phase (mirrors case 0): every comment here is authored
                     // by the profile owner, whose avatar is `account` — already
                     // loaded — so the tab is VISUALLY COMPLETE now, gated on the
@@ -1126,15 +1265,24 @@ const useTabData = (api, account, category) => {
                     // order are identical.
                     const ownOnly = {}; if (account?.name) ownOnly[account.name] = account.image;
                     const buildComments = (vp) => overlayPendingVotes(c.map((x,i)=>enrichCommentForCard(x,account,i,vp)).sort((a,b)=>b.date-a.date));
-                    setComments(buildComments(ownOnly));
+                    const fresh = buildComments(ownOnly);
+                    const before = prev();
+                    const merged = keepLoadedTail(before, fresh);
+                    changed = !sameRows(before, merged, ROW_SHAPES[1]);
+                    if (merged === fresh) setHasMoreComments(true);
+                    setComments(merged);
                     fetchVoterProfiles(c, account, api)
-                        .then(vp => { if (stillCurrent()) setComments(buildComments(vp)); })
+                        .then(vp => {
+                            if (!isLatest()) return;
+                            const patched = buildComments(vp);
+                            setComments(list => patchRows(list, patched));
+                        })
                         .catch(() => {});
                     break;
                 }
                 case 2: {
                     const rr = await api.content.getRepliesByLastUpdate(name,'',20).then(r=>Array.isArray(r)?r:[]).catch(()=>[]);
-                    if (!stillCurrent()) return;
+                    if (!isLatest()) return;
                     // Two-phase (mirrors case 0 and the feeds' onAvatars path):
                     // commit text-ready reply cards NOW — gated on the replies
                     // fetch alone, one round-trip sooner — and resolve the
@@ -1142,15 +1290,18 @@ const useTabData = (api, account, category) => {
                     // the same names-only stub transformRepliesToCardFormat
                     // already falls back to on an account-lookup miss, so both
                     // phases map/sort the same `rr` and differ only in avatars
-                    // and display names.
+                    // and display names. (No load-more on this tab, so no tail
+                    // to keep: the fresh page is the list.)
                     const ownOnly = {}; if (account.name) ownOnly[account.name] = account.image;
-                    setReplies(overlayPendingVotes(transformRepliesToCardFormat(rr, account, ownOnly, [])));
+                    const fresh = overlayPendingVotes(transformRepliesToCardFormat(rr, account, ownOnly, []));
+                    changed = !sameRows(prev(), fresh, ROW_SHAPES[2]);
+                    setReplies(fresh);
                     const relAccs = rr.flatMap(r=>[r.author,r.parent_author].filter(Boolean));
                     const allVotes = rr.flatMap(r=>r.active_votes||[]);
                     const allToFetch = [...new Set([...allVotes.map(v=>v?.voter).filter(Boolean),...relAccs])];
                     if (allToFetch.length) {
                         api.accounts.getAccounts(allToFetch).then(a => {
-                            if (!stillCurrent() || !Array.isArray(a)) return;
+                            if (!isLatest() || !Array.isArray(a)) return;
                             const vp = {}; if (account.name) vp[account.name] = account.image;
                             const fa = a.filter(Boolean);
                             fa.forEach(x => { const n=x.name||x._entity_id; if(n) vp[n]=x._profile?.profile_image||''; });
@@ -1160,21 +1311,31 @@ const useTabData = (api, account, category) => {
                     break;
                 }
                 case 3: {
-                    setHasMoreTimeline(true); timelineFloorRef.current = Infinity;
                     const h = await api.accounts.getAccountHistory(name,-1,100).catch(()=>[]);
-                    if (!stillCurrent()) return;
-                    for (let i = 0; i < (h||[]).length; i++) { const ix = h[i]?.[0]; if (typeof ix === 'number' && ix < timelineFloorRef.current) timelineFloorRef.current = ix; }
-                    setTimeline(parseAccountHistoryToTimeline(h||[], name));
+                    if (!isLatest()) return;
+                    let floor = Infinity;
+                    for (let i = 0; i < (h||[]).length; i++) { const ix = h[i]?.[0]; if (typeof ix === 'number' && ix < floor) floor = ix; }
+                    const fresh = parseAccountHistoryToTimeline(h||[], name);
+                    const before = prev();
+                    const merged = keepLoadedTail(before, fresh);
+                    if (merged === fresh) { setHasMoreTimeline(true); timelineFloorRef.current = floor; }
+                        // Kept the deeper pages: the pagination floor stays where
+                    // they reached.
+                    else timelineFloorRef.current = Math.min(timelineFloorRef.current, floor);
+                    changed = !sameRows(before, merged, ROW_SHAPES[3]);
+                    setTimeline(merged);
                     break;
                 }
             }
-            if (!stillCurrent()) return;
-            // Successful full replacement of the tab's data — signal the
-            // main component to flush stale Masonry geometry for the
-            // currently-visible tab.
-            setDataVersion(v => v + 1);
         } catch (e) { console.error('[Profile] tab data error:', e); }
-        if (stillCurrent()) setTabLoading(false);
+        finally {
+            // A profile switch already zeroed the counters for the new profile.
+            if (currentNameRef.current === name) busyRef.current[cat] = Math.max(0, busyRef.current[cat] - 1);
+        }
+        if (!isLatest()) return;
+        // Re-lay this tab out only if its rows lay out differently now.
+        if (changed) setDataVersions(bumpTab(cat));
+        setLoadedMask(m => m | tabBit(cat));
     }, [api, account]);
 
     // ── Reset on profile switch ────────────────────────────────────────
@@ -1205,10 +1366,19 @@ const useTabData = (api, account, category) => {
         setHasMorePosts(true);
         setHasMoreComments(true);
         setHasMoreTimeline(true);
-        setDataVersion(v => v + 1);
+        // Nothing loaded and nothing in flight for the new profile yet; every
+        // tab's layout is invalid.
+        setLoadedMask(0);
+        busyRef.current = [0, 0, 0, 0];
+        setDataVersions(bumpAllTabs);
     }
 
-    useEffect(() => { if (account?.name) loadTabData(category); }, [account?.name, category]); // eslint-disable-line
+    // Load the visible tab on a tab switch and on a profile switch — once
+    // that profile has REALLY loaded (`ready`, see readyName in
+    // useProfileData). Keyed on the name alone, this used to fire for the
+    // `{ name }` placeholder committed while the API initializes, bail on
+    // the cold API, and never fire again for the real account (same name).
+    useEffect(() => { if (account?.name && ready) loadTabData(category); }, [account?.name, ready, category]); // eslint-disable-line
 
     // ── Refresh on new content for THIS profile ────────────────────────
     // When the user publishes a new post or comment, the relevant tab on
@@ -1291,25 +1461,29 @@ const useTabData = (api, account, category) => {
         };
     }, [api, account?.name, loadTabData]);
 
-    // Load-more handlers
+    // Load-more handlers. Each guards on its OWN tab's in-flight count and
+    // drops its page if the reader switched profiles while it was out — it
+    // used to append the previous profile's rows to the new one.
     const loadMorePosts = useCallback(async () => {
-        if (!api || tabLoading || !hasMorePosts || !account?.name || !posts.length) return; const last = posts[posts.length-1]; if (!last?.permlink) return;
-        setTabLoading(true);
+        if (!api || busyRef.current[0] > 0 || !hasMorePosts || !account?.name || !posts.length) return; const last = posts[posts.length-1]; if (!last?.permlink) return;
+        const name = account.name;
+        busyRef.current[0] += 1;
         try {
             // Paginate via database.getDiscussions("blog", …) using the last
             // visible post as the cursor. Bridge fallback mirrors the initial
             // load — same shape, slice(1) to drop the duplicated cursor row.
             let p = await api.content.getDiscussionsByBlog({
-                tag: account.name,
+                tag: name,
                 limit: 20,
-                start_author: account.name,
+                start_author: name,
                 start_permlink: last.permlink,
             }).then(r => Array.isArray(r) ? r : []).catch(e => { console.warn('[Profile] database.getDiscussions(blog) page failed:', e.message); return []; });
             if (!p.length) {
-                p = await api.communities.getAccountPosts(account.name, 'blog', {
-                    limit: 20, start_author: account.name, start_permlink: last.permlink,
+                p = await api.communities.getAccountPosts(name, 'blog', {
+                    limit: 20, start_author: name, start_permlink: last.permlink,
                 }).then(r => Array.isArray(r) ? r : []).catch(() => []);
             }
+            if (currentNameRef.current !== name) return;
             if (p.length > 1) {
                 const np = overlayPendingVotes(p.slice(1).map(x => enrichPostForCard(x, account)));
                 setPosts(prev => [...prev, ...np]);
@@ -1318,14 +1492,16 @@ const useTabData = (api, account, category) => {
                 setHasMorePosts(false);
             }
         } catch {}
-        setTabLoading(false);
-    }, [api, account, posts, tabLoading, hasMorePosts]);
+        finally { if (currentNameRef.current === name) busyRef.current[0] = Math.max(0, busyRef.current[0] - 1); }
+    }, [api, account, posts, hasMorePosts]);
 
     const loadMoreComments = useCallback(async () => {
-        if (!api || tabLoading || !hasMoreComments || !account?.name || !comments.length) return; const last = comments[comments.length-1]; if (!last?.permlink) return;
-        setTabLoading(true);
+        if (!api || busyRef.current[1] > 0 || !hasMoreComments || !account?.name || !comments.length) return; const last = comments[comments.length-1]; if (!last?.permlink) return;
+        const name = account.name;
+        busyRef.current[1] += 1;
         try {
-            const c = await api.content.getDiscussionsByComments({tag:account.name,start_author:account.name,start_permlink:last.permlink,limit:20});
+            const c = await api.content.getDiscussionsByComments({tag:name,start_author:name,start_permlink:last.permlink,limit:20});
+            if (currentNameRef.current !== name) return;
             if (Array.isArray(c) && c.length > 1) {
                 const nc = overlayPendingVotes(c.slice(1).map((x,i)=>enrichCommentForCard(x,account,comments.length+i)));
                 setComments(prev=>[...prev,...nc]);
@@ -1333,11 +1509,11 @@ const useTabData = (api, account, category) => {
                 setHasMoreComments(false);
             }
         } catch {}
-        setTabLoading(false);
-    }, [api, account, comments, tabLoading, hasMoreComments]);
+        finally { if (currentNameRef.current === name) busyRef.current[1] = Math.max(0, busyRef.current[1] - 1); }
+    }, [api, account, comments, hasMoreComments]);
 
     const loadMoreTimeline = useCallback(async () => {
-        if (!api || tabLoading || !hasMoreTimeline || !account?.name || !timeline.length) return;
+        if (!api || busyRef.current[3] > 0 || !hasMoreTimeline || !account?.name || !timeline.length) return;
         // Pagination cursor: the lowest RAW account-history index fetched so
         // far (timelineFloorRef), NOT the lowest parsed _histIndex — a page
         // can legitimately parse to zero events or dedup to zero new ids, and
@@ -1356,17 +1532,19 @@ const useTabData = (api, account, category) => {
         // (and condenser-lineage nodes assert start >= limit anyway), so ≤1 is
         // the effective floor of the history.
         if (!isFinite(fromIndex) || fromIndex <= 1) { setHasMoreTimeline(false); return; }
-        setTabLoading(true);
+        const name = account.name;
+        busyRef.current[3] += 1;
         try {
             const from = fromIndex - 1;
             // Clamp the limit near the head of the history: condenser-lineage
             // get_account_history asserts start >= limit, so a fixed 100 threw
             // on every 380ms poll once the cursor dropped under 100 and the
             // oldest ops never loaded. Harmless if dpixa already clamps.
-            const h = await api.accounts.getAccountHistory(account.name, from, Math.min(100, from));
+            const h = await api.accounts.getAccountHistory(name, from, Math.min(100, from));
+            if (currentNameRef.current !== name) return;
             if (Array.isArray(h) && h.length) {
                 for (let i = 0; i < h.length; i++) { const ix = h[i]?.[0]; if (typeof ix === 'number' && ix < timelineFloorRef.current) timelineFloorRef.current = ix; }
-                const nt = parseAccountHistoryToTimeline(h, account.name);
+                const nt = parseAccountHistoryToTimeline(h, name);
                 const ids = new Set(timeline.map(e=>e.id));
                 const u = nt.filter(e=>!ids.has(e.id));
                 if (u.length) {
@@ -1385,8 +1563,8 @@ const useTabData = (api, account, category) => {
                 setHasMoreTimeline(false);
             }
         } catch {}
-        setTabLoading(false);
-    }, [api, account, timeline, tabLoading, hasMoreTimeline]);
+        finally { if (currentNameRef.current === name) busyRef.current[3] = Math.max(0, busyRef.current[3] - 1); }
+    }, [api, account, timeline, hasMoreTimeline]);
 
     const handleVoteChange = useCallback((permlink, voter, weight) => {
         setPosts(prev => prev.map(p => applyVoteToPost(p, permlink, voter, weight)));
@@ -1405,25 +1583,75 @@ const useTabData = (api, account, category) => {
 
     // Stable return identity (same rationale as useProfileData above):
     // this object was a fresh literal every render, so every downstream
-    // hook keyed on `tabData` recomputed on every Profile render — scroll
-    // ticks included. setPosts is a stable useState setter, so it's
-    // intentionally not a dep.
+    // hook keyed on `tabData` recomputed on every Profile render. setPosts
+    // is a stable useState setter and isTabBusy a [] callback.
     return useMemo(() => ({
-        posts, comments, replies, timeline, tabLoading, dataVersion,
+        posts, comments, replies, timeline, dataVersions, loadedMask, isTabBusy,
         loadMorePosts, loadMoreComments, loadMoreTimeline, handleVoteChange, setPosts,
-    }), [posts, comments, replies, timeline, tabLoading, dataVersion,
+    }), [posts, comments, replies, timeline, dataVersions, loadedMask, isTabBusy,
         loadMorePosts, loadMoreComments, loadMoreTimeline, handleVoteChange]);
+};
+
+// ── Scroll chrome store ────────────────────────────────────────────────
+// The page chrome reads two numbers off the scroll position: the active
+// tab's scrollTop and the clamped direction accumulator `scrollY`. They used
+// to live in useState, so every 380 ms poll tick that moved them re-rendered
+// the WHOLE page while the reader scrolled — the sidebar (whose MUI Tabs
+// force a layout on every render), every dialog host, the card menu, the
+// empty state — just so the tab bar and the FAB could read two numbers.
+// They now live in this store, published every animation frame while the
+// tab scrolls (the band listener in useMasonryGrid) so the chrome moves with
+// the finger instead of up to 380 ms behind it. What each piece of chrome
+// draws is one threshold test on the two numbers — hidden or not — so each
+// subscribes to that flag (useScrollFlag below) and re-renders only when it
+// flips: a few times per scroll, not per frame and not per tick. The page
+// doesn't re-render at all.
+const createScrollStore = (readTop, readY) => {
+    const listeners = new Set();
+    let top = 0, y = 0;
+    return {
+        getScrollTop: () => top,
+        getScrollY: () => y,
+        subscribe(fn) { listeners.add(fn); return () => { listeners.delete(fn); }; },
+        // Take a fresh reading and notify only when it moved.
+        publish() {
+            const t = readTop(), v = readY();
+            if (t === top && v === y) return;
+            top = t; y = v;
+            Array.from(listeners).forEach((fn) => fn());
+        },
+    };
+};
+
+const bumpCount = (n) => n + 1;
+
+// One boolean derived from the position: re-renders the caller — not its
+// parent — only when it flips. Read during render, so it is never a render
+// behind the store, and a caller that swaps `predicate` (the tab bar's
+// mobile and desktop tests) gets the new answer in that same render.
+// Predicates should be module-level: a new one resubscribes.
+const useScrollFlag = (store, predicate) => {
+    const [, bump] = useReducer(bumpCount, 0);
+    const flag = !!predicate(store.getScrollTop(), store.getScrollY());
+    const shownRef = useRef(flag);
+    shownRef.current = flag;
+    useEffect(() => {
+        const sync = () => {
+            if (!!predicate(store.getScrollTop(), store.getScrollY()) !== shownRef.current) bump();
+        };
+        sync(); // anything published between this render and the subscription
+        return store.subscribe(sync);
+    }, [store, predicate]);
+    return flag;
 };
 
 // ── useMasonryGrid (multi-tab) ─────────────────────────────────────────
 const GUTTER = 16;
 const SCROLL_MS = 380;
 
-const useMasonryGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx, loadMoreThreshold, category, loadMoreFn, tabLoading }) => {
+const useMasonryGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx, loadMoreThreshold, category, loadMoreFn, isTabBusy }) => {
     const masonryRefs = useRef([null,null,null,null]);
     const rootRef = useRef(null);
-    const [scrollTops, setScrollTops] = useState([0,0,0,0]);
-    const [scrollY, setScrollY] = useState(0);
     const [rootDims, setRootDims] = useState({width:0,height:0});
     const [selectedPostIndex, setSelectedPostIndex] = useState(0);
 
@@ -1434,11 +1662,42 @@ const useMasonryGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels,
     const xyByIndex = useRef([]);
     const lastScrollCheckH = useRef(0);
     const loadMoreRef = useRef(loadMoreFn);
-    const tabLoadingRef = useRef(tabLoading);
+    const isTabBusyRef = useRef(isTabBusy);
     loadMoreRef.current = loadMoreFn;
-    tabLoadingRef.current = tabLoading;
+    isTabBusyRef.current = isTabBusy;
     const categoryRef = useRef(category);
     categoryRef.current = category;
+
+    // Position of the ACTIVE tab, read through refs at publish time.
+    const scrollStore = useMemo(() => createScrollStore(
+        () => scrollTopRef.current[categoryRef.current] || 0,
+        () => scrollYRef.current,
+    ), []);
+
+    // A tab switch mounts that tab's Masonry fresh, at the top. Drop the
+    // offset remembered from the tab's last visit — the chrome read that
+    // stale number until the next poll tick — and publish before paint.
+    useLayoutEffect(() => {
+        scrollTopRef.current[category] = 0;
+        scrollStore.publish();
+    }, [category, scrollStore]);
+
+    // One reading of tab `cat`'s live offset: its refs, then the chrome
+    // subscribers. Called every animation frame while the tab scrolls (band
+    // listener) and by the poll; returns whether anything moved. A reading
+    // for a tab that is no longer on screen — a frame queued just before a
+    // tab switch — is dropped: the direction accumulator is shared, and the
+    // old tab's unmounted container would read as a jump to the top.
+    const trackScroll = useCallback((cat, top) => {
+        if (cat !== categoryRef.current) return false;
+        const prevTop = scrollTopRef.current[cat], prevY = scrollYRef.current;
+        const yBound = cat === 0 ? 64 : 72;
+        const y = Math.min(Math.max(-yBound, prevY - (top - prevTop)), yBound);
+        if (top === prevTop && y === prevY) return false;
+        scrollTopRef.current[cat] = top; scrollYRef.current = y;
+        scrollStore.publish();
+        return true;
+    }, [scrollStore]);
 
     const columnCount = useMemo(() => {
         if (category !== 0) return 1;
@@ -1529,8 +1788,18 @@ const useMasonryGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels,
     );
     const setMasonryRef = useCallback((cat) => masonryRefCallbacks[cat], [masonryRefCallbacks]);
 
-    // Recompute on layout change (columnWidth/cache/positioner changed, or tab switch)
-    useEffect(() => {
+    // Recompute on a layout change. A new column width (resize, drawer
+    // toggle) hands the MOUNTED Masonry a fresh cache and positioner while it
+    // still holds the old positions, so it has to be flushed. A tab switch —
+    // or the first mount — needs none of that: the tab's Masonry mounts fresh
+    // against the new cache, and flushing it right after mount only bought a
+    // second full render pass in the middle of the switch. Layout effect, so
+    // a resize never paints a frame of stale positions.
+    const laidOutCategoryRef = useRef(null);
+    useLayoutEffect(() => {
+        const switched = laidOutCategoryRef.current !== category;
+        laidOutCategoryRef.current = category;
+        if (switched) return;
         const m = masonryRefs.current[category]; if (!m || !cellMeasurerCache || !cellPositioner) return;
         cellMeasurerCache.clearAll(); cellMeasurerCache.visible_ids = {};
         cellPositioner.reset(cellPositionerConfig); m.clearCellPositions(); m.forceUpdate();
@@ -1551,22 +1820,26 @@ const useMasonryGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels,
         // Band refresh listener — bound to the ACTIVE tab's scrolling
         // container from the poll (null until that Masonry's first real
         // render), rebinding when the tab or its Masonry changes.
-        const band = { el: null, masonry: null, onScroll: null, raf: 0, lastTop: 0 };
+        const band = { el: null, masonry: null, cat: -1, onScroll: null, raf: 0, lastTop: 0 };
         const unbindBand = () => {
             if (band.el && band.onScroll) band.el.removeEventListener("scroll", band.onScroll);
             if (band.raf) cancelAnimationFrame(band.raf);
-            band.el = null; band.masonry = null; band.onScroll = null; band.raf = 0;
+            band.el = null; band.masonry = null; band.cat = -1; band.onScroll = null; band.raf = 0;
         };
-        const bindBand = (masonry) => {
+        const bindBand = (masonry, cat) => {
             const el = masonry._scrollingContainer;
             if (band.el === el && band.masonry === masonry) return;
             unbindBand();
-            band.el = el; band.masonry = masonry; band.lastTop = el.scrollTop;
+            band.el = el; band.masonry = masonry; band.cat = cat; band.lastTop = el.scrollTop;
             band.onScroll = () => {
                 if (band.raf) return;
                 band.raf = requestAnimationFrame(() => {
                     band.raf = 0;
+                    if (el.isConnected === false) return; // its Masonry unmounted; the poll rebinds
                     const top = el.scrollTop;
+                    // The chrome reads every frame (see the scroll store);
+                    // the band only every bandStep pixels.
+                    trackScroll(band.cat, top);
                     if (Math.abs(top - band.lastTop) < bandStepRef.current) return;
                     band.lastTop = top;
                     masonry.forceUpdate(); // band evaluation only — the range is unchanged
@@ -1578,37 +1851,44 @@ const useMasonryGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels,
         const interval = setInterval(() => {
             const cat = categoryRef.current;
             const m = masonryRefs.current[cat]; if (!m?._scrollingContainer) return;
-            bindBand(m);
-            const prevST = scrollTopRef.current[cat]; const prevSY = scrollYRef.current;
+            bindBand(m, cat);
+            const prevST = scrollTopRef.current[cat];
             const curST = m._scrollingContainer.scrollTop;
             const yDiff = curST - prevST;
             lastScrollCheckH.current += yDiff;
             const reload = Math.abs(lastScrollCheckH.current) > (overscanByPixels/2);
-            const yBound = cat === 0 ? 64 : 72;
-            const newY = Math.min(Math.max(-yBound, prevSY - yDiff), yBound);
             // Infinite scroll — poll-driven, so it must also fire when the
             // current batch doesn't overflow the container (scrollHeight is
             // clamped to clientHeight then and no scroll can ever happen;
             // the old `scrollHeight > clientHeight` guard starved load-more
             // on under-filled first pages). Only require layout (ch > 0);
-            // the tab loaders' guards (tabLoading / hasMore* / empty list)
+            // the tab loaders' guards (in-flight / hasMore* / empty list)
             // no-op the extra ticks once the tail is reached.
-            if (!tabLoadingRef.current) { const el = m._scrollingContainer; const sh = el.scrollHeight||0, ch = el.clientHeight||0; if (ch > 0 && sh - curST - ch < loadMoreThreshold) loadMoreRef.current(); }
-            if (prevST !== curST || prevSY !== newY) {
-                scrollTopRef.current[cat] = curST; scrollYRef.current = newY;
-                setScrollTops(prev => { const n = [...prev]; n[cat] = curST; return n; });
-                setScrollY(newY);
-                if (reload) lastScrollCheckH.current = 0;
-            }
+            if (!isTabBusyRef.current(cat)) { const el = m._scrollingContainer; const sh = el.scrollHeight||0, ch = el.clientHeight||0; if (ch > 0 && sh - curST - ch < loadMoreThreshold) loadMoreRef.current(); }
+            // Fallback tracking — normally the band listener has already
+            // taken this reading on the last frame. Chrome subscribers only,
+            // no page render (see the store).
+            if (trackScroll(cat, curST) && reload) lastScrollCheckH.current = 0;
         }, SCROLL_MS);
         return () => { clearInterval(interval); unbindBand(); };
-    }, [overscanByPixels, loadMoreThreshold]);
+    }, [overscanByPixels, loadMoreThreshold, trackScroll]);
 
+    // A write that landed is recorded at once, the direction memory kept. A
+    // smooth one — the container's CSS — is still at its start when this
+    // returns; the band listener follows it frame by frame. Recording its
+    // target straight away made the first animation frame read as a jump
+    // the opposite way: a scroll back to the top flashed the tab bar out of
+    // view before bringing it back.
     const scrollTo = useCallback((top) => {
-        const m = masonryRefs.current[categoryRef.current]; if (!m?._scrollingContainer) return;
-        m._scrollingContainer.scrollTop = top; scrollTopRef.current[categoryRef.current] = top;
-        setScrollTops(prev => { const n = [...prev]; n[categoryRef.current] = top; return n; }); m.forceUpdate();
-    }, []);
+        const cat = categoryRef.current;
+        const m = masonryRefs.current[cat]; if (!m?._scrollingContainer) return;
+        const el = m._scrollingContainer;
+        const from = el.scrollTop;
+        el.scrollTop = top;
+        const now = el.scrollTop;
+        if (now !== from) { scrollTopRef.current[cat] = now; scrollStore.publish(); }
+        m.forceUpdate();
+    }, [scrollStore]);
 
     const scrollToIndex = useCallback((index) => {
         const idx = index ?? selectedPostIndex;
@@ -1644,18 +1924,18 @@ const useMasonryGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels,
     }, [cellMeasurerCache, cellPositioner, cellPositionerConfig]);
 
     // Stable return identity: re-allocate only when a field actually
-    // changes (scroll ticks still change scrollTops/scrollY, but tab-data
-    // updates, dialog opens, etc. no longer mint a fresh grid object).
-    // masonryRefs is a ref and setSelectedPostIndex a stable setter, so
-    // neither is a dep; SCROLL_MS and overscanByPixels are covered by the
-    // fields derived from them.
+    // changes. Scroll ticks no longer touch it at all — the position lives
+    // in `scrollStore` — so the grid object (and everything keyed on it)
+    // holds still while the reader scrolls. masonryRefs is a ref and
+    // setSelectedPostIndex a stable setter, so neither is a dep; SCROLL_MS
+    // and overscanByPixels are covered by the fields derived from them.
     return useMemo(() => ({
         masonryRefs, setMasonryRef, setRootElement, cellMeasurerCache, cellPositioner, columnWidth, columnCount,
-        scrollingResetTimeInterval: SCROLL_MS, scrollTops, scrollY, scrollTo, scrollToIndex,
+        scrollingResetTimeInterval: SCROLL_MS, scrollStore, scrollTo, scrollToIndex,
         pageWidth, postListHeight, rootDims, overscanByPixels, selectedPostIndex, setSelectedPostIndex,
         trackElementPosition, gutterSize, resetMasonry,
     }), [setMasonryRef, setRootElement, cellMeasurerCache, cellPositioner, columnWidth, columnCount,
-        scrollTops, scrollY, scrollTo, scrollToIndex, pageWidth, postListHeight, rootDims,
+        scrollStore, scrollTo, scrollToIndex, pageWidth, postListHeight, rootDims,
         overscanByPixels, selectedPostIndex, trackElementPosition, gutterSize, resetMasonry]);
 };
 
@@ -2069,6 +2349,52 @@ const GET_ITEM_ID = (item) => item.id;
 // over its first `itemsWithSizes` (see renderPostsMasonry in the component).
 const EMPTY_ITEMS = [];
 
+// ── Scroll-driven chrome ───────────────────────────────────────────────
+// The tab bar and the mobile card each draw one thing off the scroll
+// position — tucked away or not — so each takes that flag from the scroll
+// store and re-renders when it flips: a few times per scroll, where they
+// used to take the raw numbers and re-render (the card's whole expanded
+// body included) on every 380 ms tick. The tests are the very thresholds
+// the two components applied to the raw numbers. Not memo'd: they still
+// re-render with the page (language switch, data, own-profile flags), and
+// the memo'd components inside bail when nothing they show changed.
+const profileTabsHiddenMobile = (scrollTop, scrollY) => !(scrollY > 48 || scrollTop <= 72); // bottom bar slides down
+const profileTabsHiddenDesktop = (scrollTop, scrollY) => scrollY < -48 && scrollTop >= 72;  // top bar slides up
+const mobileCardHidden = (scrollTop, scrollY) => scrollY < 48 && scrollTop >= 72;           // card slides up
+
+const ProfileTabsLive = ({ scrollStore, ...rest }) => {
+    const hidden = useScrollFlag(scrollStore, rest.lessThan960w ? profileTabsHiddenMobile : profileTabsHiddenDesktop);
+    return <ProfileTabs {...rest} hidden={hidden} />;
+};
+
+const ProfileMobileCardLive = ({ scrollStore, ...rest }) => {
+    const hidden = useScrollFlag(scrollStore, mobileCardHidden);
+    return <ProfileMobileCard {...rest} hidden={hidden} />;
+};
+
+// The create FAB only cares whether it's shown — scrolling up, or near the
+// top — so it re-renders when that flips (or a prop changes) instead of on
+// every tick. Same transforms and markup as before. `label` arrives as a
+// string from the page, whose useLanguage() re-renders on a switch.
+const isCreateFabShown = (scrollTop, scrollY) => scrollY > 48 || scrollTop <= 72;
+const CREATE_FAB_ICON_STYLE = { marginRight: 12 };
+
+const ProfileCreateFab = memo(function ProfileCreateFab({ className, scrollStore, isMobile, pushedDown, visible, label, onClick }) {
+    const shown = useScrollFlag(scrollStore, isCreateFabShown);
+    const transform = isMobile
+        ? `translateX(50%) translateY(${pushedDown ? 200 : (shown ? -96 : 56)}px)`
+        : `translateY(${shown ? -96 : 8}px)`;
+    const style = useMemo(() => ({ transform }), [transform]);
+    return (
+        <div className={className} style={style}>
+            {visible && <Fab onClick={onClick} variant="extended" size={isMobile ? "small" : "medium"}>
+                {isMobile ? <AddAPhoto/> : <PhotoCameraRounded style={CREATE_FAB_ICON_STYLE}/>}
+                {isMobile ? null : <span>{label}</span>}
+            </Fab>}
+        </div>
+    );
+});
+
 
 // ╔══════════════════════════════════════════════════════════════════════╗
 // ║  5. MAIN COMPONENT                                                  ║
@@ -2102,10 +2428,25 @@ const Profile = ({ classes, settings, pathname, api }) => {
         return unlisten;
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Memoized on the live pathname: this parse (decodeURIComponent + three
-    // regexes) used to run on EVERY Profile render — including each 380 ms
-    // scroll tick — for a URL that only changes on navigation.
-    const parsed = useMemo(() => parseProfilePathname(livePathname), [livePathname]);
+    // ── The page's own URL ─────────────────────────────────────────────
+    // The live pathname, except while a post dialog sits on top of the
+    // page. A post URL (`/<category>/@author/permlink`) names the POST's
+    // author and no tab, and following it swapped the page underneath the
+    // dialog: opening a comment's root post from the comments tab (or a
+    // post from the timeline) flipped the tab to "posts" and, for someone
+    // else's post, loaded THAT author's profile — then swapped everything
+    // back on close: refetch, re-measure, scroll position gone. Hold the
+    // last page URL instead. A cold entry straight onto a post URL has no
+    // previous one and keeps deriving the profile from the post's author,
+    // as before.
+    const pagePathnameRef = useRef(null);
+    if (!pagePathnameRef.current || !isPostUrl(livePathname)) pagePathnameRef.current = livePathname;
+    const pagePathname = pagePathnameRef.current;
+
+    // Memoized on the page pathname: this parse (decodeURIComponent + three
+    // regexes) used to run on EVERY Profile render for a URL that only
+    // changes on navigation.
+    const parsed = useMemo(() => parseProfilePathname(pagePathname), [pagePathname]);
 
     // ── Category / tab ─────────────────────────────────────────────────
     const [category, setCategory] = useState(Math.max(0, TAB_NAMES.indexOf(parsed.tab)));
@@ -2113,8 +2454,10 @@ const Profile = ({ classes, settings, pathname, api }) => {
     const [mobileCardExpanded, setMobileCardExpanded] = useState(false);
 
     // ── Profile data ───────────────────────────────────────────────────
-    const profile = useProfileData(api, livePathname);
-    const tabData = useTabData(api, profile.account, category);
+    const profile = useProfileData(api, pagePathname);
+    const tabsReady = !!profile.readyName
+        && profile.readyName.toLowerCase() === String(profile.account?.name || '').toLowerCase();
+    const tabData = useTabData(api, profile.account, category, tabsReady);
 
     const loadMoreFn = useMemo(() => {
         if (category === 0) return tabData.loadMorePosts;
@@ -2123,7 +2466,7 @@ const Profile = ({ classes, settings, pathname, api }) => {
         return () => {};
     }, [category, tabData.loadMorePosts, tabData.loadMoreComments, tabData.loadMoreTimeline]);
 
-    const grid = useMasonryGrid({ windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx, loadMoreThreshold, category, loadMoreFn, tabLoading: tabData.tabLoading });
+    const grid = useMasonryGrid({ windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx, loadMoreThreshold, category, loadMoreFn, isTabBusy: tabData.isTabBusy });
 
     // NSFW filtering for the posts tab: when the filter is ON (_nsfw_filter
     // truthy) drop posts flagged nsfw before the masonry sees them. Blur of
@@ -2175,31 +2518,51 @@ const Profile = ({ classes, settings, pathname, api }) => {
     const [menuCardData, setMenuCardData] = useState({});
 
     // ── Sync URL → state for modals ────────────────────────────────────
+    // Keyed on the page URL (see pagePathname): a post dialog opening on
+    // top leaves the tab and the modals alone. No scrollTo(0) on a tab
+    // change any more — the new tab's Masonry mounts at the top, and the
+    // old call only scrolled (and force-rendered) the tab being unmounted.
     useEffect(() => {
-        const p = parseProfilePathname(livePathname);
-        const newTab = Math.max(0, TAB_NAMES.indexOf(p.tab));
-        if (newTab !== category) { setCategory(newTab); grid.scrollTo(0); }
-        if (p.modal === 'wallet') { setWalletOpen(true); setWalletView(walletViewToTabValue(p.walletView)); setFollowListOpened(''); }
-        else if (p.modal === 'followers') { setWalletOpen(false); setFollowListOpened('FOLLOWERS'); }
-        else if (p.modal === 'following') { setWalletOpen(false); setFollowListOpened('FOLLOWING'); }
+        const newTab = Math.max(0, TAB_NAMES.indexOf(parsed.tab));
+        if (newTab !== category) setCategory(newTab);
+        if (parsed.modal === 'wallet') { setWalletOpen(true); setWalletView(walletViewToTabValue(parsed.walletView)); setFollowListOpened(''); }
+        else if (parsed.modal === 'followers') { setWalletOpen(false); setFollowListOpened('FOLLOWERS'); }
+        else if (parsed.modal === 'following') { setWalletOpen(false); setFollowListOpened('FOLLOWING'); }
         else { setWalletOpen(false); setFollowListOpened(''); }
-    }, [livePathname]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [parsed]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Auto-collapse mobile card on scroll
-    useEffect(() => { if (grid.scrollY < 0 && grid.scrollTops[category] >= 72) setMobileCardExpanded(false); }, [grid.scrollY, grid.scrollTops, category]);
+    // Auto-collapse the expanded mobile card once the reader scrolls down
+    // past it — read off the scroll store, so the check costs no page render
+    // (it runs every frame while the tab scrolls; setting false over false
+    // bails without rendering).
+    const { scrollStore } = grid;
+    useEffect(() => {
+        const check = () => {
+            if (scrollStore.getScrollY() < 0 && scrollStore.getScrollTop() >= 72) setMobileCardExpanded(false);
+        };
+        check();
+        return scrollStore.subscribe(check);
+    }, [scrollStore]);
 
     // Force masonry update when data changes
     const activeData = [tabData.posts, tabData.comments, tabData.replies, tabData.timeline][category];
 
-    // Full masonry reset when a tab's data is fully replaced (initial load,
-    // account switch, post_published / comment_published refetch). Declared
-    // BEFORE the lighter forceUpdate effect below so the cache flush happens
-    // first; the subsequent forceUpdate then renders against fresh
-    // measurements. Without this, @pixagram/virtualized keeps stale cell heights
-    // and the new posts render against the previous list's geometry.
-    useEffect(() => {
+    // Full masonry reset for the VISIBLE tab when its rows were replaced by
+    // rows that lay out differently — its own data version moved (see
+    // useTabData) — or when the NSFW filter changes which posts it shows.
+    // Not on a tab switch: that tab's Masonry mounts fresh against a fresh
+    // cache. A background refresh of another tab, or a reload that returned
+    // the rows already on screen, no longer re-measures the grid being read.
+    // Layout effect: the stale geometry is cleared before the commit paints
+    // (it used to paint one frame of the new rows on the old heights).
+    const activeVersion = tabData.dataVersions[category];
+    const laidOutRef = useRef(null);
+    useLayoutEffect(() => {
+        const last = laidOutRef.current;
+        laidOutRef.current = { category, version: activeVersion, nsfwFilter: settings._nsfw_filter };
+        if (!last || last.category !== category) return;
         grid.resetMasonry(category);
-    }, [tabData.dataVersion, settings._nsfw_filter]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [category, activeVersion, settings._nsfw_filter]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => { const m = grid.masonryRefs.current[category]; if (m) m.forceUpdate(); }, [activeData, category]);
 
@@ -2226,9 +2589,12 @@ const Profile = ({ classes, settings, pathname, api }) => {
             const newUrl = buildProfileUrl(accountName, TAB_NAMES[value]||'posts', '');
             if (!newUrl) { grid.scrollTo(0); return; }
             HISTORY.replace(newUrl);
-            setCategory(value); grid.scrollTo(0);
+            // No scrollTo(0) here: the new tab's Masonry mounts at the top,
+            // and scrollTo would target — and force-render — the outgoing
+            // tab's Masonry right before it unmounts.
+            setCategory(value);
         }
-        else grid.scrollTo(0);
+        else grid.scrollTo(0); // same tab again: scroll back to its top
         // grid.scrollTo is a stable useCallback; depending on it instead of
         // the whole grid object keeps this handler from re-allocating on
         // every scroll tick.
@@ -2316,8 +2682,8 @@ const Profile = ({ classes, settings, pathname, api }) => {
 
     // Stable UI closures: the inline `() => set…(…)` lambdas previously
     // passed to ProfileMobileCard, the create FAB, CreateCommunityDialog and
-    // NewPost re-created a closure per render — and Profile re-renders on
-    // every 380 ms scroll tick — churning those children's props for
+    // NewPost re-created a closure per render — and Profile then re-rendered
+    // on every 380 ms scroll tick — churning those children's props for
     // nothing. All setters below are stable, so these are created once.
     const toggleMobileCard = useCallback(() => setMobileCardExpanded(p => !p), []);
     const closeMobileCard = useCallback(() => setMobileCardExpanded(false), []);
@@ -2367,10 +2733,9 @@ const Profile = ({ classes, settings, pathname, api }) => {
 
     // ── Cell renderers ─────────────────────────────────────────────────
     // Depend on the SPECIFIC grid fields the renderers read, not the whole
-    // `grid` object — its identity changes on every scroll tick (scrollTops/
-    // scrollY live in it), which used to re-create all four renderers — and
-    // hand the mounted MasonryExtended a new cellRenderer prop — every
-    // 380 ms while scrolling. The fields below only change on layout changes.
+    // `grid` object, so a layout-irrelevant change to it never re-creates
+    // the renderers (and hands the mounted MasonryExtended a new
+    // cellRenderer prop). The fields below only change on layout changes.
     const {
         columnCount, columnWidth, trackElementPosition, cellMeasurerCache,
         selectedPostIndex, postListHeight,
@@ -2515,17 +2880,19 @@ const Profile = ({ classes, settings, pathname, api }) => {
     }, [category, profile.isOwnProfile, accountName]);
 
     // ── Tab body ───────────────────────────────────────────────────────
-    // `activeData` (selected above from the same four arrays the old
-    // emptyStates entries carried in `data`) keeps the isEmpty semantics
-    // identical to the previous `es.data.length === 0` check.
-    const isEmpty = !tabData.tabLoading && !profile.isLoading && activeData.length === 0 && accountName;
+    // Empty only once this tab has loaded for this profile — and it stays
+    // empty-stated while a later reload revalidates in the background (the
+    // old global-loading test flashed it before every first load and blinked
+    // it, fade-in and all, whenever any tab refreshed).
+    const tabLoaded = (tabData.loadedMask & tabBit(category)) !== 0;
+    const isEmpty = tabLoaded && !profile.isLoading && activeData.length === 0 && accountName;
     let emptyState = isEmpty ? (<div className={classes.emptyState} key={`empty-${es.key}`}><div className={classes.emptyStateIcon}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{es.icon}</svg></div><div className={classes.emptyStateTitle}>{es.title}</div><div className={classes.emptyStateSubtitle}>{es.sub}</div></div>) : null;
 
     // The four Masonry instances are rendered UNCONTROLLED — no `scrollTop`
     // prop (see the note in MasonryExtended): they track their own scroll
     // events, and the hook's scrollTo writes the container directly. The
-    // `scrollTops` state above stays for the page chrome (ProfileTabs,
-    // ProfileMobileCard, the FAB), which still takes the raw numbers.
+    // page chrome (ProfileTabs, ProfileMobileCard, the FAB) reads the
+    // position from grid.scrollStore.
     // Memoized: this object is spread into every MasonryExtended; its four
     // inputs only change on a layout change, so the spread never churns the
     // Masonry's props on a scroll tick.
@@ -2558,8 +2925,8 @@ const Profile = ({ classes, settings, pathname, api }) => {
     // The posts tab's ImageMeasurer render-prop, memoized on what it forwards
     // (it was an inline arrow, failing ImageMeasurer's PureComponent compare
     // on every render). Everything it forwards only changes on a layout
-    // change, so it is stable across scroll ticks: a tick re-renders this
-    // page for its chrome, but neither the measurer nor the Masonry.
+    // change, so it is stable across scroll ticks: a page render (data, a
+    // dialog) re-renders neither the measurer nor the Masonry.
     const { cellMeasurerCache: gridCache, cellPositioner: gridPositioner, setMasonryRef } = grid;
     const renderPostsMasonry = useCallback((itemsWithSizes) => {
         postsItemsRef.current = itemsWithSizes || EMPTY_ITEMS;
@@ -2602,31 +2969,32 @@ const Profile = ({ classes, settings, pathname, api }) => {
         // Profile picture click → PictureDialog. Pass the click event itself
         // (its currentTarget is the element the picture flies out of).
         onOpenPicture: pictureNav.openPicture,
-        // Wallet FAB stepped aside for the picture's flight (see fabAway).
-        fabAway,
-    }), [profile, postsCount, tabValue, classes, openFollowListModal, goToCommunity, handleWalletOpen, pictureNav.openPicture, fabAway]);
+        // fabAway (the wallet FAB stepping aside for the picture's flight) is
+        // handed to the sidebar alone, below: it flips as the viewer opens,
+        // and in here it rebuilt this whole object — inline handlers
+        // included — so the mobile card (tabs, swipeable views and all)
+        // re-rendered on the picture's first frame for a prop it never reads.
+    }), [profile, postsCount, tabValue, classes, openFollowListModal, goToCommunity, handleWalletOpen, pictureNav.openPicture]);
 
     const bottomBarHidden = isMobile && mobileCardExpanded;
-    const fabTransform = isMobile
-        ? `translateX(50%) translateY(${bottomBarHidden ? 200 : ((grid.scrollY>48||grid.scrollTops[category]<=72)?-96:56)}px)`
-        : `translateY(${(grid.scrollY>48||grid.scrollTops[category]<=72)?-96:8}px)`;
+    const createLabel = t("words.create", {TUC: true});
 
     // ── Render ─────────────────────────────────────────────────────────
+    // The tab bar, mobile card and create FAB read their hidden/shown flag
+    // from grid.scrollStore and re-render themselves when it flips; nothing
+    // else on this page re-renders with the scroll.
     return (
         <React.Fragment>
             <div className={classes.root}>
-                {isMobile && <ProfileMobileCard {...sidebarProps} expanded={mobileCardExpanded} height={windowHeight} y={grid.scrollY} scrollTop={grid.scrollTops[category]} onToggleExpanded={toggleMobileCard} onCloseExpanded={closeMobileCard} />}
+                {isMobile && <ProfileMobileCardLive scrollStore={scrollStore} {...sidebarProps} expanded={mobileCardExpanded} height={windowHeight} onToggleExpanded={toggleMobileCard} onCloseExpanded={closeMobileCard} />}
                 <div className={classes.viewLeft}>
-                    <ProfileTabs classes={classes} category={category} isOwnProfile={profile.isOwnProfile} onChange={handleCategoryChange} lessThan960w={isMobile} y={grid.scrollY} scrollTop={grid.scrollTops[category]} forceHidden={bottomBarHidden} />
-                    <div className={classes.mainFab} style={{transform: fabTransform}}>
-                        {profile.isOwnProfile && <Fab onClick={openCreateArtwork} variant="extended" size={isMobile?"small":"medium"}>
-                            {isMobile ? <AddAPhoto/> : <PhotoCameraRounded style={{marginRight:12}}/>}
-                            {isMobile ? null : <span>{t("words.create", {TUC: true})}</span>}
-                        </Fab>}
-                    </div>
+                    <ProfileTabsLive scrollStore={scrollStore} classes={classes} category={category} isOwnProfile={profile.isOwnProfile} onChange={handleCategoryChange} lessThan960w={isMobile} forceHidden={bottomBarHidden} />
+                    <ProfileCreateFab className={classes.mainFab} scrollStore={scrollStore} isMobile={isMobile}
+                                      pushedDown={bottomBarHidden} visible={!!profile.isOwnProfile}
+                                      label={createLabel} onClick={openCreateArtwork} />
                     {emptyState}
                 </div>
-                {!isMobile && <ProfileSidebar {...sidebarProps} />}
+                {!isMobile && <ProfileSidebar {...sidebarProps} fabAway={fabAway} />}
             </div>
 
             <div style={{position:"absolute"}} ref={grid.setRootElement}>

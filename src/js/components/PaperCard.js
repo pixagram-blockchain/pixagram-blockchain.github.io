@@ -577,7 +577,16 @@ function PaperCardInner({
         setVoteNonce((n) => n + 1);
     }, [postKey, initialVoted]);
 
-    const [hasBeenVisible, setHasBeenVisible] = useState(!!visible);
+    // Visibility is managed by the parent; the card latches it. A ref set
+    // during render, not state synced by an effect: the effect version
+    // rendered every card twice on activation — once with the flag still
+    // off (changing nothing), then again after paint to flip it — so each
+    // band refresh paid two full card renders per card it activated, and
+    // the artwork's draw was queued a frame late. The latch never goes
+    // back, exactly as before.
+    const latchRef = useRef(!!visible);
+    if (visible) latchRef.current = true;
+    const hasBeenVisible = latchRef.current;
     const [upvoteLoading, setUpvoteLoading] = useState(false);
     const [downvoteLoading, setDownvoteLoading] = useState(false);
     // Synchronous guard: refs are mutable and shared across all closures,
@@ -586,9 +595,6 @@ function PaperCardInner({
 
     // NEW: Create canvas ref to access getBoundingClientRect
     const canvasRef = useRef(null);
-
-    // Visibility is managed by parent; latch once
-    useEffect(() => { if (visible && !hasBeenVisible) setHasBeenVisible(true); }, [visible, hasBeenVisible]);
 
     const rootRef = useRef(null);
 

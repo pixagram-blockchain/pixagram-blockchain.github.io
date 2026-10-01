@@ -1,6 +1,6 @@
 "use strict";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "preact/compat";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/compat";
 import { CellMeasurerCache, createMasonryCellPositioner } from "@pixagram/virtualized/dist/es/index";
 
 // ── useMasonryGrid ─────────────────────────────────────────────────────
@@ -43,11 +43,33 @@ import { CellMeasurerCache, createMasonryCellPositioner } from "@pixagram/virtua
 // reset render after it. The live position now lives in refs; the page
 // hands in `deriveChrome`, a pure function of (scrollTop, scrollY) that
 // returns the flags it needs, and the only state here is that object —
-// replaced when a flag flips, kept by identity otherwise. A page that
-// still needs the raw numbers (Community, whose tab bar and header take
-// them) returns them from deriveChrome and gets the previous behaviour.
+// replaced when a flag flips, kept by identity otherwise. deriveChrome must
+// return flags, not the raw numbers: the position is read every animation
+// frame (see "Chrome follows the scroll every frame"), so a value that
+// changes with every pixel would re-render the page every frame. A page may
+// swap its deriveChrome (Community has one per layout); the flags are then
+// re-derived from the live position before paint, not at the next scroll.
 // The Masonry is rendered uncontrolled (no scrollTop prop): it tracks its
 // own scroll events, and scrollTo below writes the container directly.
+//
+// ── Chrome follows the scroll every frame ──────────────────────────────
+// The position used to be read only by the 500 ms poll, so a tab bar slid
+// away — or came back on the way up — as much as half a second after the
+// scroll that should have moved it: the chrome visibly lagged the finger.
+// The band listener below already runs once per animation frame while the
+// container scrolls; it now takes that reading too. A frame on which no
+// flag flips costs a few comparisons (setChrome keeps the same object and
+// nothing renders). The poll still tracks as well — a fallback until the
+// listener is bound — and keeps the load-more check.
+//
+// ── Jumps vs. glides ───────────────────────────────────────────────────
+// The pages' scroll containers declare `scroll-behavior: smooth`, which
+// turns every plain scrollTop write into an animation. Right for "back to
+// the top" on the list being read; wrong when the list underneath has just
+// been replaced (a new sort, another community, a restored view): the reader
+// watched the viewport travel through the list, and every card on the way
+// got measured and started drawing its artwork. scrollTo(top, "instant")
+// lands at once; restoreScrollTop always does.
 //
 // ── Band refresh while scrolling ───────────────────────────────────────
 // The pages decide which cards are `visible` — within artworkAheadPx of
@@ -89,6 +111,26 @@ const sameChrome = (a, b) => {
     if (ka.length !== kb.length) return false;
     for (let i = 0; i < ka.length; i++) if (a[ka[i]] !== b[ka[i]]) return false;
     return true;
+};
+
+// Direction accumulator bound: drifts negative while scrolling down,
+// positive while scrolling up, clamped — what the chrome flags read for
+// "hide on the way down, show on the way up".
+const SCROLL_Y_BOUND = 64;
+
+// Write a scroll offset that lands at once, whatever the container's CSS
+// scroll-behavior (see "Jumps vs. glides"). The override has to be in the
+// computed style when the write picks its behaviour; getClientRects() forces
+// that recalc first — the scrollTop setter should do it itself, but Chromium
+// has been caught skipping it for window.scrollTo (Next.js works around the
+// same thing), and the write needs layout anyway, so it costs nothing. The
+// inline value is put back right after.
+const jumpTo = (el, top) => {
+    const prev = el.style.scrollBehavior;
+    el.style.scrollBehavior = "auto";
+    el.getClientRects();
+    el.scrollTop = top;
+    el.style.scrollBehavior = prev;
 };
 
 const useMasonryGrid = ({
@@ -140,6 +182,26 @@ const useMasonryGrid = ({
         const next = deriveChromeRef.current(top, y);
         setChrome(prev => (sameChrome(prev, next) ? prev : next));
     }, []);
+
+    // A swapped deriveChrome (Community's per-layout pair) re-derives from
+    // the live position before paint. Same flags → same object, no render;
+    // on mount this is the initial derivation again and bails.
+    useLayoutEffect(() => {
+        applyChrome(scrollTopRef.current, scrollYRef.current);
+    }, [deriveChrome, applyChrome]);
+
+    // One reading of the live offset: refs, then the flags. Called every
+    // animation frame while the container scrolls (band listener) and by
+    // the poll.
+    const trackScroll = useCallback((top) => {
+        const prevTop = scrollTopRef.current;
+        const prevY = scrollYRef.current;
+        const y = Math.min(Math.max(-SCROLL_Y_BOUND, prevY - (top - prevTop)), SCROLL_Y_BOUND);
+        if (top === prevTop && y === prevY) return;
+        scrollTopRef.current = top;
+        scrollYRef.current = y;
+        applyChrome(top, y);
+    }, [applyChrome]);
 
     // ── Column layout ──────────────────────────────────────────────────
     const columnCount = useMemo(
@@ -243,7 +305,17 @@ const useMasonryGrid = ({
     const setMasonryElement = useCallback((el) => { if (el) masonryRef.current = el; }, []);
 
     // ── Recompute on layout change ─────────────────────────────────────
-    useEffect(() => {
+    // A new column width (resize, drawer toggle, the root's first real
+    // measurement) hands the MOUNTED Masonry a fresh cache and positioner
+    // while it still holds the old positions. As a passive effect the flush
+    // ran after that render had painted: a frame of cards at their old
+    // offsets with the new width — overlapping or gapped — on every resize.
+    // A layout effect flushes before paint. The first run is skipped: on
+    // mount the cache and positioner are brand new, and flushing them only
+    // threw away the Masonry's first measuring pass.
+    const layoutSeenRef = useRef(false);
+    useLayoutEffect(() => {
+        if (!layoutSeenRef.current) { layoutSeenRef.current = true; return; }
         const masonry = masonryRef.current;
         if (!masonry || !cellMeasurerCache || !cellPositioner) return;
         cellMeasurerCache.clearAll();
@@ -294,7 +366,13 @@ const useMasonryGrid = ({
                 if (band.raf) return;
                 band.raf = requestAnimationFrame(() => {
                     band.raf = 0;
+                    // A frame queued just before the Masonry was replaced:
+                    // its detached container would read as a jump to 0.
+                    if (el.isConnected === false) return;
                     const top = el.scrollTop;
+                    // The chrome reads every frame (see the header note);
+                    // the band only every bandStep pixels.
+                    trackScroll(top);
                     if (Math.abs(top - band.lastTop) < bandStepRef.current) return;
                     band.lastTop = top;
                     // Re-runs the cellRenderer over the mounted cells with the
@@ -313,16 +391,8 @@ const useMasonryGrid = ({
             if (!masonry?._scrollingContainer) return;
             bindBand(masonry);
 
-            const prevST = scrollTopRef.current;
-            const prevSY = scrollYRef.current;
             const container = masonry._scrollingContainer;
             const currentST = container.scrollTop;
-            const yDiff = currentST - prevST;
-
-            // Direction accumulator: drifts negative while scrolling down,
-            // positive while scrolling up, clamped — what the chrome flags
-            // read for "hide on the way down, show on the way up".
-            const newY = Math.min(Math.max(-64, prevSY - yDiff), 64);
 
             // Infinite scroll detection (only when the page wired a loader).
             // The trigger is poll-driven, so it must also fire when the
@@ -345,14 +415,12 @@ const useMasonryGrid = ({
                 }
             }
 
-            if (prevST !== currentST || prevSY !== newY) {
-                scrollTopRef.current = currentST;
-                scrollYRef.current = newY;
-                applyChrome(currentST, newY);
-            }
+            // Fallback tracking — normally the band listener has already
+            // taken this reading on the last frame and nothing moves here.
+            trackScroll(currentST);
         }, SCROLL_INTERVAL_MS);
         return () => { clearInterval(interval); unbindBand(); };
-    }, [loadMoreThreshold, applyChrome]);
+    }, [loadMoreThreshold, trackScroll]);
 
     // ── Scroll control ─────────────────────────────────────────────────
     // Writes the container; the Masonry (uncontrolled) picks the new offset
@@ -360,12 +428,28 @@ const useMasonryGrid = ({
     // where the write lands inside the current cell range — the event then
     // changes nothing, and a reset of the caches (the usual reason to scroll
     // to 0) still needs a render.
-    const scrollTo = useCallback((top) => {
+    //
+    // behavior: omitted → whatever the container's CSS says (smooth on the
+    // pages); "instant" → lands at once (see "Jumps vs. glides").
+    //
+    // A write that landed is recorded at once, the direction memory kept, so
+    // the chrome flips in the same render. A smooth one is still at its start
+    // when the call returns: the band listener follows it frame by frame. It
+    // used to be recorded at its target straight away, which the first
+    // animation frame then read as a jump the opposite way — a scroll to the
+    // top flashed the tab bar out of view before bringing it back.
+    const scrollTo = useCallback((top, behavior) => {
         const masonry = masonryRef.current;
-        if (!masonry?._scrollingContainer) return;
-        masonry._scrollingContainer.scrollTop = top;
-        scrollTopRef.current = top;
-        applyChrome(top, scrollYRef.current);
+        const el = masonry?._scrollingContainer;
+        if (!el) return;
+        const from = el.scrollTop;
+        if (behavior === "instant") jumpTo(el, top);
+        else el.scrollTop = top;
+        const now = el.scrollTop;
+        if (behavior === "instant" || now !== from) {
+            scrollTopRef.current = now;
+            applyChrome(now, scrollYRef.current);
+        }
         masonry.forceUpdate();
     }, [applyChrome]);
 
@@ -394,7 +478,9 @@ const useMasonryGrid = ({
     // Best-effort scroll restore for cache-served views. The masonry needs
     // measured cells before a deep scrollTop sticks (scrollHeight grows as
     // ImageMeasurer resolves), so retry until the target is reachable.
-    // Returns a cancel function for effect cleanup.
+    // Returns a cancel function for effect cleanup. Lands at once: under the
+    // containers' smooth scrolling the restore used to glide down from the
+    // top through every card above the saved offset.
     const restoreScrollTop = useCallback((top) => {
         if (!top || top <= 0) return () => {};
         let cancelled = false;
@@ -404,7 +490,7 @@ const useMasonryGrid = ({
             const masonry = masonryRef.current;
             const container = masonry?._scrollingContainer;
             if (container && container.scrollHeight >= top + container.clientHeight) {
-                scrollTo(top);
+                scrollTo(top, "instant");
                 return;
             }
             if (++attempts < 40) setTimeout(tryRestore, 100);

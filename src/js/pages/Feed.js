@@ -1,5 +1,5 @@
 import * as React from "preact/compat";
-import { useState, useEffect, useCallback, useMemo, useRef, memo } from "preact/compat";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, memo } from "preact/compat";
 // Coalesce co-arriving setState calls into one render. Preact auto-batches
 // inside event handlers but NOT across an `await` (each setState in a promise
 // continuation would otherwise re-render separately).
@@ -618,7 +618,10 @@ const applyVoteToPost = (post, permlink, voter, weight) => applyOptimisticVote(p
 // ╚══════════════════════════════════════════════════════════════════════╝
 
 // ── useFeedData ────────────────────────────────────────────────────────
-const useFeedData = (api, pathname) => {
+// `gridBridgeRef.current` is the page's grid (getScrollTop / scrollTo) — the
+// grid is built after this hook (it needs loadMorePosts), so it is reached
+// through a ref the page fills in during render.
+const useFeedData = (api, pathname, gridBridgeRef) => {
     // Lazy initializer: the argument form re-ran the regex on EVERY render
     // (scroll ticks included) just to be discarded after mount.
     const [sorting, setSorting] = useState(() => parseSortFromPathname(pathname));
@@ -675,30 +678,41 @@ const useFeedData = (api, pathname) => {
         prevPathnameRef.current = pathname;
         if (prev === pathname) return;
 
-        // Opening / closing PostDialog (and in-dialog next/prev navigation)
-        // only changes the URL by adding, removing, or swapping a
-        // `/@author/permlink` suffix on top of the same `/<sort>/[tag]`
-        // feed identity. Skip the reload in that case.
-        //
-        // parseTagFromPathname requires `[a-z\-]+` after the sort segment
-        // and rejects `@`, so a tagged-feed URL like `/trending/some-tag`
-        // opening a post becomes `/trending/@a/p` — same sort but tag
-        // collapses from "some-tag" to "". Without this guard, loadPage
-        // refetches with an empty tag and the masonry is replaced by an
-        // untagged-trending query. Even on the untagged feed (just
-        // `/trending` → `/trending/@a/p`), loadPage still wipes scroll
-        // position, the `hasMore` flag, and any already-paginated extra
-        // pages, then bumps dataVersion which forces a full Masonry
-        // reset. On close, HISTORY.go(-1) returns to the original URL
-        // and this effect fires again, refetching a second time.
-        //
-        // The post overlay's own open/close/swap logic lives in
-        // usePostNavigation (which subscribes to HISTORY directly), so
-        // skipping here doesn't drop any work — the underlying feed is
-        // simply left untouched while the overlay is doing its thing.
-        if (isPostUrl(prev) || isPostUrl(pathname)) return;
+        // A post URL is the overlay's business (usePostNavigation subscribes
+        // to HISTORY directly). Opening / closing PostDialog (and in-dialog
+        // next/prev navigation) only adds, swaps or removes a
+        // `/@author/permlink` URL on top of the listing, and the listing must
+        // be left alone: parseTagFromPathname can't even read the tag off a
+        // post URL (`[a-z\-]+` rejects the `@`, so `/trending/some-tag`
+        // opening a post reads as untagged), and a reload there wiped scroll
+        // position, the `hasMore` flag and any already-paginated pages, then
+        // forced a full Masonry reset — and did it all again on close.
+        if (isPostUrl(pathname)) return;
 
+        // A listing URL: reload only when it names a different listing than
+        // the one on screen (sort + tag, kept in feedIdRef). Closing the
+        // dialog back onto the same listing stays a no-op, as before. A
+        // listing reached FROM a post URL — a tag link inside PostDialog —
+        // now loads: the old `isPostUrl(prev)` skip left the previous
+        // listing on screen under the new URL.
         const newSorting = parseSortFromPathname(pathname);
+        const cur = feedIdRef.current;
+        if (cur && cur.sortIndex === newSorting
+            && parseTagFromPathname(cur.path) === parseTagFromPathname(pathname)) return;
+
+        // A different listing under the mounted page (a tag link, back /
+        // forward between listings): bank the outgoing listing's offset and
+        // start the new one at its top — what a tab click already does
+        // (handleSortingChangeWithScroll). The new list used to re-pack under
+        // the old offset, landing the reader mid-list (or on a clamped
+        // bottom that set off load-more at once) of a listing they had just
+        // opened. A cache-served list restores its own saved offset after.
+        const bridge = gridBridgeRef && gridBridgeRef.current;
+        if (bridge) {
+            if (cacheKeyRef.current) viewCache.patch(cacheKeyRef.current, { scrollTop: bridge.getScrollTop() });
+            bridge.scrollTo(0, 'instant'); // a jump, not a glide — see handleSortingChangeWithScroll
+        }
+
         feedIdRef.current = { sortIndex: newSorting, path: pathname };
         setSorting(newSorting);
         loadPage(newSorting, pathname);
@@ -1545,11 +1559,14 @@ const Feed = ({ classes, settings, pathname, api }) => {
     ], [newerLabel, hottestLabel, trendingLabel, promotedLabel]);
     const createLabel = t("words.create", { TUC: true });
 
+    // The data hook reaches the grid's scroll position through this ref (the
+    // grid is built after it), set right after useFeedGrid below.
+    const gridBridgeRef = useRef(null);
     const {
         sorting, posts, loggedInUser, dataVersion,
         handleSortingChange, handleVoteChange, loadMorePosts, loadingMore,
         consumePendingScrollRestore, saveScrollPosition,
-    } = useFeedData(api, pathname);
+    } = useFeedData(api, pathname, gridBridgeRef);
 
     // NSFW filtering: when the filter is ON (_nsfw_filter truthy) drop posts
     // flagged nsfw so they never enter the masonry. Blurring of shown posts is
@@ -1563,6 +1580,7 @@ const Feed = ({ classes, settings, pathname, api }) => {
         windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx,
         loadMoreThreshold, loadMorePosts, loadingMore,
     });
+    gridBridgeRef.current = grid;
 
     // Fallback URL when closing the post overlay with no browsable history
     // to step back into (e.g. the user landed here directly on the post URL).
@@ -1596,7 +1614,11 @@ const Feed = ({ classes, settings, pathname, api }) => {
 
     // Full masonry reset when data is fully replaced (sorting/filter change).
     // Clears stale CellMeasurerCache heights from the previous sort's posts.
-    useEffect(() => {
+    // A layout effect (as FeedPersonal's re-pack): the flush lands before the
+    // commit paints, so a replaced list never shows a frame laid out on the
+    // previous list's heights. It still runs before the passive scroll
+    // restore below.
+    useLayoutEffect(() => {
         grid.resetMasonry();
     }, [dataVersion, settings._nsfw_filter]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1683,12 +1705,17 @@ const Feed = ({ classes, settings, pathname, api }) => {
         // loadPage swaps the key synchronously right after) so tabbing back
         // restores position too.
         saveScrollPosition(grid.getScrollTop());
-        grid.scrollTo(0);
+        // A new sort jumps to the top instead of the container's smooth
+        // glide: its list replaces this one — on a cache hit within the same
+        // render, while the glide would still be travelling, and then fight
+        // the cached view's own offset restore. The current sort's tab keeps
+        // the glide back to its top.
+        grid.scrollTo(0, value !== sorting ? 'instant' : undefined);
         handleSortingChange(e, value);
         // Depend on the two stable grid functions, not the whole grid object
-        // (whose identity changes every scroll tick) — keeps the Tabs
+        // (whose identity changes with every chrome flip) — keeps the Tabs
         // onChange prop from churning while scrolling.
-    }, [handleSortingChange, grid.getScrollTop, grid.scrollTo, saveScrollPosition]);
+    }, [handleSortingChange, sorting, grid.getScrollTop, grid.scrollTo, saveScrollPosition]);
 
     const openCardMenu = useCallback((event, data) => {
         setMenuCardXY(Int32Array.of(event.x - 24, event.y - 24));
@@ -1724,11 +1751,11 @@ const Feed = ({ classes, settings, pathname, api }) => {
 
     // ── Cell renderer ──────────────────────────────────────────────────
     // Depend on the SPECIFIC grid fields the renderer reads, not the whole
-    // `grid` object: the shared masonry hook returns a fresh object whose
-    // identity changes on every scroll tick (scrollTop/scrollY live in it),
-    // which used to re-create this renderer — and hand MasonryExtended a new
-    // cellRenderer prop — every 380 ms while scrolling. The fields below are
-    // all referentially stable between layout changes.
+    // `grid` object: the page rebuilds it on every render — every chrome
+    // flip, and every scroll tick back when scrollTop/scrollY lived in it —
+    // which used to re-create this renderer and hand MasonryExtended a new
+    // cellRenderer prop each time. The fields below are all referentially
+    // stable between layout changes.
     //
     // `posts` is deliberately NOT a dependency either: the renderer reads its
     // rows from parent.props.itemsWithSizes, and the forceUpdate effect on

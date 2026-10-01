@@ -11,11 +11,11 @@ export const SEARCH_API_URL = (
 ).replace(/\/+$/, "");
 
 export const LIMITS = Object.freeze({
-    users: 12,
-    tags: 24,
-    communities: 12,
-    artworks: 16,
-    posts: 12,
+    users: 16,
+    tags: 32,
+    communities: 16,
+    artworks: 32,
+    posts: 16,
 });
 
 // Community accounts are named portal-<id>; lookup_accounts returns them like any

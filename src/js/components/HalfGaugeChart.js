@@ -46,10 +46,10 @@ const styles = theme => ({
             },
         },
         "& span": {
-            fontSize: "1.5rem",
-            fontWeight: 600,
+            fontSize: "1.25rem",
+            fontWeight: 500,
             color: "#999",
-            marginBottom: 8,
+            marginBottom: 0,
             display: "block",
             fontFamily: '"Industry Book", "Normative Pro"',
             [theme.breakpoints.down("sm")]: {
@@ -504,7 +504,7 @@ const HalfGaugeChart = ({ classes, data, totalValue, delegationDeltaValue = 0, o
                                     amount: formatValue(deltaDisplayAbs * rate),
                                     currency: cur
                                 }}
-                                slots={[<b className={"monospace"} key="0" />]} />
+                                slots={[<b className={"monospace"} style={{display: "block"}} key="0" />]} />
                         </p>
                     )}
                 </div>
@@ -525,7 +525,7 @@ const HalfGaugeChart = ({ classes, data, totalValue, delegationDeltaValue = 0, o
                             />
                             <div className={classes.legendText}>
                                 <strong>{slice.name}</strong>
-                                <span className={"monospace"}>{formatFiat(slice.value * rate, cur, { min: 0, max: 2 })}</span>
+                                <span  className={"monospace"}>{formatFiat(slice.value * rate, cur, { min: 0, max: 2 })}</span>
                             </div>
                         </div>
                     </Fade>

@@ -45,6 +45,33 @@ const ST_PICTURE_BUTTON_COLLAPSED = { borderRadius: "0px 12px 12px 0px" };
 const ST_PICTURE_BUTTON_OPENED = { borderRadius: "8px" };
 const ST_PICTURE_BUTTON_BIG = { display: "flex", borderRadius: "24px" };
 
+// Whether the card is slid up out of view. Community passes `hidden`, a flag
+// that flips a few times per scroll; the raw y/scrollTop pair is still
+// accepted and reduced to the same flag with the thresholds this card has
+// always used, so the comparator below ignores ticks that cross none of them.
+const isTucked = ({ hidden, y, scrollTop }) => (
+    hidden !== undefined ? !!hidden : (48 > y && scrollTop >= 72)
+);
+const ST_SHOWN = { transform: "translateY(0px)" };
+const ST_TUCKED = { transform: "translateY(-96px)" };
+
+// Every prop by identity, except the raw scroll numbers, which only matter
+// through isTucked. The previous comparator listed eleven props and skipped
+// the rest, the handlers among them — only safe while the raw numbers
+// re-rendered this card on nearly every scroll tick anyway. onTextEditor
+// closes over the current sort: after a sort switch with the page at the
+// top, the write button pushed the editor URL under the OLD sort, and the
+// page, reading the sort off the URL, flipped the listing back.
+const sameProps = (prev, next) => {
+    for (const k in prev) {
+        if (k !== "y" && k !== "scrollTop" && prev[k] !== next[k]) return false;
+    }
+    for (const k in next) {
+        if (k !== "y" && k !== "scrollTop" && !(k in prev)) return false;
+    }
+    return isTucked(prev) === isTucked(next);
+};
+
 
 const CommunityHeader = React.memo(({
                                         community,
@@ -54,6 +81,7 @@ const CommunityHeader = React.memo(({
                                         mobileCardExpanded,
                                         joined,
                                         tabValue,
+                                        hidden,
                                         y,
                                         scrollTop,
                                         height,
@@ -70,7 +98,7 @@ const CommunityHeader = React.memo(({
                                         classes
                                     }) => {
     useLanguage();
-    const transform = `translateY(${(48 > y && scrollTop >= 72) ? -96 : 0}px)`;
+    const slideStyle = isTucked({ hidden, y, scrollTop }) ? ST_TUCKED : ST_SHOWN;
 
     // Dismiss on a real CLICK on the backdrop (not a pointer/touch-down), and
     // consume the event so the synthesized click can't fall through to a feed
@@ -88,7 +116,7 @@ const CommunityHeader = React.memo(({
                 onClick={handleBackdropClick}
                 aria-hidden={!mobileCardExpanded}
             />
-            <div className={classes.viewMobile} style={{transform}}>
+            <div className={classes.viewMobile} style={slideStyle}>
                 <Card className={mobileCardExpanded ? classes.viewMobileCardOpened : classes.viewMobileCard}>
                     <CardHeader
                         onClick={onToggleMobileCard}
@@ -188,18 +216,6 @@ const CommunityHeader = React.memo(({
             </div>
         </React.Fragment>
     );
-}, (prevProps, nextProps) => {
-    return prevProps.mobileCardExpanded === nextProps.mobileCardExpanded &&
-        prevProps.joined === nextProps.joined &&
-        prevProps.tabValue === nextProps.tabValue &&
-        prevProps.y === nextProps.y &&
-        prevProps.scrollTop === nextProps.scrollTop &&
-        prevProps.community === nextProps.community &&
-        prevProps.members === nextProps.members &&
-        prevProps.rules === nextProps.rules &&
-        prevProps.postsCount === nextProps.postsCount &&
-        prevProps.isAdmin === nextProps.isAdmin &&
-        prevProps.onOpenPicture === nextProps.onOpenPicture;
-});
+}, sameProps);
 
 export default CommunityHeader;

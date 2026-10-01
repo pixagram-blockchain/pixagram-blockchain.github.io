@@ -22,11 +22,36 @@ import { t, useLanguage } from "../utils/text";
 const LABEL_ROW = { display: "inline-flex", alignItems: "center" };
 const LABEL_TEXT = { marginLeft: 8 };
 
+// Whether the bar is tucked away: slid down off the bottom edge on mobile,
+// up off the top edge on desktop. Profile passes `hidden`, a flag that flips
+// a few times per scroll; the raw y/scrollTop pair is still accepted and
+// reduced to the same flag with the thresholds this bar has always used.
+const isTucked = ({ hidden, lessThan960w, y, scrollTop }) => (
+    hidden !== undefined
+        ? !!hidden
+        : (lessThan960w ? !(y > 48 || scrollTop <= 72) : (-48 > y && scrollTop >= 72))
+);
+
+// Shallow, like the default memo compare, except that the raw scroll numbers
+// count only through isTucked — a tick that crosses no threshold changes
+// nothing on screen, so it no longer re-renders the Tabs (whose indicator
+// measures the DOM on every render).
+const sameProps = (prev, next) => {
+    for (const k in prev) {
+        if (k !== "y" && k !== "scrollTop" && prev[k] !== next[k]) return false;
+    }
+    for (const k in next) {
+        if (k !== "y" && k !== "scrollTop" && !(k in prev)) return false;
+    }
+    return isTucked(prev) === isTucked(next);
+};
+
 const ProfileTabs = React.memo(({
                                     classes,
                                     category,
                                     onChange,
                                     lessThan960w,
+                                    hidden,
                                     y,
                                     isOwnProfile,
                                     scrollTop
@@ -54,9 +79,10 @@ const ProfileTabs = React.memo(({
     ], labelDeps);
 
     const tabsStyle = lessThan960w ? {bottom: 0, top: "auto"}: {bottom: "auto", top: 0};
+    const tucked = isTucked({ hidden, lessThan960w, y, scrollTop });
     const transform = lessThan960w ?
-        `translateY(${(y > 48 || scrollTop <= 72) ? 0: 72}px)` :
-        `translateY(${(-48 > y && scrollTop >= 72) ? -88: 0}px)`;
+        `translateY(${tucked ? 72 : 0}px)` :
+        `translateY(${tucked ? -88 : 0}px)`;
 
     return (
         <Tabs
@@ -90,6 +116,6 @@ const ProfileTabs = React.memo(({
             />
         </Tabs>
     );
-});
+}, sameProps);
 
 export default ProfileTabs;

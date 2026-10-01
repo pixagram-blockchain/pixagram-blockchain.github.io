@@ -272,7 +272,7 @@ class PixaWalletPowerDialog extends React.PureComponent {
 
         const isPowerDown = this._isPowerDown();
         const title = isPowerDown ? t("components.pixa_wallet_dialog.power_down_2") : t("components.pixa_wallet_dialog.power_up");
-        const startAdornment = isPowerDown ? <PixaPower style={{marginBottom:-12}}/> : <PixaLiquid style={{marginBottom:-12}}/>;
+        const startAdornment = isPowerDown ? <PixaPower style={{marginBottom:-24, fontSize: "1.5em", marginRight: 8}}/> : <PixaLiquid style={{marginBottom:-12}}/>;
         const currency = this._currency();
         const description = this._description();
         const max = this._currentMax();

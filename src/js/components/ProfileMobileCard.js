@@ -30,6 +30,30 @@ const PICTURE_BUTTON_COLLAPSED = { borderRadius: "0px 12px 12px 0px" };
 const PICTURE_BUTTON_OPENED = { borderRadius: "8px" };
 const PICTURE_BUTTON_BIG = { borderRadius: "24px" };
 
+// Whether the card is slid up out of view. Profile passes `hidden`, a flag
+// that flips a few times per scroll; the raw y/scrollTop pair is still
+// accepted and reduced to the same flag with the thresholds this card has
+// always used.
+const isTucked = ({ hidden, y, scrollTop }) => (
+    hidden !== undefined ? !!hidden : (48 > y && scrollTop >= 72)
+);
+const SLIDE_SHOWN = { transform: "translateY(0px)" };
+const SLIDE_TUCKED = { transform: "translateY(-96px)" };
+
+// Shallow, like the default memo compare, except that the raw scroll numbers
+// count only through isTucked. This card renders its whole expanded body
+// (tabs, swipeable views, follow buttons, voting power) even while
+// collapsed, and a raw-number caller re-rendered all of it on every tick.
+const sameProps = (prev, next) => {
+    for (const k in prev) {
+        if (k !== "y" && k !== "scrollTop" && prev[k] !== next[k]) return false;
+    }
+    for (const k in next) {
+        if (k !== "y" && k !== "scrollTop" && !(k in prev)) return false;
+    }
+    return isTucked(prev) === isTucked(next);
+};
+
 const ProfileMobileCard = React.memo(({
                                           classes,
                                           account,
@@ -37,6 +61,7 @@ const ProfileMobileCard = React.memo(({
                                           following,
                                           tabValue,
                                           height,
+                                          hidden,
                                           y,
                                           scrollTop,
                                           timeAgo,
@@ -125,7 +150,7 @@ const ProfileMobileCard = React.memo(({
                 onClick={handleBackdropClick}
                 aria-hidden={!expanded}
             />
-            <div className={classes.viewMobile} style={{transform: `translateY(${(48 > y && scrollTop >= 72) ? -96: 0}px)`}}>
+            <div className={classes.viewMobile} style={isTucked({ hidden, y, scrollTop }) ? SLIDE_TUCKED : SLIDE_SHOWN}>
                 <Card className={(expanded ? classes.viewMobileCardOpened : classes.viewMobileCard)} >
                     <CardHeader
                         onClick={onToggleExpanded}
@@ -243,6 +268,6 @@ const ProfileMobileCard = React.memo(({
             </div>
         </React.Fragment>
     );
-});
+}, sameProps);
 
 export default ProfileMobileCard;

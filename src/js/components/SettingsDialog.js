@@ -761,6 +761,7 @@ const SettingsDialog = (props) => {
                     )}
                     <div className={classes.licenseActions}>
                         <Button
+                            size={"small"}
                             variant="contained"
                             color="primary"
                             startIcon={<GavelIcon />}
@@ -771,7 +772,7 @@ const SettingsDialog = (props) => {
                                 : t("components.settings_dialog.configure_default_license")}
                         </Button>
                         {defaultLicenseConfigured && (
-                            <Button variant="text" color="primary" onClick={_handle_default_license_reset}>
+                            <Button size={"small"} variant="text" color="primary" onClick={_handle_default_license_reset}>
                                 {t("components.settings_dialog.reset_to_standard_terms")}
                             </Button>
                         )}

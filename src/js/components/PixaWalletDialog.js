@@ -131,6 +131,7 @@ import {
 } from "../utils/powerDown";
 
 import { withLanguage } from "../utils/withLanguage";
+
 const styles = theme => ({
     backdrop: {
         zIndex: theme.zIndex.drawer + 1,
@@ -869,9 +870,15 @@ const styles = theme => ({
         "& > p": {
             margin: "3px 0px",
             color: "#a5a5a5",
+            display: "list-item",
+            marginLeft: 16,
+
         },
         "& > p.lead": {
             color: "#e0e0e0",
+            display: "inline",
+            marginLeft: 0,
+            fontFamily: `"Industry Book"`
         },
         "& > span.note": {
             display: "block",
@@ -3210,7 +3217,7 @@ class PixaWalletDialog extends React.PureComponent {
             <React.Fragment>
                 {this._render_section_header(sectionId, t("components.pixa_wallet_dialog.savings"), summaryParts.join(" · "))}
                 <Collapse in={this._is_section_expanded(sectionId)}>
-                    <Typography style={{color: "#a5a5a5", margin: "8px 0px 0px 0px"}} component={"p"} variant={"body1"}>{t("components.pixa_wallet_dialog.in_savings_withdrawals_take_3_days_to", {
+                    <Typography style={{color: "#a5a5a5", margin: "0px 0px 0px 0px"}} component={"p"} variant={"body1"}>{t("components.pixa_wallet_dialog.in_savings_withdrawals_take_3_days_to", {
                         text: _itsOwnProfile ? t("components.pixa_wallet_dialog.you_have") : t("components.pixa_wallet_dialog.it_has"),
                         savingsBalance: formatNumber(savingsBalance, 3),
                         currency: currency
@@ -3370,7 +3377,7 @@ class PixaWalletDialog extends React.PureComponent {
                     item_count: formatInteger(items.length)
                 }) : "")}
                 <Collapse in={this._is_section_expanded(sectionId)}>
-                    <Typography style={{color: "#a5a5a5", margin: "8px 0px 0px 0px"}} component={"p"} variant={"body1"}>
+                    <Typography style={{color: "#a5a5a5", margin: "0px 0px 0px 0px", fontWeight: "500"}} component={"p"} variant={"body1"}>
                         {t("components.pixa_wallet_dialog.swapping_pxa_to_pxs_is_instant_the")}
                     </Typography>
                     <List className={classes.delegationList} style={{minWidth: "auto", width: "100%"}}>
@@ -3686,7 +3693,7 @@ class PixaWalletDialog extends React.PureComponent {
                             </Typography>
                             <Typography className={classes.pricedAt} variant="body2" color="textPrimary" component="p">{t("components.pixa_wallet_dialog.fungible_with_pxa")}</Typography>
                             <Typography component={"h2"} variant={"h6"} className={classes.subTitle}>{t("components.pixa_wallet_dialog.delegations")}</Typography>
-                            <Typography style={{color: "#a5a5a5", margin: "8px 0px 0px 0px"}} component={"p"} variant={"body1"}>
+                            <Typography style={{color: "#a5a5a5", margin: "8px 0px 0px 0px", fontFamily: `"Industry Book"`, fontWeight: "500"}} component={"p"} variant={"body1"}>
                                 <T
                                     k="components.pixa_wallet_dialog.pxp_usable_because"
                                     vars={{
@@ -3789,7 +3796,7 @@ class PixaWalletDialog extends React.PureComponent {
                             {this._is_special_power_account(account.username) && (
                                 <React.Fragment>
                                     <Typography component={"h2"} variant={"h6"} className={classes.subTitle}>{t("components.pixa_wallet_dialog.special_features")}</Typography>
-                                    <Typography style={{color: "#a5a5a5", margin: "8px 0px 0px 0px"}} component={"p"} variant={"body1"}><T
+                                    <Typography style={{color: "#a5a5a5", margin: "8px 0px 0px 0px", fontFamily: `"Industry Book"`, fontWeight: "500"}} component={"p"} variant={"body1"}><T
                                         k="components.pixa_wallet_dialog.strong_strong_can_transfer_pixa_power_directly"
                                         vars={{
                                             username: account.username
@@ -4031,11 +4038,13 @@ class PixaWalletDialog extends React.PureComponent {
                                     <IconButton><InfoOutlined/></IconButton>
                                 </Tooltip>
                             </Typography>
-                            {hasRewards && <Button className={classes.rewardClaim} color="primary" variant="text" onClick={this._claim_rewards} disabled={!_itsOwnProfile}><span style={{display: "inline"}}>{t("components.pixa_wallet_dialog.claim_reward")}</span> <span className={"subtitle"} style={{display: "inline", fontWeight: "400"}}>{t("components.pixa_wallet_dialog.pxa_pxs_pxp_2", {
-                                rewardPixa: formatInteger(_rewardPixa),
-                                rewardPxs: formatInteger(_rewardPxs),
-                                rewardPxp: formatInteger(_rewardPxp)
-                            })}</span></Button>}
+                            {hasRewards && <Button className={classes.rewardClaim} color="primary" variant="text" onClick={this._claim_rewards} disabled={!_itsOwnProfile}>
+                                <span style={{display: "inline"}}>{t("components.pixa_wallet_dialog.claim_reward")}</span> <span className={"subtitle"} className={"monospace"} style={{display: "inline", fontWeight: "400"}}>{t("components.pixa_wallet_dialog.pxa_pxs_pxp_2", {
+                                    rewardPixa: formatInteger(_rewardPixa),
+                                    rewardPxs: formatInteger(_rewardPxs),
+                                    rewardPxp: formatInteger(_rewardPxp)
+                                })}</span>
+                            </Button>}
                             <WalletHistory
                                 history={_walletHistory}
                                 username={account.username}

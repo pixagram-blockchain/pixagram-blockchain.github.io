@@ -32,14 +32,26 @@ const MOBILE_ICONS = [
     <LocalOffer />,
 ];
 
-const SortingTabs = React.memo(({ 
-    sorting, 
-    onSortingChange, 
-    mainTabClass, 
-    lessThan960w, 
-    y, 
-    scrollTop 
-}) => {
+// Whether the bar is tucked away: slid down off the bottom edge on mobile,
+// up off the top edge on desktop. Pages that track the scroll as flags pass
+// `hidden`; the raw y/scrollTop pair is still accepted and reduced to the
+// same flag with the thresholds this bar has always used, so the comparator
+// below can ignore a scroll tick that crosses none of them.
+const isTucked = ({ hidden, lessThan960w, y, scrollTop }) => (
+    hidden !== undefined
+        ? !!hidden
+        : (lessThan960w ? !(y > 48 || scrollTop <= 72) : (-48 > y && scrollTop >= 72))
+);
+
+const SortingTabs = React.memo(({
+                                    sorting,
+                                    onSortingChange,
+                                    mainTabClass,
+                                    lessThan960w,
+                                    hidden,
+                                    y,
+                                    scrollTop
+                                }) => {
     useLanguage();
 
     const newerLabel = t("words.newer");
@@ -54,9 +66,10 @@ const SortingTabs = React.memo(({
     ], [newerLabel, hottestLabel, trendingLabel, promotedLabel]);
 
     const tabsStyle = lessThan960w ? {bottom: 0, top: "auto"}: {bottom: "auto", top: 0};
-    const transform = lessThan960w 
-        ? `translateY(${(y > 48 || scrollTop <= 72) ? 0: 72}px)` 
-        : `translateY(${(-48 > y && scrollTop >= 72) ? -72: 0}px)`;
+    const tucked = isTucked({ hidden, lessThan960w, y, scrollTop });
+    const transform = lessThan960w
+        ? `translateY(${tucked ? 72 : 0}px)`
+        : `translateY(${tucked ? -72 : 0}px)`;
 
     return (
         <Tabs
@@ -77,10 +90,17 @@ const SortingTabs = React.memo(({
         </Tabs>
     );
 }, (prevProps, nextProps) => {
+    // onSortingChange and mainTabClass are compared too. Leaving the handler
+    // out was only safe while the raw scroll numbers re-rendered this bar on
+    // nearly every tick: Community's handler closes over the community name,
+    // and after a switch to another community — sort unchanged, page already
+    // at the top — the bar kept the previous one, so the next tab click
+    // replaced the URL with the OLD community's and navigated back to it.
     return prevProps.sorting === nextProps.sorting &&
         prevProps.lessThan960w === nextProps.lessThan960w &&
-        prevProps.y === nextProps.y &&
-        prevProps.scrollTop === nextProps.scrollTop;
+        prevProps.onSortingChange === nextProps.onSortingChange &&
+        prevProps.mainTabClass === nextProps.mainTabClass &&
+        isTucked(prevProps) === isTucked(nextProps);
 });
 
 export default SortingTabs;

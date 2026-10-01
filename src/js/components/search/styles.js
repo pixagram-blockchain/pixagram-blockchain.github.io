@@ -105,19 +105,20 @@ export const searchStyles = (theme) => {
             position: "absolute",
             right: 52,
             top: 4,
-            color: "#ffffff",
+            color: "#999",
             transition: `background-color ${buttonTransition}`,
             "&:hover": { backgroundColor: "rgba(255,255,255,0.06)" },
             // 40 px on phones so the button fits the 40 px bar.
             [theme.breakpoints.down("sm")]: { right: 44, top: 0, padding: 8 },
         },
         filterButtonOn: {
+            color: "#fff",
             backgroundColor: "rgba(255,255,255,0.08)",
             "&:hover": { backgroundColor: "rgba(255,255,255,0.12)" },
         },
         filterBadge: {
-            backgroundColor: "#ffffff",
-            color: "#111111",
+            backgroundColor: "#eee",
+            color: "#171717",
             fontWeight: 700,
             fontSize: 10,
             height: 16,
@@ -125,7 +126,7 @@ export const searchStyles = (theme) => {
             padding: "0 4px",
             borderRadius: 8,
             // A ring of the bar's colour keeps the white badge apart from the white icon.
-            boxShadow: "0 0 0 2px #222222",
+            boxShadow: "0 0 0 2px #eee",
         },
         searchInput: {
             width: "100%",

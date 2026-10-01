@@ -291,13 +291,6 @@ class PixaWalletSwapDialog extends React.PureComponent {
                         {t("words.swap")}
                     </Typography>
 
-                    <LinearProgress
-                        className={classes.progress}
-                        style={{ margin: "0px 0px 16px 0px" }}
-                        variant="determinate"
-                        value={displayPercent}
-                    />
-
                     <Slider
                         color="secondary"
                         className={classes.slider}
@@ -359,15 +352,15 @@ class PixaWalletSwapDialog extends React.PureComponent {
                                         currency !== "PXA" ? (
                                             <PixaSupra
                                                 style={{
-                                                    margin: "0px 8px -12px 0px",
-                                                    fontSize: "1em",
+                                                    margin: "0px 8px -24px 0px",
+                                                    fontSize: "1.5em",
                                                 }}
                                             />
                                         ) : (
                                             <PixaLiquid
                                                 style={{
-                                                    margin: "0px 8px -12px 0px",
-                                                    fontSize: "1em",
+                                                    margin: "0px 8px -24px 0px",
+                                                    fontSize: "1.5em",
                                                 }}
                                             />
                                         ),
@@ -408,15 +401,15 @@ class PixaWalletSwapDialog extends React.PureComponent {
                                         otherCurrency !== "PXA" ? (
                                             <PixaSupra
                                                 style={{
-                                                    margin: "0px 8px -12px 0px",
-                                                    fontSize: "1em",
+                                                    margin: "0px 8px -24px 0px",
+                                                    fontSize: "1.5em",
                                                 }}
                                             />
                                         ) : (
                                             <PixaLiquid
                                                 style={{
-                                                    margin: "0px 8px -12px 0px",
-                                                    fontSize: "1em",
+                                                    margin: "0px 8px -24px 0px",
+                                                    fontSize: "1.5em",
                                                 }}
                                             />
                                         ),

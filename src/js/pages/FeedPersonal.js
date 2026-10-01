@@ -1555,8 +1555,13 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
     }, [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // The NSFW filter flips: the visible cell set (and its index→item
-    // mapping) changes.
-    useEffect(() => { repackMasonry(); }, [settings._nsfw_filter]); // eslint-disable-line react-hooks/exhaustive-deps
+    // mapping) changes. Layout effects, like the list re-pack above: the
+    // flipped list never paints a frame on the previous one's geometry.
+    const nsfwFilterMountedRef = useRef(false);
+    useLayoutEffect(() => {
+        if (!nsfwFilterMountedRef.current) { nsfwFilterMountedRef.current = true; return; }
+        repackMasonry();
+    }, [settings._nsfw_filter]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // "Show NSFW" flips: artworks only change blur (same height), but an
     // nsfw blog card gains or loses its cover, and CellMeasurer never
@@ -1567,7 +1572,7 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
         [posts]
     );
     const nsfwEnabledMountedRef = useRef(false);
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (!nsfwEnabledMountedRef.current) { nsfwEnabledMountedRef.current = true; return; }
         if (hasNsfwBlogCoverRef.current) repackMasonry();
     }, [settings._nsfw_enabled]); // eslint-disable-line react-hooks/exhaustive-deps

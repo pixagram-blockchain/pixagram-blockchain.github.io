@@ -117,7 +117,7 @@ const styles = theme => ({
         contain: "layout style paint",
         "& .MuiChip-root": { transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms", backgroundColor: "#000 !important", color: "#ccc", flex: "auto", paddingBottom: 4 },
         "& .MuiChip-root:hover": { transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms", backgroundColor: "#000 !important", color: "#fff" },
-        "& .MuiChip-root > .MuiChip-label": { padding: "4px 6px 4px 6px", fontSize: "12px" },
+        "& .MuiChip-root > .MuiChip-label": { padding: "4px 6px 4px 6px", fontSize: "13px" },
         // The home chip's icon (TagChipIcon). MUI gives .MuiChip-icon its own
         // colour — grey 700 on a light-type theme, near-invisible on the
         // black chip — and the icon used to carry an inline "… !important"
@@ -186,7 +186,7 @@ const styles = theme => ({
     communityInfo: { flex: 1, overflow: "hidden" },
     communityName: { fontWeight: 600, fontSize: "14px", color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
     communityMembers: { fontSize: "12px", color: "#888" },
-    metaListHeader: { fontSize: "14px", fontWeight: 600, color: "#ccc", lineHeight: "36px", backgroundColor: "transparent" },
+    metaListHeader: { fontSize: "14px", fontWeight: 600, color: "#dcdcdc", lineHeight: "36px", backgroundColor: "#1d1d1d", borderRadius: 14, margin: "8px 16px" },
     // ── Main view (discover sections) ──────────────────────────────────────────────────────
     discoverGrid: {
         display: "grid",
@@ -223,11 +223,11 @@ const styles = theme => ({
     // row is full, stretched across the columns the friend tiles leave free
     // otherwise — see FeedTile / FEED_TILE_SPAN_STYLES.
     feedTile: {
-        width: 56, height: 56, color: "#fff", backgroundColor: "#dddddd1a",
+        width: 56, height: 56, color: "#fff", backgroundColor: "#0c0c0c",
         transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
         "&:hover": {
             transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
-            backgroundColor: "#dddddd19",
+            backgroundColor: "#1d1d1d",
         }
     },
     // The stretched form: same height and background, the icon kept in a
@@ -663,7 +663,7 @@ const FriendTile = React.memo(({ classes, friend, onGoToFeedPost }) => {
             <Badge
                 className={classes.friendBadge}
                 overlap="rectangular"
-                badgeContent={friend.unseen > 0 ? `${friend.unseen}+` : null}
+                badgeContent={friend.unseen > 0 ? (<span><span>{friend.unseen}</span><sup style={{marginTop: -6}}>+</sup></span>) : null}
             >
                 <ButtonBase className={classes.discoverTile} onClick={handleClick}>
                     <Avatar src={friend.image || undefined} className={"pixelated " + classes.discoverTileAvatar}>
@@ -740,7 +740,7 @@ const MainView = React.memo(({
                 {feedEnabled && (
                     <Fade in timeout={SECTION_FADE_MS} style={SECTION_FADE_STYLES[0]}>
                         <div>
-                            <ListSubheader disableSticky className={classes.metaListHeader}>{t("components.menu_content.friends")}</ListSubheader>
+                            <ListSubheader className={classes.metaListHeader}>{t("components.menu_content.friends")}</ListSubheader>
                             <div className={classes.discoverGrid}>
                                 <FeedTile classes={classes} onGoToFeed={onGoToFeed} span={feedSpan} />
                                 {friends.map(f => (
@@ -753,7 +753,7 @@ const MainView = React.memo(({
                 {trendingTags.length > 0 && (
                     <Fade in timeout={SECTION_FADE_MS} style={SECTION_FADE_STYLES[1]}>
                         <div data-tour="menu-categories">
-                            <ListSubheader disableSticky className={classes.metaListHeader}>{t("components.menu_content.trending_categories")}</ListSubheader>
+                            <ListSubheader className={classes.metaListHeader}>{t("components.menu_content.trending_categories")}</ListSubheader>
                             <div className={classes.chips} style={{ paddingBottom: 8 }}>
                                 {/* The icon's colour is styles.chips' .MuiChip-icon rule. */}
                                 <TagChipIcon key={"disc-chiphome"} icon={HOME_CHIP_ICON} tag={""} onClick={onTagClick} />
@@ -765,7 +765,7 @@ const MainView = React.memo(({
                 {trendingPortals.length > 0 && (
                     <Fade in timeout={SECTION_FADE_MS} style={SECTION_FADE_STYLES[2]}>
                         <List dense className={classes.communitiesList} data-tour="menu-communities">
-                            <ListSubheader disableSticky className={classes.metaListHeader}>{t("components.menu_content.trending_portals")}</ListSubheader>
+                            <ListSubheader className={classes.metaListHeader}>{t("components.menu_content.trending_portals")}</ListSubheader>
                             {trendingPortals.map((c, i) => (
                                 <CommunityItem key={"disc-" + (c.name || i)} classes={classes} community={c} onGoToCommunity={onGoToCommunity} />
                             ))}
@@ -775,7 +775,7 @@ const MainView = React.memo(({
                 {governancePortals.length > 0 && (
                     <Fade in timeout={SECTION_FADE_MS} style={SECTION_FADE_STYLES[3]}>
                         <div>
-                            <ListSubheader disableSticky className={classes.metaListHeader}>{t("components.menu_content.governance_portals")}</ListSubheader>
+                            <ListSubheader className={classes.metaListHeader}>{t("components.menu_content.governance_portals")}</ListSubheader>
                             <div className={classes.discoverGrid}>
                                 {proposalsPortal && (
                                     <ProposalsTile classes={classes} portal={proposalsPortal} onGoToCommunity={onGoToCommunity} />

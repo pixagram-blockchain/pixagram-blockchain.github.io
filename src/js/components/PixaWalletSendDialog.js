@@ -723,12 +723,12 @@ class PixaWalletSendDialog extends React.PureComponent {
                                     inputComponent: NumberFormatCustom,
                                     inputProps: {currency: currency, locale: resolveLocale()},
                                     endAdornment: (
-                                        <Button onClick={this.toggleCurrency}>
+                                        <Button style={{color: "#999"}} onClick={this.toggleCurrency}>
                                             <SwapHorizRounded style={{marginRight: "4px"}}/> {type === "PIXA" ? "PXS": "PXA"}
                                         </Button>
                                     ),
                                     startAdornment: (
-                                        currency !== "PXA" ? <PixaSupra style={{margin: "0px 8px -12px 0px", fontSize: "1em"}}/>: <PixaLiquid style={{margin: "0px 8px -12px 0px", fontSize: "1em"}}/>
+                                        currency !== "PXA" ? <PixaSupra style={{margin: "0px 8px -24px 0px", fontSize: "1.5em"}}/>: <PixaLiquid style={{margin: "0px 8px -24px 0px", fontSize: "1.5em"}}/>
                                     )
                                 }}
                             />
