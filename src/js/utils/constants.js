@@ -823,14 +823,17 @@ export function parseFeedFocusHash(rawHash) {
 }
 
 // ── Meta overlays: the "+meta" path suffix ─────────────────────────────
-// The shell-level overlays — Settings, Info, Governance and the toolbar
-// search — are addressed by a suffix on whatever page is showing, so they
-// deep-link, survive a reload and answer the browser's back arrow:
+// The shell-level overlays — Settings, Info, Governance, the toolbar search,
+// and the log-in and sign-up dialogs — are addressed by a suffix on whatever
+// page is showing, so they deep-link, survive a reload and answer the
+// browser's back arrow:
 //
 //   /trending/pixelart+settings
 //   /@primerz/comments+info-privacy
 //   /portal-156480+governance-viability-vote
 //   /created+search-eyJxIjoiY2F0In0            base64url of {"q":"cat"}
+//   /created/+signup
+//   /@primerz+login
 //
 // The first "+" of the pathname starts the meta. Nothing in front of it can
 // hold one (tags, account names and permlinks are [a-z0-9.-]), so the page
@@ -838,10 +841,14 @@ export function parseFeedFocusHash(rawHash) {
 // only ever sees the page part, and so does every page's `pathname` prop. It
 // rides the pathname because the hash already belongs to the post drawer
 // (#info, #replies, #nft) and to FeedPersonal (#focus=…). The landing page
-// ("/") has no overlays; a meta on it is dropped.
+// ("/") has no overlays; a meta on it is dropped — except a log-in or sign-up
+// link aimed at it ("/+signup"), which enters the app at BROWSE_PATH with the
+// overlay open (see entryMeta below).
 //
 // Grammar: "<kind>[-<arg>…]", one "-" per level (so no slug may contain one):
 //   settings                          no argument
+//   login                             no argument
+//   signup                            no argument
 //   info-<tab>                        INFO_TABS
 //   governance-<tab>[-<section>]      GOVERNANCE_TABS; a tab with sub-levels
 //                                     (GOVERNANCE_SECTIONS) always names one
@@ -895,6 +902,23 @@ export function isHomePath(path) {
     return path === "/" || path === "";
 }
 
+// Where the landing page's Browse button enters the app. Logged out, the
+// button opens the sign-up over it.
+export const BROWSE_PATH = "/created/";
+
+// The overlays a visitor can ARRIVE with from outside: a log-in or sign-up
+// link may point at the landing page ("/+login", "/+signup"), which has no
+// overlays of its own. Such an address routes to BROWSE_PATH instead, and the
+// address follows: the Browse target first, the overlay one step above it —
+// the same two entries the Browse button leaves (Index.js, §8 and §8b).
+const ENTRY_META_KINDS = Object.freeze({ login: true, signup: true });
+
+// The parsed entry overlay of a raw suffix ("signup", "LOGIN"…), or null.
+export function entryMeta(raw) {
+    const meta = parseMeta(raw);
+    return meta && ENTRY_META_KINDS[meta.kind] ? meta : null;
+}
+
 export function parseMeta(raw) {
     const s = String(raw || "");
     if (!s || s.length > META_MAX_LENGTH) return null;
@@ -903,6 +927,8 @@ export function parseMeta(raw) {
     const rest = dash < 0 ? "" : s.slice(dash + 1);
     switch (kind) {
         case "settings":
+        case "login":
+        case "signup":
             return { kind };
         case "info": {
             const tab = rest.split("-")[0].toLowerCase();
@@ -936,7 +962,9 @@ export function formatMeta(meta) {
     if (!meta || typeof meta !== "object") return "";
     switch (meta.kind) {
         case "settings":
-            return "settings";
+        case "login":
+        case "signup":
+            return meta.kind;
         case "info":
             return "info-" + (INFO_TABS.indexOf(meta.tab) >= 0 ? meta.tab : INFO_TABS[0]);
         case "governance": {

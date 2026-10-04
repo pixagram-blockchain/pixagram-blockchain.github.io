@@ -1,5 +1,6 @@
 import * as React from "preact/compat";
-import { HISTORY } from "../utils/constants";
+import { HISTORY, BROWSE_PATH } from "../utils/constants";
+import dispatcher from "../dispatcher";
 import { idle, cancelIdle } from "../utils/idle";
 import withStyles from "@material-ui/core/styles/withStyles";
 import Fade from "@material-ui/core/Fade";
@@ -65,6 +66,19 @@ const decodeArtworks = (urls) => Promise.all(urls.map((src) => new Promise((reso
         img.src = src;
     }
 })));
+
+// ── Mobile devices: the Browse button only browses ──
+// Phones and tablets (a coarse, touch, primary pointer), and any window
+// narrow enough for the app's mobile layout (MUI's sm, the breakpoint
+// Index's useMediaQuery uses): no sign-up after Browse there, and so no
+// "Create An Account" line on the button either. One query for both, so
+// what the button says and what it does can't disagree: the stylesheet
+// hides the line with it, the click asks it again (isMobileDevice).
+const MOBILE_DEVICE_QUERY = "(pointer: coarse), (max-width: 959.95px)";
+const isMobileDevice = () => {
+    try { return !!(window.matchMedia && window.matchMedia(MOBILE_DEVICE_QUERY).matches); }
+    catch (e) { return false; }
+};
 
 const styles = theme => ({
     // ── Scoped JSS keyframes ──
@@ -403,6 +417,50 @@ const styles = theme => ({
             marginLeft: "10px",
             fontSize: "1.75rem",
         },
+        // Label over an optional second line, centred; the icon stays beside
+        // the pair.
+        "& .homeActionBrowseText": {
+            display: "inline-flex",
+            flexDirection: "column",
+            alignItems: "center",
+            textAlign: "center",
+        },
+        "& .homeActionBrowseLabel": {
+            lineHeight: 1.75,
+            transition: `line-height 420ms ${EASE_OUT}`,
+        },
+        // "Create An Account" — logged out, on a desktop (see the media rule
+        // below). It unfolds under the label (grid rows 0fr → 1fr animate its
+        // height) instead of making the pill jump taller in one frame, and
+        // the label tightens to make room, so the pill grows by a few pixels
+        // only. Lettering as the Learn button's caption: the two halves of
+        // the pill read alike.
+        "& .homeActionBrowseSub": {
+            display: "grid",
+            gridTemplateRows: "0fr",
+            opacity: 0,
+            fontSize: "11px",
+            letterSpacing: "0.06em",
+            lineHeight: 1.25,
+            color: "#5c5c5c",
+            transition: `grid-template-rows 420ms ${EASE_OUT}, opacity 320ms ${EASE_OUT}`,
+            "& > span": {
+                minHeight: 0,
+                // overflow: hidden (the clip of the unfold) would also let the
+                // line shrink to no width at all on a narrow phone, cutting
+                // the text: it keeps its longest word's width, and wraps
+                // under it where the pill has no room for one line.
+                minWidth: "min-content",
+                overflow: "hidden",
+            },
+        },
+        "& .homeActionBrowseText.withSub .homeActionBrowseLabel": {
+            lineHeight: 1.35,
+        },
+        "& .homeActionBrowseText.withSub .homeActionBrowseSub": {
+            gridTemplateRows: "1fr",
+            opacity: 1,
+        },
         "&:hover": {
             background: "#f4f4f4",
             boxShadow: "none",
@@ -419,6 +477,16 @@ const styles = theme => ({
         [theme.breakpoints.down("sm")]: {
             padding: "12px 30px",
             fontSize: "16px",
+        },
+        // Mobile devices: the button only browses, so it says only that —
+        // the label as it was, no second line.
+        [`@media ${MOBILE_DEVICE_QUERY}`]: {
+            "& .homeActionBrowseText.withSub .homeActionBrowseLabel": {
+                lineHeight: 1.75,
+            },
+            "& .homeActionBrowseText.withSub .homeActionBrowseSub": {
+                display: "none",
+            },
         },
     },
     homeText: {
@@ -671,6 +739,14 @@ const BG_TARGET_FPS = 30;
 // so the canvas stays opaque — fading the canvas element itself would show
 // whatever lies behind it instead of black.
 const BG_INTRO_MS = 900;
+// The shader clock starts at the page clock folded into this window. The
+// noise behind the bolt is driven by uTime, and even 32-bit floats lose its
+// fine detail once uTime gets large: grainy from ~8 h, blocky by ~a day. The
+// page clock counts from the DOCUMENT's load, so a landing page first drawn
+// in a tab that has been open that long (e.g. navigating back to it inside
+// the app) would open already broken. A fresh load starts well inside the
+// window, so its opening frame is untouched.
+const SHADER_CLOCK_START_WRAP_MS = 10 * 60 * 1000;
 
 // Returns tick(now) → "draw this frame?", to be called on EVERY rAF tick.
 // The refresh estimate only learns from gaps near itself, so dropped frames
@@ -759,13 +835,12 @@ const EXIT_FEEDBACK_DELAY_MS = 160;
 // to this page inside the already-running app never flips it). The page
 // then plays the very same exit as the Browse button — the route push here,
 // the dissolve and the rainbow in Index on the home→app flip — into the
-// personal feed.
+// same place too: the feed, BROWSE_PATH (no longer the personal feed).
 // If the session is known almost instantly (cached, local), the exit would
 // start while the entrance is still revealing (600 ms spiral, the
 // Fade-ins): this floor lets the landing finish arriving first, so the
 // sequence reads as home → rainbow → feed and never as a flash.
 const AUTO_ENTER_MIN_DWELL_MS = 900;
-const AUTO_ENTER_PATH = "/feed/";
 
 const HIDDEN_STYLE = Object.freeze({ visibility: "hidden" });
 
@@ -890,9 +965,10 @@ class Home extends React.PureComponent {
         });
     }
 
-    // Two props change over the page's life (settings is baked once and
-    // nothing here reads it), and both are acted on strictly as false→true
-    // TRANSITIONS:
+    // Three props change over the page's life (settings is baked once and
+    // nothing here reads it). `signedOut` is only read by render (the Browse
+    // button's second line) and by the button's click. The other two are
+    // acted on strictly as false→true TRANSITIONS:
     //   • autoEnterFeed — a page that mounts with the flag already true is a
     //     return visit (the visitor left home before Index's flip landed),
     //     and a return to the landing page must never redirect;
@@ -1412,8 +1488,17 @@ class Home extends React.PureComponent {
         }
     }
 
+    // The Browse button: the feed, at once. Logged out on a desktop (the
+    // "Create An Account" line is showing), the sign-up follows thirty
+    // seconds later — Index arms that on SIGNUP_NUDGE and opens it only if
+    // the visitor is still logged out and not logging in (§9e). On a phone
+    // or tablet the button only browses. A second click while the page is
+    // already leaving is dropped: it would push the same entry again.
     _goToFeed = () => {
-        this._enterApp("/created/");
+        if (this._leaving) return;
+        const nudge = !!this.props.signedOut && !isMobileDevice();
+        this._enterApp(BROWSE_PATH);
+        if (nudge) dispatcher.dispatch({ type: "SIGNUP_NUDGE" });
     }
 
     // Auto-enter, first step: honour the dwell floor. Landing straight into
@@ -1437,12 +1522,12 @@ class Home extends React.PureComponent {
     // themselves (`_leaving`, the click always wins), or they opened Learn
     // More at any point (`_learn_more_mounted` stays true after the first
     // open): someone who came to read must not be whisked away from under
-    // a dialog. Otherwise: exactly what the Browse button does, aimed at the
-    // personal feed.
+    // a dialog. Otherwise: exactly what the Browse button does, into the
+    // feed — without its sign-up, which is for visitors logged out.
     _autoEnter = () => {
         if (!this._mounted || this._leaving) return;
         if (this.state._learn_more_mounted) return;
-        this._enterApp(AUTO_ENTER_PATH);
+        this._enterApp(BROWSE_PATH);
     }
 
     _openLearnMore = () => {
@@ -1601,8 +1686,18 @@ class Home extends React.PureComponent {
             return shader;
         };
 
+        // highp in BOTH shaders — do not lower it to mediump. Desktop GPUs
+        // silently run mediump as 32-bit floats, but most phone GPUs really run
+        // it as 16-bit (about 3 significant digits, max 65504), and this shader
+        // cannot survive that: both hashes take fract() of products in the
+        // thousands, and Hash21 overflows to Inf/NaN on the star layers offset
+        // by i * 453.2 (cell coords up to ~380). On phones that turned the
+        // stars into garbage (the glitches) and collapsed fbm to ~0, which
+        // parks the bolt at buv.x ≈ 1 — off-screen on a portrait phone (the
+        // missing lightning). WebGL2 guarantees highp in fragment shaders, and
+        // desktop output is unchanged: it was already computing in 32-bit.
         const vertexShaderSource = `#version 300 es
-            precision mediump float;
+            precision highp float;
             in vec2 a_position;
             out vec2 v_uv;
             void main() {
@@ -1612,7 +1707,7 @@ class Home extends React.PureComponent {
 
         // Merged fragment shader: greyscale stars + blue lightning, screen-blended.
         const fragmentShaderSource = `#version 300 es
-            precision mediump float;
+            precision highp float;     // NOT mediump: see the note above the vertex shader
 
             uniform vec2  uResolution;   // full canvas size in px
             uniform float uTime;         // seconds (currentTime * 0.001)
@@ -1827,7 +1922,9 @@ class Home extends React.PureComponent {
         // each step capped, so whenever drawing pauses — the Learn-More dialog,
         // a hidden tab — the stars and the bolt resume exactly where they
         // stopped instead of jumping ahead by the length of the pause. It
-        // starts at the page clock, so the opening frame is the same as ever.
+        // starts at the page clock folded into SHADER_CLOCK_START_WRAP_MS:
+        // a fresh load opens on the same frame as ever, and a late first
+        // draw in a long-lived tab can't start the shader on a huge uTime.
         let clock = -1;
         let lastDrawTs = -1;
         let introStart = -1;
@@ -1858,7 +1955,7 @@ class Home extends React.PureComponent {
             if (pace(now)) {
                 const dt = lastDrawTs < 0 ? 0 : Math.min(now - lastDrawTs, 100);
                 lastDrawTs = now;
-                clock = clock < 0 ? now : clock + dt;
+                clock = clock < 0 ? now % SHADER_CLOCK_START_WRAP_MS : clock + dt;
                 if (introStart < 0) introStart = now;
 
                 // Smooth the cursor (lerp) — no setState. Time-based: the
@@ -1938,7 +2035,7 @@ class Home extends React.PureComponent {
     }
 
     render() {
-        const { classes, departing } = this.props;
+        const { classes, departing, signedOut } = this.props;
         const { _artworks, _learn_more_opened, _learn_more_mounted, _svg_logo } = this.state;
         return (
             <div className={classes.homeRoot}>
@@ -2016,7 +2113,13 @@ class Home extends React.PureComponent {
                                     onClick={this._goToFeed}
                                     className={classes.homeActionBrowse}
                                 >
-                                    {t("components.home.browse_posts")} <ExploreIcon />
+                                    <span className={signedOut ? "homeActionBrowseText withSub" : "homeActionBrowseText"}>
+                                        <span className="homeActionBrowseLabel">{t("components.home.browse_posts")}</span>
+                                        <span className="homeActionBrowseSub" aria-hidden={signedOut ? undefined : "true"}>
+                                            <span>{t("components.home.create_an_account")}</span>
+                                        </span>
+                                    </span>
+                                    <ExploreIcon />
                                 </Button>
                             </div>
                         </div>

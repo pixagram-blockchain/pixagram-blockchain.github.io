@@ -29,6 +29,7 @@ import { update_meta_title } from "../utils/meta-tags";
 import {
     PAGE_ROUTES, isPostUrl, hostPageForPostUrl,
     splitMetaPath, parseMeta, formatMeta, isHomePath, parseFeedFocusHash,
+    BROWSE_PATH, entryMeta,
 } from "../utils/constants";
 
 import LogoutModal from "../components/LogoutModal";
@@ -442,9 +443,19 @@ const DIALOG_REGISTRY = {
         sfxOpen: "state-change_confirm-down",
         sfxClose: "labactive",
     },
+    // login and account are meta overlays too (+login, +signup — §8b): open
+    // them with the LOGIN / ACCOUNT dispatcher events or openMeta, never
+    // openDialog. The sign-up closes through the address, and can hold the
+    // address back (registerCloseGuard, §8c) while the person has typed
+    // something they would lose, or has a backup PDF still to save.
     account: {
         load: () => import("../components/CreateAccountDialog"),
-        props: (api, close) => ({ open: true, api, onClose: close }),
+        props: (api, close, options) => ({
+            open: true,
+            api,
+            onClose: options.onClose || close,
+            registerCloseGuard: options.registerCloseGuard || null,
+        }),
         sfxOpen: "state-change_confirm-down",
         sfxClose: "labactive",
     },
@@ -456,20 +467,29 @@ const DIALOG_REGISTRY = {
     },
     login: {
         load: () => import("../components/LoginDialog"),
-        props: (api, close, options) => ({
-            open: true,
-            api,
-            onClose: () => close(null),
-            onLogin: (result) => close(result),
-            // "New Here? Create Account." — close this dialog, then route
-            // through the global dispatcher so the ACCOUNT case opens the
-            // CreateAccountDialog exactly like every other entry point.
-            onOpenCreateAccount: () => {
-                close(null);
-                dispatcher.dispatch({ type: "ACCOUNT" });
-            },
-            ...options,
-        }),
+        // `options` is what the LOGIN event asked for (defaultUsername,
+        // requiredKeyType, onLogin…), which useMetaDialogs carries over, plus
+        // the overlay's own routing — of which the dialog only takes onClose.
+        props: (api, close, options) => {
+            const {
+                meta, onMetaChange, onFail, registerCloseGuard, onClose, onLogin, ...asked
+            } = options;
+            const leave = onClose || (() => close(null));
+            return {
+                ...asked,
+                open: true,
+                api,
+                onClose: leave,
+                // A caller's own onLogin is handed straight to the dialog,
+                // which closes itself a beat after reporting; without one the
+                // dialog goes as soon as the login is in.
+                onLogin: typeof onLogin === "function" ? onLogin : () => leave(),
+                // "New Here? Create Account." — the ACCOUNT case swaps +login
+                // for +signup in place, exactly like every other entry point,
+                // so the page underneath stays one step back.
+                onOpenCreateAccount: () => dispatcher.dispatch({ type: "ACCOUNT" }),
+            };
+        },
         sfxOpen: "state-change_confirm-down",
         sfxClose: "labactive",
     },
@@ -486,12 +506,12 @@ const DIALOG_REGISTRY = {
         sfxOpen: "state-change_confirm-down",
         sfxClose: "labactive",
     },
-    // settings, witnesses and appinfo are the meta overlays (§8b): the address
-    // drives them. useMetaDialogs opens them with `meta` (the address's
-    // overlay, parsed), `onMetaChange` for tab moves and an `onClose` that goes
-    // through the address. Open them with openMeta or the META dispatcher
-    // event, never openDialog: a dialog the address doesn't name is taken down
-    // again by useMetaDialogs.
+    // settings, witnesses and appinfo are meta overlays (§8b), like login and
+    // account above: the address drives them. useMetaDialogs opens them with
+    // `meta` (the address's overlay, parsed), `onMetaChange` for tab moves and
+    // an `onClose` that goes through the address. Open them with openMeta or
+    // the META dispatcher event, never openDialog: a dialog the address
+    // doesn't name is taken down again by useMetaDialogs.
     settings: {
         load: () => import("../components/SettingsDialog"),
         props: (api, close, options, settings) => ({
@@ -864,6 +884,16 @@ function makePageElement(Page, settings, pathname, key) {
     );
 }
 
+// The part of an address that routes: the page, without its "+meta" overlay.
+// One exception: a log-in or sign-up link aimed at the landing page
+// ("/+signup") routes to the Browse target, since the landing has no overlays
+// — useMetaRoute (§8b) then moves the address there too, so the landing page
+// is never mounted on the way.
+function routedPath(pathname) {
+    const { path, meta } = splitMetaPath(String(pathname || ""));
+    return isHomePath(path) && entryMeta(meta) ? BROWSE_PATH : path;
+}
+
 function usePageRouter(history, settingsRef, apiRef) {
     const [page, dispatch] = useReducer(pageReducer, { name: null, element: null });
     const pathnameRef = useRef("");
@@ -995,7 +1025,7 @@ function usePageRouter(history, settingsRef, apiRef) {
         // page (useMetaRoute, §8b), so opening or closing one returns just
         // below as "same pathname" and never swaps, remounts or re-renders
         // the page — which is also why pages never see the suffix.
-        const _pathname = splitMetaPath(String(newPathname || history.location.pathname)).path;
+        const _pathname = routedPath(newPathname || history.location.pathname);
         const oldPathname = String(pathnameRef.current);
 
         if (_pathname === "/index.html") {
@@ -1099,23 +1129,29 @@ function usePageRouter(history, settingsRef, apiRef) {
 // ═════════════════════════════════════════════════════════════════════════════
 // §8b — useMetaRoute: the "+meta" overlay suffix
 // ═════════════════════════════════════════════════════════════════════════════
-// Settings, Info, Governance and the search live in the address as a suffix on
-// the page (utils/constants: splitMetaPath / parseMeta / formatMeta). The
-// address, not a click handler, is what opens them: a button pushes the
-// suffix, the back arrow pops it, a shared link lands with it, and
-// useMetaDialogs (§8c) brings the dialog slot in line with it.
+// Settings, Info, Governance, the search, the log-in and the sign-up live in
+// the address as a suffix on the page (utils/constants: splitMetaPath /
+// parseMeta / formatMeta). The address, not a click handler, is what opens
+// them: a button pushes the suffix, the back arrow pops it, a shared link
+// lands with it, and useMetaDialogs (§8c) brings the dialog slot in line with
+// it.
 //
-//   openMeta(meta)    push `page+meta` — or swap the suffix in place when an
-//                     overlay is already up, so the page stays one step back
-//   updateMeta(meta)  the open overlay moved (tab, section, query): replace
-//   closeMeta()       step back onto the page when this document pushed the
-//                     overlay; otherwise (shared link, reload) drop the suffix
-//                     in place
-//   readMeta()        the overlay in the address right now, between renders
-//   visit, visitRef   counts moves onto another entry (push, back/forward)
+//   openMeta(meta)     push `page+meta` — or swap the suffix in place when an
+//                      overlay is already up, so the page stays one step back
+//   updateMeta(meta)   the open overlay moved (tab, section, query): replace
+//   closeMeta()        step back onto the page when this document pushed the
+//                      overlay; otherwise (shared link, reload) drop the
+//                      suffix in place
+//   closeMetaOf(kind)  closeMeta, only while the address still shows an
+//                      overlay of that kind — the close a dialog is handed
+//   readMeta()         the overlay in the address right now, between renders
+//   visit, visitRef    counts moves onto another entry (push, back/forward)
 //
 // A non-canonical address (any case, a missing tab, "%2B", a trailing "/", a
-// meta on the landing page) is rewritten in place to formatMeta's form.
+// meta on the landing page) is rewritten in place to formatMeta's form. A
+// log-in or sign-up link aimed at the landing page ("/+signup") is the one
+// meta there that is kept: it becomes the Browse target plus the overlay,
+// pushed one step above it.
 
 // A path starting with "//" reads back as a protocol-relative URL — another
 // origin, so writing it throws. No route matches one anyway: the suffix is
@@ -1173,17 +1209,6 @@ function useMetaRoute(history) {
         history.replace(url, state);
         if (pushed) pushedKeysRef.current.add(history.location.key);
     }, [history]);
-
-    useEffect(() => {
-        const location = history.location;
-        const current = splitMetaPath(location.pathname);
-        if (current.path !== loc.path || current.meta !== loc.meta) return; // moved on already
-        if (!isWritablePath(loc.path)) return;
-        const canonical = metaKey ? loc.path + "+" + metaKey : loc.path;
-        if (canonical !== location.pathname) {
-            replaceEntry(canonical + location.search + location.hash, location.state);
-        }
-    }, [history, loc, metaKey, replaceEntry]);
 
     const openMeta = useCallback((next) => {
         const raw = formatMeta(next);
@@ -1244,7 +1269,38 @@ function useMetaRoute(history) {
         return parseMeta(raw);
     }, [history]);
 
-    return { meta, visit, visitRef, openMeta, updateMeta, closeMeta, readMeta };
+    // The close an overlay's dialog is handed: a no-op once the address shows
+    // another overlay, or none. A dialog's close can come late — LoginDialog
+    // closes itself a second after a login it already reported — and must not
+    // take down whatever the address has moved on to since.
+    const closeMetaOf = useCallback((kind) => {
+        const shown = readMeta();
+        if (shown && shown.kind === kind) closeMeta();
+    }, [readMeta, closeMeta]);
+
+    useEffect(() => {
+        const location = history.location;
+        const current = splitMetaPath(location.pathname);
+        if (current.path !== loc.path || current.meta !== loc.meta) return; // moved on already
+        if (!isWritablePath(loc.path)) return;
+        // "/+login", "/+signup": a log-in or sign-up link aimed at the landing
+        // page, which has no overlays (the router already routed this address
+        // to the Browse target). The address becomes what the Browse button
+        // leaves: the Browse target, with the overlay pushed above it — so
+        // closing it, or the back arrow, lands on the feed.
+        const entry = isHomePath(loc.path) ? entryMeta(loc.meta) : null;
+        if (entry) {
+            replaceEntry(BROWSE_PATH + location.search + location.hash, location.state);
+            openMeta(entry);
+            return;
+        }
+        const canonical = metaKey ? loc.path + "+" + metaKey : loc.path;
+        if (canonical !== location.pathname) {
+            replaceEntry(canonical + location.search + location.hash, location.state);
+        }
+    }, [history, loc, metaKey, replaceEntry, openMeta]);
+
+    return { meta, visit, visitRef, openMeta, updateMeta, closeMeta, closeMetaOf, readMeta };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1255,16 +1311,37 @@ function useMetaRoute(history) {
 // new `meta` (it retargets its tab), or close it — never at another dialog's
 // expense. When a PIN prompt, a wallet… takes the slot while the suffix is
 // still in the address, the overlay comes back once that dialog closes; and a
-// dialog on its way in (LOGIN hands over to ACCOUNT by closing and opening in
-// one go) is let land first.
+// dialog on its way in is let land first.
+//
+// A dialog can hold on when the address takes it down (the back arrow, a
+// link): it registers a guard through its `registerCloseGuard` prop, and a
+// guard that answers true keeps it up — the dialog shows the person why (the
+// sign-up asks before throwing away what was typed, and won't go before its
+// backup PDF is saved) — while the address gets its overlay back.
+//
+// `extrasRef.current[dialogName]` is merged into an overlay's open options:
+// what the event that asked for it carried (LOGIN's onLogin, defaultUsername…),
+// which the address alone can't hold.
 
-const META_DIALOG_BY_KIND = Object.freeze({ settings: "settings", info: "appinfo", governance: "witnesses" });
-const META_DIALOG_NAMES = Object.freeze({ settings: true, appinfo: true, witnesses: true });
+const META_DIALOG_BY_KIND = Object.freeze({
+    settings: "settings", info: "appinfo", governance: "witnesses", login: "login", signup: "account",
+});
+const META_KIND_BY_DIALOG = Object.freeze({
+    settings: "settings", appinfo: "info", witnesses: "governance", login: "login", account: "signup",
+});
+const META_DIALOG_NAMES = Object.freeze({
+    settings: true, appinfo: true, witnesses: true, login: true, account: true,
+});
+// Read or write the chain from their first render: not opened before the API
+// is up (a cold landing on "+signup" waits for it; the page shows meanwhile).
+const META_DIALOGS_NEED_API = Object.freeze({ witnesses: true, login: true, account: true });
 
-function useMetaDialogs(meta, route, manager, gate) {
+function useMetaDialogs(meta, route, manager, gate, extrasRef) {
     const { dialog, pendingRef, openDialog, closeDialog, cancelDialog, updateDialog } = manager;
-    const { updateMeta, closeMeta } = route;
+    const { openMeta, updateMeta, closeMetaOf } = route;
     const { pageName, apiReady, settingsKnown } = gate;
+    // The open overlay dialog's guard: { name, hold } — see above.
+    const guardRef = useRef(null);
 
     useEffect(() => {
         // "+search-…" is not a dialog: it belongs to the toolbar search.
@@ -1283,22 +1360,44 @@ function useMetaDialogs(meta, route, manager, gate) {
         }
         if (current && !META_DIALOG_NAMES[current]) return;  // not ours to replace
         if (want && pending === want) return;                // on its way
-        // The slot is empty or holds another overlay's dialog.
+        // The slot is empty or holds another overlay's dialog — which may
+        // hold on (see above): then its overlay goes back into the address.
+        const guard = guardRef.current;
+        if (current && guard && guard.name === current) {
+            let hold = false;
+            try { hold = guard.hold() === true; } catch (e) { hold = false; }
+            if (hold) {
+                openMeta({ kind: META_KIND_BY_DIALOG[current] });
+                return;
+            }
+        }
         const canOpen = !!want
             // a shell to show it in: not at cold start, nor on the landing
             // page still mounted while the router swaps the page in
             && !!pageName && pageName !== "home"
-            && (want !== "witnesses" || apiReady)            // reads the chain on mount
+            && (!META_DIALOGS_NEED_API[want] || apiReady)
             && (want !== "settings" || settingsKnown);       // not the pre-hydration bag
         if (canOpen) {
-            openDialog(want, { meta, onMetaChange: updateMeta, onClose: closeMeta, onFail: closeMeta });
+            const kind = meta.kind;
+            const close = () => closeMetaOf(kind);
+            openDialog(want, {
+                ...((extrasRef && extrasRef.current && extrasRef.current[want]) || null),
+                meta,
+                onMetaChange: updateMeta,
+                onClose: close,
+                onFail: close,
+                registerCloseGuard: (hold) => {
+                    if (typeof hold === "function") guardRef.current = { name: want, hold };
+                    else if (guardRef.current && guardRef.current.name === want) guardRef.current = null;
+                },
+            });
         } else if (current) {
             // Never leave one overlay's dialog up under another's address
             // (or none): the wanted one opens when it can.
             closeDialog(current);
         }
-    }, [meta, dialog, pendingRef, pageName, apiReady, settingsKnown,
-        openDialog, closeDialog, cancelDialog, updateDialog, updateMeta, closeMeta]);
+    }, [meta, dialog, pendingRef, pageName, apiReady, settingsKnown, extrasRef,
+        openDialog, closeDialog, cancelDialog, updateDialog, openMeta, updateMeta, closeMetaOf]);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1452,6 +1551,11 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl) {
     // initialize() resolves means the remount never sees a null api, and
     // not bumping on the first connection keeps boot at a single mount.
     const [apiGeneration, setApiGeneration] = useState(0);
+    // What restoreSession() found, once it has answered: { account } — the
+    // restored account's name, null for none — and null until then. Read by
+    // useSignedOut (§9d): only after this is "no active account" an answer
+    // rather than a session still on its way.
+    const [restored, setRestored] = useState(null);
     const connectionsRef = useRef(0);
     const handlersRef = useRef([]); // tracks { event, fn } for cleanup
 
@@ -1581,6 +1685,11 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl) {
                     if (cancelled) return;
                     const sessionState = await pixaAPI.restoreSession();
                     if (cancelled) return;
+                    // restoreSession() answers the restored account's NAME (a
+                    // string) — a vault still locked behind its PIN included —
+                    // or null; not an object (pixaproxyapi.js).
+                    const restoredAccount = typeof sessionState === "string" ? sessionState : "";
+                    setRestored({ account: restoredAccount || null });
 
                     // Single snackbar policy on login: the `session_restored`
                     // event above already fires "Welcome back, @user". The
@@ -1609,6 +1718,7 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl) {
         return () => {
             cancelled = true;
             setApiReady(false);
+            setRestored(null);
             // Detach all registered event listeners from the outgoing instance,
             // then retire it. This cleanup runs both on unmount AND right
             // before a re-init when `nodeUrl` changes below — that's what makes
@@ -1633,7 +1743,7 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl) {
         };
     }, [nodeUrl]); // Re-instantiate whenever the resolved node URL changes
 
-    return { apiReady, apiGeneration };
+    return { apiReady, apiGeneration, restored };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1707,7 +1817,8 @@ function useSessionAvatar(apiRef, apiReady, apiGeneration) {
 // ═════════════════════════════════════════════════════════════════════════════
 // The rule is about the app's own history, not the browser's: when the app
 // is instantiated ON the landing page and the visitor turns out to be logged
-// in, they are taken to their personal feed; when the app is already
+// in, they are taken into the feed — BROWSE_PATH, where the Browse button
+// goes (it used to be their personal feed); when the app is already
 // instantiated and the landing page is reached by navigating back to it,
 // nothing happens. It is the transition the Browse button plays: this hook
 // only decides WHEN, and hands Home a one-way `autoEnterFeed` flag; Home
@@ -1738,15 +1849,14 @@ function useSessionAvatar(apiRef, apiReady, apiGeneration) {
 // before the subscription existed. A null answer consumes nothing; only an
 // account fires. A visitor with no session simply keeps the landing page.
 //
-// The FeedPersonal chunk is fetched on the decision itself and awaited
-// before the flag flips: the landing page stays fully alive (stars, strip)
-// until the feed can mount in the same beat as the exit, instead of fading
-// to black and stalling on a download. Deliberately NOT warmed earlier on
-// idle: the gate is armed for every load that starts on home, and most of
-// those are logged-out first visits that may bounce — the same reason the
-// sibling warm below skips the landing page. If the import fails the flip
-// goes ahead regardless — the router makes its own attempt and shows its
-// fallback, just as a Browse click would.
+// The Feed chunk is awaited on the decision itself, before the flag flips:
+// the landing page stays fully alive (stars, strip) until the feed can mount
+// in the same beat as the exit, instead of fading to black and stalling on a
+// download. It is usually in the module cache already — the Home→Feed warm
+// below fetches it on idle for the Browse button — so this mostly costs
+// nothing; it only matters when the session is known before that warm has
+// run. If the import fails the flip goes ahead regardless — the router makes
+// its own attempt and shows its fallback, just as a Browse click would.
 function useLandingAutoEnter(apiRef, apiReady, apiGeneration, pageName) {
     const [autoEnter, setAutoEnter] = useState(false);
     // First page this page load resolved to — "home" arms the gate.
@@ -1787,7 +1897,7 @@ function useLandingAutoEnter(apiRef, apiReady, apiGeneration, pageName) {
             // visitor leaving home on their own, and a flag that lands on an
             // unmounted (or later re-mounted) Home is inert by design — Home
             // acts only on the false→true transition of a mounted instance.
-            PAGE_IMPORTERS.feedpersonal()
+            PAGE_IMPORTERS.feed()
                 .catch(() => {})
                 .then(() => setAutoEnter(true));
         };
@@ -1806,6 +1916,142 @@ function useLandingAutoEnter(apiRef, apiReady, apiGeneration, pageName) {
     }, [apiRef, apiReady, apiGeneration, pageName]);
 
     return autoEnter;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// §9d — useSignedOut: is the visitor logged out?
+// ═════════════════════════════════════════════════════════════════════════════
+// Drives the landing page's Browse button (Home's `signedOut`): logged out, on
+// a desktop, it reads "Create An Account" under its label and the sign-up
+// follows the click (useSignupNudge, §9e). The answer from the API comes
+// late — after the connection and the session restore — so the last answer
+// is kept on this device as a hint and used until then, and the button
+// doesn't change under the visitor on every load. Without a hint (a first
+// visit, nearly always) the visitor is taken for logged out; a session found
+// later takes the line away.
+//
+// "No active account" only counts once restoreSession() has answered
+// (usePixaAPI's `restored`, which also carries a vault still locked behind its
+// PIN); after that the session events keep it current, the way
+// useSessionAvatar follows them. `known` says whether `signedOut` is that
+// answer yet (true) or still the hint (false).
+const SIGNED_IN_HINT_KEY = "pixa_signed_in_hint";
+
+function readSignedOutHint() {
+    try { return window.localStorage.getItem(SIGNED_IN_HINT_KEY) !== "1"; } catch (e) { return true; }
+}
+
+function writeSignedInHint(signedIn) {
+    try { window.localStorage.setItem(SIGNED_IN_HINT_KEY, signedIn ? "1" : "0"); } catch (e) { /* private mode */ }
+}
+
+const SIGN_IN_EVENTS = Object.freeze(["session_created", "session_restored", "session_resumed", "account_switched", "pin_unlocked"]);
+
+function useSignedOut(apiRef, apiReady, apiGeneration, restored) {
+    const [signedOut, setSignedOut] = useState(readSignedOutHint);
+    const [known, setKnown] = useState(false);
+
+    useEffect(() => {
+        const api = apiRef.current;
+        if (!apiReady || !restored || !api?.eventEmitter) {
+            setKnown(false); // a new connection answers again
+            return undefined;
+        }
+
+        let cancelled = false;
+        let token = 0; // retires a lookup overtaken by a newer session event
+
+        const settle = (out) => {
+            if (cancelled) return;
+            writeSignedInHint(!out);
+            setSignedOut(out);
+            setKnown(true);
+        };
+        const check = async (known) => {
+            const mine = ++token;
+            let account = known || null;
+            if (!account && typeof api.getActiveAccount === "function") {
+                try { account = await api.getActiveAccount(); } catch (e) { account = null; }
+            }
+            if (cancelled || mine !== token) return;
+            settle(!account);
+        };
+        const onSignedIn = () => { token += 1; settle(false); };
+        // Another account may still be active after one session ends.
+        const onEnded = () => { check(null); };
+
+        SIGN_IN_EVENTS.forEach((ev) => api.eventEmitter.on(ev, onSignedIn));
+        api.eventEmitter.on("session_ended", onEnded);
+        check(restored.account);
+
+        return () => {
+            cancelled = true;
+            SIGN_IN_EVENTS.forEach((ev) => api.eventEmitter.off(ev, onSignedIn));
+            api.eventEmitter.off("session_ended", onEnded);
+        };
+        // apiGeneration: a node switch retires the emitter subscribed above.
+    }, [apiRef, apiReady, apiGeneration, restored]);
+
+    return { signedOut, known };
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// §9e — useSignupNudge: the sign-up, 30 s after a logged-out Browse (desktop)
+// ═════════════════════════════════════════════════════════════════════════════
+// The landing page's Browse button, clicked logged out on a desktop, enters
+// the feed at once and arms this nudge (Home dispatches SIGNUP_NUDGE; phones
+// and tablets never arm it — there the button only browses). Thirty seconds
+// later the sign-up opens, through the address like every other way in
+// (+signup), as long as the visitor is still logged out and not logging in:
+//
+//   - logged in meanwhile, or found logged in once the session check
+//     answers: dropped;
+//   - the log-in or the sign-up opened meanwhile (by the visitor, from the
+//     menu or a link): dropped — they have chosen already;
+//   - due while something else is up (another overlay or dialog, an open
+//     post, the search, the first-visit tour, the drawer, the landing page)
+//     or while the session check hasn't answered yet: it waits for the first
+//     clear moment rather than covering what the visitor is doing.
+//
+// Once per page load: fired or dropped, it never comes back — a second
+// Browse (back on the landing page, Browse again) doesn't re-arm it.
+const SIGNUP_NUDGE_DELAY_MS = 30000;
+
+function useSignupNudge({ signedOut, sessionKnown, meta, busy, openMeta }) {
+    const [armed, setArmed] = useState(false);
+    const [due, setDue] = useState(false);
+    const armedRef = useRef(false);
+    const doneRef = useRef(false); // fired or dropped
+
+    const arm = useCallback(() => {
+        if (armedRef.current || doneRef.current) return;
+        armedRef.current = true;
+        setArmed(true);
+    }, []);
+
+    useEffect(() => {
+        if (!armed) return undefined;
+        const timer = setTimeout(() => setDue(true), SIGNUP_NUDGE_DELAY_MS);
+        return () => clearTimeout(timer);
+    }, [armed]);
+
+    // Dropped: the visitor went for the log-in or the sign-up themselves, or
+    // is logged in.
+    useEffect(() => {
+        if (!armed || doneRef.current) return;
+        if (meta && (meta.kind === "login" || meta.kind === "signup")) doneRef.current = true;
+        else if (sessionKnown && !signedOut) doneRef.current = true;
+    }, [armed, meta, sessionKnown, signedOut]);
+
+    // Due: at the first clear moment, still logged out — the sign-up.
+    useEffect(() => {
+        if (!due || doneRef.current) return;
+        if (!sessionKnown || busy) return; // waits
+        doneRef.current = true;
+        if (signedOut) openMeta({ kind: "signup" });
+    }, [due, sessionKnown, signedOut, busy, openMeta]);
+
+    return arm;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -2588,10 +2834,13 @@ function Index({ classes, history, settings: rawSettings }) {
     const apiNodeUrl = processedSettings._api_node_url || BOOT_API_NODE_URL_HINT || api.DEFAULT_API_NODE_URL;
 
     // ── API lifecycle (populates apiRef) ─────────────────────────────────
-    const { apiReady, apiGeneration } = usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, apiNodeUrl);
+    const { apiReady, apiGeneration, restored } = usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, apiNodeUrl);
 
     // ── Active account's profile image → compact drawer opener ───────────
     const menuAvatar = useSessionAvatar(apiRef, apiReady, apiGeneration);
+
+    // ── Logged out? → the landing page's Browse button (§9d) ─────────────
+    const { signedOut, known: signedOutKnown } = useSignedOut(apiRef, apiReady, apiGeneration, restored);
 
     // ── Live settings stream ─────────────────────────────────────────────
     // utils/settings emits every resolved bag (init / get / set). Feeding it
@@ -2636,19 +2885,29 @@ function Index({ classes, history, settings: rawSettings }) {
         page, historyTags, deleteHistoryTag, navigate, livePathname, setPageComponent,
     } = usePageRouter(history, settingsRef, apiRef);
 
-    // ── Logged-in arrival on the landing page → personal feed ─────────────
+    // ── Logged-in arrival on the landing page → the feed ──────────────────
     // One-way flag handed to Home (see useLandingAutoEnter): Home plays its
-    // Browse-button exit into /feed/ when it flips.
+    // Browse-button exit into the feed (BROWSE_PATH) when it flips.
     const autoEnterFeed = useLandingAutoEnter(apiRef, apiReady, apiGeneration, page.name);
 
-    // ── Meta overlays (+settings, +info-…, +governance-…, +search-…) ─────
+    // ── Meta overlays (+settings, +info-…, +governance-…, +search-…,
+    //    +login, +signup) ───────────────────────────────────────────────────
     const metaRoute = useMetaRoute(history);
     const { meta, openMeta, closeMeta } = metaRoute;
+    // What the LOGIN event that asked for the log-in carried (onLogin,
+    // defaultUsername, requiredKeyType…), keyed by dialog name: the address
+    // can't hold callbacks, so useMetaDialogs merges it into the open.
+    const metaExtrasRef = useRef({});
     useMetaDialogs(meta, metaRoute, dialogs, {
         pageName: page.name,
         apiReady,
         settingsKnown: !!processedSettings._know_the_settings,
-    });
+    }, metaExtrasRef);
+    // …and it is spent once the log-in leaves the address: a "+login" reached
+    // later (forward arrow, a link) is a fresh one, not that caller's.
+    useEffect(() => {
+        if (!meta || meta.kind !== "login") metaExtrasRef.current.login = null;
+    }, [meta]);
 
     // Re-route when locale changes or on initial settings load.
     // Other settings changes (renderer, nsfw, payout…) propagate to pages
@@ -2674,7 +2933,7 @@ function Index({ classes, history, settings: rawSettings }) {
             // one is live — the subscription below turns that into a re-render.
             setLanguage(locale);
 
-            const pathname = splitMetaPath(history.location.pathname).path;
+            const pathname = routedPath(history.location.pathname);
             for (const route of PAGE_ROUTES) {
                 if (route.page_name !== "unknown" && pathname.match(route.page_regex)) {
                     setPageComponent(route.page_name, pathname);
@@ -2897,6 +3156,19 @@ function Index({ classes, history, settings: rawSettings }) {
     const openDrawer = useCallback(() => setDrawerOpen(true), []);
     const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
+    // ── Sign-up 30 s after a logged-out Browse on a desktop (§9e) ────────
+    // Armed by the SIGNUP_NUDGE event. "Busy": whatever the sign-up must not
+    // cover when it comes due — it then waits for the first clear moment.
+    const nudgeBusy = !!meta || !!dialog.name || !page.name || page.name === "home"
+        || isPostUrl(livePathname) || !!tourSteps || search.isOpen || drawerOpen;
+    const armSignupNudge = useSignupNudge({
+        signedOut,
+        sessionKnown: signedOutKnown,
+        meta,
+        busy: nudgeBusy,
+        openMeta,
+    });
+
     // ── Toolbar menu (vert) ───────────────────────────────────────────────
     const [menuVertXY, setMenuVertXY] = useState(EMPTY_I32);
     const openToolbarMenu = useCallback((event) => {
@@ -3030,9 +3302,20 @@ function Index({ classes, history, settings: rawSettings }) {
             case "ICO":          openIco(); break;
             case "OPEN_QR":      openDialog("qr"); break;
             case "WALLET":       openDialog("wallet"); break;
-            case "ACCOUNT":      openDialog("account"); break;
+            // The sign-up and the log-in are overlays (+signup, +login):
+            // through the address, like Settings, so they deep-link and the
+            // back arrow closes them.
+            case "ACCOUNT":      openMeta({ kind: "signup" }); break;
+            // The landing page's Browse, clicked logged out on a desktop: the
+            // sign-up follows 30 s later, if still wanted (§9e).
+            case "SIGNUP_NUDGE": armSignupNudge(); break;
             case "ADD_ACCOUNT":  openDialog("add_account"); break;
-            case "LOGIN":        openDialog("login", event.data || {}); break;
+            case "LOGIN":
+                metaExtrasRef.current.login = event.data || null;
+                openMeta({ kind: "login" });
+                // Nowhere to open it (the landing page): nothing to carry.
+                if (metaRoute.readMeta()?.kind !== "login") metaExtrasRef.current.login = null;
+                break;
             case "UNLOCK":       openDialog("unlock", event.data || {}); break;
             case "VOTES":        openVotingList(event.data); break;
             case "LOGOUT":       openLogout(); break;
@@ -3180,9 +3463,9 @@ function Index({ classes, history, settings: rawSettings }) {
     );
 
     // The landing element is baked in setPageComponent without `autoEnterFeed`
-    // (that flag is state that only exists here), so it is injected at render
-    // the way ContentComponent injects settings/pathname/api into the app
-    // pages: clone the inner <Home> with the flag, re-wrap it in its keyed
+    // and `signedOut` (state that only exists here), so they are injected at
+    // render the way ContentComponent injects settings/pathname/api into the
+    // app pages: clone the inner <Home> with them, re-wrap it in its keyed
     // Suspense. Memoized so an Index re-render for anything else hands Home
     // (a PureComponent) the same element rather than a fresh clone.
     const landingElement = useMemo(() => {
@@ -3190,8 +3473,8 @@ function Index({ classes, history, settings: rawSettings }) {
         if (page.name !== "home" || !element) return element;
         const inner = element.props?.children;
         if (!inner) return element;
-        return React.cloneElement(element, null, React.cloneElement(inner, { autoEnterFeed }));
-    }, [page.name, page.element, autoEnterFeed]);
+        return React.cloneElement(element, null, React.cloneElement(inner, { autoEnterFeed, signedOut }));
+    }, [page.name, page.element, autoEnterFeed, signedOut]);
 
     // ═════════════════════════════════════════════════════════════════════
     // Render

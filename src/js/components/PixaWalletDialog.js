@@ -117,6 +117,7 @@ import ExpandMoreRounded from "@material-ui/icons/ExpandMoreRounded";
 import DescriptionRounded from "@material-ui/icons/DescriptionRounded";
 import ShowChartRounded from "@material-ui/icons/ShowChartRounded";
 import WalletHistory from "./WalletHistory";
+import RewardClaimAnimation from "./RewardClaimAnimation";
 import { cssBackgroundImage } from "../utils/safeUrl";
 
 import { T } from "../utils/T";
@@ -131,6 +132,15 @@ import {
 } from "../utils/powerDown";
 
 import { withLanguage } from "../utils/withLanguage";
+
+// Home / Index's rainbow at full strength, closed into a loop (orange runs
+// back into violet through red) so it can spin around the claim button.
+// Their outer deep red is left out: opaque, it reads as a gap in the ring.
+// Same `in hsl shorter hue` interpolation, with an sRGB twin for
+// engines that can't parse it (JSS `fallbacks`, as on Home).
+const CLAIM_RAINBOW_STOPS = "#f000ff, #0095ff, #0cffe9, #d8ff00, #f59300, #f000ff";
+const CLAIM_RAINBOW = `conic-gradient(from 0deg in hsl shorter hue, ${CLAIM_RAINBOW_STOPS})`;
+const CLAIM_RAINBOW_FALLBACK = `conic-gradient(${CLAIM_RAINBOW_STOPS})`;
 
 const styles = theme => ({
     backdrop: {
@@ -543,28 +553,123 @@ const styles = theme => ({
             }
         }
     },
+    // Claim button: black label on a white fill inside a spinning rainbow
+    // border, with the same rainbow blurred into a glow outside it. Both
+    // layers are spans behind the label (the button is its own stacking
+    // context), each a rounded window onto a large conic rainbow that
+    // rotates — on the compositor, so the endless spin costs no main-thread
+    // work. The ring's white fill leaves 2 px of rainbow showing; the glow's
+    // window is blurred. Hover greys the fill a touch and lifts the glow;
+    // disabled (another user's wallet, a claim in flight) greys the ring,
+    // drops the glow and stops the spin.
+    "@keyframes claimRainbowSpin": {
+        from: { transform: "rotate(0deg)" },
+        to: { transform: "rotate(360deg)" },
+    },
     rewardClaim: {
         position: "absolute",
         top: "0px",
         right: "18px",
         display: "grid",
         borderRadius: "16px",
-        backgroundColor: "#101010",
-        transition: "background-color 240ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
+        isolation: "isolate",
+        // 80 % on desktop, 60 % on mobile (below), shrinking into the
+        // top-right corner the button is pinned to.
+        transform: "scale(0.8)",
+        transformOrigin: "top right",
+        color: "#000000 !important",
+        backgroundColor: "transparent",
         "&:hover": {
-            backgroundColor: "#171717",
-            transition: "background-color 360ms cubic-bezier(0.4, 0, 0.2, 1) 0ms"
+            backgroundColor: "transparent",
+        },
+        "&:hover $rewardClaimGlow": {
+            opacity: 1,
+        },
+        "&:hover $rewardClaimRing::after": {
+            backgroundColor: "#ececec",
+        },
+        // MUI's dark-theme disabled text is light grey: unreadable on white.
+        "&.Mui-disabled": {
+            color: "rgba(0, 0, 0, 0.45)",
+        },
+        "&.Mui-disabled $rewardClaimGlow": {
+            opacity: 0,
+        },
+        "&.Mui-disabled $rewardClaimRing": {
+            filter: "grayscale(1)",
+            opacity: 0.6,
+        },
+        "&.Mui-disabled $rewardClaimSpin": {
+            animationPlayState: "paused",
         },
         [theme.breakpoints.down("sm")]: {
             top: "12px",
             right: "12px",
-            transform: "scale(0.8125)",
+            transform: "scale(0.6)",
             "& .subtitle": {
                 fontSize: "9px",
                 color: "#aaa",
                 maxWidth: 140
             }
         }
+    },
+    rewardClaimGlow: {
+        position: "absolute",
+        top: -1,
+        right: -1,
+        bottom: -1,
+        left: -1,
+        zIndex: -1,
+        borderRadius: 18,
+        overflow: "hidden",
+        pointerEvents: "none",
+        filter: "blur(16px) contrast(1.6) brightness(.8)",
+        opacity: 0.8,
+        transition: "opacity 360ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
+    },
+    rewardClaimRing: {
+        position: "absolute",
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        zIndex: -1,
+        borderRadius: 16,
+        overflow: "hidden",
+        pointerEvents: "none",
+        transition: "opacity 240ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
+        // The white fill, leaving a 2 px ring of the rainbow around it.
+        "&::after": {
+            content: "''",
+            position: "absolute",
+            top: 1,
+            right: 1,
+            bottom: 1,
+            left: 1,
+            borderRadius: 14,
+            backgroundColor: "#ffffff",
+            transition: "background-color 240ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
+        },
+    },
+    // Square, centred on the button and far larger than its diagonal, so the
+    // rounded windows above are covered at every angle of the turn.
+    rewardClaimSpin: {
+        position: "absolute",
+        left: "50%",
+        top: "50%",
+        width: 600,
+        height: 600,
+        marginLeft: -300,
+        marginTop: -300,
+        fallbacks: { background: CLAIM_RAINBOW_FALLBACK },
+        background: CLAIM_RAINBOW,
+        animationName: "$claimRainbowSpin",
+        animationDuration: "4s",
+        animationTimingFunction: "linear",
+        animationIterationCount: "infinite",
+        "@media (prefers-reduced-motion: reduce)": {
+            animationName: "none",
+        },
     },
     historyControls: {
         "& > .MuiFormControlLabel-root": {
@@ -751,11 +856,14 @@ const styles = theme => ({
     },
     delegationListItem: {
         backgroundColor: "transparent",
-        borderRadius: "0px",
+        borderRadius: "12px",
         transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,border-radius 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
+        "& .MuiListItemSecondaryAction-root": {
+            right: "0%",
+            transform: "translateY(-50%) scale(0.8)"
+        },
         "&:hover": {
             backgroundColor: "#101010",
-            borderRadius: "12px",
             transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,border-radius 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms"
         }
     },
@@ -849,6 +957,7 @@ const styles = theme => ({
         }
     },
     portfolioCard: {
+        cursor: "pointer",
         backgroundColor: "#151515",
         borderRadius: "18px",
         padding: "20px 24px",
@@ -858,6 +967,84 @@ const styles = theme => ({
             backgroundColor: "#212121",
             transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms"
         }
+    },
+    // "Rewards pending" card of the overview, on top of portfolioCard. While
+    // the wallet's owner has rewards to claim it wears the claim button's
+    // look: a 1 px spinning rainbow ring with the same rainbow blurred into a
+    // glow around it (rewardsCardRing / rewardsCardGlow, rendered only then),
+    // the glow lifting on hover.
+    // The card is deliberately NOT a stacking context: ring and glow sit at
+    // z-index -1 in the swipe view's stacking context, behind the card and
+    // its neighbours, so the card's own paint covers all but the 1 px ring
+    // and the glow only shows around it instead of over the next card or the
+    // transfer button. Nothing between the card and that context may paint a
+    // background, or it would hide them.
+    rewardsCard: {
+        position: "relative",
+        "&:hover $rewardsCardGlow": {
+            opacity: 1,
+        },
+    },
+    // Ring and glow: rounded windows 1 px outside the card onto a spinning
+    // conic rainbow, as on the claim button (same rainbow, same spin), the
+    // glow's window blurred. They fade in when rewards arrive.
+    "@keyframes rewardsCardIn": {
+        from: { opacity: 0 },
+    },
+    rewardsCardGlow: {
+        position: "absolute",
+        top: -1,
+        right: -1,
+        bottom: -1,
+        left: -1,
+        zIndex: -1,
+        borderRadius: 19, // portfolioCard's 18 + the 1 px ring
+        overflow: "hidden",
+        pointerEvents: "none",
+        filter: "blur(16px) contrast(1.6) brightness(.8)",
+        opacity: 0.8,
+        transition: "opacity 360ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
+        animationName: "$rewardsCardIn",
+        animationDuration: "360ms",
+        animationTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+    },
+    rewardsCardRing: {
+        position: "absolute",
+        top: -1,
+        right: -1,
+        bottom: -1,
+        left: -1,
+        zIndex: -1,
+        borderRadius: 19,
+        overflow: "hidden",
+        pointerEvents: "none",
+        animationName: "$rewardsCardIn",
+        animationDuration: "360ms",
+        animationTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+    },
+    // A centred square 150 % of the card's width: the claim button's fixed
+    // 600 px is too small for a full-width card, and 150 % stays wider than
+    // the diagonal of any card up to about as tall as it is wide, so the
+    // windows are covered at every angle of the turn. Squared with padding
+    // (percentages of the width), not aspect-ratio.
+    rewardsCardSpin: {
+        position: "absolute",
+        left: "50%",
+        top: "50%",
+        width: "150%",
+        height: 0,
+        paddingTop: "150%",
+        marginLeft: "-75%",
+        marginTop: "-75%",
+        fallbacks: { background: CLAIM_RAINBOW_FALLBACK },
+        background: CLAIM_RAINBOW,
+        animationName: "$claimRainbowSpin",
+        animationDuration: "4s",
+        animationTimingFunction: "linear",
+        animationIterationCount: "infinite",
+        "@media (prefers-reduced-motion: reduce)": {
+            animationName: "none",
+        },
     },
     // Live power-down schedule under the "Powering down" title of the PXP view.
     // Same surface as portfolioCard but static (no hover): it is a statement,
@@ -1181,6 +1368,10 @@ class PixaWalletDialog extends React.PureComponent {
             _rewardPixaRaw: '0.000 PXA',
             _rewardPxsRaw: '0.000 PXS',
             _rewardVestsRaw: '0.000000 PXP',
+            // Claim in flight (button disabled) and, once it succeeded, what
+            // RewardClaimAnimation pours into the total (null = not playing).
+            _claiming_rewards: false,
+            _reward_claim: null,
             _isPoweringDown: false,
             _nextPowerDown: 0,
             _nextWithdrawalDate: null,
@@ -1270,7 +1461,7 @@ class PixaWalletDialog extends React.PureComponent {
         this.setState(merged, () => {
             if(isNewlyClosed || isNewAccount) {
                 if (this.state._tour_steps) this._finish_tour("closed");
-                this.setState({...merged, _tab_value: false}, () => {
+                this.setState({...merged, _tab_value: false, _reward_claim: null}, () => {
                     this.forceUpdate();
                 })
             } else if (isNewlyOpened) {
@@ -2171,11 +2362,19 @@ class PixaWalletDialog extends React.PureComponent {
     };
 
     /**
-     * Claim pending rewards via the broadcast API
+     * Claim pending rewards via the broadcast API, then play
+     * RewardClaimAnimation: the amounts the button showed pour into the
+     * headline total.
      */
     _claim_rewards = async () => {
         const { api, account, _fullAccount, _rewardPixa, _rewardPxs, _LIQUID_SYMBOL, _DOLLAR_SYMBOL, _VESTS_SYMBOL } = this.state;
-        if (!api || !account || !_fullAccount) return;
+        // _claiming guards a double tap synchronously; the state twin greys the button.
+        if (!api || !account || !_fullAccount || this._claiming) return;
+        // Snapshot BEFORE broadcasting: the pre-claim total and the pending
+        // amounts are the animation's starting point.
+        const claim = this._reward_claim_snapshot();
+        this._claiming = true;
+        this.setState({ _claiming_rewards: true }, () => this.forceUpdate());
         try {
             // Reconstruct asset strings via formatter to guarantee safe_asset format.
             // For vesting: use the raw numerical value from reward_vesting_balance
@@ -2183,7 +2382,13 @@ class PixaWalletDialog extends React.PureComponent {
             //  API translates PXP→VESTS before sending to the chain).
             const rawVestsAmount = parseFloat(_fullAccount.reward_vesting_balance) || 0;
             await api.broadcast.claimRewardBalance(account.username);
-            if (actions?.trigger_snackbar) actions.trigger_snackbar(t("components.pixa_wallet_dialog.rewards_claimed_successfully"), 'success');
+            if (claim) {
+                // The animation is the success feedback (its live region reads
+                // the same sentence the snackbar used to show).
+                this._play_reward_claim(claim);
+            } else if (actions?.trigger_snackbar) {
+                actions.trigger_snackbar(t("components.pixa_wallet_dialog.rewards_claimed_successfully"), 'success');
+            }
             // Refresh data after claim
             this._refresh_after_tx();
         } catch (err) {
@@ -2191,7 +2396,75 @@ class PixaWalletDialog extends React.PureComponent {
             if (actions?.trigger_snackbar) actions.trigger_snackbar(t("components.pixa_wallet_dialog.failed_to_claim_rewards", {
                 message: (err.message || t("components.pixa_wallet_dialog.unknown_error"))
             }), 'error');
+        } finally {
+            this._claiming = false;
+            this.setState({ _claiming_rewards: false }, () => this.forceUpdate());
         }
+    };
+
+    /**
+     * What a claim is about to pour into the wallet: the headline total before
+     * it (`_totalUsd`, the "estimated wealth" figure) and every pending reward
+     * > 0 with its USD value, in filling order PXS → PXA → PXP (PXP is
+     * PXA-denominated). null when nothing is pending.
+     */
+    _reward_claim_snapshot = () => {
+        const s = this.state;
+        const pxaUsd = Number(s._pixaUsdPrice) || 0;
+        const pxsUsd = Number(s._pxsUsdPrice) || 0;
+        const items = [
+            { symbol: 'PXS', amount: Number(s._rewardPxs) || 0, price: pxsUsd },
+            { symbol: 'PXA', amount: Number(s._rewardPixa) || 0, price: pxaUsd },
+            { symbol: 'PXP', amount: Number(s._rewardPxp) || 0, price: pxaUsd },
+        ]
+            .filter((it) => it.amount > 0)
+            .map((it) => ({ symbol: it.symbol, amount: it.amount, usd: it.amount * it.price }));
+        return items.length ? { startUsd: Number(s._totalUsd) || 0, items } : null;
+    };
+
+    /**
+     * Start the claim animation and fold the claimed rewards into the
+     * balances at once, on the load path's headline basis (owned PXP +
+     * liquid / in-flight PXA and PXS), so the wallet the animation fades back
+     * to already shows the total it climbed to and no longer offers the
+     * claim. _refresh_after_tx() then replaces this with the chain's figures.
+     */
+    _play_reward_claim = (claim) => {
+        const claimed = (symbol) => (claim.items.find((it) => it.symbol === symbol) || {}).amount || 0;
+        const pxs = claimed('PXS');
+        const pxa = claimed('PXA');
+        const pxp = claimed('PXP');
+        const pouredUsd = claim.items.reduce((sum, it) => sum + it.usd, 0);
+        this.setState((prev) => {
+            const pxa$ = prev._pixaUsdPrice || 0;
+            const pxs$ = prev._pxsUsdPrice || 0;
+            const nextPixa = (prev._pixaBalance || 0) + pxa;
+            const nextPxs = (prev._pxsBalance || 0) + pxs;
+            const nextOwnPxp = (prev._ownPxp || 0) + pxp;
+            const nextPxp = (prev._pxpBalance || 0) + pxp;
+            return {
+                _reward_claim: claim,
+                _rewardPixa: 0,
+                _rewardPxs: 0,
+                _rewardPxp: 0,
+                _rewardPxpInPixa: 0,
+                _pixaBalance: nextPixa,
+                _pxsBalance: nextPxs,
+                _ownPxp: nextOwnPxp,
+                _pxpBalance: nextPxp,
+                _pxpInPixa: nextPxp,
+                _powerDownablePxp: Math.max(0, nextOwnPxp - (prev._delegatedPxp || 0)),
+                _pixaUsd: (nextPixa + (prev._savingsPixa || 0) + (prev._pendingPixa || 0)) * pxa$,
+                _pxsUsd: (nextPxs + (prev._savingsPxs || 0) + (prev._pendingPxs || 0)) * pxs$,
+                _pxpUsd: nextPxp * pxa$,
+                // Same sum the animation's total climbs by.
+                _totalUsd: (prev._totalUsd || 0) + pouredUsd,
+            };
+        }, () => this.forceUpdate());
+    };
+
+    _end_reward_claim = () => {
+        this.setState({ _reward_claim: null }, () => this.forceUpdate());
     };
 
     /**
@@ -3469,6 +3742,8 @@ class PixaWalletDialog extends React.PureComponent {
             _confirm_action_body,
             _itsOwnProfile,
             _loggedInUser,
+            _claiming_rewards,
+            _reward_claim,
         } = this.state;
 
         // When viewing someone else's wallet, use the logged-in user for broadcasts.
@@ -3529,6 +3804,10 @@ class PixaWalletDialog extends React.PureComponent {
         const pixaPctDisplay = formatPercent(_tokenTotalUsd > 0 ? (_pixaUsd / _tokenTotalUsd) * 100 : 0, 1);
         const pxsPctDisplay = formatPercent(_tokenTotalUsd > 0 ? (_pxsUsd / _tokenTotalUsd) * 100 : 0, 1);
         const hasRewards = _rewardPixa > 0 || _rewardPxs > 0 || _rewardPxp > 0;
+        // Rainbow ring and glow on the overview's "Rewards pending" card: only
+        // when the viewer can claim them, i.e. their own wallet (on someone
+        // else's the claim button is greyed out, so the card stays plain too).
+        const rewardsCardLive = hasRewards && !!_itsOwnProfile;
         const _hasAnyFunds = _totalUsd > 0 || _pxpBalance > 0 || _pixaHoldings > 0 || _pxsHoldings > 0;
 
         // Live power-down schedule from the account's own withdraw fields
@@ -3635,7 +3914,11 @@ class PixaWalletDialog extends React.PureComponent {
 
                     {/* Quick Stats */}
                     <div style={{display: "flex", gap: "12px", flexWrap: "wrap"}}>
-                        <div className={classes.portfolioCard} onClick={() => {this._handle_tab_value_change({}, 3)}} style={{flex: "1 1 calc(50% - 6px)", backgroundImage: "url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MDAgNTAwIj4KICA8cGF0aCBkPSJNIDM3NC4wOTQgMzQzLjQyOSBDIDM2OC4wOTEgMzM3LjI3MiAzNjAuNTQ3IDMzNC4xOTQgMzUxLjc3MiAzMzQuMTk0IEwgMjQ0LjAxMiAzMzQuMTk0IEwgMjExLjk5MiAzMjIuOTU2IEwgMjE3LjA3MSAzMDguNDg2IEwgMjQ0LjAxMiAzMTguNzk5IEwgMjg3LjExNyAzMTguNzk5IEMgMjkyLjUwMyAzMTguNzk5IDI5Ni44MTUgMzE2LjY0MiAzMDAuMzU1IDMxMy4xMDMgQyAzMDMuODk2IDMwOS41NjIgMzA1LjU5IDMwNS4yNTMgMzA1LjU5IDMwMC40OCBDIDMwNS41OSAyOTIuMTY2IDMwMS41ODggMjg2LjQ3IDI5My41ODIgMjgzLjIzNyBMIDE4MS42NjYgMjQxLjgyNyBMIDE1MS42NDcgMjQxLjgyNyBMIDE1MS42NDcgMzgwLjM3NiBMIDI1OS40MDYgNDExLjE2NCBMIDM4My4wMjIgMzY0Ljk4MSBDIDM4My4xNzcgMzU2LjgyMSAzODAuMDk4IDM0OS41ODggMzc0LjA5NCAzNDMuNDI5IE0gMTIwLjg1OSAyNDEuODI3IEwgNTkuMDM0IDI0MS44MjcgTCA1OS4wMzQgNDExLjE2NCBMIDEyMC44NTkgNDExLjE2NCBMIDEyMC44NTkgMjQxLjgyNyBaIiBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAxOyB0cmFuc2Zvcm0tYm94OiBmaWxsLWJveDsgdHJhbnNmb3JtLW9yaWdpbjogNTAlIDUwJTsgZmlsbDogcmdiKDI1NSwgMjU1LCAyNTUpOyBmaWxsLW9wYWNpdHk6IDAuMDU7IiB0cmFuc2Zvcm09Im1hdHJpeCgwLjgzODY3MSwgLTAuNTQ0NjM5LCAwLjU0NDYzOSwgMC44Mzg2NzEsIC0wLjAwMDAwNiwgLTAuMDAwMDA3KSI+PC9wYXRoPgogIDxwYXRoIGQ9Ik0gMzA5LjQyIDIzLjcyNCBDIDI5Mi45MTIgMjMuNjM2IDI3Ni44NDQgMzkuNTMxIDI4NC4xOCA1OS4yNzEgTCAyNTYuNDkzIDU5LjI3MSBDIDI0Ni44NDMgNTkuMjcxIDIzOS4wMjcgNjcuMDg3IDIzOS4wMjcgNzYuNzM5IEwgMjM5LjAyNyA5NC4yMDYgQyAyMzkuMDI3IDk5LjAyNyAyNDIuOTM4IDEwMi45MzkgMjQ3Ljc2IDEwMi45MzkgTCAzMjYuMzY0IDEwMi45MzkgTCAzMjYuMzY0IDc2LjczOSBMIDM0My44MyA3Ni43MzkgTCAzNDMuODMgMTAyLjkzOSBMIDQyMi40MzUgMTAyLjkzOSBDIDQyNy4yNTggMTAyLjkzOSA0MzEuMTcgOTkuMDI3IDQzMS4xNyA5NC4yMDYgTCA0MzEuMTcgNzYuNzM5IEMgNDMxLjE3IDY3LjA4NyA0MjMuMzQ0IDU5LjI3MSA0MTMuNzAzIDU5LjI3MSBMIDM4Ni4wMTYgNTkuMjcxIEMgMzk2LjIzNCAzMC43MTEgMzU3LjgwNiAxMC41MzYgMzQwLjA3NSAzNS4xNjQgTCAzMzUuMDk3IDQxLjgwMiBMIDMzMC4xMTkgMzQuOTkxIEMgMzI0LjYxNSAyNy4yMTggMzE3LjAxOCAyMy44MTIgMzA5LjQyIDIzLjcyNCBNIDMwOC44OTcgNDEuODAyIEMgMzE2LjY2OSA0MS44MDIgMzIwLjYgNTEuMjM1IDMxNS4wOTcgNTYuNzM4IEMgMzA5LjU5NiA2Mi4yNCAzMDAuMTYzIDU4LjMwOSAzMDAuMTYzIDUwLjUzNiBDIDMwMC4xNjMgNDUuNzA3IDMwNC4wNzUgNDEuODAyIDMwOC44OTcgNDEuODAyIE0gMzYxLjMgNDEuODAyIEMgMzY5LjA3MyA0MS44MDIgMzczLjAwNCA1MS4yMzUgMzY3LjUwMiA1Ni43MzggQyAzNjEuOTk4IDYyLjI0IDM1Mi41NjUgNTguMzA5IDM1Mi41NjUgNTAuNTM2IEMgMzUyLjU2NSA0NS43MDcgMzU2LjQ3OCA0MS44MDIgMzYxLjMgNDEuODAyIE0gMjQ3Ljc2IDExMS42NzIgTCAyNDcuNzYgMTgxLjU0NSBDIDI0Ny43NiAxOTEuMTg2IDI1NS41NzUgMTk5LjAxMiAyNjUuMjI3IDE5OS4wMTIgTCA0MDQuOTY5IDE5OS4wMTIgQyA0MTQuNjExIDE5OS4wMTIgNDIyLjQzNSAxOTEuMTg2IDQyMi40MzUgMTgxLjU0NSBMIDQyMi40MzUgMTExLjY3MiBMIDM0My44MyAxMTEuNjcyIEwgMzQzLjgzIDE4MS41NDUgTCAzMjYuMzY0IDE4MS41NDUgTCAzMjYuMzY0IDExMS42NzIgTCAyNDcuNzYgMTExLjY3MiBaIiBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAxOyB0cmFuc2Zvcm0tYm94OiBmaWxsLWJveDsgdHJhbnNmb3JtLW9yaWdpbjogNTAlIDUwJTsgZmlsbDogcmdiKDI1NSwgMjU1LCAyNTUpOyBmaWxsLW9wYWNpdHk6IDAuMDU7IiB0cmFuc2Zvcm09Im1hdHJpeCgwLjgzODY3MSwgLTAuNTQ0NjM5LCAwLjU0NDYzOSwgMC44Mzg2NzEsIC0wLjAwMDAwNCwgLTAuMDAwMDEzKSI+PC9wYXRoPgo8L3N2Zz4K)", backgroundRepeat: "no-repeat", backgroundPosition: "90% 50%", backgroundSize: "30%", minWidth: "140px", padding: "16px"}}>
+                        <div className={`${classes.portfolioCard} ${classes.rewardsCard}`} onClick={() => {this._handle_tab_value_change({}, 3)}} style={{flex: "1 1 calc(50% - 6px)", backgroundImage: "url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MDAgNTAwIj4KICA8cGF0aCBkPSJNIDM3NC4wOTQgMzQzLjQyOSBDIDM2OC4wOTEgMzM3LjI3MiAzNjAuNTQ3IDMzNC4xOTQgMzUxLjc3MiAzMzQuMTk0IEwgMjQ0LjAxMiAzMzQuMTk0IEwgMjExLjk5MiAzMjIuOTU2IEwgMjE3LjA3MSAzMDguNDg2IEwgMjQ0LjAxMiAzMTguNzk5IEwgMjg3LjExNyAzMTguNzk5IEMgMjkyLjUwMyAzMTguNzk5IDI5Ni44MTUgMzE2LjY0MiAzMDAuMzU1IDMxMy4xMDMgQyAzMDMuODk2IDMwOS41NjIgMzA1LjU5IDMwNS4yNTMgMzA1LjU5IDMwMC40OCBDIDMwNS41OSAyOTIuMTY2IDMwMS41ODggMjg2LjQ3IDI5My41ODIgMjgzLjIzNyBMIDE4MS42NjYgMjQxLjgyNyBMIDE1MS42NDcgMjQxLjgyNyBMIDE1MS42NDcgMzgwLjM3NiBMIDI1OS40MDYgNDExLjE2NCBMIDM4My4wMjIgMzY0Ljk4MSBDIDM4My4xNzcgMzU2LjgyMSAzODAuMDk4IDM0OS41ODggMzc0LjA5NCAzNDMuNDI5IE0gMTIwLjg1OSAyNDEuODI3IEwgNTkuMDM0IDI0MS44MjcgTCA1OS4wMzQgNDExLjE2NCBMIDEyMC44NTkgNDExLjE2NCBMIDEyMC44NTkgMjQxLjgyNyBaIiBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAxOyB0cmFuc2Zvcm0tYm94OiBmaWxsLWJveDsgdHJhbnNmb3JtLW9yaWdpbjogNTAlIDUwJTsgZmlsbDogcmdiKDI1NSwgMjU1LCAyNTUpOyBmaWxsLW9wYWNpdHk6IDAuMDU7IiB0cmFuc2Zvcm09Im1hdHJpeCgwLjgzODY3MSwgLTAuNTQ0NjM5LCAwLjU0NDYzOSwgMC44Mzg2NzEsIC0wLjAwMDAwNiwgLTAuMDAwMDA3KSI+PC9wYXRoPgogIDxwYXRoIGQ9Ik0gMzA5LjQyIDIzLjcyNCBDIDI5Mi45MTIgMjMuNjM2IDI3Ni44NDQgMzkuNTMxIDI4NC4xOCA1OS4yNzEgTCAyNTYuNDkzIDU5LjI3MSBDIDI0Ni44NDMgNTkuMjcxIDIzOS4wMjcgNjcuMDg3IDIzOS4wMjcgNzYuNzM5IEwgMjM5LjAyNyA5NC4yMDYgQyAyMzkuMDI3IDk5LjAyNyAyNDIuOTM4IDEwMi45MzkgMjQ3Ljc2IDEwMi45MzkgTCAzMjYuMzY0IDEwMi45MzkgTCAzMjYuMzY0IDc2LjczOSBMIDM0My44MyA3Ni43MzkgTCAzNDMuODMgMTAyLjkzOSBMIDQyMi40MzUgMTAyLjkzOSBDIDQyNy4yNTggMTAyLjkzOSA0MzEuMTcgOTkuMDI3IDQzMS4xNyA5NC4yMDYgTCA0MzEuMTcgNzYuNzM5IEMgNDMxLjE3IDY3LjA4NyA0MjMuMzQ0IDU5LjI3MSA0MTMuNzAzIDU5LjI3MSBMIDM4Ni4wMTYgNTkuMjcxIEMgMzk2LjIzNCAzMC43MTEgMzU3LjgwNiAxMC41MzYgMzQwLjA3NSAzNS4xNjQgTCAzMzUuMDk3IDQxLjgwMiBMIDMzMC4xMTkgMzQuOTkxIEMgMzI0LjYxNSAyNy4yMTggMzE3LjAxOCAyMy44MTIgMzA5LjQyIDIzLjcyNCBNIDMwOC44OTcgNDEuODAyIEMgMzE2LjY2OSA0MS44MDIgMzIwLjYgNTEuMjM1IDMxNS4wOTcgNTYuNzM4IEMgMzA5LjU5NiA2Mi4yNCAzMDAuMTYzIDU4LjMwOSAzMDAuMTYzIDUwLjUzNiBDIDMwMC4xNjMgNDUuNzA3IDMwNC4wNzUgNDEuODAyIDMwOC44OTcgNDEuODAyIE0gMzYxLjMgNDEuODAyIEMgMzY5LjA3MyA0MS44MDIgMzczLjAwNCA1MS4yMzUgMzY3LjUwMiA1Ni43MzggQyAzNjEuOTk4IDYyLjI0IDM1Mi41NjUgNTguMzA5IDM1Mi41NjUgNTAuNTM2IEMgMzUyLjU2NSA0NS43MDcgMzU2LjQ3OCA0MS44MDIgMzYxLjMgNDEuODAyIE0gMjQ3Ljc2IDExMS42NzIgTCAyNDcuNzYgMTgxLjU0NSBDIDI0Ny43NiAxOTEuMTg2IDI1NS41NzUgMTk5LjAxMiAyNjUuMjI3IDE5OS4wMTIgTCA0MDQuOTY5IDE5OS4wMTIgQyA0MTQuNjExIDE5OS4wMTIgNDIyLjQzNSAxOTEuMTg2IDQyMi40MzUgMTgxLjU0NSBMIDQyMi40MzUgMTExLjY3MiBMIDM0My44MyAxMTEuNjcyIEwgMzQzLjgzIDE4MS41NDUgTCAzMjYuMzY0IDE4MS41NDUgTCAzMjYuMzY0IDExMS42NzIgTCAyNDcuNzYgMTExLjY3MiBaIiBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAxOyB0cmFuc2Zvcm0tYm94OiBmaWxsLWJveDsgdHJhbnNmb3JtLW9yaWdpbjogNTAlIDUwJTsgZmlsbDogcmdiKDI1NSwgMjU1LCAyNTUpOyBmaWxsLW9wYWNpdHk6IDAuMDU7IiB0cmFuc2Zvcm09Im1hdHJpeCgwLjgzODY3MSwgLTAuNTQ0NjM5LCAwLjU0NDYzOSwgMC44Mzg2NzEsIC0wLjAwMDAwNCwgLTAuMDAwMDEzKSI+PC9wYXRoPgo8L3N2Zz4K)", backgroundRepeat: "no-repeat", backgroundPosition: "90% 50%", backgroundSize: "30%", minWidth: "140px", padding: "16px"}}>
+                            {rewardsCardLive && <React.Fragment>
+                                <span className={classes.rewardsCardGlow} aria-hidden="true"><span className={classes.rewardsCardSpin}/></span>
+                                <span className={classes.rewardsCardRing} aria-hidden="true"><span className={classes.rewardsCardSpin}/></span>
+                            </React.Fragment>}
                             <Typography variant="body2" style={{color: "#999", marginBottom: "4px"}}>{t("components.pixa_wallet_dialog.rewards_pending")}</Typography>
                             <Typography variant="h6" className="monospace" style={{color: "#ffffff"}}>{fmtFiat(_rewardPixa * _pixaUsdPrice + _rewardPxs * _pxsUsdPrice + _rewardPxpInPixa * _pixaUsdPrice, 2)}</Typography>
                             <Typography variant="caption" style={{color: "#666"}}>{t("components.pixa_wallet_dialog.pxa_pxs_pxp", {
@@ -4038,12 +4321,14 @@ class PixaWalletDialog extends React.PureComponent {
                                     <IconButton><InfoOutlined/></IconButton>
                                 </Tooltip>
                             </Typography>
-                            {hasRewards && <Button className={classes.rewardClaim} color="primary" variant="text" onClick={this._claim_rewards} disabled={!_itsOwnProfile}>
-                                <span style={{display: "inline"}}>{t("components.pixa_wallet_dialog.claim_reward")}</span> <span className={"subtitle"} className={"monospace"} style={{display: "inline", fontWeight: "400"}}>{t("components.pixa_wallet_dialog.pxa_pxs_pxp_2", {
-                                    rewardPixa: formatInteger(_rewardPixa),
-                                    rewardPxs: formatInteger(_rewardPxs),
-                                    rewardPxp: formatInteger(_rewardPxp)
-                                })}</span>
+                            {hasRewards && <Button className={classes.rewardClaim} color="primary" variant="text" onClick={this._claim_rewards} disabled={!_itsOwnProfile || _claiming_rewards}>
+                                <span className={classes.rewardClaimGlow} aria-hidden="true"><span className={classes.rewardClaimSpin}/></span>
+                                <span className={classes.rewardClaimRing} aria-hidden="true"><span className={classes.rewardClaimSpin}/></span>
+                                <span style={{display: "inline", marginTop: 4, fontSize: "1.075rem"}}>{t("components.pixa_wallet_dialog.claim_reward")}</span> <span style={{fontWeight: "550", marginTop: -8}} className={"subtitle"} className={"monospace"} style={{display: "inline", fontWeight: "400"}}>{t("components.pixa_wallet_dialog.pxa_pxs_pxp_2", {
+                                rewardPixa: formatInteger(_rewardPixa),
+                                rewardPxs: formatInteger(_rewardPxs),
+                                rewardPxp: formatInteger(_rewardPxp)
+                            })}</span>
                             </Button>}
                             <WalletHistory
                                 history={_walletHistory}
@@ -4259,6 +4544,15 @@ class PixaWalletDialog extends React.PureComponent {
                     <React.Suspense fallback={null}>
                         <LazyTour steps={this.state._tour_steps} onFinish={this._finish_tour} />
                     </React.Suspense>
+                ) : null}
+                {_reward_claim ? (
+                    <RewardClaimAnimation
+                        claim={_reward_claim}
+                        fiatRate={fiatRate}
+                        currency={cur}
+                        announcement={t("components.pixa_wallet_dialog.rewards_claimed_successfully")}
+                        onDone={this._end_reward_claim}
+                    />
                 ) : null}
                 <PixaWalletPowerDialog type={_power_dialog_opened} open={_power_dialog_opened.length} onClose={this._close_power_dialog} onConfirm={this._handle_power_confirm} api={this.state.api} account={account} maxPXP={_powerDownablePxp} maxPXA={_pixaBalance} pixaUsdPrice={_pixaUsdPrice} fiatRate={fiatRate} fiatCurrency={cur} locale={this.state._locale} powerDownIntervals={this.state._powerDownIntervals} powerDownIntervalSeconds={this.state._powerDownIntervalSeconds}/>
                 <PixaWalletSendDialog type={_send_dialog_opened} open={_send_dialog_opened.length} onToggleCurrency={this._open_send_dialog} onClose={this._close_send_dialog} api={this.state.api} account={_itsOwnProfile ? account : broadcastAccount} maxPXA={_itsOwnProfile ? _pixaBalance : 999999999} maxPXS={_itsOwnProfile ? _pxsBalance : 999999999} pixaUsdPrice={_pixaUsdPrice} pxsUsdPrice={_pxsUsdPrice} fiatRate={fiatRate} fiatCurrency={cur} locale={this.state._locale} onSend={this._handle_send_confirm} initialUsername={!_itsOwnProfile ? account.username : undefined} lockedUsername={!_itsOwnProfile} recentRecipients={_itsOwnProfile ? _recentRecipients : []}/>

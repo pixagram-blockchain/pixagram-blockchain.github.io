@@ -40,6 +40,7 @@ import CheckCircleOutlineIcon from '@material-ui/icons/CheckCircleOutline';
 import SendIcon from '@material-ui/icons/Send';
 import ExpandMoreIcon from '@material-ui/icons/ExpandMoreRounded';
 import Tooltip from "@material-ui/core/Tooltip";
+import Link from "@material-ui/core/Link";
 import Tab from "@material-ui/core/Tab";
 import Tabs from "@material-ui/core/Tabs";
 import * as actions from "../actions/utils";
@@ -311,12 +312,20 @@ const ST_FS_14__C_7B7B7B__P_12PX_4PX = { fontSize: 14, color: "#7b7b7b", padding
 const ST_C_BDBDBD__FS_14__TA_CENTER = { color: "#bdbdbd", fontSize: 14, textAlign: "center" };
 const ST_C_FFF__FS_16__TA_CENTER = { color: "#fff", fontSize: 16, textAlign: "center" };
 const ST_C_BDBDBD__FS_13__TA_CENTER = { color: "#bdbdbd", fontSize: 13, textAlign: "center", maxWidth: 420 };
-const ST_C_7B7B7B__FS_13__TA_CENTER = { color: "#7b7b7b", fontSize: 13, textAlign: "center" };
 const ST_C_BDBDBD__FSTY_ITALIC__FS_14 = { color: "#bdbdbd", fontStyle: "italic", fontSize: 14, textAlign: "center" };
 const ST_W_100__MAXW_360PX__US_NONE = { width: "100%", maxWidth: "360px", userSelect: "none", pointerEvents: "none" };
 const ST_W_360PX__FS_60PX__FW_400 = { width: "360px", fontSize: "60px", fontWeight: "400", margin: "-24px 16px 0px 16px" };
 const ST_W_360PX__FS_20PX__FW_400 = { width: "360px", fontSize: "20px", fontWeight: "400", margin: "24px 16px" };
 const ST_P_24PX = { padding: "24px" };
+// Phones: the step names go under their circles (Stepper alternativeLabel),
+// each in a third of the width, where they can wrap. Side by side they
+// can't — one word each — and in 18 of the 27 languages GENERATE / VERIFY /
+// CONFIRM came out wider than a 390 px screen (up to 482 px), which made the
+// whole dialog wider than the screen and cut off its right edge.
+const COMPACT_STEPPER_MAX_WIDTH = 599; // MUI's "xs"
+const ST_STEPPER_COMPACT = { padding: "14px 4px 10px" };
+const viewportWidth = () => window.innerWidth || document.documentElement.clientWidth ||
+    (document.body || document.getElementsByTagName('body')[0]).clientWidth;
 const ST_POS_ABSOLUTE__W_0__H_0 = { position: 'absolute', width: 0, height: 0, overflow: 'hidden', opacity: 0, pointerEvents: 'none' };
 
 // Agreement modal (step 0): one tab per legal document. Key paths only —
@@ -384,6 +393,13 @@ const toSmsLang = (raw) => {
     return SUPPORTED_SMS_LANGS.indexOf(lang) !== -1 ? lang : "en";
 };
 
+// The account worker writes its error messages in English. In an English UI
+// they are shown as they come (`workerText(json.error) || t(...)`); in any
+// other language the dialog's own translation for that case is shown
+// instead. Where the dialog has no text of its own for a case, the worker's
+// message is kept in every language: it is the only detail there is.
+const workerText = (text) => (/^en\b/i.test(String(getLanguage() || "en")) ? String(text || "") : "");
+
 // Debounce for the pre-flight /check-phone call while the user types.
 const PHONE_CHECK_DEBOUNCE_MS = 650;
 
@@ -420,8 +436,21 @@ const destSupport = (dialCode) => {
 const SESSION_TIMEOUT_MIN = 24 * 60;
 const PIN_TIMEOUT_MIN = 24 * 60;
 
-// Auto-close delay on the final success screen.
-const AUTO_CLOSE_MS = 6000;
+// Signing a just-created account in: how long to keep asking the node to
+// validate it before giving up, and how often (see _loginCurrentAccount).
+const ACCOUNT_VISIBLE_TIMEOUT_MS = 15000;
+const ACCOUNT_VISIBLE_RETRY_MS = 1500;
+// api.validateCredentials answers that waiting can't change (pixaproxyapi.js,
+// _doValidation). Any other refusal ('Account not found' while the node
+// catches up with a new account, a failed request) is asked again.
+const PERMANENT_VALIDATION_ERRORS = Object.freeze([
+    "Master password does not match account keys",
+    "Invalid account parameter",
+]);
+
+// (No auto-close on the final success screen anymore: a download the person
+// cancelled went unnoticed and the dialog closed on an unsaved backup. The
+// dialog now stays until the backup PDF is saved — see _mayClose.)
 
 // =============================================================================
 // Phone mask data — array of [ISO2, mask] tuples. Multiple masks per country
@@ -1103,6 +1132,21 @@ const countryEntries = () => {
 // =============================================================================
 
 const styles = theme => ({
+    // Keyframes at the sheet's top level, where the "$name" references below
+    // resolve (the form Home.js documents).
+    "@keyframes shake": {
+        "0%": { transform: "translateX(0)" },
+        "18%": { transform: "translateX(-7px)" },
+        "36%": { transform: "translateX(6px)" },
+        "54%": { transform: "translateX(-4px)" },
+        "72%": { transform: "translateX(3px)" },
+        "100%": { transform: "translateX(0)" },
+    },
+    "@keyframes codeCaretBlink": {
+        "0%": { opacity: 1 },
+        "50%": { opacity: 0 },
+        "100%": { opacity: 1 },
+    },
     backdrop: {
         zIndex: "1301",
         color: '#fff',
@@ -1193,6 +1237,10 @@ const styles = theme => ({
         // the keyboard shrinks the dialog, only the content area shrinks and
         // scrolls — CANCEL/NEXT stay visible at the bottom edge.
         gridTemplateRows: "auto minmax(0, 1fr) auto",
+        // One column, never wider than the dialog: an implicit (auto) column
+        // grows to its widest row's min-content, and a step name that can't
+        // wrap then stretched the content and the action bar off-screen too.
+        gridTemplateColumns: "minmax(0, 1fr)",
         flex: 1,
         minHeight: 0,
         minWidth: 0,
@@ -1207,6 +1255,23 @@ const styles = theme => ({
         [theme.breakpoints.down("md")]: {
             backgroundColor: "transparent",
         }
+    },
+    // Phones (see COMPACT_STEPPER_MAX_WIDTH): names under the circles, a
+    // little smaller, wrapping between words — and inside one only when a
+    // single word is wider than its third.
+    stepperCompact: {
+        "& .MuiStepLabel-label.MuiStepLabel-alternativeLabel": {
+            marginTop: 6,
+            fontSize: 12,
+            lineHeight: 1.25,
+            overflowWrap: "anywhere",
+            hyphens: "auto",
+        },
+        "& .MuiStep-alternativeLabel": {
+            paddingLeft: 2,
+            paddingRight: 2,
+            minWidth: 0,
+        },
     },
     swipeableContainer: {
         flex: 1,
@@ -1338,6 +1403,17 @@ const styles = theme => ({
             color: "#7b7b7b",
         },
         "& .MuiCheckbox-root.Mui-checked": {
+            color: "#ffffff",
+        },
+    },
+    // "Terms of Use" / "Privacy Policy" inside the agreement sentence: text,
+    // underlined, that opens its document — and only that (no tick).
+    termsLink: {
+        font: "inherit",
+        verticalAlign: "baseline",
+        textUnderlineOffset: "2px",
+        cursor: "pointer",
+        "&:hover": {
             color: "#ffffff",
         },
     },
@@ -1501,6 +1577,266 @@ const styles = theme => ({
         fontSize: 64,
         color: "#ffffff",
     },
+    // One short horizontal shake: a failed code, a close refused until the
+    // backup is saved. Restarts whenever the class is put back on.
+    shake: {
+        animationName: "$shake",
+        animationDuration: "380ms",
+        animationTimingFunction: "cubic-bezier(0.36, 0.07, 0.19, 0.97)",
+        "@media (prefers-reduced-motion: reduce)": {
+            animationName: "none",
+        },
+    },
+    // ── Confirmation code: six boxes over one input (see CodeBoxes) ──
+    codeLabel: {
+        display: "block",
+        fontSize: 13,
+        color: "#bdbdbd",
+        margin: "8px 0 10px 2px",
+        textAlign: "left",
+        userSelect: "none",
+    },
+    codeRow: {
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+    },
+    codeBoxes: {
+        position: "relative",
+        flex: "1 1 auto",
+        minWidth: 0,
+        maxWidth: 452,
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        cursor: "text",
+        userSelect: "none",
+        [theme.breakpoints.down("xs")]: {
+            gap: 5,
+        },
+    },
+    codeBox: {
+        flex: "1 1 0",
+        minWidth: 0,
+        maxWidth: 64,
+        height: 64,
+        borderRadius: 14,
+        border: "2px solid rgba(255, 255, 255, 0.23)",
+        background: "rgba(255, 255, 255, 0.04)",
+        color: "#ffffff",
+        fontSize: 28,
+        fontWeight: 500,
+        lineHeight: 1,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontVariantNumeric: "tabular-nums",
+        transition: "border-color 160ms cubic-bezier(0.4, 0, 0.2, 1), background-color 160ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 160ms cubic-bezier(0.4, 0, 0.2, 1)",
+        [theme.breakpoints.down("xs")]: {
+            height: 56,
+            fontSize: 24,
+            borderRadius: 12,
+        },
+    },
+    codeBoxFilled: {
+        borderColor: "rgba(255, 255, 255, 0.5)",
+    },
+    codeBoxActive: {
+        borderColor: "#ffffff",
+        background: "rgba(255, 255, 255, 0.08)",
+        boxShadow: "0 0 0 3px rgba(255, 255, 255, 0.12)",
+    },
+    codeBoxOk: {
+        borderColor: "#ffffff",
+    },
+    codeBoxFail: {
+        borderColor: "#7b7b7b",
+        color: "#bdbdbd",
+    },
+    // The code reads ABC-123: a short dash between the two groups of three.
+    codeSeparator: {
+        flex: "0 0 auto",
+        width: 10,
+        height: 2,
+        borderRadius: 1,
+        background: "#5a5a5a",
+        [theme.breakpoints.down("xs")]: {
+            width: 6,
+        },
+    },
+    codeCaret: {
+        width: 2,
+        height: "45%",
+        borderRadius: 1,
+        background: "#ffffff",
+        animationName: "$codeCaretBlink",
+        animationDuration: "1.1s",
+        animationTimingFunction: "steps(1)",
+        animationIterationCount: "infinite",
+    },
+    // The one real input, laid over the boxes and fully transparent: it takes
+    // every tap, keystroke, paste and SMS autofill; the boxes only draw.
+    codeInput: {
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: "100%",
+        margin: 0,
+        padding: 0,
+        border: 0,
+        outline: "none",
+        background: "transparent",
+        color: "transparent",
+        caretColor: "transparent",
+        WebkitTextFillColor: "transparent",
+        // At least 16px: iOS zooms the page into a smaller focused input.
+        fontSize: 16,
+        cursor: "text",
+        appearance: "none",
+        "&::selection": {
+            background: "transparent",
+        },
+        // Autofill must not paint its tint over the boxes.
+        "&:-webkit-autofill": {
+            transition: "background-color 600000s 0s, color 600000s 0s",
+        },
+    },
+    codeStatus: {
+        flex: "0 0 auto",
+        width: 44,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "#7b7b7b",
+    },
+    // ── Quit confirmation: a fully white modal over the dark dialog ──
+    quitDialog: {
+        "& .MuiDialog-paper": {
+            background: "#ffffff",
+            color: "#000000",
+            borderRadius: 21,
+            padding: "8px 8px 4px",
+        },
+        "& .MuiDialogTitle-root .MuiTypography-root": {
+            color: "#000000",
+            fontWeight: 600,
+        },
+        "& .MuiDialogContent-root .MuiTypography-root": {
+            color: "#4a4a4a",
+            fontSize: 15,
+            textAlign: "left",
+        },
+        "& .MuiDialogActions-root": {
+            padding: "8px 16px 16px",
+        },
+        "& .quitLeave": {
+            color: "#3d3d3d",
+            "&:hover": {
+                backgroundColor: "rgba(0, 0, 0, 0.06)",
+            },
+        },
+        "& .quitStay": {
+            backgroundColor: "#000000",
+            color: "#ffffff",
+            boxShadow: "none",
+            "&:hover": {
+                backgroundColor: "#262626",
+                boxShadow: "none",
+            },
+        },
+    },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The step-0 agreement sentence, with the two document names in it as links
+//   Ticking the box (or clicking the plain words of the sentence) only ticks
+//   it; the underlined "Terms of Use" and "Privacy Policy" only open their
+//   document — a click on a link never ticks the box.
+//
+//   The names are found in the sentence as each locale words it (the same
+//   keys that title the documents' modal — plus the usual English wordings of
+//   the terms), so the sentence keeps its translation. A name a locale words
+//   differently inside its sentence is added after it instead, so both
+//   documents can always be opened.
+// ─────────────────────────────────────────────────────────────────────────────
+const TERMS_AGREEMENT_KEY = "components.create_account_dialog.i_have_read_the_terms_of_use_and";
+const TERMS_ENGLISH_WORDINGS = ["Terms and Conditions", "Terms & Conditions", "Terms and Condition", "Terms of Service"];
+
+// [{ text, tab? }]: the sentence cut around the document names it contains
+// (tab = 0 Terms of Use, 1 Privacy Policy), then the ones it doesn't. Each
+// name lists the wordings to look for, first match wins; a name not found
+// is linked with its first wording.
+const splitTermsSentence = (sentence, names) => {
+    const s = String(sentence || "");
+    const lower = s.toLowerCase();
+    // A case mapping that changes the length would shift every index.
+    const searchable = lower.length === s.length;
+    const found = [];
+    const missing = [];
+    names.forEach(({ texts, tab }) => {
+        const wordings = (Array.isArray(texts) ? texts : [texts]).map((x) => String(x || "")).filter(Boolean);
+        let hit = null;
+        for (const name of wordings) {
+            const at = searchable ? lower.indexOf(name.toLowerCase()) : -1;
+            if (at === -1) continue;
+            if (found.some((f) => at < f.end && f.start < at + name.length)) continue;
+            hit = { start: at, end: at + name.length, tab };
+            break;
+        }
+        if (hit) found.push(hit);
+        else missing.push({ text: wordings[0] || "", tab });
+    });
+    found.sort((a, b) => a.start - b.start);
+    const parts = [];
+    let cursor = 0;
+    found.forEach(({ start, end, tab }) => {
+        if (start > cursor) parts.push({ text: s.slice(cursor, start) });
+        parts.push({ text: s.slice(start, end), tab }); // the sentence's own wording and case
+        cursor = end;
+    });
+    if (cursor < s.length) parts.push({ text: s.slice(cursor) });
+    return { parts, missing: missing.filter((m) => m.text) };
+};
+
+const TermsAgreementLabel = memo(function TermsAgreementLabel({ classes, onOpenTerms }) {
+    useLanguage();
+    const { parts, missing } = splitTermsSentence(t(TERMS_AGREEMENT_KEY), [
+        { texts: [t(TERMS_MODAL_TITLE_KEYS[0]), ...TERMS_ENGLISH_WORDINGS], tab: 0 },
+        { texts: [t(TERMS_MODAL_TITLE_KEYS[1])], tab: 1 },
+    ]);
+    // Inside the checkbox's <label>: preventDefault keeps the click from
+    // reaching the checkbox, so following a link never ticks or unticks it.
+    const link = (text, tab, key) => (
+        <Link
+            key={key}
+            component="button"
+            type="button"
+            underline="always"
+            color="inherit"
+            className={classes.termsLink}
+            onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onOpenTerms(tab);
+            }}
+        >
+            {text}
+        </Link>
+    );
+    return (
+        <span>
+            {parts.map((p, i) => (typeof p.tab === "number" ? link(p.text, p.tab, "p" + i) : p.text))}
+            {missing.length > 0 && " ("}
+            {missing.map((m, i) => (
+                <React.Fragment key={"m" + m.tab}>
+                    {i > 0 && " · "}
+                    {link(m.text, m.tab)}
+                </React.Fragment>
+            ))}
+            {missing.length > 0 && ")"}
+        </span>
+    );
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1522,7 +1858,8 @@ const StepGenerate = memo(function StepGenerate({
                                                     advancedOpen,
                                                     termsAccepted,
                                                     onToggleAdvanced,
-                                                    onTermsClick,
+                                                    onTermsToggle,
+                                                    onOpenTerms,
                                                     onUsernameChange,
                                                     onSeedInput,
                                                     onBeforeSeedWordAdd,
@@ -1562,7 +1899,7 @@ const StepGenerate = memo(function StepGenerate({
     const readOnly = usernameAvailable || usernameSyntaxError || pendingUsernameValidation;
 
     const usernameEndAdornment = useMemo(() => (
-        <Tooltip title={usernameSyntaxError.length > 0 ? "WARNING: The username has a syntax error.": pendingUsernameValidation ? "WAIT: The system look for an existing account with this username.": usernameAvailable ? "SUCCESS: The username is available.": "INFO: You can recover this account with manually entering the proper seed."}>
+        <Tooltip title={usernameSyntaxError.length > 0 ? t("components.create_account_dialog.warning_the_username_has_a_syntax_error"): pendingUsernameValidation ? t("components.create_account_dialog.wait_the_system_is_looking_for_an_existing"): usernameAvailable ? t("components.create_account_dialog.success_the_username_is_available"): t("components.create_account_dialog.info_you_can_recover_this_account_by")}>
             <InputAdornment position="end" className={classes.inputEndAdornment}>
                 {usernameSyntaxError.length > 0 ?
                     <IconButton edge="end" disabled className={classes.buttonNotDisabled}>
@@ -1646,17 +1983,18 @@ const StepGenerate = memo(function StepGenerate({
                     {usernameMessage}
                 </Typography>
             </Collapse>
+            {/* The box (and the plain words) tick the agreement; only the
+                underlined document names open the document. */}
             <FormControlLabel
                 className={classes.termsRow}
-                onClick={onTermsClick}
                 control={
                     <Checkbox
                         checked={termsAccepted}
-                        onChange={() => {}}
+                        onChange={onTermsToggle}
                         name="terms-agreement"
                     />
                 }
-                label={t("components.create_account_dialog.i_have_read_the_terms_of_use_and")}
+                label={<TermsAgreementLabel classes={classes} onOpenTerms={onOpenTerms} />}
             />
             <div
                 className={classes.advancedToggle}
@@ -1676,7 +2014,7 @@ const StepGenerate = memo(function StepGenerate({
                         fullWidth
                         variant="outlined"
                         label={t("components.create_account_dialog.mnemonic")}
-                        placeholder={seed.length > 0 ? "": readOnly ? "Write down the old seed phrase": "Generate a new seed phrase"}
+                        placeholder={seed.length > 0 ? "": readOnly ? t("components.create_account_dialog.generate_a_new_seed_phrase"): t("components.create_account_dialog.enter_your_old_seed_phrase")}
                         readOnly={readOnly}
                         value={seed}
                         inputProps={{style: {minWidth: "64px"}}}
@@ -1708,12 +2046,12 @@ const StepGenerate = memo(function StepGenerate({
                 <div className={classes.capacityCard}>
                     <div className={"capCol"}>
                         <span className={"capValue"}>{capacity.accounts_available}</span>
-                        <span className={"capLabel"}>{"Account still available"}</span>
+                        <span className={"capLabel"}>{t("components.create_account_dialog.accounts_still_available")}</span>
                     </div>
                     {remainMs !== null && (
                         <div className={"capCol capRight"}>
                             <span className={"capValue"}>{fmtRemain(remainMs)}</span>
-                            <span className={"capLabel"}>{`Until +${capacity.refill_amount || 250} refill`}</span>
+                            <span className={"capLabel"}>{t("components.create_account_dialog.until_refill", { amount: capacity.refill_amount || 250 })}</span>
                         </div>
                     )}
                 </div>
@@ -1755,6 +2093,144 @@ const CountryPickerRow = memo(function CountryPickerRow({ iso, code, name, class
     );
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Confirmation code: six boxes over one input
+//   One box per character of the SMS code, all fed by ONE real <input> laid
+//   transparent over them. Typing runs from box to box without the person
+//   moving anything, Backspace takes back one character, and a whole code —
+//   pasted, or offered by the keyboard straight from the SMS
+//   (autocomplete="one-time-code") — fills every box at once. A tap anywhere
+//   on the row lands in that input, so a long press still opens the native
+//   paste menu. `value` is the bare code ("ABC12"), without the dash.
+// ─────────────────────────────────────────────────────────────────────────────
+const CODE_LENGTH = 6;
+const CODE_SLOTS = [0, 1, 2, 3, 4, 5];
+const CODE_GROUP = 3; // the dash goes before this box: ABC-123
+const cleanCode = (raw) => String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+const CodeBoxes = memo(function CodeBoxes({ classes, id, label, value, status, autoFocus, onChange }) {
+    const inputRef = useRef(null);
+    const [focused, setFocused] = useState(false);
+    const [caret, setCaret] = useState(0);
+
+    const readCaret = useCallback(() => {
+        const el = inputRef.current;
+        if (el && typeof el.selectionStart === "number") setCaret(el.selectionStart);
+    }, []);
+    // A tap puts the browser's caret wherever the invisible text happens to
+    // be under the finger: typing always resumes after the last character.
+    const caretToEnd = useCallback(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        const end = el.value.length;
+        try { el.setSelectionRange(end, end); } catch (_) { /* no selection API */ }
+        setCaret(end);
+    }, []);
+
+    // A code was just sent: be ready to take it (typed, or picked from the
+    // keyboard's suggestion bar).
+    useEffect(() => {
+        if (!autoFocus || !inputRef.current) return;
+        try { inputRef.current.focus(); } catch (_) {}
+    }, [autoFocus]);
+
+    // Only a real change goes up: a 7th character typed into a full code must
+    // not send the same code to /verify-code again (each try counts against
+    // the attempts the SMS allows). And the field itself is kept exactly what
+    // the boxes show — a lowercase letter, a dash, an extra character never
+    // linger in it, or the next Backspace would only remove those.
+    const commit = useCallback((next) => {
+        const el = inputRef.current;
+        if (el && el.value !== next) el.value = next;
+        if (next !== value) onChange(next);
+    }, [onChange, value]);
+
+    const handleChange = useCallback((e) => {
+        commit(cleanCode(e.target.value).slice(0, CODE_LENGTH));
+        readCaret();
+    }, [commit, readCaret]);
+
+    // A whole code replaces whatever was typed; a fragment goes in at the
+    // caret. Only [A-Z0-9] is kept either way ("abc-123" → ABC123).
+    const handlePaste = useCallback((e) => {
+        let text = "";
+        try { text = (e.clipboardData || window.clipboardData).getData("text") || ""; }
+        catch (_) { return; } // let the browser paste; handleChange cleans it
+        e.preventDefault();
+        const pasted = cleanCode(text);
+        if (!pasted) return;
+        if (pasted.length >= CODE_LENGTH) {
+            commit(pasted.slice(0, CODE_LENGTH));
+            caretToEnd();
+            return;
+        }
+        const el = inputRef.current;
+        const start = el && typeof el.selectionStart === "number" ? el.selectionStart : value.length;
+        const end = el && typeof el.selectionEnd === "number" ? el.selectionEnd : value.length;
+        commit((value.slice(0, start) + pasted + value.slice(end)).slice(0, CODE_LENGTH));
+        caretToEnd();
+    }, [commit, caretToEnd, value]);
+
+    const handleFocus = useCallback(() => {
+        setFocused(true);
+        // After the browser has placed its own caret from the tap.
+        setTimeout(caretToEnd, 0);
+    }, [caretToEnd]);
+    const handleBlur = useCallback(() => setFocused(false), []);
+    const focusInput = useCallback(() => {
+        if (inputRef.current) inputRef.current.focus();
+    }, []);
+
+    // The box the next character goes to (the last one once all are full).
+    const at = Math.min(caret, value.length, CODE_LENGTH - 1);
+    const editable = status !== "ok" && status !== "pending";
+    const boxClass = (i) => {
+        let c = classes.codeBox;
+        if (status === "ok") c += " " + classes.codeBoxOk;
+        else if (status === "fail") c += " " + classes.codeBoxFail;
+        else if (value[i]) c += " " + classes.codeBoxFilled;
+        if (focused && editable && i === at) c += " " + classes.codeBoxActive;
+        return c;
+    };
+
+    return (
+        <div
+            className={status === "fail" ? classes.codeBoxes + " " + classes.shake : classes.codeBoxes}
+            onClick={focusInput}
+        >
+            {CODE_SLOTS.map((i) => (
+                <React.Fragment key={i}>
+                    {i === CODE_GROUP && <span className={classes.codeSeparator} aria-hidden="true" />}
+                    <div className={boxClass(i)} aria-hidden="true">
+                        {value[i] || (focused && editable && i === at ? <span className={classes.codeCaret} /> : null)}
+                    </div>
+                </React.Fragment>
+            ))}
+            <input
+                ref={inputRef}
+                id={id}
+                className={classes.codeInput}
+                type="text"
+                value={value}
+                onChange={handleChange}
+                onPaste={handlePaste}
+                onFocus={handleFocus}
+                onBlur={handleBlur}
+                onClick={caretToEnd}
+                onKeyUp={readCaret}
+                aria-label={label}
+                inputMode="text"
+                autoComplete="one-time-code"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                // A string: Preact drops a `false` attribute instead of writing
+                // spellcheck="false", and the squiggle would show under the boxes.
+                spellCheck="false"
+            />
+        </div>
+    );
+});
+
 const StepVerify = memo(function StepVerify({
                                                 classes,
                                                 recoveryMode,
@@ -1779,6 +2255,7 @@ const StepVerify = memo(function StepVerify({
                                                 onCodeChange,
                                                 onVerifyCode,
                                                 sendError,
+                                                phoneError,            // the number itself refused by /send-code
                                                 codeError,
                                                 resendInSec,
                                                 capacity,
@@ -1928,7 +2405,7 @@ const StepVerify = memo(function StepVerify({
                 </Typography>
                 <Typography style={ST_FS_13__MB_24__C_7B7B7B}>{t("components.create_account_dialog.seed_length_word", {
                     word: { word: seed.length },
-                    enoughSeed: !enoughSeed && " — expected 12, 15, 18, 21 or 24."
+                    enoughSeed: !enoughSeed && (" — " + t("components.create_account_dialog.expected_12_15_18_21_or_24"))
                 })}</Typography>
                 <div style={ST_TA_RIGHT}>
                     <Button
@@ -1937,9 +2414,9 @@ const StepVerify = memo(function StepVerify({
                         onClick={onVerifyRecovery}
                         disabled={!enoughSeed || recoveryStatus === "pending" || recoveryStatus === "ok"}
                     >
-                        {recoveryStatus === "pending" ? "VERIFYING..." :
-                            recoveryStatus === "ok"      ? "VERIFIED" :
-                                "VERIFY SEED"}
+                        {recoveryStatus === "pending" ? t("components.create_account_dialog.verifying") :
+                            recoveryStatus === "ok"      ? t("components.create_account_dialog.verified") :
+                                t("components.create_account_dialog.verify_seed")}
                     </Button>
                 </div>
                 <Collapse in={recoveryStatus === "fail"}>
@@ -1968,7 +2445,7 @@ const StepVerify = memo(function StepVerify({
     // explain it the same way as an unsupported dial code.
     const typedUnsupported = String(phoneFormatted || "").startsWith("+") && destSupport(phoneFormatted) === "unsupported";
     const countryUnsupported = destSupport(dialCode) === "unsupported" || typedUnsupported;
-    const sendDisabled = sendingCode || challenging || phoneRaw.length < 4 || resendInSec > 0 || noCapacity || blockedByCheck || sendLockedByWindow || countryUnsupported;
+    const sendDisabled = sendingCode || challenging || phoneRaw.length < 4 || resendInSec > 0 || noCapacity || blockedByCheck || sendLockedByWindow || countryUnsupported || Boolean(phoneError);
     // More digits than any of the country's masks: shown in full, never cut.
     // Usually a foreign number entered without its "+" — the country switches
     // by itself once the number is complete, otherwise this note says what to
@@ -1980,54 +2457,61 @@ const StepVerify = memo(function StepVerify({
     // One-line status under the phone field, fed by /check-phone.
     let phoneNote = "";
     if (countryUnsupported) {
-        phoneNote = "SMS verification is not yet available for this country.";
+        phoneNote = t("components.create_account_dialog.sms_verification_is_not_yet_available_for");
     } else if (phoneTooLong) {
-        phoneNote = `${phoneRaw.length} digits — a ${countryName} number has at most ${maxDigits}. For another country, start with its code ("+…") or choose it from the list.`;
+        phoneNote = t("components.create_account_dialog.digits_numbers_in_have_at_most_for", { digits: phoneRaw.length, country: countryName, max: maxDigits });
     } else if (turnstileState === "error") {
-        phoneNote = "The browser check could not load. If you use a content blocker, allow challenges.cloudflare.com and reload.";
+        phoneNote = t("components.create_account_dialog.the_browser_check_could_not_load_if_you");
     } else if (phoneChecking) {
-        phoneNote = "Checking number…";
+        phoneNote = t("components.create_account_dialog.checking_number");
     } else if (phoneCheck) {
         const nextAt = phoneCheck.next_send_allowed_at
             ? new Date(phoneCheck.next_send_allowed_at).toLocaleString(getLocaleCode())
             : null;
         if (phoneCheck.phone_status === "consumed" || phoneCheck.phone_status === "pending_creation") {
-            phoneNote = "This phone number has already been used to create an account.";
+            phoneNote = t("components.create_account_dialog.this_phone_number_has_already_been_used");
         } else if (phoneCheck.phone_status === "send_limit_reached") {
-            phoneNote = `This number has reached the maximum of ${phoneCheck.sends_max_total} verification SMS.`;
+            phoneNote = t("components.create_account_dialog.this_number_has_reached_the_maximum_of", { max: phoneCheck.sends_max_total });
         } else if (phoneCheck.phone_status === "cooldown") {
             phoneNote = nextAt
-                ? `An SMS was already sent to this number. The next one is possible on ${nextAt}.`
-                : "An SMS was already sent to this number recently.";
+                ? t("components.create_account_dialog.an_sms_was_already_sent_to_this_number_the", { date: nextAt })
+                : t("components.create_account_dialog.an_sms_was_already_sent_to_this_number");
         } else if (phoneCheck.phone_status === "verified") {
-            phoneNote = "This phone is already verified — you can continue.";
+            phoneNote = t("components.create_account_dialog.this_phone_is_already_verified_you_can");
         }
     }
+    // Shown right under the phone field: everything said about the number
+    // itself — the /check-phone verdict, or /send-code refusing it.
+    const fieldNote = phoneError || phoneNote;
+    const fieldNoteColor = !phoneError && phoneCheck && phoneCheck.phone_status === "verified" ? "#ffffff" : "#bdbdbd";
+
+    // The code as typed, without the dash the state keeps ("ABC-12" → "ABC12").
+    const codeChars = String(confirmationCode || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
     const verifyDisabled =
         codeStatus === "pending" ||
         codeStatus === "ok" ||
-        confirmationCode.replace(/-/g, "").length < 6;
+        codeChars.length < CODE_LENGTH;
 
-    const codeEndAdornment = (
-        <InputAdornment position="end" className={classes.inputEndAdornment}>
-            {codeStatus === "ok" ? (
-                <Tooltip title={t("components.create_account_dialog.code_verified")}>
-                    <IconButton edge="end" disabled>
-                        <CheckCircleOutlineIcon style={ST_C_FFFFFF} />
-                    </IconButton>
-                </Tooltip>
-            ) : codeStatus === "pending" ? (
-                <CircularProgress size={20} color="inherit" />
-            ) : (
-                <Tooltip title={t("components.create_account_dialog.verify_the_confirmation_code")}>
-                    <span>
-                        <IconButton edge="end" onClick={onVerifyCode} disabled={verifyDisabled}>
-                            <CheckCircleOutlineIcon />
-                        </IconButton>
-                    </span>
-                </Tooltip>
-            )}
-        </InputAdornment>
+    // Beside the boxes: the verification state (also a manual retry, e.g.
+    // after a network error — a full code is otherwise verified by itself).
+    const codeStatusIndicator = codeStatus === "ok" ? (
+        <Tooltip title={t("components.create_account_dialog.code_verified")}>
+            <span>
+                <IconButton disabled>
+                    <CheckCircleOutlineIcon style={ST_C_FFFFFF} />
+                </IconButton>
+            </span>
+        </Tooltip>
+    ) : codeStatus === "pending" ? (
+        <CircularProgress size={22} color="inherit" />
+    ) : (
+        <Tooltip title={t("components.create_account_dialog.verify_the_confirmation_code")}>
+            <span>
+                <IconButton onClick={onVerifyCode} disabled={verifyDisabled}>
+                    <CheckCircleOutlineIcon />
+                </IconButton>
+            </span>
+        </Tooltip>
     );
 
     // Dial-code start adornment: an inline editable "+41" label. Editing it
@@ -2078,6 +2562,14 @@ const StepVerify = memo(function StepVerify({
                     inputProps={{ autoComplete: "tel-national", inputMode: "tel" }}
                 />
             </FormControl>
+            {/* About the number itself ("This phone number has already been
+                used to create an account.", unsupported country, too long…):
+                right under the field it is about, not under the button. */}
+            <Collapse in={Boolean(fieldNote)}>
+                <Typography style={{ fontSize: 13, marginTop: -8, marginBottom: 12, color: fieldNoteColor, fontStyle: "italic", textAlign: "left" }}>
+                    {fieldNote}
+                </Typography>
+            </Collapse>
             {/* Turnstile mount point — empty unless Cloudflare needs a click. */}
             <div ref={turnstileHost} style={turnstileState === "off" ? ST_DISPLAY_NONE : ST_MB_8} />
             <Button
@@ -2089,12 +2581,12 @@ const StepVerify = memo(function StepVerify({
                 startIcon={(sendingCode || challenging) ? <CircularProgress size={16} color="inherit" /> : <SendIcon />}
                 style={ST_MB_16}
             >
-                {challenging ? "CHECKING BROWSER..." :
-                    sendingCode ? "SENDING..." :
+                {challenging ? t("components.create_account_dialog.checking_browser") :
+                    sendingCode ? t("components.create_account_dialog.sending") :
                         resendInSec > 0 ? t("components.create_account_dialog.resend_in_s", {
                                 resendInSec: resendInSec
                             }) :
-                            codeSent ? "RESEND CONFIRMATION CODE" : "SEND CONFIRMATION CODE"}
+                            codeSent ? t("components.create_account_dialog.resend_confirmation_code") : t("components.create_account_dialog.send_confirmation_code")}
             </Button>
             {capacity && (
                 <Typography style={ST_FS_12__MT_NEG8__MB_8}>
@@ -2102,7 +2594,7 @@ const StepVerify = memo(function StepVerify({
                         ? t(
                             "components.create_account_dialog.daily_capacity_reached_new_account_slots_open",
                             {
-                                toLocaleTimeString: capacity.next_refill_at ? new Date(capacity.next_refill_at).toLocaleString(getLocaleCode()) : "the next UTC midnight"
+                                toLocaleTimeString: capacity.next_refill_at ? new Date(capacity.next_refill_at).toLocaleString(getLocaleCode()) : t("components.create_account_dialog.the_next_utc_midnight")
                             }
                         )
                         : t("components.create_account_dialog.account_slot_available_today", {
@@ -2110,39 +2602,32 @@ const StepVerify = memo(function StepVerify({
                         })}
                 </Typography>
             )}
-            <Collapse in={Boolean(phoneNote) && !sendError}>
-                <Typography style={{ fontSize: 13, marginTop: -8, marginBottom: 12, color: phoneCheck && phoneCheck.phone_status === "verified" ? "#ffffff" : "#bdbdbd", fontStyle: "italic", textAlign: "left" }}>
-                    {phoneNote}
-                </Typography>
-            </Collapse>
             <Collapse in={Boolean(sendError)}>
                 <Typography style={ST_FS_14__MB_12__C_BDBDBD}>
                     {sendError}
                 </Typography>
             </Collapse>
             <Collapse in={codeSent}>
-                <FormControl variant="outlined" fullWidth style={ST_MT_8}>
-                    <InputLabel htmlFor="confirmation-code-input">{t("components.create_account_dialog.confirmation_code")}</InputLabel>
-                    <OutlinedInput
+                <label className={classes.codeLabel} htmlFor="confirmation-code-input">
+                    {t("components.create_account_dialog.confirmation_code")}
+                </label>
+                <div className={classes.codeRow}>
+                    <CodeBoxes
+                        classes={classes}
                         id="confirmation-code-input"
-                        value={confirmationCode}
+                        label={t("components.create_account_dialog.confirmation_code")}
+                        value={codeChars}
+                        status={codeStatus}
+                        autoFocus={codeSent && codeStatus !== "ok"}
                         onChange={onCodeChange}
-                        placeholder="ABC-123"
-                        endAdornment={codeEndAdornment}
-                        labelWidth={140}
-                        inputProps={{
-                            autoCapitalize: "characters",
-                            autoComplete: "one-time-code",
-                            autoCorrect: "off",
-                            spellCheck: false,
-                            maxLength: 7,
-                            style: { letterSpacing: "0.2em", textTransform: "uppercase" },
-                        }}
                     />
-                </FormControl>
+                    <div className={classes.codeStatus}>
+                        {codeStatusIndicator}
+                    </div>
+                </div>
                 <Collapse in={codeStatus === "fail"}>
                     <Typography style={ST_FS_14__MT_12__C_BDBDBD}>
-                        {codeError || "That code doesn't match. Double-check the SMS or send a new one."}
+                        {codeError || t("components.create_account_dialog.that_code_doesnt_match_double_check_the_sms")}
                     </Typography>
                 </Collapse>
                 <Collapse in={codeStatus === "ok"}>
@@ -2159,7 +2644,7 @@ const StepVerify = memo(function StepVerify({
                 fullWidth={true}
                 maxWidth={"xs"}
             >
-                <DialogTitle>{"Select your country"}</DialogTitle>
+                <DialogTitle>{t("components.create_account_dialog.select_your_country")}</DialogTitle>
                 <DialogContent style={ST_PT_0}>
                     <FormControl fullWidth variant="outlined">
                         <OutlinedInput
@@ -2167,7 +2652,7 @@ const StepVerify = memo(function StepVerify({
                             value={pickerFilter}
                             onChange={onPickerFilterChange}
                             onKeyDown={onPickerFilterKeyDown}
-                            placeholder={"Search country, code or paste a number"}
+                            placeholder={t("components.create_account_dialog.search_country_code_or_paste_a_number")}
                             inputProps={PICKER_INPUT_PROPS}
                         />
                     </FormControl>
@@ -2184,7 +2669,7 @@ const StepVerify = memo(function StepVerify({
                         ))}
                         {filteredEntries.length === 0 && (
                             <Typography style={ST_FS_14__C_7B7B7B__P_12PX_4PX}>
-                                {"No country matches your search."}
+                                {t("components.create_account_dialog.no_country_matches_your_search")}
                             </Typography>
                         )}
                     </div>
@@ -2196,17 +2681,39 @@ const StepVerify = memo(function StepVerify({
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Memoized Step 3: Confirm
-//   Awareness panel + creation/recovery progress + backup download + auto-close.
+//   Creation/recovery progress, then the backup PDF — which has to be saved
+//   before the dialog can close. Where the browser offers a real "Save as"
+//   (File System Access), the save is known to have happened; anywhere else
+//   a plain download is all a page can start, and whether the file was kept
+//   or the download cancelled can't be seen — so the person confirms it.
+//   Closing a finished sign-up then signs the new account in (the class's
+//   _signInAndClose); this panel says so, and shows how it went.
 // ─────────────────────────────────────────────────────────────────────────────
+const ST_PDF_NOTE = { color: "#bdbdbd", fontSize: 13, textAlign: "center", maxWidth: 420, fontStyle: "italic" };
+const ST_PDF_SAVED = { color: "#ffffff", fontSize: 14, textAlign: "center", maxWidth: 420 };
+const ST_PDF_REMINDER = { color: "#ffffff", fontSize: 14, fontWeight: 500, textAlign: "center", maxWidth: 420 };
+const PDF_NOTICE_KEYS = {
+    cancelled: "components.create_account_dialog.the_download_was_cancelled_your_backup_isnt",
+    failed: "components.create_account_dialog.the_pdf_couldnt_be_saved_please_try_again",
+};
+
 const StepConfirm = memo(function StepConfirm({
                                                   classes,
                                                   status,           // 'working' | 'success' | 'error'
                                                   recoveryMode,
                                                   errorMessage,
-                                                  autoCloseInSec,
-                                                  pdfDownloaded,
                                                   hasPdfBlob,
+                                                  pdfDownloaded,    // a download / save was started
+                                                  pdfSaving,        // the "Save as" write is running
+                                                  pdfVerified,      // written through "Save as": known saved
+                                                  pdfConfirmed,     // verified, or confirmed by the person
+                                                  pdfNotice,        // '' | 'cancelled' | 'failed'
+                                                  pdfReminder,      // closes refused so far (re-runs the shake)
+                                                  username,
+                                                  signInState,      // 'idle' | 'pending' | 'done' | 'failed'
+                                                  signInError,
                                                   onDownloadPdf,
+                                                  onTogglePdfConfirmed,
                                               }) {
     useLanguage();
     return (
@@ -2216,7 +2723,7 @@ const StepConfirm = memo(function StepConfirm({
                     <>
                         <CircularProgress color="inherit" />
                         <Typography style={ST_C_BDBDBD__FS_14__TA_CENTER}>
-                            {recoveryMode ? "Recovering your account..." : "Creating your account on Pixa..."}
+                            {recoveryMode ? t("components.create_account_dialog.recovering_your_account") : t("components.create_account_dialog.creating_your_account_on_pixa")}
                         </Typography>
                     </>
                 )}
@@ -2224,7 +2731,9 @@ const StepConfirm = memo(function StepConfirm({
                     <>
                         <CheckCircleOutlineIcon className={classes.statusIconSuccess} />
                         <Typography style={ST_C_FFF__FS_16__TA_CENTER}>
-                            {recoveryMode ? "Account recovered. You're signed in." : "Account created. You're signed in."}
+                            {recoveryMode
+                                ? t("components.create_account_dialog.account_recovered_youre_signed_in")
+                                : t("components.create_account_dialog.account_created")}
                         </Typography>
 
                         {hasPdfBlob && (
@@ -2232,13 +2741,15 @@ const StepConfirm = memo(function StepConfirm({
                                 variant={pdfDownloaded ? "outlined" : "contained"}
                                 color="default"
                                 onClick={onDownloadPdf}
+                                disabled={pdfSaving}
+                                startIcon={pdfSaving ? <CircularProgress size={16} color="inherit" /> : null}
                                 style={ST_MT_8}
                             >
-                                {pdfDownloaded ? "DOWNLOAD AGAIN" : "DOWNLOAD BACKUP PDF"}
+                                {pdfSaving ? t("components.create_account_dialog.saving") : pdfDownloaded ? t("components.create_account_dialog.download_again") : t("components.create_account_dialog.download_backup_pdf")}
                             </Button>
                         )}
 
-                        {!pdfDownloaded && hasPdfBlob && (
+                        {hasPdfBlob && !pdfDownloaded && (
                             <Typography style={ST_C_BDBDBD__FS_13__TA_CENTER}>
                                 {t(
                                     "components.create_account_dialog.you_must_download_your_backup_pdf_before"
@@ -2246,16 +2757,67 @@ const StepConfirm = memo(function StepConfirm({
                             </Typography>
                         )}
 
-                        {pdfDownloaded && typeof autoCloseInSec === "number" && autoCloseInSec > 0 && (
-                            <Typography style={ST_C_7B7B7B__FS_13__TA_CENTER}>{t("components.create_account_dialog.this_dialog_will_close_in_s", {
-                                autoCloseInSec: autoCloseInSec
-                            })}</Typography>
+                        {hasPdfBlob && pdfNotice && PDF_NOTICE_KEYS[pdfNotice] && (
+                            <Typography style={ST_PDF_NOTE}>{t(PDF_NOTICE_KEYS[pdfNotice])}</Typography>
+                        )}
+
+                        {hasPdfBlob && pdfVerified && (
+                            <Typography style={ST_PDF_SAVED}>
+                                {t("components.create_account_dialog.backup_pdf_saved_keep_it_somewhere_safe_it")}
+                            </Typography>
+                        )}
+
+                        {hasPdfBlob && pdfDownloaded && !pdfVerified && (
+                            <>
+                                <Typography style={ST_PDF_NOTE}>
+                                    {t("components.create_account_dialog.check_that_the_download_finished_if_it_was")}
+                                </Typography>
+                                <FormControlLabel
+                                    className={classes.termsRow}
+                                    control={
+                                        <Checkbox
+                                            checked={pdfConfirmed}
+                                            onChange={onTogglePdfConfirmed}
+                                            name="backup-saved"
+                                        />
+                                    }
+                                    label={t("components.create_account_dialog.i_have_saved_my_backup_pdf")}
+                                />
+                            </>
+                        )}
+
+                        {hasPdfBlob && pdfReminder > 0 && !pdfConfirmed && (
+                            <Typography key={pdfReminder} className={classes.shake} style={ST_PDF_REMINDER}>
+                                {t("components.create_account_dialog.save_your_backup_pdf_before_closing_it_is")}
+                            </Typography>
+                        )}
+
+                        {/* A new account is signed in as the dialog closes
+                            (_signInAndClose): said once the backup is saved. */}
+                        {!recoveryMode && (!hasPdfBlob || pdfConfirmed) && signInState === "idle" && (
+                            <Typography style={ST_PDF_NOTE}>
+                                {t("components.create_account_dialog.youll_be_signed_in_as_when_you_close", { username })}
+                            </Typography>
+                        )}
+                        {signInState === "pending" && (
+                            <Typography style={ST_PDF_SAVED}>
+                                {t("components.create_account_dialog.signing_you_in_as", { username })}
+                            </Typography>
+                        )}
+                        {signInState === "failed" && (
+                            <Typography style={ST_PDF_REMINDER}>
+                                {signInError
+                                    ? t("components.create_account_dialog.you_couldnt_be_signed_in_error_try_again", {
+                                        error: String(signInError).replace(/[\s.。．।]+$/u, ""), // its own full stop: the sentence adds one
+                                    })
+                                    : t("components.create_account_dialog.you_couldnt_be_signed_in_try_again_or")}
+                            </Typography>
                         )}
                     </>
                 )}
                 {status === "error" && (
                     <Typography style={ST_C_BDBDBD__FSTY_ITALIC__FS_14}>
-                        {errorMessage || "Something went wrong. Please try again."}
+                        {errorMessage || t("components.create_account_dialog.something_went_wrong_please_try_again")}
                     </Typography>
                 )}
             </div>
@@ -2276,8 +2838,18 @@ class CreateAccountDialog extends React.PureComponent {
         super(props);
         // Hidden form ref for browser credential save
         this._credentialFormRef = React.createRef();
-        this._autoCloseTimer = null;
-        this._countdownTimer = null;
+        // Set by the quit modal's QUIT: from then on every close goes through
+        // (the shell asks again when the address drops the overlay).
+        this._quitConfirmed = false;
+        // Set by CLOSE after a failed sign-in: leave the finished sign-up
+        // without signing in.
+        this._leaveSignedOut = false;
+        // A sign-in is running (_signInAndClose). An instance flag, not state:
+        // two closes in one tick (a double click, Escape and the back arrow)
+        // must not start two sign-ins before the state catches up.
+        this._signingIn = false;
+        // An await that resolves after the dialog is gone must not touch it.
+        this._unmounted = false;
         this._advancedOpenTimer = null;
         this._resendTimer = null;
         this._phoneCheckTimer = null;
@@ -2304,9 +2876,18 @@ class CreateAccountDialog extends React.PureComponent {
             _username_available: false,
             _downloaded: false,
             _pdfBlob: null,                // generated up-front, downloaded at step 2 success
-            _pdfDownloaded: false,         // user has actually clicked download
+            _pdfDownloaded: false,         // a download / "Save as" has been started
+            _pdfSaving: false,             // the "Save as" write is running
+            _pdfVerified: false,           // written through "Save as": known to be saved
+            _pdfConfirmed: false,          // verified, or the person confirmed it was saved
+            _pdfNotice: "",                // '' | 'cancelled' | 'failed'
+            _pdfReminder: 0,               // closes refused for an unsaved backup
+            _quitConfirmOpen: false,       // the white "Quit the sign-up?" modal
+            _signInState: "idle",          // 'idle'|'pending'|'done'|'failed' — the sign-in on close
+            _signInError: "",
             _creating_account: false,
-            _fullscreen: (window.innerWidth || document.documentElement.clientWidth || (document.body || document.getElementsByTagName('body')[0]).clientWidth) <= 960,
+            _fullscreen: viewportWidth() <= 960,
+            _compactStepper: viewportWidth() <= COMPACT_STEPPER_MAX_WIDTH,
             _publicKeys: {
                 owner: "",
                 active: "",
@@ -2342,6 +2923,7 @@ class CreateAccountDialog extends React.PureComponent {
             _confirmationCode: "",
             _codeStatus: "idle",           // 'idle'|'pending'|'ok'|'fail'
             _sendError: "",                // server message shown under the send button
+            _phoneError: "",               // /send-code refused the number itself — shown under the phone field
             _codeError: "",                // server message shown under the code field
             _resendInSec: 0,               // resend-button cooldown countdown
             _voucher: null,                // account-creation voucher from /verify-code
@@ -2355,13 +2937,17 @@ class CreateAccountDialog extends React.PureComponent {
             // Step 2: final confirm/status panel
             _confirmStatus: "idle",        // 'idle'|'working'|'success'|'error'
             _errorMessage: "",
-            _autoCloseInSec: null,
         };
     };
 
     componentDidMount() {
         window.addEventListener("resize", this._computeSize);
         this._fetchCapacity();
+        // The shell asks this dialog before the address takes it down (the
+        // back arrow, a link — Index.js §8c): see _closeGuard.
+        if (typeof this.props.registerCloseGuard === "function") {
+            this.props.registerCloseGuard(this._closeGuard);
+        }
         // Mirror the visual viewport into CSS variables. When the on-screen
         // keyboard opens, mobile browsers shrink the visual viewport without
         // resizing the layout viewport, so a `height: 100%` fullscreen dialog
@@ -2375,6 +2961,7 @@ class CreateAccountDialog extends React.PureComponent {
     }
 
     componentWillUnmount() {
+        this._unmounted = true;
         window.removeEventListener("resize", this._computeSize);
         if (window.visualViewport) {
             window.visualViewport.removeEventListener("resize", this._updateVisualViewport);
@@ -2382,8 +2969,9 @@ class CreateAccountDialog extends React.PureComponent {
         }
         document.documentElement.style.removeProperty("--cad-vvh");
         document.documentElement.style.removeProperty("--cad-vvt");
-        if (this._autoCloseTimer)     { clearTimeout(this._autoCloseTimer);     this._autoCloseTimer = null; }
-        if (this._countdownTimer)     { clearInterval(this._countdownTimer);    this._countdownTimer = null; }
+        if (typeof this.props.registerCloseGuard === "function") {
+            this.props.registerCloseGuard(null);
+        }
         if (this._advancedOpenTimer)  { clearTimeout(this._advancedOpenTimer);  this._advancedOpenTimer = null; }
         if (this._resendTimer)        { clearInterval(this._resendTimer);       this._resendTimer = null; }
         if (this._phoneCheckTimer)    { clearTimeout(this._phoneCheckTimer);    this._phoneCheckTimer = null; }
@@ -2401,9 +2989,11 @@ class CreateAccountDialog extends React.PureComponent {
     };
 
     _computeSize = () => {
-        const fullscreen = (window.innerWidth || document.documentElement.clientWidth || (document.body || document.getElementsByTagName('body')[0]).clientWidth) <= 960;
-        if (this.state._fullscreen !== fullscreen) {
-            this.setState({_fullscreen: fullscreen}, () => { this.forceUpdate(); });
+        const width = viewportWidth();
+        const fullscreen = width <= 960;
+        const compactStepper = width <= COMPACT_STEPPER_MAX_WIDTH;
+        if (this.state._fullscreen !== fullscreen || this.state._compactStepper !== compactStepper) {
+            this.setState({_fullscreen: fullscreen, _compactStepper: compactStepper}, () => { this.forceUpdate(); });
         }
     };
 
@@ -2553,7 +3143,12 @@ class CreateAccountDialog extends React.PureComponent {
                 _masterKey:   masterKey,
                 _pdfBlob:     blob,
                 _downloaded:  true,        // legacy flag — keys exist
-                _pdfDownloaded: false,     // user has NOT saved the file yet
+                // A new file: none of it has been saved yet.
+                _pdfDownloaded: false,
+                _pdfVerified:   false,
+                _pdfConfirmed:  false,
+                _pdfNotice:     "",
+                _pdfReminder:   0,
             }, () => this.forceUpdate());
         } catch (err) {
             console.error("[CreateAccountDialog] silent key generation failed:", err);
@@ -2564,33 +3159,82 @@ class CreateAccountDialog extends React.PureComponent {
     };
 
     /**
-     * Save the previously-built PDF blob to disk and mark it as downloaded.
-     * Called from the step 2 success state via the explicit "Download backup"
-     * button. The user must download before the OK / auto-close can complete.
+     * Save the previously-built PDF blob to disk. Called from the step 2
+     * success state via the explicit "Download backup" button; the dialog
+     * cannot close before the backup is saved (see _mayClose).
+     *
+     *  - Where the browser offers a real "Save as" (File System Access API,
+     *    Chromium desktop), the file is written through it: a completed write
+     *    is a backup KNOWN to be saved, a dismissed picker is known to be
+     *    cancelled. showSaveFilePicker is called first thing, inside the
+     *    click's user activation.
+     *  - Anywhere else, a plain download is all a page can start, and
+     *    whether the file was kept or the download cancelled can't be seen:
+     *    the person then confirms it (StepConfirm's checkbox).
      */
-    _trigger_pdf_download = () => {
-        const { _pdfBlob, _username } = this.state;
-        if (!_pdfBlob) return;
+    _trigger_pdf_download = async () => {
+        const { _pdfBlob, _username, _pdfSaving } = this.state;
+        if (!_pdfBlob || _pdfSaving) return;
+        const filename = `KeysOf-${_username}-Pixagram.pdf`;
+
+        if (typeof window !== "undefined" && typeof window.showSaveFilePicker === "function") {
+            let handle = null;
+            try {
+                handle = await window.showSaveFilePicker({
+                    suggestedName: filename,
+                    types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }],
+                });
+            } catch (err) {
+                if (err && err.name === "AbortError") {
+                    // The picker was dismissed: nothing saved, and we know it.
+                    this.setState({ _pdfNotice: "cancelled" }, () => this.forceUpdate());
+                    return;
+                }
+                handle = null; // not usable here (policy, embedded view…): plain download below
+            }
+            if (handle) {
+                this.setState({ _pdfSaving: true, _pdfNotice: "" }, () => this.forceUpdate());
+                try {
+                    const writable = await handle.createWritable();
+                    await writable.write(_pdfBlob);
+                    await writable.close();
+                    this.setState({
+                        _pdfSaving: false,
+                        _pdfDownloaded: true,
+                        _pdfVerified: true,
+                        _pdfConfirmed: true,
+                        _pdfNotice: "",
+                    }, () => this.forceUpdate());
+                } catch (err) {
+                    console.error("[CreateAccountDialog] PDF save failed:", err);
+                    this.setState({ _pdfSaving: false, _pdfNotice: "failed" }, () => this.forceUpdate());
+                }
+                return;
+            }
+        }
+
         try {
             const url = URL.createObjectURL(_pdfBlob);
             const a = document.createElement("a");
-            a.download = `KeysOf-${_username}-Pixagram.pdf`;
+            a.download = filename;
             a.href = url;
             a.click();
             a.remove();
-            URL.revokeObjectURL(url);
-            this.setState({ _pdfDownloaded: true }, () => {
-                this.forceUpdate(() => {
-                    // The auto-close timer is gated on the PDF being downloaded;
-                    // start it now if we're already in success state.
-                    if (this.state._confirmStatus === "success" && !this._autoCloseTimer) {
-                        this._startAutoClose();
-                    }
-                });
-            });
+            // Revoked later rather than right after click(): some browsers
+            // still read the URL once the save prompt has been answered.
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+            // Started — not known to be kept: the person confirms it.
+            this.setState({ _pdfDownloaded: true, _pdfNotice: "" }, () => this.forceUpdate());
         } catch (err) {
             console.error("[CreateAccountDialog] PDF download failed:", err);
+            this.setState({ _pdfNotice: "failed" }, () => this.forceUpdate());
         }
+    };
+
+    /** StepConfirm's "I have saved my backup PDF" checkbox. */
+    _handlePdfConfirmedToggle = () => {
+        if (this.state._pdfVerified) return; // known saved: nothing to confirm
+        this.setState({ _pdfConfirmed: !this.state._pdfConfirmed }, () => this.forceUpdate());
     };
 
     _handleMouseDownPassword = (event) => {
@@ -2672,17 +3316,18 @@ class CreateAccountDialog extends React.PureComponent {
     };
 
     /**
-     * Terms & Conditions row (step 0). A click anywhere on the row — checkbox
-     * or label — toggles the agreement AND opens the terms modal.
-     * preventDefault stops the native checkbox toggle so the controlled state
-     * stays the single source of truth (no double flip on label clicks).
+     * Terms row (step 0), the checkbox — or the plain words of its sentence,
+     * through the <label>: ticks or unticks the agreement, nothing else. The
+     * documents open only from their underlined names (_handleOpenTerms).
      */
-    _handleTermsClick = (e) => {
-        if (e && typeof e.preventDefault === "function") e.preventDefault();
-        this.setState({
-            _termsAccepted: !this.state._termsAccepted,
-            _termsModalOpen: true,
-        }, () => this.forceUpdate());
+    _handleTermsToggle = (e, checked) => {
+        const next = typeof checked === "boolean" ? checked : !this.state._termsAccepted;
+        this.setState({ _termsAccepted: next }, () => this.forceUpdate());
+    };
+
+    /** "Terms of Use" (tab 0) / "Privacy Policy" (tab 1) in that sentence: open that document. */
+    _handleOpenTerms = (tab) => {
+        this.setState({ _termsModalOpen: true, _termsTab: tab === 1 ? 1 : 0 }, () => this.forceUpdate());
     };
 
     _handleTermsModalClose = () => {
@@ -2733,6 +3378,7 @@ class CreateAccountDialog extends React.PureComponent {
             _codeStatus: "idle",
             _phoneCheck: null,
             _sendError: "",
+            _phoneError: "",
         }, () => { this.forceUpdate(); this._schedulePhoneCheck(); });
     };
 
@@ -2784,6 +3430,7 @@ class CreateAccountDialog extends React.PureComponent {
             _codeStatus: "idle",
             _phoneCheck: null,
             _sendError: "",
+            _phoneError: "",
         };
         if (match) {
             // Country resolved — switch mask, keep any subscriber digits we had.
@@ -2827,7 +3474,7 @@ class CreateAccountDialog extends React.PureComponent {
         const { _country, _dialCode } = this.state;
         const parsed = parsePhoneInput(inputVal);
         const prevDigits = String(this.state._phoneRaw || "");
-        const resetFlow = { _codeSent: false, _confirmationCode: "", _codeStatus: "idle", _phoneCheck: null, _sendError: "" };
+        const resetFlow = { _codeSent: false, _confirmationCode: "", _codeStatus: "idle", _phoneCheck: null, _sendError: "", _phoneError: "" };
         const afterUpdate = () => { this.forceUpdate(); this._schedulePhoneCheck(); };
         // Select `country` (dial code `prefix`, digits only) with `subscriber`
         // in the field.
@@ -2939,8 +3586,9 @@ class CreateAccountDialog extends React.PureComponent {
         }
     };
 
+    // Takes the bare code from the code boxes ("ABC12") — or an input event.
     _handleCodeChange = (e) => {
-        const formatted = formatConfirmationCode(e.target.value);
+        const formatted = formatConfirmationCode(typeof e === "string" ? e : e && e.target ? e.target.value : "");
         const cleaned = String(formatted || "").replace(/-/g, "");
         const prevStatus = this.state._codeStatus;
         // Editing the code clears any previous fail/ok state.
@@ -3073,7 +3721,7 @@ class CreateAccountDialog extends React.PureComponent {
         const phone = composeE164(_dialCode, _phoneRaw);
         const payload = { phone, language: toSmsLang(getLanguage()) };
         if (typeof turnstileToken === "string" && turnstileToken) payload.turnstile_token = turnstileToken;
-        this.setState({ _sendingCode: true, _codeStatus: "idle", _sendError: "", _codeError: "" }, () => this.forceUpdate());
+        this.setState({ _sendingCode: true, _codeStatus: "idle", _sendError: "", _phoneError: "", _codeError: "" }, () => this.forceUpdate());
         try {
             const res = await fetch(`${ACCOUNT_SERVICE_API}/send-code`, {
                 method:  "POST",
@@ -3091,7 +3739,7 @@ class CreateAccountDialog extends React.PureComponent {
                 } else {
                     this.setState({
                         _sendingCode: false,
-                        _sendError: "This phone is already verified. Finish sign-up in the session where you verified it, or retry after that verification expires.",
+                        _sendError: t("components.create_account_dialog.this_phone_is_already_verified_finish_sign"),
                     }, () => this.forceUpdate());
                 }
                 return;
@@ -3108,7 +3756,7 @@ class CreateAccountDialog extends React.PureComponent {
                 return;
             }
 
-            let msg = json.error || "Could not send the confirmation code. Try again.";
+            let msg = json.error || t("components.create_account_dialog.could_not_send_the_confirmation_code_try");
             if (json.code === "SEND_WINDOW") {
                 // 1 SMS per 7-day window: a ticking countdown makes no sense
                 // at this scale — show the date and lock the button until then.
@@ -3116,30 +3764,30 @@ class CreateAccountDialog extends React.PureComponent {
                     ? new Date(json.next_send_allowed_at).toLocaleString(getLocaleCode())
                     : null;
                 msg = when
-                    ? `An SMS was already sent to this number. The next one is possible on ${when}.`
-                    : (json.error || "An SMS was already sent to this number recently.");
+                    ? t("components.create_account_dialog.an_sms_was_already_sent_to_this_number_the", { date: when })
+                    : (workerText(json.error) || t("components.create_account_dialog.an_sms_was_already_sent_to_this_number"));
                 this.setState({ _nextSendAllowedAt: json.next_send_allowed_at || null }, () => this.forceUpdate());
                 if (typeof json.retry_after === "number" && json.retry_after <= 300) {
                     this._startResendCountdown(json.retry_after);
                 }
             } else if (json.code === "COUNTRY_NOT_SUPPORTED" || json.code === "COUNTRY_NOT_ENABLED" || json.code === "SENDER_NOT_AVAILABLE") {
-                msg = json.error || "SMS verification is not yet available for this country.";
+                msg = workerText(json.error) || t("components.create_account_dialog.sms_verification_is_not_yet_available_for");
             } else if (json.code === "IP_LIMIT") {
-                msg = json.error || "Too many verification requests from your network. Try again later.";
+                msg = workerText(json.error) || t("components.create_account_dialog.too_many_verification_requests_from_your");
                 if (typeof json.retry_after === "number" && json.retry_after <= 300) {
                     this._startResendCountdown(json.retry_after);
                 }
             } else if (json.code === "SEND_LIMIT_TOTAL") {
-                msg = `This phone number has reached the maximum of ${json.sends_max_total || 2} verification SMS and cannot receive more.`;
+                msg = t("components.create_account_dialog.this_phone_number_has_reached_the_maximum", { max: json.sends_max_total || 2 });
             } else if (json.code === "TURNSTILE_REQUIRED" || json.code === "TURNSTILE_FAILED") {
                 // The gate is on and the token was missing, stale or already
                 // used. The widget is reset before every send, so a plain
                 // retry usually succeeds; a blocked script needs a reload.
                 msg = TURNSTILE_SITE_KEY
-                    ? "The browser check did not pass. Please try again — if it keeps failing, reload the page (and allow challenges.cloudflare.com in any content blocker)."
-                    : "This version of the app cannot pass the sign-up browser check. Please reload to get the latest version.";
+                    ? t("components.create_account_dialog.the_browser_check_did_not_pass_please_try")
+                    : t("components.create_account_dialog.this_version_of_the_app_cannot_pass_the");
             } else if (json.code === "TURNSTILE_UNAVAILABLE") {
-                msg = "The browser check service is momentarily unavailable. Please try again in a minute.";
+                msg = t("components.create_account_dialog.the_browser_check_service_is_momentarily");
                 this._startResendCountdown(30);
             } else if (json.code === "VELOCITY_LIMIT" || json.code === "RATE_LIMITED") {
                 // Anti-pumping ceiling or burst limiter. retry_after can be up
@@ -3150,14 +3798,14 @@ class CreateAccountDialog extends React.PureComponent {
                     : null;
                 if (typeof json.retry_after === "number" && json.retry_after <= 300) {
                     this._startResendCountdown(json.retry_after);
-                    msg = json.error || "Too many verification requests right now. Please wait a moment and retry.";
+                    msg = workerText(json.error) || t("components.create_account_dialog.too_many_verification_requests_right_now");
                 } else {
                     msg = when
-                        ? `Too many verification requests right now. Please try again after ${when}.`
-                        : (json.error || "Too many verification requests right now. Please try again later.");
+                        ? t("components.create_account_dialog.too_many_verification_requests_right_now_2", { date: when })
+                        : (workerText(json.error) || t("components.create_account_dialog.too_many_verification_requests_right_now_3"));
                 }
             } else if (json.code === "SENDING_DISABLED") {
-                msg = json.error || "SMS verification is temporarily paused. Please try again later.";
+                msg = workerText(json.error) || t("components.create_account_dialog.sms_verification_is_temporarily_paused");
             } else if (res.status === 429 && json.retry_after) {
                 this._startResendCountdown(json.retry_after);
                 msg = t(
@@ -3167,14 +3815,20 @@ class CreateAccountDialog extends React.PureComponent {
                     }
                 );
             } else if (res.status === 403) {
-                msg = json.error || "This phone number has already been used to create an account.";
+                // The number itself is refused (one account per phone): said
+                // under the phone field, like /check-phone's verdict, and
+                // SEND stays off until the number changes.
+                msg = workerText(json.error) || t("components.create_account_dialog.this_phone_number_has_already_been_used");
+                this.setState({ _sendingCode: false, _phoneError: msg }, () => this.forceUpdate());
+                if (actions?.trigger_snackbar) actions.trigger_snackbar(msg, "error");
+                return;
             } else if (res.status === 400) {
-                msg = json.error || "That phone number doesn't look valid.";
+                msg = workerText(json.error) || t("components.create_account_dialog.that_phone_number_doesnt_look_valid");
             }
             this.setState({ _sendingCode: false, _sendError: msg }, () => this.forceUpdate());
             if (actions?.trigger_snackbar) actions.trigger_snackbar(msg, "error");
         } catch (err) {
-            this.setState({ _sendingCode: false, _sendError: "Network error — could not reach the account service." }, () => this.forceUpdate());
+            this.setState({ _sendingCode: false, _sendError: t("components.create_account_dialog.network_error_could_not_reach_the_account") }, () => this.forceUpdate());
             if (actions?.trigger_snackbar) {
                 actions.trigger_snackbar(t(
                     "components.create_account_dialog.could_not_send_the_confirmation_code_try"
@@ -3220,7 +3874,7 @@ class CreateAccountDialog extends React.PureComponent {
                 return;
             }
 
-            let msg = json.error || "That code doesn't match. Double-check the SMS or send a new one.";
+            let msg = workerText(json.error) || t("components.create_account_dialog.that_code_doesnt_match_double_check_the_sms");
             if (res.status === 401 && typeof json.attempts_remaining === "number") {
                 msg = t(
                     "components.create_account_dialog.that_code_doesnt_match_attempt_left_before",
@@ -3229,21 +3883,21 @@ class CreateAccountDialog extends React.PureComponent {
                     }
                 );
             } else if (res.status === 410) {
-                msg = "That code expired — send a new one.";
+                msg = t("components.create_account_dialog.that_code_expired_send_a_new_one");
             } else if (res.status === 429) {
-                msg = json.error || "Too many attempts — request a new code.";
+                msg = workerText(json.error) || t("components.create_account_dialog.too_many_attempts_request_a_new_code");
             } else if (res.status === 409) {
-                msg = "This phone is already verified from another session. Finish there, or retry after that verification expires.";
+                msg = t("components.create_account_dialog.this_phone_is_already_verified_from_another");
             } else if (res.status === 403) {
-                msg = json.error || "This phone number has already been used to create an account.";
+                msg = workerText(json.error) || t("components.create_account_dialog.this_phone_number_has_already_been_used");
             } else if (res.status === 404) {
-                msg = "No verification in progress for this number — send a code first.";
+                msg = t("components.create_account_dialog.no_verification_in_progress_for_this_number");
             } else if (res.status === 500) {
-                msg = "Verification hiccuped on the server — send a fresh code and try again.";
+                msg = t("components.create_account_dialog.verification_hiccuped_on_the_server_send_a");
             }
             this.setState({ _codeStatus: "fail", _codeError: msg }, () => this.forceUpdate());
         } catch (err) {
-            this.setState({ _codeStatus: "fail", _codeError: "Network error — could not reach the account service." }, () => this.forceUpdate());
+            this.setState({ _codeStatus: "fail", _codeError: t("components.create_account_dialog.network_error_could_not_reach_the_account") }, () => this.forceUpdate());
         }
     };
 
@@ -3289,7 +3943,12 @@ class CreateAccountDialog extends React.PureComponent {
                     _privateKeys:    keys.priv,
                     _masterKey:      masterKey,
                     _pdfBlob:        blob,
+                    // A new file: none of it has been saved yet.
                     _pdfDownloaded:  false,
+                    _pdfVerified:    false,
+                    _pdfConfirmed:   false,
+                    _pdfNotice:      "",
+                    _pdfReminder:    0,
                 }, () => this.forceUpdate());
             } else {
                 this.setState({ _recoveryStatus: "fail" }, () => this.forceUpdate());
@@ -3299,34 +3958,50 @@ class CreateAccountDialog extends React.PureComponent {
         }
     };
 
-    // ── Auto-login after creation/recovery ──────────────────────────────────
+    // ── Sign-in after creation/recovery ─────────────────────────────────────
     //
-    // Mirrors the master-password / no-PIN path in LoginDialog so the user is
-    // logged in exactly as if they had typed their master password into the
-    // login dialog. Specifically:
+    // The steps LoginDialog takes for a master password without a PIN
+    // (_executeLogin, its path 2), so the person ends up logged in exactly as
+    // if they had typed their master password there. What each step does is
+    // read off utils/api/pixaproxyapi.js:
     //
-    //   1. api.updateConfig({ SESSION_TIMEOUT, PIN_TIMEOUT }) — applies the
-    //      1-day timeout to the session manager's config.
-    //   2. api.quickLogin(username, masterKey, 'master', { stayConnected: true })
-    //      — derives all role keys from the master password, creates the
-    //      session with the derived keys, marks login_type='master', emits
-    //      the session_created event listeners care about, and persists.
+    //   1. api.updateConfig({ SESSION_TIMEOUT, PIN_TIMEOUT }) — the 1-day
+    //      window the session is created with.
+    //   2. api.validateCredentials(username, masterKey, 'master') — derives
+    //      the role keys and checks them against the account ON CHAIN. While
+    //      the node doesn't show a just-created account yet it answers
+    //      { valid: false, error: 'Account not found' }, so a refusal is asked
+    //      again for up to ACCOUNT_VISIBLE_TIMEOUT_MS — except keys that don't
+    //      match (PERMANENT_VALIDATION_ERRORS), which waiting can't change.
+    //   3. api.quickLogin(..., { validation, skipSession: false,
+    //      stayConnected: true }) — handed that validation, it doesn't check
+    //      again: it caches the keys, creates the persistent session (with
+    //      its session_created event) and makes the account the active one.
+    //      Not handed one, quickLogin validates by itself: the
+    //      `skipValidation` the previous version passed has been ignored
+    //      since the API's v3.5.2. So it checked the brand-new account once,
+    //      the moment it was created, got 'Account not found' — and the
+    //      "You're signed in" text hid the failure.
+    //   4. No session id back: session_created is emitted by hand, as
+    //      LoginDialog does — the keys are cached and the account active.
     //
-    // The previous version passed pre-derived private keys to createSession
-    // directly. That technically created a session record but bypassed
-    // keyManager.addAccountWithMasterKey, so consumers expecting the master-
-    // key derivation chain (e.g. on-demand role-key recovery) would break.
+    // Resolves { ok, error }: a failure is reported, never covered by a
+    // "You're signed in". Registration runs it when the finished dialog
+    // closes (_signInAndClose) — by then the account is on chain — and
+    // recovery at its confirm step (the account has long been there).
     _loginCurrentAccount = async () => {
         const { api, _username, _masterKey } = this.state;
         const { onLogin } = this.props;
 
-        if (!api || !_masterKey) {
-            console.error("[CreateAccountDialog] auto-login: missing api or master key");
-            return false;
+        if (!api || typeof api.validateCredentials !== "function" ||
+            typeof api.quickLogin !== "function" || !_masterKey) {
+            console.error("[CreateAccountDialog] sign-in: missing api or master key");
+            return { ok: false, error: t("components.create_account_dialog.the_connection_to_the_blockchain_isnt_ready") };
         }
 
         const sessionTimeoutMs = SESSION_TIMEOUT_MIN * 60 * 1000;
         const pinTimeoutMs     = PIN_TIMEOUT_MIN     * 60 * 1000;
+        const userAgent        = (typeof navigator !== "undefined" && navigator.userAgent) || "unknown";
 
         try {
             // Step 1: align session manager config with the desired 1-day window.
@@ -3341,64 +4016,36 @@ class CreateAccountDialog extends React.PureComponent {
                 }
             }
 
-            // Step 2: quickLogin with the master password — same path
-            // LoginDialog takes when no PIN is set. stayConnected:true makes
-            // the session persistent (device-wrapped) for the timeout window.
-            if (typeof api.quickLogin === "function") {
-                const result = await api.quickLogin(_username, _masterKey, "master", {
-                    skipValidation: true,
-                    skipSession:    false,
-                    stayConnected:  true,
-                    userAgent:      (typeof navigator !== "undefined" && navigator.userAgent) || "unknown",
-                });
-                // quickLogin handles setActiveAccount internally on success.
-                if (api.keyManager?.setActiveAccount) {
-                    try { api.keyManager.setActiveAccount(_username); } catch (_) {}
+            // Step 2: the credentials, checked on chain — with time for a
+            // brand-new account to become visible on the node.
+            const deadline = Date.now() + ACCOUNT_VISIBLE_TIMEOUT_MS;
+            let validation = null;
+            for (;;) {
+                try {
+                    validation = await api.validateCredentials(_username, _masterKey, "master");
+                } catch (e) {
+                    validation = { valid: false, error: (e && e.message) || "" };
                 }
-                // If for any reason no session was emitted, fall back to a
-                // direct createSession call with derived keys.
-                const sessionEmitted = result && (result.sessionId || result.eventEmitted);
-                if (!sessionEmitted && api.sessionManager?.createSession) {
-                    let derivedKeys = null;
-                    if (api.keyManager?.addAccountWithMasterKey) {
-                        try {
-                            derivedKeys = await api.keyManager.addAccountWithMasterKey(
-                                _username, _masterKey, { storeInVault: false }
-                            );
-                        } catch (e) {
-                            console.warn("[CreateAccountDialog] addAccountWithMasterKey fallback failed:", e);
-                        }
-                    }
-                    await api.sessionManager.createSession(_username, {
-                        keys:           derivedKeys || this.state._privateKeys,
-                        persistent:     true,
-                        timeout_ms:     sessionTimeoutMs,
-                        pin_timeout_ms: pinTimeoutMs,
-                        login_type:     "master",
-                        user_agent:     (typeof navigator !== "undefined" && navigator.userAgent) || "unknown",
-                    });
+                if (validation && validation.valid) break;
+                if (this._unmounted) return { ok: false, error: "" };
+                const refusal = (validation && validation.error) || "";
+                if (PERMANENT_VALIDATION_ERRORS.includes(refusal) ||
+                    Date.now() + ACCOUNT_VISIBLE_RETRY_MS > deadline) {
+                    throw new Error(refusal || t("components.create_account_dialog.your_new_account_could_not_be_verified_on"));
                 }
-            } else if (api.sessionManager?.createSession) {
-                // No quickLogin available — derive then create session manually.
-                let derivedKeys = null;
-                if (api.keyManager?.addAccountWithMasterKey) {
-                    derivedKeys = await api.keyManager.addAccountWithMasterKey(
-                        _username, _masterKey, { storeInVault: false }
-                    );
-                }
-                await api.sessionManager.createSession(_username, {
-                    keys:           derivedKeys || this.state._privateKeys,
-                    persistent:     true,
-                    timeout_ms:     sessionTimeoutMs,
-                    pin_timeout_ms: pinTimeoutMs,
-                    login_type:     "master",
-                    user_agent:     (typeof navigator !== "undefined" && navigator.userAgent) || "unknown",
-                });
-                if (api.keyManager?.setActiveAccount) {
-                    try { api.keyManager.setActiveAccount(_username); } catch (_) {}
-                }
-            } else if (api.eventEmitter?.emit) {
-                // Last-resort: just emit so any listening UI updates.
+                await new Promise((resolve) => setTimeout(resolve, ACCOUNT_VISIBLE_RETRY_MS));
+            }
+
+            // Step 3: quickLogin from that validation — LoginDialog's call.
+            const result = await api.quickLogin(_username, _masterKey, "master", {
+                validation,
+                skipSession:   false,
+                stayConnected: true,
+                userAgent,
+            });
+
+            // Step 4: no session id — at least let the UI know, as LoginDialog.
+            if (!(result && (result.sessionId || result.eventEmitted)) && api.eventEmitter?.emit) {
                 api.eventEmitter.emit("session_created", { account: _username });
             }
 
@@ -3409,28 +4056,43 @@ class CreateAccountDialog extends React.PureComponent {
             if (typeof onLogin === "function") {
                 onLogin({ username: _username, autoFromCreation: true });
             }
-            return true;
+            return { ok: true, error: "" };
         } catch (err) {
-            console.error("[CreateAccountDialog] auto-login failed:", err);
-            return false;
+            console.error("[CreateAccountDialog] sign-in failed:", err);
+            return { ok: false, error: (err && err.message) || "" };
         }
     };
 
-    // ── Auto-close after success ────────────────────────────────────────────
-    _startAutoClose = () => {
-        if (this._autoCloseTimer) clearTimeout(this._autoCloseTimer);
-        if (this._countdownTimer) clearInterval(this._countdownTimer);
-        const totalSec = Math.round(AUTO_CLOSE_MS / 1000);
-        this.setState({ _autoCloseInSec: totalSec }, () => this.forceUpdate());
-        this._countdownTimer = setInterval(() => {
-            const next = (this.state._autoCloseInSec || 0) - 1;
-            this.setState({ _autoCloseInSec: next > 0 ? next : 0 }, () => this.forceUpdate());
-        }, 1000);
-        this._autoCloseTimer = setTimeout(() => {
-            if (this._countdownTimer) { clearInterval(this._countdownTimer); this._countdownTimer = null; }
-            this._handleDialogClose();
-        }, AUTO_CLOSE_MS);
+    /**
+     * The finished sign-up is closing (OK, Escape, a backdrop click, the back
+     * arrow — see _mayClose): sign the new account in first, then close. A
+     * failure keeps the dialog open with the reason, TRY AGAIN and CLOSE
+     * (which leaves without signing in — the backup PDF logs in any time).
+     */
+    _signInAndClose = async () => {
+        if (this._signingIn) return;
+        this._signingIn = true;
+        this.setState({ _signInState: "pending", _signInError: "" }, () => this.forceUpdate());
+        const { ok, error } = await this._loginCurrentAccount();
+        this._signingIn = false;
+        if (this._unmounted) return;
+        if (ok) {
+            this.setState({ _signInState: "done" }, () => {
+                this.forceUpdate();
+                this._handleDialogClose();
+            });
+        } else {
+            this.setState({ _signInState: "failed", _signInError: error || "" }, () => this.forceUpdate());
+        }
     };
+
+    // CLOSE after a failed sign-in: leave without signing in.
+    _handleCloseSignedOut = () => {
+        this._leaveSignedOut = true;
+        this._handleDialogClose();
+    };
+
+    // (The success screen no longer closes by itself: see _mayClose.)
 
     // ─────────────────────────────────────────────────────────────────────────
     // Browser Credential Save — offers to save keys for LoginDialog autofill
@@ -3486,14 +4148,14 @@ class CreateAccountDialog extends React.PureComponent {
         const { _username, _publicKeys, _voucher } = this.state;
 
         if (!_publicKeys.owner || !_publicKeys.active || !_publicKeys.posting || !_publicKeys.memo) {
-            const errorMsg = "Public keys not found. Please download the sprout PDF first.";
+            const errorMsg = t("components.create_account_dialog.public_keys_not_found_please_download_the");
             this.setState({ _confirmStatus: "error", _errorMessage: errorMsg }, () => this.forceUpdate());
             if (actions?.trigger_snackbar) actions.trigger_snackbar(errorMsg, "error");
             return;
         }
 
         if (!_voucher) {
-            const errorMsg = "Phone verification voucher missing. Go back and verify your phone again.";
+            const errorMsg = t("components.create_account_dialog.phone_verification_voucher_missing_go_back");
             this.setState({ _confirmStatus: "error", _errorMessage: errorMsg }, () => this.forceUpdate());
             if (actions?.trigger_snackbar) actions.trigger_snackbar(errorMsg, "error");
             return;
@@ -3520,18 +4182,16 @@ class CreateAccountDialog extends React.PureComponent {
             const result = await response.json();
 
             if (result.success) {
-                // Auto-login the freshly-created account (1-day session).
-                await this._loginCurrentAccount();
-
+                // Not signed in here: the node may not show the account for a
+                // few seconds yet. The person saves the backup PDF first, and
+                // closing the dialog signs them in (_signInAndClose).
+                //
+                // No auto-close: the dialog stays until the person has saved
+                // the backup PDF and closes it themselves (_mayClose).
                 this.setState({
                     _creating_account: false,
                     _confirmStatus:    "success",
-                }, () => this.forceUpdate(() => {
-                    // Only start the auto-close countdown if the user has
-                    // already saved their backup PDF; otherwise wait until
-                    // they click the Download button on the success panel.
-                    if (this.state._pdfDownloaded) this._startAutoClose();
-                }));
+                }, () => this.forceUpdate());
 
                 if (actions?.trigger_snackbar) {
                     actions.trigger_snackbar(t("components.create_account_dialog.account_created_successfully", {
@@ -3553,33 +4213,33 @@ class CreateAccountDialog extends React.PureComponent {
                 //   410 / voucher 403|409     → verification terminal, redo it
                 const status = response.status;
                 let errorMsg = t("components.create_account_dialog.account_creation_failed", {
-                    error: result.error || "Unknown error"
+                    error: result.error || t("components.create_account_dialog.unknown_error")
                 });
                 if (status === 410 || (status === 403 && result.field === "voucher")) {
-                    errorMsg = "Your phone verification expired. Go back and verify your phone again.";
+                    errorMsg = t("components.create_account_dialog.your_phone_verification_expired_go_back_and");
                     this.setState({
                         _voucher: null, _voucherExpiresAt: null,
                         _codeStatus: "idle", _codeSent: false, _confirmationCode: "",
                     }, () => this.forceUpdate());
                 } else if (status === 409 && result.field === "voucher") {
                     errorMsg = result.used_at
-                        ? "This phone verification was already used to create an account."
-                        : "An account creation with this verification is already in flight — give it a minute, then try again.";
+                        ? t("components.create_account_dialog.this_phone_verification_was_already_used_to")
+                        : t("components.create_account_dialog.an_account_creation_with_this_verification_is");
                 } else if (status === 409) {
-                    errorMsg = `@${_username.toLowerCase()} was just taken on-chain. Go back and pick another name — your phone verification is still valid.`;
+                    errorMsg = t("components.create_account_dialog.was_just_taken_on_chain_go_back_and_pick", { username: _username.toLowerCase() });
                 } else if (status === 429) {
-                    const when = result.next_refill_at ? new Date(result.next_refill_at).toLocaleString(getLocaleCode()) : "the next UTC midnight";
-                    errorMsg = `Account-creation capacity is exhausted for now. New slots open at ${when} — your phone verification stays valid.`;
+                    const when = result.next_refill_at ? new Date(result.next_refill_at).toLocaleString(getLocaleCode()) : t("components.create_account_dialog.the_next_utc_midnight");
+                    errorMsg = t("components.create_account_dialog.account_creation_capacity_is_exhausted_for", { date: when });
                     this._fetchCapacity();
                 } else if (status === 402 || status === 500 || status === 503) {
-                    errorMsg = `${result.error || "The network broadcast failed."} Your phone verification is still valid — go back and try again in a moment.`;
+                    errorMsg = t("components.create_account_dialog.error_your_phone_verification_is_still_valid", { error: result.error || t("components.create_account_dialog.the_network_broadcast_failed") });
                 }
                 this.setState({ _creating_account: false, _confirmStatus: "error", _errorMessage: errorMsg }, () => this.forceUpdate());
                 if (actions?.trigger_snackbar) actions.trigger_snackbar(errorMsg, "error");
             }
         } catch (error) {
             const errorMsg = t("components.create_account_dialog.account_creation_failed_2", {
-                message: error.message || "Unknown error"
+                message: error.message || t("components.create_account_dialog.unknown_error")
             });
             this.setState({ _creating_account: false, _confirmStatus: "error", _errorMessage: errorMsg }, () => this.forceUpdate());
             if (actions?.trigger_snackbar) actions.trigger_snackbar(errorMsg, "error");
@@ -3592,18 +4252,18 @@ class CreateAccountDialog extends React.PureComponent {
      */
     _recoverAndLogin = async () => {
         this.setState({ _confirmStatus: "working" }, () => this.forceUpdate());
-        const ok = await this._loginCurrentAccount();
+        const { ok } = await this._loginCurrentAccount();
+        if (this._unmounted) return;
         if (ok) {
-            this.setState({ _confirmStatus: "success" }, () => this.forceUpdate(() => {
-                if (this.state._pdfDownloaded) this._startAutoClose();
-            }));
+            // Signed in already: closing has nothing left to do.
+            this.setState({ _confirmStatus: "success", _signInState: "done" }, () => this.forceUpdate());
             if (actions?.trigger_snackbar) {
                 actions.trigger_snackbar(t("components.create_account_dialog.welcome_back", {
                     _username: this.state._username
                 }), "success");
             }
         } else {
-            const errorMsg = "Could not start a session. Please try again.";
+            const errorMsg = t("components.create_account_dialog.could_not_start_a_session_please_try_again");
             this.setState({ _confirmStatus: "error", _errorMessage: errorMsg }, () => this.forceUpdate());
         }
     };
@@ -3632,41 +4292,102 @@ class CreateAccountDialog extends React.PureComponent {
     };
 
     _handleFinalConfirm = () => {
-        // Step 2 OK button: route through the unified close handler so the
-        // PDF-must-be-downloaded gate (and timer cleanup) are honored.
+        // Step 2 OK button (TRY AGAIN after a failed sign-in): route through
+        // the unified close handler, so the backup-must-be-saved gate is
+        // honored and the new account is signed in on the way out (_mayClose).
         if (this.state._confirmStatus === "success") {
             this._handleDialogClose();
         }
     };
 
     /**
-     * Universal close handler.
+     * Has the person typed anything this dialog would throw away? The fields
+     * they fill in themselves: username, password, phone, code, recovery seed
+     * words. A pre-filled dial code, a generated seed or a ticked checkbox
+     * alone is not input worth asking about.
+     */
+    _hasUserInput = () => {
+        const s = this.state;
+        return s._tab_value > 0 ||
+            String(s._username || "").length > 0 ||
+            String(s._password || "").length > 0 ||
+            String(s._phoneRaw || "").length > 0 ||
+            String(s._phoneFormatted || "").length > 0 ||
+            String(s._confirmationCode || "").length > 0 ||
+            String(s._seed_word_input || "").length > 0 ||
+            (s._recoveryMode && Array.isArray(s._seed) && s._seed.length > 0);
+    };
+
+    /**
+     * May the dialog close right now? Every way out asks — CANCEL, OK,
+     * Escape, a backdrop click, and the shell when the address drops
+     * "+signup" (back arrow; see _closeGuard). When the answer is no, the
+     * person is shown why:
      *
-     *  - While creating/recovering: block close entirely. Backdrop clicks and
-     *    Escape do nothing during the on-chain transaction.
-     *  - On step 2 success with an undownloaded PDF: trigger the download
-     *    automatically before closing. This satisfies the "must download"
-     *    requirement without making the user feel trapped.
-     *  - Otherwise: pass through to props.onClose.
+     *  - while creating/recovering: never (the on-chain transaction runs);
+     *  - once the account exists: only with its backup PDF saved — no
+     *    auto-close, no forced download on the way out (a download the
+     *    person cancelled went unnoticed that way); a refused close says so.
+     *    With the backup saved, closing a finished sign-up signs the new
+     *    account in first (_signInAndClose), and the dialog goes once that
+     *    is done — or, after a failed sign-in, when the person picks CLOSE;
+     *  - before that: freely when nothing was typed, otherwise only once the
+     *    person has confirmed in the white "Quit the sign-up?" modal.
+     */
+    _mayClose = () => {
+        const { _creating_account, _confirmStatus, _pdfBlob, _pdfConfirmed, _signInState } = this.state;
+        if (_creating_account || _confirmStatus === "working") return false;
+        if (_confirmStatus === "success") {
+            if (_pdfBlob && !_pdfConfirmed) {
+                this._remindPdf();
+                return false;
+            }
+            if (_signInState === "done" || this._leaveSignedOut) return true;
+            this._signInAndClose(); // closes by itself once signed in
+            return false;
+        }
+        if (!this._quitConfirmed && this._hasUserInput()) {
+            this._openQuitConfirm();
+            return false;
+        }
+        return true;
+    };
+
+    // Registered with the shell (Index.js §8c, via props.registerCloseGuard):
+    // asked before the address takes this dialog down. true holds it open.
+    _closeGuard = () => !this._mayClose();
+
+    _remindPdf = () => {
+        this.setState({ _pdfReminder: (this.state._pdfReminder || 0) + 1 }, () => this.forceUpdate());
+    };
+
+    _openQuitConfirm = () => {
+        if (this.state._quitConfirmOpen) return;
+        this.setState({ _quitConfirmOpen: true }, () => this.forceUpdate());
+    };
+
+    // "CONTINUE" (or Escape / a click beside the white modal): back to the form.
+    _handleQuitStay = () => {
+        this.setState({ _quitConfirmOpen: false }, () => this.forceUpdate());
+    };
+
+    // "QUIT": the person let go of what they typed — every close goes through now.
+    _handleQuitConfirm = () => {
+        this._quitConfirmed = true;
+        this.setState({ _quitConfirmOpen: false }, () => {
+            this.forceUpdate();
+            this._handleDialogClose();
+        });
+    };
+
+    /**
+     * Universal close handler — CANCEL, OK, Escape, backdrop. Closes through
+     * props.onClose (the address, when opened as "+signup") only when
+     * _mayClose agrees; otherwise _mayClose has already shown why not.
      */
     _handleDialogClose = (event, reason) => {
-        const { _creating_account, _confirmStatus, _pdfBlob, _pdfDownloaded } = this.state;
-
-        // Hard block: never close mid-creation.
-        if (_creating_account || _confirmStatus === "working") return;
-
-        // On step 2 success: force-download the PDF before allowing close.
-        if (_confirmStatus === "success" && _pdfBlob && !_pdfDownloaded) {
-            this._trigger_pdf_download();
-            // Fall through and close after the download is triggered. The
-            // download itself is async (browser save dialog), but the click
-            // dispatch is sync, so the file save proceeds independently.
-        }
-
-        if (this._autoCloseTimer)    { clearTimeout(this._autoCloseTimer);    this._autoCloseTimer = null; }
-        if (this._countdownTimer)    { clearInterval(this._countdownTimer);   this._countdownTimer = null; }
+        if (!this._mayClose()) return;
         if (this._advancedOpenTimer) { clearTimeout(this._advancedOpenTimer); this._advancedOpenTimer = null; }
-
         if (this.props.onClose) this.props.onClose(event, reason);
     };
 
@@ -3838,11 +4559,11 @@ class CreateAccountDialog extends React.PureComponent {
         } = this.state;
 
         if (_username_syntax_error && _username_syntax_error.length) return _username_syntax_error;
-        if (_pending_username_validation) return "Pending validation";
+        if (_pending_username_validation) return t("components.create_account_dialog.pending_validation");
         if (!_username_available) {
             return _recoveryMode
-                ? "Recovery mode: enter your seed phrase below to take this account back"
-                : "Username already taken";
+                ? t("components.create_account_dialog.recovery_mode_enter_your_seed_phrase_below")
+                : t("components.create_account_dialog.username_already_taken");
         }
         return "";
     };
@@ -3857,6 +4578,7 @@ class CreateAccountDialog extends React.PureComponent {
             classes,
             open,
             _fullscreen,
+            _compactStepper,
             _tab_value,
             _creating_account,
             _username,
@@ -3885,21 +4607,31 @@ class CreateAccountDialog extends React.PureComponent {
             _confirmationCode,
             _codeStatus,
             _sendError,
+            _phoneError,
             _codeError,
             _resendInSec,
             _capacity,
             _phoneCheck,
             _phoneChecking,
             _nextSendAllowedAt,
+            _voucher,
             _recoveryStatus,
             _confirmStatus,
             _errorMessage,
-            _autoCloseInSec,
             _pdfBlob,
             _pdfDownloaded,
+            _pdfSaving,
+            _pdfVerified,
+            _pdfConfirmed,
+            _pdfNotice,
+            _pdfReminder,
+            _quitConfirmOpen,
+            _signInState,
+            _signInError,
         } = this.state;
 
         const username_message = this._get_username_message();
+        const signingIn = _signInState === "pending";
 
         return (
             <React.Fragment>
@@ -3909,8 +4641,8 @@ class CreateAccountDialog extends React.PureComponent {
                         fullWidth={true}
                         maxWidth={"md"}
                         disablePortal={false}
-                        disableBackdropClick={_creating_account || _confirmStatus === "working"}
-                        disableEscapeKeyDown={_creating_account || _confirmStatus === "working"}
+                        disableBackdropClick={_creating_account || _confirmStatus === "working" || signingIn}
+                        disableEscapeKeyDown={_creating_account || _confirmStatus === "working" || signingIn}
                         onClose={this._handleDialogClose}
                         keepMounted={false}>
                     <div className={classes.flexDesktop}>
@@ -3929,7 +4661,12 @@ class CreateAccountDialog extends React.PureComponent {
                             {/* Sticky Stepper at top */}
                             <div className={classes.stepperContainer}>
                                 <Fade in timeout={300}>
-                                    <Stepper activeStep={_tab_value} style={ST_P_24PX}>
+                                    <Stepper
+                                        activeStep={_tab_value}
+                                        alternativeLabel={_compactStepper}
+                                        className={_compactStepper ? classes.stepperCompact : undefined}
+                                        style={_compactStepper ? ST_STEPPER_COMPACT : ST_P_24PX}
+                                    >
                                         <Step completed={_tab_value > 0}>
                                             <StepLabel>{t("words.generate", {TUC: true})}</StepLabel>
                                         </Step>
@@ -3974,7 +4711,8 @@ class CreateAccountDialog extends React.PureComponent {
                                             advancedOpen={_advancedOpen}
                                             termsAccepted={_termsAccepted}
                                             onToggleAdvanced={this._handleToggleAdvanced}
-                                            onTermsClick={this._handleTermsClick}
+                                            onTermsToggle={this._handleTermsToggle}
+                                            onOpenTerms={this._handleOpenTerms}
                                             capacity={_capacity}
                                             onRefreshCapacity={this._fetchCapacity}
                                             onUsernameChange={this._handleUsernameChange}
@@ -4010,6 +4748,7 @@ class CreateAccountDialog extends React.PureComponent {
                                             onCodeChange={this._handleCodeChange}
                                             onVerifyCode={this._verifyCode}
                                             sendError={_sendError}
+                                            phoneError={_phoneError}
                                             codeError={_codeError}
                                             resendInSec={_resendInSec}
                                             capacity={_capacity}
@@ -4023,10 +4762,18 @@ class CreateAccountDialog extends React.PureComponent {
                                             status={_confirmStatus}
                                             recoveryMode={_recoveryMode}
                                             errorMessage={_errorMessage}
-                                            autoCloseInSec={_autoCloseInSec}
-                                            pdfDownloaded={_pdfDownloaded}
                                             hasPdfBlob={Boolean(_pdfBlob)}
+                                            pdfDownloaded={_pdfDownloaded}
+                                            pdfSaving={_pdfSaving}
+                                            pdfVerified={_pdfVerified}
+                                            pdfConfirmed={_pdfConfirmed}
+                                            pdfNotice={_pdfNotice}
+                                            pdfReminder={_pdfReminder}
                                             onDownloadPdf={this._trigger_pdf_download}
+                                            onTogglePdfConfirmed={this._handlePdfConfirmedToggle}
+                                            username={_username}
+                                            signInState={_signInState}
+                                            signInError={_signInError}
                                         />
                                     </SwipeableViews>
                                 </Fade>
@@ -4039,7 +4786,7 @@ class CreateAccountDialog extends React.PureComponent {
                                         <Button variant="text" color="primary" onClick={this._goToPreviousStep} disabled={_tab_value === 0 || (_tab_value === 2 && _confirmStatus !== "error") || _creating_account}>{t("words.back", {TUC: true})}</Button>
                                     </Fade>
                                     {_tab_value < 2 && (
-                                        <Button variant="contained" color="primary" onClick={this._handleDialogClose} disabled={_creating_account}>{"CANCEL"}</Button>
+                                        <Button variant="contained" color="primary" onClick={this._handleDialogClose} disabled={_creating_account}>{t("words.cancel", {TUC: true})}</Button>
                                     )}
                                     {_tab_value === 0 ? (
                                         <Button
@@ -4050,7 +4797,7 @@ class CreateAccountDialog extends React.PureComponent {
                                             onClick={this._handleNextFromGenerate}
                                             disabled={!this._first_step_done()}
                                         >
-                                            {_recoveryMode ? "RECOVER" : "NEXT"}
+                                            {_recoveryMode ? t("components.create_account_dialog.recover") : t("words.next", {TUC: true})}
                                         </Button>
                                     ) : _tab_value === 1 ? (
                                         <Button
@@ -4062,26 +4809,42 @@ class CreateAccountDialog extends React.PureComponent {
                                             disabled={!this._can_click_next()}
                                         >{t("words.next", {TUC: true})} </Button>
                                     ) : (
-                                        <Button
-                                            className={classes.whiteButton}
-                                            variant="contained"
-                                            color="primary"
-                                            autoFocus
-                                            onClick={this._handleFinalConfirm}
-                                            disabled={_confirmStatus !== "success" || !_pdfDownloaded}
-                                        >
-                                            OK
-                                        </Button>
+                                        <React.Fragment>
+                                            {/* A failed sign-in: leave without it. */}
+                                            {_signInState === "failed" && (
+                                                <Button variant="text" color="primary" onClick={this._handleCloseSignedOut}>
+                                                    {t("words.close", {TUC: true})}
+                                                </Button>
+                                            )}
+                                            {/* OK closes — and, after a sign-up, signs the new account in first. */}
+                                            <Button
+                                                className={classes.whiteButton}
+                                                variant="contained"
+                                                color="primary"
+                                                autoFocus
+                                                onClick={this._handleFinalConfirm}
+                                                disabled={_confirmStatus !== "success" || (Boolean(_pdfBlob) && !_pdfConfirmed) || signingIn}
+                                                startIcon={signingIn ? <CircularProgress size={16} color="inherit" /> : null}
+                                            >
+                                                {signingIn
+                                                    ? t("components.create_account_dialog.signing_in")
+                                                    : _signInState === "failed"
+                                                        ? t("components.create_account_dialog.try_again")
+                                                        : "OK"}
+                                            </Button>
+                                        </React.Fragment>
                                     )}
                                 </DialogActions>
                             </Fade>
                         </div>
                     </div>
                 </Dialog>
-                {/* Terms of Use / Privacy Policy modal — opened by any click on
-                    the step-0 agreement checkbox or its label. Renders the same
-                    two components as AppInfoDialog (strings in locales/en.js
-                    under components.terms_of_use / components.privacy_policy). */}
+                {/* Terms of Use / Privacy Policy modal — opened only from the
+                    underlined names in the step-0 agreement sentence, on the
+                    tab of the one clicked (TermsAgreementLabel). Renders the
+                    same two components as AppInfoDialog (strings in
+                    locales/en.js under components.terms_of_use /
+                    components.privacy_policy). */}
                 <Dialog
                     className={classes.termsDialog}
                     open={_termsModalOpen}
@@ -4108,6 +4871,42 @@ class CreateAccountDialog extends React.PureComponent {
                     <DialogActions>
                         <Button variant="text" color="primary" onClick={this._handleTermsModalClose}>
                             {t("words.close", {TUC: true})}
+                        </Button>
+                    </DialogActions>
+                </Dialog>
+                {/* "Quit the sign-up?" — a fully white modal over the dark
+                    dialog, shown only when something was typed (_mayClose).
+                    Escape or a click beside it keeps the sign-up going. */}
+                <Dialog
+                    className={classes.quitDialog}
+                    open={_quitConfirmOpen}
+                    onClose={this._handleQuitStay}
+                    fullWidth={true}
+                    maxWidth={"xs"}
+                    aria-labelledby="cad-quit-title"
+                    aria-describedby="cad-quit-text"
+                >
+                    <DialogTitle id="cad-quit-title">{t("components.create_account_dialog.quit_the_sign_up")}</DialogTitle>
+                    <DialogContent id="cad-quit-text">
+                        <Typography component="p" variant="body1">
+                            {t("components.create_account_dialog.what_you_have_entered_so_far_will_be")}
+                        </Typography>
+                        {_voucher ? (
+                            <Typography component="p" variant="body1" style={ST_MT_8}>
+                                {t("components.create_account_dialog.your_phone_number_is_verified_for_this_sign")}
+                            </Typography>
+                        ) : _codeSent ? (
+                            <Typography component="p" variant="body1" style={ST_MT_8}>
+                                {t("components.create_account_dialog.a_confirmation_code_was_already_sent_to_your")}
+                            </Typography>
+                        ) : null}
+                    </DialogContent>
+                    <DialogActions>
+                        <Button variant="text" className="quitLeave" onClick={this._handleQuitConfirm}>
+                            {t("components.create_account_dialog.quit")}
+                        </Button>
+                        <Button variant="contained" className="quitStay" onClick={this._handleQuitStay} autoFocus>
+                            {t("components.create_account_dialog.continue")}
                         </Button>
                     </DialogActions>
                 </Dialog>

@@ -7,6 +7,7 @@ import Badge from "@material-ui/core/Badge";
 import CloseIcon from "@material-ui/icons/Close";
 import ArrowBackRounded from "@material-ui/icons/ArrowBackRounded";
 import TuneIcon from "@material-ui/icons/Tune";
+import SearchIcon from "@material-ui/icons/Search";
 
 import { t, useLanguage } from "../../utils/text";
 
@@ -17,9 +18,14 @@ import { searchStyles } from "./styles";
 import { SearchResults } from "./SearchResults";
 
 // ── SearchBar ─────────────────────────────────────────────────────────────────
-// The toolbar's search box: input, filter button (white, with the number of
-// active filters as a badge), close/back button, click-away, and the results
-// dropdown anchored to the bar.
+// The toolbar's search box: input, filter button, close/back button,
+// click-away, and the results dropdown anchored to the bar.
+//
+// The filter button's icon follows the search: a magnifier while it is closed
+// (so the bar reads as a search box), the filter icon once it is open, with the
+// number of active filters as a badge. The click is the same either way: it
+// expands or collapses the filter panel, so from the closed bar it opens the
+// search with the panel out.
 //
 // Sizing, all measured live (ResizeObserver on the bar + window resize):
 //   width       the dropdown copies the bar's width, so it follows window
@@ -131,6 +137,11 @@ const SearchBarInner = React.memo(
         const filterCount = countFilters(results && results.filters);
         const filtersOpen = !!(results && results.filtersOpen);
         const filtersLabel = tr(t, "components.search_bar.filters", "Filters");
+        // Closed, the button is named like the magnifier it shows (the placeholder's
+        // "Search"). There is no count to show then: an active filter keeps the
+        // search open.
+        const buttonTitle = open ? filtersLabel : tr(t, "words.search", "Search");
+        const buttonLabel = open && filterCount ? `${filtersLabel} (${filterCount})` : buttonTitle;
 
         return (
             <ClickAwayListener onClickAway={onClickAway}>
@@ -149,13 +160,17 @@ const SearchBarInner = React.memo(
                             <IconButton
                                 className={classes.filterButton + (filtersOpen ? " " + classes.filterButtonOn : "")}
                                 onClick={onFilters}
-                                aria-label={filterCount ? `${filtersLabel} (${filterCount})` : filtersLabel}
+                                aria-label={buttonLabel}
                                 aria-expanded={filtersOpen}
-                                title={filtersLabel}
+                                title={buttonTitle}
                             >
-                                <Badge badgeContent={filterCount} invisible={!filterCount} max={99} classes={{ badge: classes.filterBadge }}>
-                                    <TuneIcon />
-                                </Badge>
+                                {open ? (
+                                    <Badge badgeContent={filterCount} invisible={!filterCount} max={99} classes={{ badge: classes.filterBadge }}>
+                                        <TuneIcon />
+                                    </Badge>
+                                ) : (
+                                    <SearchIcon />
+                                )}
                             </IconButton>
                         ) : null}
                         <IconButton className={classes.searchButton} onClick={onButton}>
