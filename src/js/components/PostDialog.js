@@ -27,7 +27,7 @@ import {crtF, hexF, sqrF, triF, xbrzF, acquireBestCachedBitmap} from "../utils/r
 import ArrowForwardIosIcon from "@material-ui/icons/ArrowForwardIos";
 import InfoOutlined from "@material-ui/icons/InfoOutlined";
 import JSLoader from "../utils/JSLoader";
-import {HISTORY, POST_DRAWER_TAB_HASHES, parsePostDrawerHash, parseCommentFocusHash, buildCommentFocusHash, getPostState, POST_STATE} from "../utils/constants";
+import {HISTORY, POST_DRAWER_TAB_HASHES, parsePostDrawerHash, parseCommentFocusHash, buildCommentFocusHash, getPostState, POST_STATE, buildPostUrl} from "../utils/constants";
 import Chip from "@material-ui/core/Chip";
 import Palette from '@material-ui/icons/Palette'
 import SwapVert from '@material-ui/icons/SwapVert'
@@ -89,6 +89,7 @@ import * as favorites from "../utils/favorites";
 import { analyze_colors } from 'smart-downscaler';
 
 import { pngdby } from "../utils/png-db";
+import PostOriginality from "./PostOriginality";
 
 import { T } from "../utils/T";
 import { t, useLanguage } from "../utils/text";
@@ -485,7 +486,11 @@ const DetailsView = React.memo(({
                                     isOwner,
                                     onEditPost,
                                     isFavorite,
-                                    onToggleFavorite
+                                    onToggleFavorite,
+                                    nsfw,
+                                    locales,
+                                    onOpenArtwork,
+                                    onOpenAuthor
                                 }) => (
     <React.Fragment>
         {/* Description — sanitized by the pipeline, safe for innerHTML */}
@@ -598,12 +603,24 @@ const DetailsView = React.memo(({
                         : <FavoriteBorderRounded style={{ color: "#8a8a8a", marginLeft: "auto", flexShrink: 0 }} />}
                 </ListItem>
             </Tooltip>
+            {/* Originality (copies on-chain) + Inspiration (similar themes), from the search
+                Worker. Keyed by post so every artwork opens with both collapsed. */}
+            <PostOriginality
+                key={((data.author || {}).username || "") + "/" + (data.permlink || "")}
+                author={(data.author || {}).username}
+                permlink={data.permlink}
+                nsfw={nsfw}
+                locales={locales}
+                onOpenArtwork={onOpenArtwork}
+                onOpenAuthor={onOpenAuthor} />
         </List>
     </React.Fragment>
 ), function (a, b){
     if (a.id !== b.id || a.data !== b.data) return false;
     if (a.isOwner !== b.isOwner) return false;
     if (a.isFavorite !== b.isFavorite) return false;
+    if (a.nsfw !== b.nsfw || a.locales !== b.locales) return false;
+    if (a.onOpenArtwork !== b.onOpenArtwork || a.onOpenAuthor !== b.onOpenAuthor) return false;
     if (a.metadata !== b.metadata) return false;
     /* Belt-and-suspenders: deep-check metadata fields in case Preact's
      * batching reuses an object reference across two reducer patches. */
@@ -1244,6 +1261,7 @@ const DrawerCardInner = React.memo(function DrawerCardInner({
                                                                 /* details */ metadata, type, kb, _copied, handleTagClick, handleDownloadArtwork, handleOpenLicenseDialog, handleCopy,
                                                                 isOwner, openEditPost,
                                                                 isFavorite, onToggleFavorite,
+                                                                nsfw, openRelatedArtwork,
                                                                 /* comments */ _current_comments, _show_parent, _sorting, sortedComments, _comments_loading, api, account,
                                                                 toggleShowParent, sliceReplies, handleSortingChange, showReplies, onLoadReplies, openAuthor, replyToComment,
                                                                 startEditComment, requestDeleteComment,
@@ -1300,7 +1318,9 @@ const DrawerCardInner = React.memo(function DrawerCardInner({
                                      tags={tags} onTagClick={handleTagClick} onDownloadArtwork={handleDownloadArtwork}
                                      onOpenLicenseDialog={handleOpenLicenseDialog} copied={_copied} onCopy={handleCopy}
                                      isOwner={isOwner} onEditPost={openEditPost}
-                                     isFavorite={isFavorite} onToggleFavorite={onToggleFavorite} />
+                                     isFavorite={isFavorite} onToggleFavorite={onToggleFavorite}
+                                     nsfw={nsfw} locales={locales}
+                                     onOpenArtwork={openRelatedArtwork} onOpenAuthor={openAuthor} />
                     </CardContent>
                     <CardContent key="view-1" style={STYLE_CARDCONTENT_1}>
                         <CommentsView id={data.id} currentComments={_current_comments} showParent={_show_parent}
@@ -1349,6 +1369,7 @@ const DrawerCardInner = React.memo(function DrawerCardInner({
     if (a._comment_sending !== b._comment_sending || a._reply_target !== b._reply_target) return false;
     if (a._edit_target !== b._edit_target || a.isOwner !== b.isOwner || a.account !== b.account) return false;
     if (a.isFavorite !== b.isFavorite) return false;
+    if (a.nsfw !== b.nsfw || a.openRelatedArtwork !== b.openRelatedArtwork || a.openAuthor !== b.openAuthor) return false;
     if (a._sorting !== b._sorting || a._comments_loading !== b._comments_loading) return false;
     if (a._show_parent !== b._show_parent || a._current_comments !== b._current_comments) return false;
     if (a.sortedComments !== b.sortedComments || a.authorsEntries !== b.authorsEntries) return false;
@@ -2348,6 +2369,15 @@ function createInst() {
         // vertical drag/scroll path and never yield it back.
         cardAxisLocked: null,        // null | "v" | "h"
 
+        // Pathname of the post whose mobile drawer pushed its own "#…" history
+        // entry (state→URL effect, counted by the host via onDrawerPush); null
+        // once that entry is popped. openRelatedArtwork pops it before swapping
+        // the post, so the depth the host counts stays true.
+        drawerPushPath: null,
+        // openRelatedArtwork's swap waiting for that pop: { path, timer, unlisten }
+        // (cancelRelatedSwap drops it).
+        relatedSwap: null,
+
         // Watermark-download cache: the styled frame captured in setImgd so
         // the download reuses it instead of re-running the render pool.
         renderedImageData: null,
@@ -2366,6 +2396,15 @@ function createInst() {
         previewForId: null,
         pendingFullRender: null,
     };
+}
+
+/* openRelatedArtwork's swap, waiting for the drawer entry's pop, abandoned. */
+function cancelRelatedSwap(inst) {
+    const pending = inst.relatedSwap;
+    if (!pending) return;
+    inst.relatedSwap = null;
+    if (pending.unlisten) pending.unlisten();
+    clearTimeout(pending.timer);
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -3708,6 +3747,51 @@ function PostDialog(props) {
         HISTORY.push("/trending/" + tag); props.onClose?.();
     }, [props.onClose]);
 
+    /* ── Related artworks (Details → Originality / Inspiration) ───────────
+     * A copy or an artwork on a similar theme opens IN PLACE, the way the
+     * arrows swap siblings: HISTORY.replace, so the viewer stays exactly one
+     * entry deep and Back / close return to the page underneath. The host's
+     * syncFromUrl picks the URL up and fetches the post when it is not in its
+     * list (the deep-link path). On mobile an open drawer has a history entry
+     * of its own on top of the post's (state→URL effect + onDrawerPush): pop it
+     * first — the hash listener closes the drawer and tells the host through
+     * onDrawerPop — and swap once that pop has reached every listener, so the
+     * depth the host counts for closePost stays true. */
+    const openRelatedArtwork = useCallback((item) => {
+        if (!item) return;
+        const path = buildPostUrl({
+            category: item.category, tags: item.tags,
+            author: { username: item.author }, permlink: item.permlink,
+        });
+        if (!path) return;
+        // A second tap while the drawer entry is being popped retargets that swap
+        // instead of popping a second entry (which would leave the page).
+        if (inst.relatedSwap) { inst.relatedSwap.path = path; return; }
+        if (path === HISTORY.location.pathname) return;
+        const st = stateRef.current;
+        const ownDrawerEntry = st._view_right_mobile_enabled && st._view_mobile_opened
+            && !!HISTORY.location.hash && inst.drawerPushPath === HISTORY.location.pathname;
+        if (!ownDrawerEntry) { HISTORY.replace(path); return; }
+        const from = HISTORY.location.pathname;
+        const pending = { path, timer: null, unlisten: null };
+        // Swap only where the pop leaves us — the post's own entry, dialog still open. Anywhere
+        // else the swap is dropped rather than replacing an entry it was never meant for.
+        const atPost = () => HISTORY.location.pathname === from && !HISTORY.location.hash;
+        const swap = () => {
+            if (inst.relatedSwap !== pending) return;
+            const ready = atPost() && stateRef.current.open;
+            cancelRelatedSwap(inst);
+            if (ready) HISTORY.replace(pending.path);
+        };
+        inst.relatedSwap = pending;
+        pending.unlisten = HISTORY.listen(() => {
+            if (atPost()) setTimeout(swap, 0);              // after every other listener saw the pop
+            else if (HISTORY.location.pathname !== from) cancelRelatedSwap(inst); // went elsewhere
+        });
+        pending.timer = setTimeout(swap, 1500); // no pop: give up (swap() re-checks where we are)
+        HISTORY.back();
+    }, []);
+
     const handleCopy = useCallback((s) => {
         clipboard.writeText(s);
         dispatch({ _copied: true });
@@ -3862,10 +3946,15 @@ function PostDialog(props) {
     const clearReplyTarget = useCallback(() => { dispatch({ _reply_target: null }); }, []);
     const handleChangeIndex = useCallback((v) => handleTabChange({}, v), [handleTabChange]);
 
-    /* PERF: Stable callback for comment TextField — avoids new inline arrow fn per render */
+    /* PERF: Stable callback for comment TextField — avoids new inline arrow fn per render.
+     * submitComment is declared further down: naming it in this deps array read it
+     * before its declaration — a TDZ ReferenceError wherever `const` is not compiled
+     * down to `var`, and a first-render (stale) submitComment where it is. The latest
+     * one is reached through a ref instead (assigned right after its declaration). */
+    const submitCommentRef = useRef(null);
     const onCommentKeyDown = useCallback((e) => {
-        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComment(); }
-    }, [submitComment]);
+        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (submitCommentRef.current) submitCommentRef.current(); }
+    }, []);
 
     // Vote helpers
     const resolveInitialVoted = useCallback((data, account) => {
@@ -4011,6 +4100,7 @@ function PostDialog(props) {
             })
             .catch((e) => { console.warn('[PostDialog] comment broadcast failed:', e.message); actions.trigger_snackbar(t("words.failed_to_post_comment")); dispatch({ _comment_sending: false }); });
     }, [props.api, props.account, props.onCommentPost, startCommentRefresh]);
+    submitCommentRef.current = submitComment;
 
     /* ================================================================
      * COMMENT EDIT / DELETE (own comments — dialog-only by design)
@@ -4203,6 +4293,7 @@ function PostDialog(props) {
             if (inst.navBounceTimer) clearTimeout(inst.navBounceTimer);
             if (inst.closeResetTimer) clearTimeout(inst.closeResetTimer);
             if (inst.scrollMomentumRaf) cancelAnimationFrame(inst.scrollMomentumRaf);
+            cancelRelatedSwap(inst);
             discardPreview();
         };
     }, []);
@@ -4243,6 +4334,7 @@ function PostDialog(props) {
             // A drawer-push got popped — same pathname, hash went away.
             // Notify the parent so its history-depth counter stays in sync.
             if (st._view_mobile_opened && !wantOpen && prevHash && !newHash) {
+                inst.drawerPushPath = null;
                 props.onDrawerPop?.();
             }
             if (st._tab_value === wantTab && st._view_mobile_opened === wantOpen) return;
@@ -4300,6 +4392,7 @@ function PostDialog(props) {
         const url = currentPath + desiredHash;
         if (usesPush) {
             HISTORY.push(url);
+            inst.drawerPushPath = currentPath;
             props.onDrawerPush?.();
         } else {
             HISTORY.replace(url);
@@ -4459,6 +4552,8 @@ function PostDialog(props) {
         if (isNewlyClosed) {
             inst.navTransitioning = false; inst.navDismissing = false; inst.navBouncing = false;
             inst.navDirection = null;
+            inst.drawerPushPath = null; // the host's closePost pops everything it counted
+            cancelRelatedSwap(inst);
             if (inst.navDismissTimer) { clearTimeout(inst.navDismissTimer); inst.navDismissTimer = null; }
             if (inst.navBounceTimer) { clearTimeout(inst.navBounceTimer); inst.navBounceTimer = null; }
             if (inst.navSafetyTimer) { clearTimeout(inst.navSafetyTimer); inst.navSafetyTimer = null; }
@@ -5004,6 +5099,7 @@ function PostDialog(props) {
                             handleOpenLicenseDialog={handleOpenLicenseDialog} handleCopy={handleCopy}
                             isOwner={isOwner} openEditPost={openEditPost}
                             isFavorite={_is_favorite} onToggleFavorite={toggleFavorite}
+                            nsfw={!!props.nsfw} openRelatedArtwork={openRelatedArtwork}
                             _current_comments={_current_comments} _show_parent={_show_parent}
                             _sorting={_sorting} sortedComments={sortedComments} _comments_loading={_comments_loading}
                             api={props.api} account={props.account}
