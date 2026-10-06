@@ -1,5 +1,5 @@
 import QRCode from "qrcode-svg";
-import {B64chromium} from "chromium-base64"
+import {encode} from "@pixagram/turbobase64"
 import JSLoader from "./JSLoader";
 import { PrivateKey } from "@pixagram/dpixa";
 // pixa_bip39 ≥ 0.0.7 is a wasm-pack *bundler*-target build: the wasm module
@@ -42,7 +42,7 @@ function svgToBase64(svgString, prefix) {
 
     const encoder = new TextEncoder();
     const uint8Array = encoder.encode(svgString);
-    const base64 = new B64chromium().bytesToBase64(uint8Array);
+    const base64 = encode(uint8Array);
     return prefix + base64;
 }
 

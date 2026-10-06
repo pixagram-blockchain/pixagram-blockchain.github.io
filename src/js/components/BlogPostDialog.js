@@ -29,6 +29,7 @@ import MenuItem from "@material-ui/core/MenuItem";
 import ListItemIcon from "@material-ui/core/ListItemIcon";
 import ListItemText from "@material-ui/core/ListItemText";
 import ShareRounded from "@material-ui/icons/ShareRounded";
+import TranslateRounded from "@material-ui/icons/TranslateRounded";
 import CommentRounded from "@material-ui/icons/CommentRounded";
 import SendRounded from "@material-ui/icons/SendRounded";
 import CloseIcon from "@material-ui/icons/Close";
@@ -123,6 +124,87 @@ function renderCommentBody(body) {
 function renderPostBody(body) {
     if (!body) return "";
     return safeHTML(body);
+}
+
+/**
+ * Machine translation (api.translation, pixaproxyapi v4.7).
+ *
+ * A translated body takes the original's path through BOTH sanitization
+ * passes, never a shortcut: the RAW on-chain markdown goes to the translation
+ * Worker, the translated markdown comes back through pixaproxyapi's
+ * SanitizationPipeline (marked, mentions, post-tier allowlist → entity.body),
+ * and that HTML enters _get_article (renderPostBody + heading ids) and
+ * ArticleBody's boundary guard exactly like `data.content` does.
+ *
+ * Strings are in the locales (components.blog_post_dialog.*); language names
+ * come from Intl, in the reader's own language, as {{language}}.
+ */
+const LANGUAGE_NAMES = new Map();   // UI locales → Intl.DisplayNames (or null)
+
+// The language a reader would name: "fr-FR" → "fr"; the two Chinese scripts
+// and the regional variants that read differently keep their tag.
+function displayLanguageCode(code) {
+    const c = String(code || "");
+    if (/^zh[-_](tw|hk|mo|hant)/i.test(c)) return "zh-Hant";
+    if (/^zh/i.test(c)) return "zh-Hans";
+    if (/^(pt|sr)[-_]/i.test(c)) return c.replace("_", "-");
+    return c.split(/[-_]/)[0];
+}
+
+// Intl.DisplayNames in the UI language. A bare "pt" is the European Portuguese
+// of locales/pt.js; without a region, Intl names languages the Brazilian way.
+function languageNames(uiLocale) {
+    const given = (Array.isArray(uiLocale) ? uiLocale : [uiLocale]).filter((l) => typeof l === "string" && l);
+    const locales = given.length ? given.map((l) => (/^pt$/i.test(l) ? "pt-PT" : l)) : ["en"];
+    const key = locales.join(",");
+    let names = LANGUAGE_NAMES.get(key);
+    if (names === undefined) {
+        try { names = new Intl.DisplayNames(locales, { type: "language" }); } catch (e) { names = null; }
+        LANGUAGE_NAMES.set(key, names);
+    }
+    return names;
+}
+
+/**
+ * A language's name in the reader's language. `bracketed`: the name goes
+ * inside the string's own parentheses, so a name that has some is written
+ * with a comma instead ("Chinesisch (vereinfacht)" → "Chinesisch, vereinfacht").
+ */
+function languageName(code, uiLocale, bracketed = false) {
+    if (!code) return "";
+    const c = displayLanguageCode(code);
+    const names = languageNames(uiLocale);
+    let name = c;
+    try { name = (names && names.of(c)) || c; } catch (e) { name = c; }
+    if (bracketed) {
+        const m = /^(.*?)\s*[(（]([^()（）]+)[)）]$/.exec(name);
+        if (m) name = m[1] + (/[぀-ヿ㐀-鿿]/.test(name) ? "、" : ", ") + m[2];
+    }
+    return name;
+}
+
+// Error code (Worker, its client, api.translation) → message. Literal keys,
+// so the locale tooling sees every one of them.
+const TRANSLATION_ERRORS = {
+    rate_limited: () => t("components.blog_post_dialog.translation_rate_limited"),
+    too_large: () => t("components.blog_post_dialog.translation_too_long"),
+    bad_target: () => t("components.blog_post_dialog.translation_language_unsupported"),
+    TRANSLATE_NO_TEXT: () => t("components.blog_post_dialog.translation_no_text"),
+    TRANSLATE_NOT_CONFIGURED: () => t("components.blog_post_dialog.translation_unavailable"),
+    forbidden_origin: () => t("components.blog_post_dialog.translation_unavailable"),
+    session_required: () => t("components.blog_post_dialog.translation_unavailable"),  // Worker wants a Turnstile key the app lacks
+    challenge_failed: () => t("components.blog_post_dialog.translation_check_failed"),
+    session_failed: () => t("components.blog_post_dialog.translation_check_failed"),
+    unauthorized: () => t("components.blog_post_dialog.translation_check_failed"),
+    busy: () => t("components.blog_post_dialog.translation_busy"),
+    starting: () => t("components.blog_post_dialog.translation_still_starting"),
+};
+
+function translationErrorText(e) {
+    const code = (e && typeof e.code === "string") ? e.code : "";
+    return Object.prototype.hasOwnProperty.call(TRANSLATION_ERRORS, code)
+        ? TRANSLATION_ERRORS[code]()
+        : t("components.blog_post_dialog.translation_failed");
 }
 
 /**
@@ -594,6 +676,14 @@ const styles = theme => ({
         transition: "color 275ms cubic-bezier(0.4, 0, 0.2, 1) 5ms",
         "&:hover": {
             color: "#bbb",
+        }
+    },
+    // Translate button while translating / showing the translation
+    // (declared after shareButton so it wins over its hover color).
+    translateButtonActive: {
+        color: "#fff",
+        "&:hover": {
+            color: "#fff",
         }
     },
     commentsHeader: {
@@ -1243,6 +1333,13 @@ class BlogPostDialog extends React.PureComponent {
             _toc_active: "",          // heading id currently in view
             // ── Image lightbox (hero zoom) ──
             _lightbox: null,          // { src, alt, rendering } while an image is zoomed
+            // ── Machine translation ──
+            // { key, target, src, status: "loading"|"done", html, title, source,
+            //   partial, done, total, waking } — `html` is entity.body from
+            // api.translation (already through the SanitizationPipeline); it is
+            // rendered by _get_article / ArticleBody like the original body.
+            _translation: null,
+            _show_translation: false, // reading the translation (else the original)
         };
         this._votingRef = false;
         this._favUnsub = null;    // favorites store subscription (live heart sync)
@@ -1267,6 +1364,9 @@ class BlogPostDialog extends React.PureComponent {
         this._lb = null;              // geometry + source element while open
         this._lightboxImg = null;
         this._lightboxBackdrop = null;
+        // ── Translation bookkeeping ──
+        this._translateAbort = null;  // AbortController of the request in flight
+        this._translateToken = 0;     // bumps on cancel: stale callbacks are ignored
     }
 
     // Callback ref for the scroll container. The container is rendered inside
@@ -1324,6 +1424,7 @@ class BlogPostDialog extends React.PureComponent {
         window.removeEventListener("resize", this._syncMobileHeader);
         window.removeEventListener("resize", this._close_lightbox_on_resize);
         this._teardown_lightbox();
+        this._stop_translation_request();
         if (this._favUnsub) { this._favUnsub(); this._favUnsub = null; }
         if (this._commentRefreshTimer) {
             clearInterval(this._commentRefreshTimer);
@@ -1405,6 +1506,7 @@ class BlogPostDialog extends React.PureComponent {
             _initialVoted: initialVoted,
         }, () => {
             if (openChanged && new_props.open) {
+                this._stop_translation_request();
                 this.setSt4te({
                     _voted: initialVoted,
                     _comments: [],
@@ -1423,6 +1525,8 @@ class BlogPostDialog extends React.PureComponent {
                     _toc_active: "",
                     _focusComment: null,
                     _focusPathKeys: [],
+                    _translation: null,
+                    _show_translation: false,
                 });
                 this._toc_pinned = false;
                 this._toc_hover = false;
@@ -1449,6 +1553,10 @@ class BlogPostDialog extends React.PureComponent {
                 // leaves the DOM, via setScrollContainerRef. The timer cleanup
                 // no longer depends on the ref existing.
                 this._teardown_lightbox();
+                // Stop paying for a translation nobody will read; what is on
+                // screen stays put while the dialog fades out (the next open
+                // starts from the original).
+                this._stop_translation_request();
                 this._toc_pinned = false;
                 this._toc_hover = false;
                 if (this._commentRefreshTimer) {
@@ -1460,6 +1568,7 @@ class BlogPostDialog extends React.PureComponent {
             }
 
             if (dataChanged && new_props.open) {
+                this._stop_translation_request();
                 this.setSt4te({
                     _comments: [],
                     _current_comments: [],
@@ -1476,6 +1585,8 @@ class BlogPostDialog extends React.PureComponent {
                     _toc_active: "",
                     _focusComment: null,
                     _focusPathKeys: [],
+                    _translation: null,
+                    _show_translation: false,
                 });
                 this._teardown_lightbox();   // the source <img> is about to be replaced
                 this._toc_pinned = false;
@@ -1583,6 +1694,176 @@ class BlogPostDialog extends React.PureComponent {
         setTimeout(() => { this.setSt4te({ _copied: false }); }, 3000);
     }
 
+    // ── Translation ───────────────────────────────────────────────────────
+    // raw on-chain markdown → translation Worker → pixaproxyapi
+    // SanitizationPipeline (api.translation.translateContent) → entity.body,
+    // which _get_article and ArticleBody render and guard like the original.
+
+    /** The body string the article pipeline renders when not translating. */
+    _article_source = (data) => (data && (data.content || data.body || data._description_html)) || "";
+
+    /** The reader's language: the UI locale the dialog formats dates with. */
+    _translation_target = () => {
+        const locales = this.st4te.locales;
+        const first = Array.isArray(locales) ? locales[0] : locales;
+        if (typeof first === "string" && first) return first;
+        return (typeof navigator !== "undefined" && navigator.language) || "en";
+    }
+
+    _translation_key = (data, target) =>
+        ((data.author || {}).username || "") + "/" + (data.permlink || "") + "@" + target;
+
+    /**
+     * The translation to show instead of the original, or null. A translation
+     * of another post, into another UI language, or of a body that has been
+     * edited since is never shown.
+     */
+    _shown_translation = () => {
+        const tr = this.st4te._translation;
+        if (!tr || !this.st4te._show_translation || !tr.html) return null;
+        const data = this.st4te.data || {};
+        if (tr.key !== this._translation_key(data, this._translation_target())) return null;
+        if (tr.src !== this._article_source(data)) return null;
+        return tr;
+    }
+
+    _can_translate = () => {
+        const { api, data } = this.st4te;
+        return !!(api && api.translation && api.translation.endpoint && data && data.permlink);
+    }
+
+    /** Abort the request in flight; what is on screen is left as it is. */
+    _stop_translation_request = () => {
+        this._translateToken++;
+        if (this._translateAbort) {
+            try { this._translateAbort.abort(); } catch (e) {}
+            this._translateAbort = null;
+        }
+    }
+
+    /** Abort and go back to the original. */
+    _cancel_translation = (rerender = true) => {
+        this._stop_translation_request();
+        if (!this.st4te._translation && !this.st4te._show_translation) return;
+        this._teardown_lightbox();
+        if (rerender) {
+            this.setSt4te({ _translation: null, _show_translation: false });
+        } else {
+            this.st4te._translation = null;
+            this.st4te._show_translation = false;
+        }
+    }
+
+    _toggle_translation = () => {
+        const tr = this.st4te._translation;
+        const data = this.st4te.data || {};
+        const current = tr && tr.key === this._translation_key(data, this._translation_target()) &&
+            tr.src === this._article_source(data);
+        if (current && tr.status === "loading") {   // second click while running: cancel
+            this._cancel_translation();
+            return;
+        }
+        if (current && tr.status === "done") {      // already translated: switch views
+            this._teardown_lightbox();   // the article's <img> nodes are about to be replaced
+            this.setSt4te({ _show_translation: !this.st4te._show_translation });
+            return;
+        }
+        this._start_translation();
+    }
+
+    _start_translation = () => {
+        const { api } = this.st4te;
+        const data = this.st4te.data || {};
+        const author = (data.author || {}).username;
+        const permlink = data.permlink;
+        if (!api || !api.translation || !author || !permlink) return;
+        this._stop_translation_request();
+        const token = this._translateToken;
+        const abort = typeof AbortController !== "undefined" ? new AbortController() : null;
+        this._translateAbort = abort;
+        const target = this._translation_target();
+        const base = {
+            key: this._translation_key(data, target),
+            target,
+            src: this._article_source(data),
+            status: "loading",
+            html: null,               // the original stays on screen until the first paragraphs land
+            title: null,
+            source: null,
+            partial: false,
+            done: 0,
+            total: 0,
+            waking: false,
+        };
+        this.setSt4te({ _translation: base, _show_translation: true });
+        const live = () => token === this._translateToken;
+        const update = (patch) => this.setSt4te({ _translation: { ...this.st4te._translation, ...patch } });
+
+        api.translation.translateContent(author, permlink, {
+            target,
+            signal: abort ? abort.signal : undefined,
+            // The document so far, already through the SanitizationPipeline:
+            // translated paragraphs, the rest still original.
+            onProgress: ({ entity, done, total }) => {
+                if (!live()) return;
+                this._teardown_lightbox();
+                update({ html: (entity && entity.body) || null, done, total, waking: false });
+            },
+            onStatus: () => { if (live()) update({ waking: true }); },
+        }).then((res) => {
+            if (!live()) return;
+            this._translateAbort = null;
+            const entity = res.entity || {};
+            if (api.translation.sameLanguage(res.source, res.target)) {
+                this.setSt4te({ _translation: null, _show_translation: false });
+                actions.trigger_snackbar(t("components.blog_post_dialog.already_in_your_language"));
+                return;
+            }
+            this._teardown_lightbox();
+            this.setSt4te({
+                _translation: {
+                    ...base,
+                    status: "done",
+                    html: entity.body || null,
+                    title: entity.title || null,
+                    source: res.source || null,
+                    partial: !!res.partial,
+                },
+            });
+            if (res.partial) actions.trigger_snackbar(t("components.blog_post_dialog.translation_partial"));
+        }).catch((e) => {
+            if (!live()) return;        // cancelled, closed or superseded
+            this._translateAbort = null;
+            this._teardown_lightbox();
+            this.setSt4te({ _translation: null, _show_translation: false });
+            if (e && (e.name === "AbortError" || e.code === "ABORTED")) return;
+            console.warn("[BlogPostDialog] translation failed:", e && (e.code || e.message));
+            actions.trigger_snackbar(translationErrorText(e));
+        });
+    }
+
+    _translate_tooltip = (translating, shown) => {
+        const { _translation: tr, locales } = this.st4te;
+        if (translating) {
+            if (tr.waking) return t("components.blog_post_dialog.translation_starting");
+            return tr.total > 0
+                ? t("components.blog_post_dialog.translating_progress", { done: tr.done, total: tr.total })
+                : t("components.blog_post_dialog.translating");
+        }
+        if (shown) {
+            return shown.source
+                ? t("components.blog_post_dialog.show_original_language", { language: languageName(shown.source, locales, true) })
+                : t("components.blog_post_dialog.show_original");
+        }
+        const target = this._translation_target();
+        const data = this.st4te.data || {};
+        if (tr && tr.status === "done" && tr.key === this._translation_key(data, target) &&
+            tr.src === this._article_source(data)) {
+            return t("components.blog_post_dialog.show_translation", { language: languageName(target, locales, true) });
+        }
+        return t("components.blog_post_dialog.translate_to", { language: languageName(target, locales) });
+    }
+
     _open_author = (username) => {
         // Refuse to navigate when username is missing or empty — same
         // rationale as PostDialog.openAuthor: pushing the broken `/@` URL
@@ -1674,8 +1955,12 @@ class BlogPostDialog extends React.PureComponent {
     // memoized on the raw string, so the scroll-driven re-renders of this
     // dialog stop re-sanitizing the whole article on every frame.
     _get_article = () => {
-        const data = this.st4te.data || {};
-        const raw = data.content || data.body || data._description_html || '';
+        // A shown translation is entity.body out of pixaproxyapi's
+        // SanitizationPipeline — it takes the same two steps below as the
+        // original: renderPostBody (safeHTML) + heading ids here, then
+        // ArticleBody's boundary guard.
+        const translation = this._shown_translation();
+        const raw = translation ? translation.html : this._article_source(this.st4te.data);
         if (this._articleCache && this._articleCache.raw === raw) return this._articleCache;
         const processed = processArticleHtml(renderPostBody(raw));
         this._articleCache = { raw, html: processed.html, headings: processed.headings };
@@ -2365,6 +2650,7 @@ class BlogPostDialog extends React.PureComponent {
     _on_post_edited = (payload) => {
         const data = this.st4te.data || {};
         if (data.permlink !== payload.permlink) return;
+        this._cancel_translation(false);   // translated from the previous title
         const newData = {
             ...data,
             title: payload.title,
@@ -2393,6 +2679,7 @@ class BlogPostDialog extends React.PureComponent {
                 if (!fresh || !fresh.author) return;
                 const cur = this.st4te.data || {};
                 if (cur.permlink !== payload.permlink) return; // navigated away meanwhile
+                this._cancel_translation(false);   // translated from the previous body
                 let metaTags = [];
                 try {
                     const meta = typeof fresh.json_metadata === "string"
@@ -2849,6 +3136,7 @@ class BlogPostDialog extends React.PureComponent {
             _titleHeight, _isMobileHeader,
             _toc_open, _toc_active, _lightbox,
             _focusComment, _focusPathKeys,
+            _translation,
         } = this.st4te;
 
         // No post to render — deleted, unresolvable, or still loading. The
@@ -2900,7 +3188,13 @@ class BlogPostDialog extends React.PureComponent {
         // level above the body's shallowest heading. It only joins when body
         // headings exist — a title alone is no table of contents.
         // (Entries, indent styles and min level are memoized in _get_toc.)
-        const toc = this._get_toc(article, (data.title || "").trim());
+        // Translation state for the header button; the translated title is
+        // plain text (safeString in the pipeline) and renders as a text node.
+        const shownTranslation = this._shown_translation();
+        const translating = !!(_translation && _translation.status === "loading" &&
+            _translation.key === this._translation_key(data, this._translation_target()));
+        const title = (shownTranslation && shownTranslation.title) || data.title || "";
+        const toc = this._get_toc(article, title.trim());
         const tocEntries = toc.entries;
         const tocStyles = toc.styles;
         const tocMinLevel = toc.minLevel;
@@ -2988,7 +3282,7 @@ class BlogPostDialog extends React.PureComponent {
                                         ref={this.titleRef}
                                         className={`${classes.headerTitle} ${showHeaderTitle ? classes.headerTitleVisible : ''}`}
                                     >
-                                        {data.title || ""}
+                                        {title}
                                     </Typography>
                                 </div>
                             </div>
@@ -3013,7 +3307,7 @@ class BlogPostDialog extends React.PureComponent {
                                         <Card className={classes.paperCard}>
                                             <CardContent className={classes.paperContent}>
                                                 <Typography variant="h1" className={classes.title}>
-                                                    {data.title || ""}
+                                                    {title}
                                                 </Typography>
 
                                                 <div className={classes.authorSection}>
@@ -3056,7 +3350,7 @@ class BlogPostDialog extends React.PureComponent {
                                                     </div>
                                                     <div className={classes.actions}>
                                                         <div>
-                                                            <Tooltip title={_is_favorite ? "Remove from favorites" : "Add to favorites"}>
+                                                            <Tooltip title={_is_favorite ? t("components.blog_post_dialog.remove_from_favorites") : t("components.blog_post_dialog.add_to_favorites")}>
                                                                 <IconButton className={classes.shareButton} onClick={this._toggle_favorite}>
                                                                     {_is_favorite ? <FavoriteRounded /> : <FavoriteBorderRounded />}
                                                                 </IconButton>
@@ -3066,6 +3360,27 @@ class BlogPostDialog extends React.PureComponent {
                                                                     <ShareRounded />
                                                                 </IconButton>
                                                             </Tooltip>
+                                                            {this._can_translate() && (
+                                                                <Tooltip title={this._translate_tooltip(translating, shownTranslation)}>
+                                                                    <IconButton
+                                                                        className={`${classes.shareButton} ${(translating || shownTranslation) ? classes.translateButtonActive : ''}`}
+                                                                        onClick={this._toggle_translation}
+                                                                        aria-pressed={!!shownTranslation}
+                                                                    >
+                                                                        {translating ? (
+                                                                            <CircularProgress
+                                                                                size={22}
+                                                                                thickness={5}
+                                                                                color="inherit"
+                                                                                variant={_translation.total > 0 ? "determinate" : "indeterminate"}
+                                                                                value={_translation.total > 0 ? Math.max(6, (100 * _translation.done) / _translation.total) : undefined}
+                                                                            />
+                                                                        ) : (
+                                                                            <TranslateRounded />
+                                                                        )}
+                                                                    </IconButton>
+                                                                </Tooltip>
+                                                            )}
                                                         </div>
                                                         {isOwner && (
                                                             <div>

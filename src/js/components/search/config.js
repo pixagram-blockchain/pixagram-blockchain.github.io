@@ -2,20 +2,25 @@
 
 // ── Search configuration ──────────────────────────────────────────────────────
 // The artwork/post leg talks to the pixagram-search Worker (D1 + FTS5 + Vectorize +
-// SigLIP); everything else stays on the chain node through pixaAPI. The base
+// SigLIP 2); everything else stays on the chain node through pixaAPI. The base
 // URL can be overridden at runtime (window.__PIXAGRAM_SEARCH_API__) so a
 // staging Worker can be pointed at without a rebuild.
+//
+// v3 adds what the box uses while typing: /suggest (completions, questions,
+// titles, documentation sections, popular searches, and the placeholder's
+// examples) and /query (an answer to a question: /ask about the artworks,
+// /help about the platform). Against an older Worker they simply stay silent.
 export const SEARCH_API_URL = (
     (typeof window !== "undefined" && window.__PIXAGRAM_SEARCH_API__) ||
-    "https://pixagram-search-v2.p1x4.workers.dev"
+    "https://pixagram-search-v3.p1x4.workers.dev"
 ).replace(/\/+$/, "");
 
 export const LIMITS = Object.freeze({
-    users: 16,
-    tags: 32,
-    communities: 16,
-    artworks: 32,
-    posts: 16,
+    users: 10,
+    tags: 20,
+    communities: 10,
+    artworks: 15,
+    posts: 5,
 });
 
 // Community accounts are named portal-<id>; lookup_accounts returns them like any
@@ -42,6 +47,23 @@ export const DROPDOWN_MAX_HEIGHT = 786;
 
 // Filter panel: suggestions shown under the author / community text fields.
 export const SUGGEST_LIMIT = 6;
+
+// ── v3: the box guesses ───────────────────────────────────────────────────────
+// Suggestions are cheap (index lookups, cached at the edge): asked at every
+// short pause in typing. Answers are not (an /ask plan or a documentation
+// answer, 20 a minute per client): asked for a finished question ("…?") after a
+// longer pause, for a question-like text after a long one, and at once on Enter
+// or when a question is picked.
+export const SUGGEST_DEBOUNCE_MS = 180;
+export const SUGGEST_ROWS = 6;              // suggestion rows in the dropdown
+export const ANSWER_DEBOUNCE_MS = 700;      // after "…?"
+export const ANSWER_IDLE_MS = 1600;         // after a question word and three words, without "?"
+
+// The placeholder: the plain "Search" first, then the Worker's examples (in the
+// UI language, from what the index holds), each fading out and the next in.
+export const EXAMPLE_FIRST_MS = 2200;
+export const EXAMPLE_INTERVAL_MS = 3800;
+export const EXAMPLE_FADE_MS = 280;
 
 // The Worker's 20 colour buckets (name + representative hex), in the order the
 // swatches are drawn. /vocab is the source of truth and replaces this at runtime.

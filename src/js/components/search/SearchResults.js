@@ -1,5 +1,5 @@
 "use strict";
-import React, { useEffect, useMemo, useRef } from "preact/compat";
+import React, { useCallback, useEffect, useMemo, useRef } from "preact/compat";
 import Popper from "@material-ui/core/Popper";
 import Collapse from "@material-ui/core/Collapse";
 import List from "@material-ui/core/List";
@@ -20,6 +20,8 @@ import { TagResult } from "./TagResult";
 import { CommunityResult } from "./CommunityResult";
 import { PostResult } from "./PostResult";
 import { ArtworkMasonry } from "./ArtworkMasonry";
+import { SuggestionList } from "./SuggestionList";
+import { AnswerCard } from "./AnswerCard";
 
 // ── SearchResults ─────────────────────────────────────────────────────────────
 // The dropdown under the search bar:
@@ -34,6 +36,12 @@ import { ArtworkMasonry } from "./ArtworkMasonry";
 // above the other matches, only when it is a valid tag (see tags.js) or a tag the
 // chain already lists — and never for a portal-<id>: that is a community (its
 // posts carry it as their first tag), which the Communities section covers.
+//
+// v3, above the sections: what the Worker proposes for the text typed
+// (SuggestionList, rows picked with the mouse or the keys SearchBar handles),
+// "did you mean …?" when the search corrected a word, and the answer to a
+// question (AnswerCard). Opening an artwork or a post from the results tells the
+// Worker which one (controls.feedback), so its ranking learns.
 
 const EMPTY = Object.freeze([]);
 
@@ -46,11 +54,28 @@ const POPPER_MODIFIERS = Object.freeze({
 export const SearchResults = React.memo(
     ({
          classes, query, results, anchorEl, width, maxHeight, history, controls,
+         suggestions = EMPTY, highlight = -1, onPick, onFill,
          onGoToUsername, onGoToTag, onGoToCommunity, onGoToArtwork, onGoToPost, onSetTagNavigation,
      }) => {
         useLanguage();
-        const { users, tags, communities, artworks, posts, loading, artworksLoading, filters, filtersOpen } = results;
+        const { users, tags, communities, artworks, posts, loading, artworksLoading, filters, filtersOpen, answer, didYouMean } = results;
         const filtering = hasFilters(filters);
+
+        // Opening a result reports it (the Worker's ranker learns which ones people open).
+        const openArtwork = useCallback((item) => {
+            if (controls && controls.feedback) controls.feedback(item);
+            onGoToArtwork(item);
+        }, [controls, onGoToArtwork]);
+        // "Did you mean": only for the text it corrected (the box may hold a newer one), and once —
+        // not when a suggestion row already proposes the same.
+        const corrected = didYouMean && didYouMean.term === query.trim().toLowerCase() ? didYouMean.text : null;
+        const showDidYouMean = !!corrected && !!controls && !!controls.applyText &&
+            corrected.trim().toLowerCase() !== query.trim().toLowerCase() &&
+            !suggestions.some((s) => s.text.trim().toLowerCase() === corrected.trim().toLowerCase());
+        const onDidYouMean = useCallback(() => {
+            if (corrected && controls && controls.applyText) controls.applyText(corrected);
+        }, [controls, corrected]);
+        const answering = !!answer && (answer.loading || !!answer.data);
 
         // Popper positions itself on window resize; a width change without one
         // (the bar widening, a breakpoint flip of its margins) is pushed through here.
@@ -74,7 +99,11 @@ export const SearchResults = React.memo(
             }
             return m || base;
         }, [communities, results.communityTitles]);
-        const goToPost = onGoToPost || onGoToArtwork; // same route shape: /<category>/@author/permlink
+        const goTo = onGoToPost || onGoToArtwork; // same route shape: /<category>/@author/permlink
+        const goToPost = useCallback((post) => {
+            if (controls && controls.feedback) controls.feedback(post);
+            goTo(post);
+        }, [controls, goTo]);
 
         const tag = normalizeTag(query);
         const tagIsValid = !!tag && !COMMUNITY_ACCOUNT_RE.test(tag) && (isValidTag(tag) || tags.some((x) => x.name === tag));
@@ -100,7 +129,7 @@ export const SearchResults = React.memo(
             <div className={indexClass}>
                 <ListSubheader className={classes.subheaderSticky}>{tr(t, "words.artworks", "Artworks")}</ListSubheader>
                 {artworks.length > 0
-                    ? <ArtworkMasonry items={artworks} onOpen={onGoToArtwork} />
+                    ? <ArtworkMasonry items={artworks} onOpen={openArtwork} />
                     : (
                         <div className={classes.loading} style={{ padding: "8px 0 12px 0" }}>
                             <CircularProgress size={18} style={{ color: "#666" }} />
@@ -110,8 +139,9 @@ export const SearchResults = React.memo(
         ) : null;
 
         let emptyMessage = null;
-        if (artworksLoading) {
-            // The Worker is still searching: no "nothing found" yet.
+        if (artworksLoading || answering || suggestions.length > 0) {
+            // The Worker is still searching, an answer stands above, or the suggestions offer
+            // where to go next: no "nothing found" (Enter takes the suggestions away).
         } else if (query.trim()) {
             emptyMessage = tagIsValid ? (
                 // The link shows and opens the tag the term stands for ("#Pixel" → #pixel).
@@ -152,6 +182,25 @@ export const SearchResults = React.memo(
                         </Collapse>
                     ) : null}
                     <div className={classes.searchScroll}>
+                        {suggestions.length > 0 && onPick ? (
+                            <SuggestionList
+                                classes={classes}
+                                items={suggestions}
+                                query={query}
+                                highlight={highlight}
+                                onPick={onPick}
+                                onFill={onFill}
+                            />
+                        ) : null}
+                        {showDidYouMean ? (
+                            <p className={classes.didYouMean}>
+                                {tr(t, "components.search_results.did_you_mean", "Did you mean:")}{" "}
+                                <button type="button" className={classes.didYouMeanLink} onClick={onDidYouMean}>{corrected}</button>
+                            </p>
+                        ) : null}
+                        {answering ? (
+                            <AnswerCard classes={classes} answer={answer} onGoToUsername={onGoToUsername} onOpenArtwork={openArtwork} />
+                        ) : null}
                         {loading ? (
                             <div className={classes.loading}>
                                 <CircularProgress size={24} style={{ color: "#666" }} />
@@ -213,6 +262,10 @@ export const SearchResults = React.memo(
     (prev, next) =>
         prev.query === next.query &&
         prev.results === next.results &&
+        prev.suggestions === next.suggestions &&
+        prev.highlight === next.highlight &&
+        prev.onPick === next.onPick &&
+        prev.onFill === next.onFill &&
         prev.anchorEl === next.anchorEl &&
         prev.width === next.width &&
         prev.maxHeight === next.maxHeight &&

@@ -67,13 +67,13 @@ const PRESETS_TRANSFORM = {
     seed: -1,
     identity_preserve: true,
     lora_style: "retroart",
-    identitynet_strength: 0.85,
-    ip_adapter_scale: 0.85,
+    identitynet_strength: 0.9,
+    ip_adapter_scale: 0.9,
     resolution: 1280,
     aspect_ratio: "1:1",
     use_tiled: false,
-    tile_size: 786,
-    tile_overlap: 256,
+    tile_size: 860,
+    tile_overlap: 192,
 };
 const PRESET_GENERATE = {
     negative_prompt: "Ugly, real, artifacts, blurry, disformed, photo-realistic, photo, photography, realistic, low-quality, text, white edges, border.",

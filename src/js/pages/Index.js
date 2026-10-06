@@ -3079,7 +3079,9 @@ function Index({ classes, history, settings: rawSettings }) {
     // switch), forcing a full page reconcile for props already flowing.
 
     // ── Search ────────────────────────────────────────────────────────────
-    const search = useSearch(apiRef);
+    // The UI language picks the language of the placeholder's examples and of
+    // the questions the box proposes (null until the settings are known).
+    const search = useSearch(apiRef, { lang: processedSettings._know_the_settings ? processedSettings._language : null });
     // It lives in the address too (+search-…): §8d.
     const searchAddress = useSearchMeta(search, meta, metaRoute, apiReady && !!page.name && page.name !== "home");
 

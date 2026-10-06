@@ -1,9 +1,9 @@
 import createSVG from "./vtracer";
 import { XbrzGpuRenderer, XBRZ_PRESETS } from '@pixagram/upscaler';
-import init, {get_memory, xbrz_upscale_config} from '@pixagram/upscaler/wasm';
+import init, {get_memory, xbrz_upscale_config} from '@pixagram/upscaler';
 // Namespace import so the optional `initThreadPool` export (present only in the
 // multi-threaded build) can be feature-detected without breaking single-threaded builds.
-import * as upscalerWasm from '@pixagram/upscaler/wasm';
+import * as upscalerWasm from '@pixagram/upscaler';
 await ensureUpscalerReady();
 
 let renderer;

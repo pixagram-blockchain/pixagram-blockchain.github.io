@@ -1,6 +1,6 @@
 "use strict";
 
-import { COMMUNITY_ACCOUNT_RE, DEFAULT_COLORS, LIMITS, SEARCH_API_URL } from "./config";
+import { COMMUNITY_ACCOUNT_RE, DEFAULT_COLORS, LIMITS, SEARCH_API_URL, SUGGEST_ROWS } from "./config";
 import { filtersToParams, hasFilters } from "./filters";
 
 // ── pixagram-search Worker client ─────────────────────────────────────────────
@@ -13,8 +13,8 @@ import { filtersToParams, hasFilters } from "./filters";
 //                       vectors; items carry `community` and `post` (summary, excerpt, …)
 //            `limit` applies per result set; `community=` filters by community.
 //
-//   flat   (pixagram-search-v2, the SigLIP 2 stack)
-//            { items, mode, next_cursor, total_candidates, facets?, notes? }
+//   flat   (pixagram-search-v2 and v3, the SigLIP 2 stacks)
+//            { items, mode, next_cursor, total_candidates, facets?, notes?, query_id?, did_you_mean? }
 //            One fused list for both types, so `limit` covers both. `type` narrows it.
 //            There is no `community` parameter and no `community` field: a community post's
 //            `category` is its portal-<id>, which is also stored as a tag, so the
@@ -26,16 +26,30 @@ import { filtersToParams, hasFilters } from "./filters";
 // request. The flat one gets one request per result set (each with its own limit) and per
 // community. The UI sees the same normalized objects either way.
 //
+// v3 (flat) also returns a `query_id` per answer: every item keeps the one it came with and its
+// rank there (`qid`, `rank`), so a click can be reported to /feedback (the ranker learns from
+// it). `did_you_mean` (a corrected query) is passed on.
+//
 //   facets — only when asked for ({ facets: true }): { author, community, primary_color,
 //            has_color, type, month, … } as [{ key, n }] counts
 // Without a query the Worker browses (newest first) — that is how filters work on their own.
 
-/** Absolute URL of the best thumbnail: the native WebP (small, exact pixels) first. */
+/**
+ * Absolute URL of the best thumbnail: the native WebP (small, exact pixels) first. Only the
+ * Worker's own image paths ("/img/…") or an https URL: anything else is no image.
+ */
 export function artworkImageUrl(item) {
     const images = item?.artwork?.images;
-    const rel = images?.original || images?.upscaled;
-    if (!rel) return null;
-    return /^https?:\/\//i.test(rel) ? rel : SEARCH_API_URL + rel;
+    return workerImage(images?.original) || workerImage(images?.upscaled);
+}
+
+const httpsUrl = (v) => (typeof v === "string" && /^https:\/\/[^\s]+$/i.test(v) ? v : null);
+
+/** An image path of the Worker ("/img/orig/…") or an https URL, as an absolute URL; else null. */
+function workerImage(v) {
+    if (typeof v !== "string" || !v) return null;
+    if (/^\/img\/[A-Za-z0-9._/-]+$/.test(v) && !v.includes("..")) return SEARCH_API_URL + v;
+    return httpsUrl(v);
 }
 
 /** App route of a post: /<category>/@<author>/<permlink> (what the feed/profile pages push). */
@@ -76,6 +90,8 @@ function normalizePost(item) {
         netVotes: item.net_votes || 0,
         path: artworkPath(item),
         score: item.score ? item.score.fused : 0,
+        qid: typeof item._qid === "string" ? item._qid : null,
+        rank: Number(item._rank) || null,
     };
 }
 
@@ -101,6 +117,8 @@ function normalize(item) {
         // Unix seconds (the Worker stores chain time as UTC seconds): the card's tooltip.
         created: Number(item.created) || 0,
         score: item.score ? item.score.fused : 0,
+        qid: typeof item._qid === "string" ? item._qid : null,
+        rank: Number(item._rank) || null,
     };
 }
 
@@ -118,7 +136,7 @@ function normalizeFacets(raw) {
     return out;
 }
 
-const EMPTY = Object.freeze({ artworks: [], posts: [], facets: null });
+const EMPTY = Object.freeze({ artworks: [], posts: [], facets: null, didYouMean: null });
 
 /** GET /search with `params`: the parsed body, or null on any failure. Rethrows only on abort. */
 async function fetchSearch(params, signal) {
@@ -147,20 +165,34 @@ let apiShape = null;
 function fromSets(json, limit, postsLimit) {
     const artworks = (Array.isArray(json?.artworks?.items) ? json.artworks.items : []).map(normalize).filter((it) => it.src && it.path).slice(0, limit);
     const posts = (Array.isArray(json?.posts?.items) ? json.posts.items : []).map(normalizePost).filter((it) => it.path).slice(0, postsLimit);
-    return { artworks, posts, facets: normalizeFacets(json?.facets) };
+    return { artworks, posts, facets: normalizeFacets(json?.facets), didYouMean: null };
 }
 
-/** Items of several flat answers as one list: first seen wins, re-ordered when several scopes were merged. */
+/** The corrected query of the first answer that has one (a word was misspelled). */
+function didYouMeanOf(answers) {
+    for (const json of answers) {
+        const d = json && typeof json.did_you_mean === "string" ? json.did_you_mean.trim() : "";
+        if (d) return d.slice(0, 120);
+    }
+    return null;
+}
+
+/**
+ * Items of several flat answers as one list: first seen wins, re-ordered when several scopes were
+ * merged. Each keeps the query_id of its answer and its rank there (for /feedback).
+ */
 function mergeItems(answers, newest) {
     const seen = new Set();
     const items = [];
     for (const json of answers) {
-        for (const it of Array.isArray(json?.items) ? json.items : []) {
+        const qid = json && typeof json.query_id === "string" ? json.query_id : null;
+        const list = Array.isArray(json?.items) ? json.items : [];
+        list.forEach((it, i) => {
             if (it && it.id != null && !seen.has(it.id)) {
                 seen.add(it.id);
-                items.push(it);
+                items.push(qid ? { ...it, _qid: qid, _rank: i + 1 } : it);
             }
-        }
+        });
     }
     if (answers.length > 1) {
         items.sort(newest
@@ -197,7 +229,7 @@ async function searchFlat(params, filters, { signal, limit, postsLimit, facets }
 
     const artworks = mergeItems(artAnswers, newest).map(normalize).filter((it) => it.src && it.path).slice(0, limit);
     const posts = mergeItems(postAnswers, newest).map(normalizePost).filter((it) => it.path).slice(0, postsLimit);
-    return { artworks, posts, facets: normalizeFacets(facetAnswers[0]?.facets) };
+    return { artworks, posts, facets: normalizeFacets(facetAnswers[0]?.facets), didYouMean: didYouMeanOf(artAnswers.concat(postAnswers)) };
 }
 
 /**
@@ -268,4 +300,195 @@ export function loadVocab() {
             });
     }
     return vocabPromise;
+}
+// ── v3: suggestions, examples, answers, feedback ──────────────────────────────
+// /suggest and /query exist on the v3 Worker only. Against an older one (or when
+// it cannot be reached) these resolve to null / the built-in examples and the box
+// behaves as before. Everything from the Worker is checked here: texts are
+// plain strings (rendered as text nodes, never HTML), links are https only.
+
+const SUGGESTION_KINDS = new Set(["complete", "question", "title", "help", "popular", "correction"]);
+const ROUTES = new Set(["search", "ask", "help"]);
+
+/** GET `path` on the Worker: the parsed body, or null on any failure. Rethrows only on abort. */
+async function getJson(path, params, signal) {
+    const url = SEARCH_API_URL + path + (params ? "?" + new URLSearchParams(params).toString() : "");
+    let res;
+    try {
+        res = await fetch(url, { signal, headers: { accept: "application/json" } });
+    } catch (e) {
+        if (e && e.name === "AbortError") throw e;
+        return null;
+    }
+    if (!res.ok) return null;
+    try {
+        return await res.json();
+    } catch (e) {
+        if (e && e.name === "AbortError") throw e;
+        return null;
+    }
+}
+
+const clean = (v, max) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
+
+/** One suggestion from /suggest, checked; null when it is not one. */
+export function normalizeSuggestion(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const text = clean(raw.text, 160);
+    if (!text) return null;
+    const kind = SUGGESTION_KINDS.has(raw.kind) ? raw.kind : "complete";
+    const route = ROUTES.has(raw.route) ? raw.route : "search";
+    const out = { text, kind, route };
+    const query = clean(raw.query, 300);
+    if (query) out.query = query;
+    if (Number.isFinite(Number(raw.n)) && Number(raw.n) > 0) out.n = Number(raw.n);
+    if (raw.source && typeof raw.source === "object") {
+        const url = httpsUrl(raw.source.url);
+        if (url) out.source = { title: clean(raw.source.title, 120), heading: clean(raw.source.heading, 120), url };
+    }
+    const p = raw.post;
+    if (p && typeof p === "object" && typeof p.author === "string" && typeof p.permlink === "string" && p.author && p.permlink) {
+        const post = {
+            id: Number(p.id) || null,
+            author: p.author,
+            permlink: p.permlink,
+            category: typeof p.category === "string" ? p.category : null,
+            type: p.type === "blog" ? "blog" : "artwork",
+            image: workerImage(p.image),
+        };
+        if (artworkPath(post)) out.post = post;
+    }
+    return out;
+}
+
+/**
+ * What the Worker proposes for the text typed (a trailing space says the last word is finished):
+ * { q, completion, items }, or null when it cannot say (an older Worker, a network error).
+ */
+export async function fetchSuggestions(text, { signal, lang, limit = SUGGEST_ROWS + 2 } = {}) {
+    const q = String(text || "").replace(/^\s+/, "").slice(0, 100);
+    if (!q.trim()) return null;
+    const params = { q, limit: String(limit) };
+    if (lang) params.lang = lang;
+    const json = await getJson("/suggest", params, signal);
+    if (!json || !Array.isArray(json.suggestions)) return null;
+    const items = json.suggestions.map(normalizeSuggestion).filter(Boolean);
+    const completion = typeof json.completion === "string" && json.completion.length > q.length ? json.completion.slice(0, 160) : null;
+    return { q: text, completion, items };
+}
+
+// Examples for the placeholder when the Worker has none to give (an older Worker, offline):
+// a few searches and questions every Pixagram index can answer.
+const FALLBACK_EXAMPLES = Object.freeze({
+    en: ["pixel cat", "who posted the first dragon?", "blue landscape", "who is the most active artist?", "how many cat artworks?"],
+    fr: ["chat", "qui a posté la première œuvre de dragon ?", "paysage bleu", "quel est l'artiste le plus actif ?", "combien de chats ?"],
+    de: ["Katze", "wer hat den ersten Drachen gepostet?", "blaue Landschaft", "wer ist der aktivste Künstler?", "wie viele Katzen?"],
+    es: ["gato", "dragón", "paisaje azul"],
+    it: ["gatto", "drago", "paesaggio blu"],
+    pt: ["gato", "dragão", "paisagem azul"],
+});
+
+const fallbackExamples = (lang) =>
+    (FALLBACK_EXAMPLES[lang] || FALLBACK_EXAMPLES.en).map((text) => ({ text, kind: /[?？]$/.test(text) ? "question" : "complete", route: /[?？]$/.test(text) ? "ask" : "search" }));
+
+const examplesCache = new Map(); // lang → Promise<[suggestion]>
+
+/**
+ * Examples for the placeholder in the UI language, once per language and page load. When the
+ * Worker could not give any (offline, a refusal, an older Worker), the built-in ones come back,
+ * marked `fallback`, and are not kept: the next call asks again.
+ */
+export function loadExamples(lang) {
+    const key = /^[a-z]{2}$/.test(String(lang || "")) ? lang : "en";
+    if (!examplesCache.has(key)) {
+        const fallback = () => {
+            examplesCache.delete(key);
+            const list = fallbackExamples(key);
+            list.fallback = true;
+            return Object.freeze(list);
+        };
+        const p = getJson("/suggest", { lang: key })
+            .then((json) => {
+                if (!json) return fallback();
+                const list = Array.isArray(json.examples) ? json.examples.map(normalizeSuggestion).filter(Boolean) : [];
+                // the Worker answered: an index with nothing to show yet gets the built-in ones, kept
+                return Object.freeze(list.length ? list : fallbackExamples(key));
+            })
+            .catch(fallback);
+        examplesCache.set(key, p);
+    }
+    return examplesCache.get(key);
+}
+
+/** The text of an answer with at most `max` characters, as plain text. */
+const answerText = (v, max = 2000) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+
+function normalizeSources(list) {
+    return (Array.isArray(list) ? list : [])
+        .map((s, i) => {
+            const url = httpsUrl(s && s.url);
+            if (!url) return null;
+            return { n: Number(s.n) || i + 1, title: clean(s.title, 120), heading: clean(s.heading, 120), url, excerpt: clean(s.excerpt, 400) };
+        })
+        .filter(Boolean)
+        .slice(0, 8);
+}
+
+/**
+ * GET /query: the Worker's router decides between a search, an /ask answer and a /help answer
+ * (or `route` forces one). Resolves to
+ *   { route: "ask",  text, value, confidence, empty, items: [artwork…] }
+ *   { route: "help", text, status, sources: [{ n, title, heading, url, excerpt }] }
+ *   { route: "search", links: [{ title, heading, url }] }   (documentation pages that match, maybe none)
+ *   { route: "search", links: [], retry: true }             (the answer budget is spent: ask again later)
+ * or null when the Worker cannot say. Rethrows only on abort.
+ */
+export async function fetchAnswer(text, { signal, route = null, filters = null, nsfw = "exclude" } = {}) {
+    const q = String(text || "").trim().slice(0, 300);
+    if (!q) return null;
+    // results=0: the box runs its own search; the Worker need not run (and log) another
+    const params = { q, nsfw, results: "0" };
+    if (route === "ask" || route === "help") params.route = route;
+    if (filters && (filters.type === "artwork" || filters.type === "blog")) params.type = filters.type;
+    const json = await getJson("/query", params, signal);
+    if (!json || typeof json.route !== "string") return null;
+    // The client's answer budget was spent: no verdict about the text, ask again later.
+    if (json.answer_budget === "spent") return { route: "search", links: [], retry: true };
+    const a = json.answer && typeof json.answer === "object" ? json.answer : null;
+    if (json.route === "ask" && a) {
+        const items = (Array.isArray(a.items) ? a.items : []).map(normalize).filter((it) => it.src && it.path).slice(0, 8);
+        const value = typeof a.answer === "string" || typeof a.answer === "number" ? a.answer : null;
+        return {
+            route: "ask",
+            text: answerText(a.answer_text, 600),
+            value,
+            empty: value === null || value === 0,
+            confidence: Number(a.confidence) || 0,
+            items,
+        };
+    }
+    if (json.route === "help" && a) {
+        const status = typeof a.status === "string" ? a.status : "not_found";
+        if (status === "disabled" || status === "no_docs") return { route: "search", links: [] };
+        return { route: "help", text: answerText(a.answer_text), status, sources: normalizeSources(a.sources) };
+    }
+    return { route: "search", links: normalizeSources(json.help_links) };
+}
+
+/**
+ * Tell the Worker which result was opened (POST /feedback): fire and forget, survives the
+ * navigation that follows. Only for items that came with a query_id (v3).
+ */
+export function sendFeedback(item, action = "click") {
+    if (!item || typeof item.qid !== "string" || !item.qid || !(Number(item.id) > 0)) return;
+    const body = JSON.stringify({ query_id: item.qid, post_id: Number(item.id), rank: item.rank || undefined, action });
+    const url = SEARCH_API_URL + "/feedback";
+    try {
+        // text/plain: a simple request, no CORS preflight; the Worker reads the JSON body as is
+        const blob = typeof Blob === "function" ? new Blob([body], { type: "text/plain;charset=UTF-8" }) : null;
+        if (blob && typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function" && navigator.sendBeacon(url, blob)) return;
+        fetch(url, { method: "POST", body, keepalive: true, headers: { "content-type": "text/plain;charset=UTF-8" } }).catch(() => {});
+    } catch (e) {
+        // feedback is best effort
+    }
 }

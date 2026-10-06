@@ -83,7 +83,16 @@
  *     setVault → no-ops; unlockVault delegates to unlockWithPin); plaintext
  *     cache entries are refused rather than served.
  *
- * @version 4.6.0
+ * v4.7.0: TranslationAPI (`api.translation`). translateContent() sends the RAW
+ * on-chain markdown (getContent(..., { raw: true })) to the translation Worker
+ * and runs the translated markdown through the SAME SanitizationPipeline as
+ * getContent() — it is untrusted text exactly like a chain body. Components
+ * apply their usual render + boundary guard on top, so a translated body is
+ * sanitized as many times as the original, never fewer. Endpoint:
+ * CONFIG.TRANSLATE_ENDPOINT / initialize({ translateEndpoint }). The Worker
+ * client (./pixa-translate.js) is loaded on first use.
+ *
+ * @version 4.7.0
  *
  * API Groups and Methods:
  *
@@ -413,6 +422,13 @@
  *
  * rewards (RewardsAPI):
  *   - simulateCurvePayouts({variableReward, posts})
+ *
+ * translation (TranslationAPI):
+ *   - translateContent(author, permlink, { target, source?, signal?, onProgress?, onStatus? })
+ *       // raw chain body → translation Worker → SanitizationPipeline (as getContent)
+ *   - sameLanguage(a, b)                       // e.g. a post already in the reader's language
+ *   - languages()                              // target languages offered by the Worker
+ *   - setEndpoint(url)
  */
 
 // Shared LacertaDB instance — constructed in utils/settings.js (main bundle,
@@ -530,6 +546,13 @@ const CONFIG = {
     ],
     APP_NAME: 'pixagram/4.2.0',
     PAGINATION_LIMIT: 20,
+    // Translation Worker (Cloudflare, origin-locked to pixagram.com) in front
+    // of the Hugging Face Space — see TranslationAPI. Override with
+    // initialize({ translateEndpoint }); an empty value disables translation.
+    TRANSLATE_ENDPOINT: 'https://translate.pixagram.com',
+    // Cloudflare Turnstile site key, needed only when the Worker runs with
+    // REQUIRE_SESSION=true. Override with initialize({ translateTurnstileSiteKey }).
+    TRANSLATE_TURNSTILE_SITE_KEY: '',
     // Testnet chain ID (HIVE-shared value). This used to be the library's
     // DEFAULT_CHAIN_ID in dpixa <= 1.3.x, so leaving CHAIN_ID null "just worked"
     // against testnet by coincidence — mainnet and testnet constants were
@@ -1121,6 +1144,7 @@ export class PixaProxyAPI {
         this.transaction = null;
         this.jsonrpc = null;
         this.rewards = null;
+        this.translation = null;
 
         // Internal managers
         this.keyManager = null;
@@ -1301,6 +1325,8 @@ export class PixaProxyAPI {
         try {
             if (config.sessionTimeout) this.config.SESSION_TIMEOUT = config.sessionTimeout;
             if (config.pinTimeout) this.config.PIN_TIMEOUT = config.pinTimeout;
+            if (typeof config.translateEndpoint === 'string') this.config.TRANSLATE_ENDPOINT = config.translateEndpoint;
+            if (typeof config.translateTurnstileSiteKey === 'string') this.config.TRANSLATE_TURNSTILE_SITE_KEY = config.translateTurnstileSiteKey;
 
             // ── Phase 0a′: Kick the IDB work off FIRST ─────────────────────
             // The warm-start probe and the user_settings open are independent
@@ -1464,6 +1490,7 @@ export class PixaProxyAPI {
             this.transaction = new TransactionStatusAPI(this);
             this.jsonrpc = new JsonRpcAPI(this);
             this.rewards = new RewardsAPI(this);
+            this.translation = new TranslationAPI(this);
 
             this.keyManager = new KeyManager(this.eventEmitter, this.config);
             this.sessionManager = new SessionManager(this.settingsDb, this.config, {
@@ -9566,6 +9593,186 @@ class RewardsAPI {
             console.warn('[RewardsAPI] simulate_curve_payouts failed:', e.message);
         }
         return null;
+    }
+}
+
+// ============================================
+// Translation API Group
+// ============================================
+
+/**
+ * Machine translation of on-chain content through the Pixagram translation
+ * Worker (Cloudflare, origin-locked to pixagram.com) and its Hugging Face
+ * Space (TranslateGemma on CPU).
+ *
+ * The Worker is given the RAW markdown — the exact bytes getContent() returns
+ * with { raw: true } — since only the source still has the structure the
+ * Worker keeps out of the model's reach (code, links, images, @mentions,
+ * HTML). Its output is untrusted text exactly like a chain body, so it goes
+ * through the SAME SanitizationPipeline as getContent(): the translated
+ * markdown takes the place of `body` (and `title`) in the raw chain payload,
+ * and that payload is sanitized as a whole. Components then apply their own
+ * render + boundary guard to `entity.body`, as for any other post.
+ *
+ * The Worker client (./pixa-translate.js) is loaded on first use.
+ */
+class TranslationAPI {
+    constructor(proxy) {
+        this.proxy = proxy;
+        /** @private { endpoint, siteKey, translator } — rebuilt when the config changes */
+        this._client = null;
+    }
+
+    /** Worker URL ('' = translation disabled). */
+    get endpoint() {
+        return (this.proxy.config.TRANSLATE_ENDPOINT || '').replace(/\/+$/, '');
+    }
+
+    /** @param {string} url  Worker URL, '' to disable translation */
+    setEndpoint(url) {
+        this.proxy.config.TRANSLATE_ENDPOINT = typeof url === 'string' ? url : '';
+        this._client = null;
+    }
+
+    /**
+     * Same language for a reader? 'pt-BR' and 'pt-PT' are; the two Chinese
+     * scripts ('zh-Hans', 'zh-Hant') are not.
+     * @param {string} a
+     * @param {string} b
+     * @returns {boolean}
+     */
+    sameLanguage(a, b) {
+        if (!a || !b) return false;
+        const x = String(a).toLowerCase();
+        const y = String(b).toLowerCase();
+        if (x === y) return true;
+        const base = x.split('-')[0];
+        return base === y.split('-')[0] && base !== 'zh';
+    }
+
+    /** @private */
+    async _translator() {
+        const endpoint = this.endpoint;
+        const siteKey = this.proxy.config.TRANSLATE_TURNSTILE_SITE_KEY || '';
+        if (!endpoint) throw new PixaAPIError('Translation is not configured', 'TRANSLATE_NOT_CONFIGURED');
+        const c = this._client;
+        if (c && c.endpoint === endpoint && c.siteKey === siteKey) return c.translator;
+        const mod = await JSLoader(() => import('./pixa-translate.js'));
+        const translator = mod.createTranslator({ endpoint, turnstileSiteKey: siteKey });
+        this._client = { endpoint, siteKey, translator };
+        return translator;
+    }
+
+    /**
+     * Languages the translator offers, for pickers.
+     * @returns {Promise<Array<{code: string, name: string, native: string}>>}
+     */
+    async languages() {
+        const translator = await this._translator();
+        return translator.languages();
+    }
+
+    /**
+     * Translate a post or a comment and return it sanitized, like getContent().
+     *
+     * @param {string} author
+     * @param {string} permlink
+     * @param {object} options
+     * @param {string} options.target  reader's language: 'fr', 'pt-BR', 'zh-TW'… (normalised by the Worker)
+     * @param {string} [options.source='auto']
+     * @param {AbortSignal} [options.signal]
+     * @param {(p: {entity: object, done: number, total: number}) => void} [options.onProgress]
+     *        the document so far (translated paragraphs, the rest still original),
+     *        already through the SanitizationPipeline; at most one call per
+     *        `progressIntervalMs`, since each one is a full render
+     * @param {(s: {state: string, retryIn: number}) => void} [options.onStatus]
+     *        the Space is waking up or busy; the Worker keeps retrying
+     * @param {number} [options.progressIntervalMs=300]
+     * @returns {Promise<{entity: object, source: string|null, target: string, partial: boolean, cached: boolean}>}
+     *        `entity` has the shape getContent() returns; `entity.body` is sanitized HTML
+     */
+    async translateContent(author, permlink, options = {}) {
+        const { target, source = 'auto', signal, onProgress, onStatus, progressIntervalMs = 300 } = options;
+        if (!target) throw new PixaAPIError('A target language is required', 'TRANSLATE_NO_TARGET');
+        // FAIL-CLOSED, as getContent(): nothing leaves this layer unsanitized.
+        const pipeline = this.proxy.sanitizationPipeline;
+        if (!pipeline) throw new PixaAPIError('Content sanitizer not ready', 'SANITIZER_NOT_READY');
+
+        const raw = await this.proxy.content.getContent(author, permlink, { raw: true });
+        if (!raw) throw new PixaAPIError('Content not found', 'NOT_FOUND', { author, permlink });
+        if (typeof raw.body !== 'string' || !raw.body.trim() || detectContentType(raw.body) === 'pixel_art') {
+            throw new PixaAPIError('Nothing to translate (empty body or pixel art)', 'TRANSLATE_NO_TEXT');
+        }
+        if (signal && signal.aborted) throw signal.reason || new PixaAPIError('Translation aborted', 'ABORTED');
+        const translator = await this._translator();
+
+        // The chain payload with the translated text in place of the original;
+        // every other field (json_metadata, votes, payouts…) is the chain's own
+        // and goes through the same validators.
+        const render = (body, title) => {
+            const entity = pipeline.sanitizeContent({ ...raw, body, title });
+            if (!entity) throw new PixaAPIError('Translated content failed sanitization', 'TRANSLATE_SANITIZE_FAILED');
+            return entity;
+        };
+
+        // Progress events carry the whole document so far; rendering one is a
+        // full sanitization, so bursts (paragraphs answered from the cache)
+        // are coalesced to the latest one.
+        let latest = null;
+        let timer = null;
+        let lastEmit = 0;
+        let finished = false;
+        const emit = () => {
+            timer = null;
+            if (finished || !latest) return;
+            const p = latest;
+            latest = null;
+            lastEmit = Date.now();
+            try {
+                onProgress({ entity: render(p.markdown, raw.title), done: p.done, total: p.total });
+            } catch (e) {
+                console.warn('[TranslationAPI] progress render failed:', e.message);
+            }
+        };
+        const progress = typeof onProgress === 'function'
+            ? (p) => {
+                latest = p;
+                if (!timer) timer = setTimeout(emit, Math.max(0, lastEmit + progressIntervalMs - Date.now()));
+            }
+            : undefined;
+
+        let body;
+        try {
+            body = await translator.translate(raw.body, { target, source, signal, onProgress: progress, onStatus });
+        } finally {
+            finished = true;
+            if (timer) clearTimeout(timer);
+        }
+
+        // The title goes after the body, in the language detected on the body:
+        // a few words alone are too little to detect from. Best effort — the
+        // original title stays if this fails.
+        let title = raw.title || '';
+        if (title && !this.sameLanguage(body.source, body.target)) {
+            try {
+                const t = await translator.translate(title, { target, source: body.source || source, signal });
+                let text = t && typeof t.markdown === 'string' ? t.markdown.trim() : '';
+                // The model ends sentences with a period; a title that had none keeps none.
+                if (!/[.!?。…]$/.test(title.trim()) && /[.。]$/.test(text) && !/\.\.$/.test(text)) text = text.slice(0, -1);
+                if (text) title = text;
+            } catch (e) {
+                if (signal && signal.aborted) throw e;
+                console.warn('[TranslationAPI] title translation failed:', e.message);
+            }
+        }
+
+        return {
+            entity: render(body.markdown, title),
+            source: body.source || null,
+            target: body.target || target,
+            partial: Boolean(body.partial),
+            cached: Boolean(body.cached),
+        };
     }
 }
 

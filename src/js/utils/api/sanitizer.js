@@ -14,7 +14,7 @@
  *
  * Drop-in replacement for @pixagram/sanitizer WASM module.
  *
- * @version 2.0.0
+ * @version 2.0.1
  * @module ContentSanitizer
  */
 
@@ -833,7 +833,12 @@ class TextProcessor {
 
 class MentionProcessor {
 
-    static #MENTION_RE = /(^|[ \t\n\r>(])@([a-zA-Z][a-zA-Z0-9.\-]{2,15})/g;
+    // The whole run of name characters after "@". Dots and hyphens at its end
+    // are punctuation ("thanks @alice." / "@alice-"): no account name ends with
+    // one, so #mentionLink splits them off before validating. The length
+    // (3–16) is checked on what remains, so a longer run is never linked by a
+    // prefix. One character class and nothing after it: linear, no backtracking.
+    static #MENTION_RE = /(^|[ \t\n\r>(])@([a-zA-Z][a-zA-Z0-9.\-]*)/g;
     static #HASHTAG_RE = /(^|[ \t\n\r>(])#([a-zA-Z][a-zA-Z0-9\-]{0,31})/g;
 
     static #htmlEscape(s) {
@@ -845,6 +850,21 @@ class MentionProcessor {
         return username.length >= 3 && username.length <= 16
             && /^[a-z]/.test(username) && /^[a-z0-9.\-]+$/.test(username)
             && !/[.\-]{2}/.test(username) && !/[.\-]$/.test(username);
+    }
+
+    /**
+     * Link for a mention run, or null when it is not a valid account name.
+     * Trailing dots/hyphens stay in the text after the link. They are trimmed
+     * with a loop, not /[.\-]+$/, which backtracks quadratically on a long run
+     * of dots that does not reach the end.
+     */
+    static #mentionLink(run) {
+        let end = run.length;
+        while (end > 0 && (run.charCodeAt(end - 1) === 0x2e || run.charCodeAt(end - 1) === 0x2d)) end--;
+        const lower = run.slice(0, end).toLowerCase();
+        if (!MentionProcessor.#isValidUsername(lower)) return null;
+        const esc = MentionProcessor.#htmlEscape(lower);
+        return `<a href="/@${esc}" class="pixa-mention" data-username="${esc}">@${esc}</a>${run.slice(end)}`;
     }
 
     static #isContinuationChar(text, pos) {
@@ -895,7 +915,9 @@ class MentionProcessor {
     }
 
     /**
-     * Process @mentions and #hashtags in HTML, respecting link nesting.
+     * Process @mentions and #hashtags in HTML. Not inside links (no nested
+     * anchors), and not inside <code> / <pre>, which show text as written:
+     * `#include`, `color: #fff`, `@decorator`.
      * @param {string} html
      * @returns {string}
      */
@@ -903,15 +925,22 @@ class MentionProcessor {
         let result = '';
         let pos = 0;
         let linkDepth = 0;
+        let codeDepth = 0;
 
         while (pos < html.length) {
             if (html[pos] === '<') {
                 const tagEnd = MentionProcessor.#findTagEnd(html, pos);
                 if (tagEnd !== -1) {
                     const tag = html.slice(pos, tagEnd + 1);
-                    const lower = tag.toLowerCase();
-                    if (lower.startsWith('<a ') || lower === '<a>') linkDepth++;
-                    else if (lower.startsWith('</a'))                linkDepth = Math.max(0, linkDepth - 1);
+                    // The whole tag name: a "</a" prefix would also match
+                    // </abbr> or </aside> and end the link early.
+                    const m = /^<(\/?)([a-z][a-z0-9]*)[\s/>]/i.exec(tag);
+                    if (m) {
+                        const name = m[2].toLowerCase();
+                        const step = m[1] ? -1 : 1;
+                        if (name === 'a') linkDepth = Math.max(0, linkDepth + step);
+                        else if (name === 'code' || name === 'pre') codeDepth = Math.max(0, codeDepth + step);
+                    }
                     result += tag;
                     pos = tagEnd + 1;
                 } else {
@@ -923,19 +952,14 @@ class MentionProcessor {
                 while (pos < html.length && html[pos] !== '<') pos++;
                 const text = html.slice(textStart, pos);
 
-                if (linkDepth > 0) {
+                if (linkDepth > 0 || codeDepth > 0) {
                     result += text;
                 } else {
                     let processed = MentionProcessor.#replaceWithBoundaryCheck(
                         text,
                         new RegExp(MentionProcessor.#MENTION_RE.source, 'g'),
                         MentionProcessor.#isContinuationChar,
-                        (username) => {
-                            const lower = username.toLowerCase();
-                            if (!MentionProcessor.#isValidUsername(lower)) return null;
-                            const esc = MentionProcessor.#htmlEscape(lower);
-                            return `<a href="/@${esc}" class="pixa-mention" data-username="${esc}">@${esc}</a>`;
-                        },
+                        MentionProcessor.#mentionLink,
                     );
                     processed = MentionProcessor.#replaceWithBoundaryCheck(
                         processed,

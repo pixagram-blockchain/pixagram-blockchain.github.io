@@ -2,18 +2,27 @@
  * render-pool.js — unified upscaling pool.
  *
  * Merges the former hexagonrenderwasm.js / crtWebgl.js / xbrzwasm.js /
- * render-pool.js into a single module and adds the TRI algorithm
- * (triangulated upscaler, original to @pixagram/upscaler, MIT) on both
- * paths:
- *   - GPU (WebGL2):  TriGpuRenderer
- *   - CPU (WASM):    tri_upscale_config
+ * render-pool.js into a single module. Paths per algorithm:
+ *   - xBRZ: GPU (XbrzGpuRenderer) or CPU through WasmXbrzPool: all cores,
+ *           off the main thread, byte-identical to the single-threaded
+ *           WASM call (which remains the fallback if workers can't start)
+ *   - CRT / HEX: GPU (WebGL2) or main-thread WASM
+ *   - SQR: nearest-neighbour on a 2D canvas
+ *   - TRI: not available in @pixagram/upscaler 0.4.x (no tri_upscale_config,
+ *          no TriGpuRenderer); triF / cutF report an error instead of rendering
+ * Every GPU render falls back to WASM if the GPU throws (context loss,
+ * device limits).
  *
- * Public API (unchanged + triF):
+ * Package entry points (@pixagram/upscaler 0.4.1+):
+ *   '@pixagram/upscaler'       GPU renderers, presets, WasmXbrzPool
+ *   '@pixagram/upscaler/wasm'  the WASM module (init, *_upscale_config, get_memory)
+ *
+ * Public API (unchanged):
  *   xbrzF(image_data, scale, callback, terminate, id, mode)
  *   hexF (image_data, scale, callback, terminate, id, mode)
  *   crtF (image_data, scale, callback, terminate, id, mode)
  *   sqrF (image_data, scale, callback, terminate, id, mode)
- *   triF (image_data, scale, callback, terminate, id, mode)   // NEW
+ *   triF (image_data, scale, callback, terminate, id, mode)
  *   cutF — compatibility alias for triF
  *   releaseId(id)                       // drops callbacks, KEEPS cached renders
  *   getCachedRender(id, algo, scale)    // cache-first lookup (skip decode+upscale)
@@ -51,9 +60,6 @@
  * against the device's probed texture/renderbuffer/viewport limit and a
  * configurable pixel budget; oversized jobs silently take the WASM path
  * instead of resetting the driver.
- *
- * TRI preserves alpha (interpolation runs on premultiplied RGBA), so
- * transparent pixel art stays transparent.
  */
 
 import createSVG from "./vtracer";
@@ -62,58 +68,116 @@ import {
     HexGpuRenderer,
     XbrzGpuRenderer,
     XBRZ_PRESETS,
+    WasmXbrzPool,
 } from '@pixagram/upscaler';
+// The WASM module is its own entry point: the package root exports only the
+// GPU renderers, presets and helpers, so importing init / *_upscale_config
+// from '@pixagram/upscaler' resolves to undefined.
 import init, {
     get_memory,
     crt_upscale_config,
     hex_upscale_config,
-    tri_upscale_config,
     xbrz_upscale_config,
 } from '@pixagram/upscaler/wasm';
-// Namespace import so the optional `initThreadPool` export (present only in the
-// multi-threaded build) can be feature-detected without breaking single-threaded builds.
-import * as upscalerWasm from '@pixagram/upscaler/wasm';
 
-await ensureUpscalerReady();
+// ── Logging ──────────────────────────────────────────────────────────
+// A failure usually repeats for every card on screen (context loss, a
+// missing algorithm), so each distinct message is logged once.
+const loggedMessages = new Set();
+
+function logOnce(level, text, err) {
+    const key = text + "|" + ((err && err.message) || String(err));
+    if (loggedMessages.has(key)) return;
+    loggedMessages.add(key);
+    console[level]("[render-pool] " + text, err);
+}
+
+function isGpuMode(mode) {
+    return ("" + mode).toUpperCase() === "GPU";
+}
 
 // ── WASM bootstrap ────────────────────────────────────────────────────
 /**
- * Initialise the WASM module and, when the multi-threaded build is present,
- * spin up the rayon thread pool. Runs at most once per JS context (the promise
- * is memoised on globalThis) and is safe on every build/page:
- *   - default (single-threaded) build -> initThreadPool isn't exported, skipped
- *   - page without cross-origin isolation -> SharedArrayBuffer unavailable, skipped
- * In every skipped case the module keeps working single-threaded, exactly as before.
+ * Initialise the main-thread WASM module once per JS context (the promise
+ * is memoised on globalThis). It starts as soon as this module loads, but
+ * nothing waits on it up front: GPU renders never need it and CPU renders
+ * await it just before calling into WASM, so importing this module never
+ * blocks on a WASM download. A failed init is forgotten, so the next CPU
+ * render retries.
+ *
+ * There is no thread pool to start: @pixagram/upscaler/wasm is
+ * single-threaded, and multi-core xBRZ comes from WasmXbrzPool below,
+ * which needs neither SharedArrayBuffer nor cross-origin isolation.
  */
 function ensureUpscalerReady() {
-    return (globalThis.__upscalerReady ??= (async () => {
-        await init();
-        // `initThreadPool` exists only in the multi-threaded build. Resolve it with a
-        // runtime-computed key so bundlers (webpack/Vite/etc.) don't emit an
-        // "export 'initThreadPool' was not found" warning against the single-threaded build.
-        const initThreadPool = upscalerWasm[["init", "Thread", "Pool"].join("")];
-        const canThread =
-            typeof initThreadPool === "function" &&
-            globalThis.crossOriginIsolated === true;
-        if (!canThread) return;
-        try {
-            const threads = globalThis.navigator?.hardwareConcurrency || 4;
-            await initThreadPool(threads);
-        } catch (err) {
-            console.warn("[upscaler] thread pool init failed; running single-threaded:", err);
-        }
-    })());
+    return (globalThis.__upscalerReady ??= init().then(
+        () => undefined,
+        (err) => {
+            globalThis.__upscalerReady = undefined;
+            throw err;
+        },
+    ));
+}
+
+if (typeof window !== "undefined") {
+    ensureUpscalerReady().catch((err) => {
+        logOnce("warn", "WASM init failed; CPU renders will retry:", err);
+    });
 }
 
 /**
- * Copy a WASM upscale result out of linear memory into a fresh ImageData.
- * The copy is required: the view aliases WASM memory, which is reused by the
- * next call and detached whenever the heap grows.
+ * Copy a WASM upscale result out of linear memory into a fresh ImageData,
+ * then free the result handle. The copy is required: the view aliases WASM
+ * memory, which is reused by the next call and detached whenever the heap
+ * grows.
  */
 function wasmResultToImageData(r) {
-    const m = get_memory();
-    const view = new Uint8ClampedArray(m.buffer, r.ptr, r.len);
-    return new ImageData(new Uint8ClampedArray(view), r.width, r.height);
+    try {
+        const view = new Uint8ClampedArray(get_memory().buffer, r.ptr, r.len);
+        return new ImageData(new Uint8ClampedArray(view), r.width, r.height);
+    } finally {
+        r.free();
+    }
+}
+
+// ── Multi-core CPU xBRZ ──────────────────────────────────────────────
+// CPU-mode xBRZ runs in a WasmXbrzPool: the image is split into bands of
+// rows rendered on all cores in module workers, so the main thread stays
+// free for scrolling, and the result is byte-identical to
+// xbrz_upscale_config. Created on first use; if the workers can't start
+// (CSP, unsupported browser) CPU xBRZ stays on the main thread.
+let xbrzPoolPromise = null;
+let xbrzPoolInstance = null; // for the stats panel
+
+function getXbrzPool() {
+    if (!xbrzPoolPromise) {
+        xbrzPoolPromise = WasmXbrzPool.create().then(
+            (pool) => (xbrzPoolInstance = pool),
+            (err) => {
+                logOnce("warn", "xBRZ worker pool unavailable; CPU xBRZ runs on the main thread:", err);
+                return null;
+            },
+        );
+    }
+    return xbrzPoolPromise;
+}
+
+const XBRZ_CPU = XBRZ_PRESETS.smooth; // same preset as the GPU path
+
+async function xbrzCpu(imgd, scale) {
+    // The pool clamps scales to 2..8; the WASM call clamps to 1..8. Above 1x
+    // both give identical output, so only scale < 2 stays on the main thread.
+    const pool = scale >= 2 ? await getXbrzPool() : null;
+    if (pool) {
+        // The pool returns fresh, caller-owned pixels: wrap without a copy.
+        const o = await pool.upscale(imgd, { ...XBRZ_CPU, scale });
+        return new ImageData(o.data, o.width, o.height);
+    }
+    await ensureUpscalerReady();
+    const r = xbrz_upscale_config(imgd.data, imgd.width, imgd.height, scale,
+        XBRZ_CPU.equalColorTolerance, XBRZ_CPU.centerDirectionBias,
+        XBRZ_CPU.dominantDirectionThreshold, XBRZ_CPU.steepDirectionThreshold);
+    return wasmResultToImageData(r);
 }
 
 // ── GPU renderer lifecycle (one lazy singleton per algorithm) ────────
@@ -158,6 +222,21 @@ function disposeGpuExcept(keep) {
 
 function disposeAll() {
     disposeGpuExcept(null);
+}
+
+/**
+ * Run a GPU render; on any GPU error (lost context, limits, no WebGL2)
+ * dispose that renderer and return null so the caller takes the WASM path.
+ */
+function tryGpu(algo, imgd, options) {
+    try {
+        const o = getGpuRenderer(algo).render(imgd, options);
+        return new ImageData(o.data, o.width, o.height);
+    } catch (err) {
+        logOnce("warn", `${algo} GPU render failed; using WASM:`, err);
+        disposeGpu(algo);
+        return null;
+    }
 }
 
 // ── GPU size guard ───────────────────────────────────────────────────
@@ -216,9 +295,8 @@ function gpuCanHandle(imgd, scale) {
 // ── Per-algorithm upscalers (GPU / WASM) ─────────────────────────────
 
 async function crtUpscale(imgd, scale, mode = "CPU") {
-    let o;
-    if (("" + mode).toUpperCase() === "GPU" && scale < 6 && gpuCanHandle(imgd, scale)) {
-        o = getGpuRenderer("crt").render(imgd, {
+    if (isGpuMode(mode) && scale < 6 && gpuCanHandle(imgd, scale)) {
+        const out = tryGpu("crt", imgd, {
             scale: scale,          // 2-32 (default: 3)
             warpX: 0.015,          // Horizontal curvature (default: 0.015)
             warpY: 0.02,           // Vertical curvature (default: 0.02)
@@ -229,22 +307,19 @@ async function crtUpscale(imgd, scale, mode = "CPU") {
             enableScanlines: true, // Enable scanlines
             enableMask: true,      // Enable shadow mask
         });
-    } else {
-        // WASM/CPU path. With the multi-threaded build + started pool, the
-        // kernel fans per-row work across rayon automatically.
-        disposeGpu("crt");
-        const r = crt_upscale_config(imgd.data, imgd.width, imgd.height, scale,
-            0.015, 0.02, -4.0, 0.5, 0.3, true, true, true);
-        // wasmResultToImageData already returns a fresh ImageData — no re-wrap.
-        return wasmResultToImageData(r);
+        if (out) return out;
     }
-    return new ImageData(o.data, o.width, o.height);
+    // WASM/CPU path (main thread).
+    disposeGpu("crt");
+    await ensureUpscalerReady();
+    const r = crt_upscale_config(imgd.data, imgd.width, imgd.height, scale,
+        0.015, 0.02, -4.0, 0.5, 0.3, true, true, true);
+    return wasmResultToImageData(r);
 }
 
 async function hexUpscale(imgd, scale, mode = "CPU") {
-    let o;
-    if (("" + mode).toUpperCase() === "GPU" && scale < 8 && gpuCanHandle(imgd, scale)) {
-        o = getGpuRenderer("hex").render(imgd, {
+    if (isGpuMode(mode) && scale < 8 && gpuCanHandle(imgd, scale)) {
+        const out = tryGpu("hex", imgd, {
             scale,
             orientation: 'flat-top',
             drawBorders: false,
@@ -252,21 +327,28 @@ async function hexUpscale(imgd, scale, mode = "CPU") {
             borderThickness: 0,
             backgroundColor: "#00000000",
         });
-    } else {
-        disposeGpu("hex");
-        // The raw wasm export takes numbers, not the strings the GPU options
-        // accept: orientation 0 = flat-top (1 = pointy-top), colors are
-        // 0xRRGGBBAA u32 values. The old per-file version passed strings here
-        // and only worked through implicit >>>0 coercion to 0.
-        const r = hex_upscale_config(imgd.data, imgd.width, imgd.height, scale,
-            /* orientation  */ 0,
-            /* draw_borders */ false,
-            /* border_color */ 0x00000000,
-            /* thickness    */ 0,
-            /* background   */ 0x00000000);
-        return wasmResultToImageData(r);
+        if (out) return out;
     }
-    return new ImageData(o.data, o.width, o.height);
+    disposeGpu("hex");
+    await ensureUpscalerReady();
+    // The raw wasm export takes numbers, not the strings the GPU options
+    // accept: orientation 0 = flat-top (1 = pointy-top), colors are
+    // 0xRRGGBBAA u32 values. The old per-file version passed strings here
+    // and only worked through implicit >>>0 coercion to 0.
+    const r = hex_upscale_config(imgd.data, imgd.width, imgd.height, scale,
+        /* orientation  */ 0,
+        /* draw_borders */ false,
+        /* border_color */ 0x00000000,
+        /* thickness    */ 0,
+        /* background   */ 0x00000000);
+    return wasmResultToImageData(r);
+}
+
+// TRI is not part of @pixagram/upscaler 0.4.x (no tri_upscale_config, no
+// TriGpuRenderer). Fail with a clear message rather than a ReferenceError;
+// wire the real calls in here once the package provides them.
+async function triUpscale() {
+    throw new Error("TRI is not available in @pixagram/upscaler 0.4.x (no tri_upscale_config / TriGpuRenderer)");
 }
 
 // xBRZ keeps its hybrid pipeline: native xBRZ up to 8x, then a vtracer SVG
@@ -287,21 +369,16 @@ function ensureXbrzScratch() {
 }
 
 async function xbrzUpscale(imgd, scale, tempCallback, processN = 1, mode = "GPU") {
-    let imgd2;
+    let imgd2 = null;
     // 8x is included in the GPU gate: the size guard, not the scale
     // ceiling, is what keeps the driver alive — a small sprite at 8x is a
     // trivial target, a large input reroutes to WASM before allocation.
-    if (("" + mode).toUpperCase() === "GPU" && scale <= 8 && gpuCanHandle(imgd, scale)) {
-        const o = getGpuRenderer("xbrz").render(imgd, { ...XBRZ_PRESETS.smooth, scale });
-        imgd2 = new ImageData(o.data, o.width, o.height);
-    } else {
+    if (isGpuMode(mode) && scale <= 8 && gpuCanHandle(imgd, scale)) {
+        imgd2 = tryGpu("xbrz", imgd, { ...XBRZ_PRESETS.smooth, scale });
+    }
+    if (!imgd2) {
         disposeGpu("xbrz");
-        // Same values as XBRZ_PRESETS.smooth:
-        // (tolerance, centerBias, dominantThreshold, steepThreshold)
-        const r = xbrz_upscale_config(imgd.data, imgd.width, imgd.height, scale,
-            40, 4.0, 4.0, 2.4);
-        // wasmResultToImageData already returns a fresh ImageData — no re-wrap.
-        imgd2 = wasmResultToImageData(r);
+        imgd2 = await xbrzCpu(imgd, scale);
     }
 
     if (scale <= 8) {
@@ -864,60 +941,72 @@ async function processWorker(algorithm, image_data, scale, callback, terminate =
     // released (they all share one WebGL context, so this trims textures,
     // not contexts). Whether a GPU-eligible call actually renders on the
     // GPU is decided inside each upscaler: mode + scale gate + gpuCanHandle
-    // (the output-size guard) — an oversized job falls through to WASM.
-    if (mode !== "GPU") {
+    // (the output-size guard) — an oversized job, or a GPU error, falls
+    // through to WASM.
+    if (!isGpuMode(mode)) {
         disposeAll();
     }
 
-    if (algorithm === "hex") {
-        const imgd = await hexUpscale(image_data, scale, mode);
-        await received(imgd, fullId, algorithm);
-        disposeGpuExcept("hex");
-    } else if (algorithm === "xbrz") {
-        // Only the xbrz/vtracer path consumes the live-callback count.
-        const n = Object.keys(workerState[algorithm].callbacks).length;
-        const imgd = await xbrzUpscale(image_data, scale, (tempImgd) => { received(tempImgd, fullId, algorithm); }, n, mode);
-        await received(imgd, fullId, algorithm);
-        disposeGpuExcept("xbrz");
-    } else if (algorithm === "crt") {
-        const imgd = await crtUpscale(image_data, scale, mode);
-        await received(imgd, fullId, algorithm);
-        disposeGpuExcept("crt");
-    } else if (algorithm === "tri") {
-        const imgd = await triUpscale(image_data, scale, mode);
-        await received(imgd, fullId, algorithm);
-        disposeGpuExcept("tri");
-    } else if (algorithm === "sqr") {
-        disposeAll();
-        const imgd = await upscale_square(image_data, scale);
-        await received(imgd, fullId, algorithm);
+    try {
+        if (algorithm === "hex") {
+            const imgd = await hexUpscale(image_data, scale, mode);
+            await received(imgd, fullId, algorithm);
+            disposeGpuExcept("hex");
+        } else if (algorithm === "xbrz") {
+            // Only the xbrz/vtracer path consumes the live-callback count.
+            const n = Object.keys(workerState[algorithm].callbacks).length;
+            const imgd = await xbrzUpscale(image_data, scale, (tempImgd) => { received(tempImgd, fullId, algorithm); }, n, mode);
+            await received(imgd, fullId, algorithm);
+            disposeGpuExcept("xbrz");
+        } else if (algorithm === "crt") {
+            const imgd = await crtUpscale(image_data, scale, mode);
+            await received(imgd, fullId, algorithm);
+            disposeGpuExcept("crt");
+        } else if (algorithm === "tri") {
+            const imgd = await triUpscale(image_data, scale, mode);
+            await received(imgd, fullId, algorithm);
+            disposeGpuExcept("tri");
+        } else if (algorithm === "sqr") {
+            disposeAll();
+            const imgd = await upscale_square(image_data, scale);
+            await received(imgd, fullId, algorithm);
+        }
+    } catch (err) {
+        // The consumer gets no frame for this request (as before), but the
+        // error is reported instead of escaping as an unhandled rejection.
+        logOnce("error", `${algorithm} render failed:`, err);
     }
 }
 
 // ── Public API: per-algorithm shortcuts ──────────────────────────────
+function run(algorithm, image_data, scale, callback, terminate, id, mode) {
+    processWorker(algorithm, image_data, scale, callback, terminate, id, mode)
+        .catch((err) => logOnce("error", `${algorithm} request failed:`, err));
+}
+
 export function xbrzF(image_data, scale, callback, terminate, id, mode) {
-    processWorker('xbrz', image_data, scale, callback, terminate, id, mode);
+    run('xbrz', image_data, scale, callback, terminate, id, mode);
 }
 
 export function hexF(image_data, scale, callback, terminate, id, mode) {
-    processWorker('hex', image_data, scale, callback, terminate, id, mode);
+    run('hex', image_data, scale, callback, terminate, id, mode);
 }
 
 export function crtF(image_data, scale, callback, terminate, id, mode) {
-    processWorker('crt', image_data, scale, callback, terminate, id, mode);
+    run('crt', image_data, scale, callback, terminate, id, mode);
 }
 
 export function triF(image_data, scale, callback, terminate, id, mode) {
-    processWorker('tri', image_data, scale, callback, terminate, id, mode);
+    run('tri', image_data, scale, callback, terminate, id, mode);
 }
 
 // Compatibility alias for earlier integrations; routes to TRI.
 export function cutF(image_data, scale, callback, terminate, id, mode) {
-    processWorker('tri', image_data, scale, callback, terminate, id, mode);
+    run('tri', image_data, scale, callback, terminate, id, mode);
 }
 
 export function sqrF(image_data, scale, callback, terminate, id, mode) {
-    processWorker('sqr', image_data, scale, callback, terminate, id, mode);
+    run('sqr', image_data, scale, callback, terminate, id, mode);
 }
 
 // ── Public API: consumer lifecycle ───────────────────────────────────
@@ -965,6 +1054,9 @@ if (typeof window !== 'undefined') {
                 probedMaxDim: gpuLimitsCache ? gpuLimitsCache.maxDim : null,
                 maxOutputPixels: MAX_GPU_OUTPUT_PIXELS,
             },
+            // 0 until the first CPU xBRZ render starts the pool (or if it
+            // could not start and CPU xBRZ runs on the main thread).
+            cpuXbrzWorkers: xbrzPoolInstance ? xbrzPoolInstance.size : 0,
             algorithms: {},
         };
         for (const a of ALGORITHMS) {
