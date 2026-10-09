@@ -1,7 +1,10 @@
 "use strict";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/compat";
-import { CellMeasurerCache, createMasonryCellPositioner } from "@pixagram/virtualized/dist/es/index";
+import { CellMeasurerCache } from "@pixagram/virtualized/dist/es/index";
+// The positioner comes from MasonryExtended: same library positioner, but it
+// remembers its config, which the Masonry's relayout needs to replay it.
+import { createMasonryCellPositioner, EXIT_MS } from "../components/MasonryExtended";
 
 // ── useMasonryGrid ─────────────────────────────────────────────────────
 // One parameterized grid hook replacing the three near-identical copies
@@ -90,6 +93,15 @@ import { CellMeasurerCache, createMasonryCellPositioner } from "@pixagram/virtua
 // activated with at least three quarters of the band still ahead of it. A
 // forced render is cheap: the cellRenderer does no measuring, and the
 // memo'd cards bail unless their `visible` flag flipped.
+//
+// ── Rows added, removed or changed ─────────────────────────────────────
+// MasonryExtended re-flows the cells past such a row in place (see
+// "Relayout past a change" there): no reset of the grid any more for a
+// refresh of the list on screen. resetMasonry stays for a list that is
+// replaced as a whole (another sort, another account). The Masonry reports
+// the first index it re-placed through onRelayout; the positions this hook
+// tracked from that index on belong to the old layout and are dropped.
+// useCellExit (below) runs the delete animation.
 
 export const GUTTER_SIZE = 16;
 export const SCROLL_INTERVAL_MS = 500;
@@ -511,6 +523,16 @@ const useMasonryGrid = ({
         xyByIndex.current[index] = [rowIndex, columnIndex];
     }, []);
 
+    // MasonryExtended re-placed every cell from `from` on (a row added,
+    // removed or changed there): the positions tracked past it are stale.
+    // Cells in the render window re-track in the same render; the rest read
+    // as unplaced until they render again. Called during the Masonry's
+    // render — refs only.
+    const onRelayout = useCallback((from) => {
+        if (topScrollByIndex.current.length > from) topScrollByIndex.current.length = from;
+        if (heightByIndex.current.length > from) heightByIndex.current.length = from;
+    }, []);
+
     // Where a cell currently sits in the scroll container — or null while
     // the masonry hasn't placed it yet: it lays cells out lazily as the
     // viewport approaches them, so a card deep in the list has no position
@@ -547,8 +569,62 @@ const useMasonryGrid = ({
         getScrollTop, restoreScrollTop,
         rootDimensions, overscanByPixels,
         selectedPostIndex, setSelectedPostIndex, trackElementPosition,
-        getCellPosition, xyByIndex, resetMasonry,
+        getCellPosition, xyByIndex, resetMasonry, onRelayout,
     };
+};
+
+// ── useCellExit ────────────────────────────────────────────────────────
+// The delete animation. exitCell(key, onExited, delay) lists the cell's key
+// in `exitingKeys` — hand that to MasonryExtended, which scales the cell
+// down and fades it out, both together, over EXIT_MS — then calls
+// onExited(key): the page drops the row and the cells past it glide into
+// the gap. `delay` holds the start back, e.g. until a closing dialog has
+// faded and the card can be seen leaving.
+//
+// The page also filters its visible rows by `exitedKeys`: a refetch landing
+// a moment later can still list the post (indexer lag), and it must not
+// come back. Both sets only grow — a deleted post stays deleted — and a key
+// already requested is ignored, so the dialog callback and the API's
+// content events can both ask for the same exit.
+// Hold-back for a delete confirmed in a dialog: the dialog's own exit (MUI's
+// leaving-screen duration, 195 ms) finishes first, so the card is seen
+// leaving rather than vanishing behind the fading backdrop.
+export const DELETE_EXIT_DELAY_MS = 200;
+
+const NO_KEYS = new Set();
+const withKey = (set, key) => {
+    const next = new Set(set);
+    next.add(key);
+    return next;
+};
+
+export const useCellExit = () => {
+    const [keys, setKeys] = useState(() => ({ exiting: NO_KEYS, exited: NO_KEYS }));
+    const timersRef = useRef(null);
+    if (timersRef.current === null) timersRef.current = new Map();
+
+    useEffect(() => () => {
+        timersRef.current.forEach((t) => clearTimeout(t));
+        timersRef.current.clear();
+    }, []);
+
+    const exitCell = useCallback((key, onExited, delay = 0) => {
+        const timers = timersRef.current;
+        if (key == null || timers.has(key)) return;
+        const finish = () => {
+            timers.set(key, 0);
+            setKeys((s) => (s.exited.has(key) ? s : { exiting: s.exiting, exited: withKey(s.exited, key) }));
+            if (onExited) onExited(key);
+        };
+        const start = () => {
+            setKeys((s) => (s.exiting.has(key) ? s : { exiting: withKey(s.exiting, key), exited: s.exited }));
+            timers.set(key, setTimeout(finish, EXIT_MS));
+        };
+        if (delay > 0) timers.set(key, setTimeout(start, delay));
+        else start();
+    }, []);
+
+    return { exitingKeys: keys.exiting, exitedKeys: keys.exited, exitCell };
 };
 
 export default useMasonryGrid;

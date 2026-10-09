@@ -549,7 +549,7 @@ const CONFIG = {
     // Translation Worker (Cloudflare, origin-locked to pixagram.com) in front
     // of the Hugging Face Space — see TranslationAPI. Override with
     // initialize({ translateEndpoint }); an empty value disables translation.
-    TRANSLATE_ENDPOINT: 'https://translate.pixagram.com',
+    TRANSLATE_ENDPOINT: 'https://pixagram-translate.p1x4.workers.dev',
     // Cloudflare Turnstile site key, needed only when the Worker runs with
     // REQUIRE_SESSION=true. Override with initialize({ translateTurnstileSiteKey }).
     TRANSLATE_TURNSTILE_SITE_KEY: '',

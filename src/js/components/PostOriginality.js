@@ -22,6 +22,7 @@ import { ORIGINALITY, MATCH, fetchOriginality, fetchSimilar, timeline } from "./
 import timeAgo from "../utils/TimeAgo";
 import { t, useLanguage } from "../utils/text";
 import { T } from "../utils/T";
+import ButtonBase from "@material-ui/core/ButtonBase";
 
 // ── PostOriginality ───────────────────────────────────────────────────────────
 // The last section of the post drawer's Details tab, after Actions:
@@ -151,14 +152,14 @@ const MatchTile = React.memo(function MatchTile({ item, index, classes, reveal, 
                 onClick={open}
                 onKeyDown={openable ? activateOnKey(open) : undefined}
             >
-                <div className={classes.tileBox} style={{ height: TILE_H }}>
+                <ButtonBase className={classes.tileBox} style={{ height: TILE_H }}>
                     {reveal && item.src ? (
                         <img src={item.src} alt={item.title || ""} decoding="async" draggable={false}
                              onLoad={done} onError={done} className={imgClass} style={delay} />
                     ) : null}
                     {reveal && !item.src ? <BrokenImageRounded className={classes.noImage} /> : null}
                     {item.isSelf ? null : <span className={classes.badge + shown} style={delay}>{verdictLabel(item)}</span>}
-                </div>
+                </ButtonBase>
                 <div className={classes.caption + shown} style={delay}>
                     <span className={classes.captionAuthor}>@{item.author}</span>
                     <span className={classes.captionMeta}>{meta}</span>
@@ -210,14 +211,14 @@ const IdeaTile = React.memo(function IdeaTile({ item, index, classes, reveal, ns
     );
     return (
         <Tooltip arrow placement="top" enterDelay={300} title={tip}>
-            <div className={classes.cell} style={{ aspectRatio: "1 / " + cellRatio(item) }} role="link" tabIndex={0}
-                 aria-label={(item.title ? item.title + " — " : "") + "@" + item.author}
-                 onClick={open} onKeyDown={activateOnKey(open)}>
+            <ButtonBase className={classes.cell} style={{ aspectRatio: "1 / " + cellRatio(item) }} role="link" tabIndex={0}
+                        aria-label={(item.title ? item.title + " — " : "") + "@" + item.author}
+                        onClick={open} onKeyDown={activateOnKey(open)}>
                 {reveal ? (
                     <img src={item.src} alt={item.title || ""} decoding="async" draggable={false}
                          onLoad={done} onError={done} className={imgClass} style={{ animationDelay: stagger(index) }} />
                 ) : null}
-            </div>
+            </ButtonBase>
         </Tooltip>
     );
 });
@@ -237,7 +238,7 @@ const IdeaGrid = React.memo(function IdeaGrid({ items, classes, reveal, nsfw, on
     );
 });
 
-function IdeaSkeleton({ classes }) {
+const IdeaSkeleton = React.memo(function IdeaSkeleton({ classes }) {
     return (
         <div className={classes.grid} aria-hidden="true">
             {SKELETON.map((col, c) => (
@@ -247,7 +248,125 @@ function IdeaSkeleton({ classes }) {
             ))}
         </div>
     );
-}
+});
+
+// ── the section's parts ───────────────────────────────────────────────────────
+// The section's own state moves several times per use: the Worker's answer,
+// each reveal, each "entered" flag at the end of a Collapse, the similar fetch
+// starting and landing. Every one of those used to re-render the whole section
+// — the status line, both reveal rows (ButtonBase + ripple each), both panels.
+// Each part below is a memo hoisted to module scope (stable identity, never
+// recreated by the parent) and renders only for its own props. The parts that
+// print text subscribe to the language themselves, so a memo bail-out can't
+// leave them in the previous language.
+
+const SectionHeader = React.memo(function SectionHeader({ label }) {
+    return <ListSubheader disableSticky>{label}</ListSubheader>;
+});
+
+/** The verdict line: re-renders when the Worker's answer changes, and only then. */
+const OriginalityStatus = React.memo(function OriginalityStatus({ classes, data, onOpenAuthor, onRetry }) {
+    useLanguage();
+    const sourceAuthor = data && data.source ? data.source.author : undefined;
+    const openSource = useCallback(() => { if (onOpenAuthor) onOpenAuthor(sourceAuthor); }, [onOpenAuthor, sourceAuthor]);
+    const openSourceOnKey = useMemo(() => activateOnKey(openSource), [openSource]);
+    const retryOnKey = useMemo(() => activateOnKey(onRetry), [onRetry]);
+
+    let icon, title, body = null, warn = false;
+    const status = data ? data.status : null;
+    if (!data) {
+        icon = <CircularProgress size={20} thickness={4} className={classes.spinner} />;
+        title = t(NS + "checking");
+    } else if (status === ORIGINALITY.FAKE) {
+        warn = true;
+        icon = <WarningRounded />;
+        title = t(NS + "fake_title");
+        const who = (
+            <span className={classes.author} role="link" tabIndex={0}
+                  onClick={openSource} onKeyDown={openSourceOnKey}>@{sourceAuthor}</span>
+        );
+        body = <T k={NS + (data.identical ? "fake_identical_body" : "fake_copy_body")} vars={{ author: who }} />;
+    } else if (status === ORIGINALITY.UNDETERMINED) {
+        icon = <HelpOutlineRounded />;
+        title = t(NS + "undetermined_title");
+        body = t(NS + "undetermined_body");
+    } else if (status === ORIGINALITY.COPIED) {
+        icon = <VerifiedUserRounded />;
+        title = t(NS + "copied_title");
+        body = t(NS + "copied_body");
+    } else if (status === ORIGINALITY.ORIGINAL || status === ORIGINALITY.POSSIBLE || status === ORIGINALITY.REPOSTED) {
+        icon = <VerifiedUserRounded />;
+        title = t(NS + "original_title");
+        body = t(NS + (status === ORIGINALITY.ORIGINAL ? "original_body" : status === ORIGINALITY.POSSIBLE ? "possible_body" : "reposted_body"));
+    } else if (status === ORIGINALITY.PENDING) {
+        icon = <HourglassEmptyRounded />;
+        title = t(NS + "pending_title");
+        body = t(NS + "pending_body");
+    } else {
+        icon = <InfoOutlined />;
+        title = t(NS + "unavailable_title");
+        body = (
+            <span className={classes.link} role="button" tabIndex={0} onClick={onRetry} onKeyDown={retryOnKey}>
+                {t(NS + "retry")}
+            </span>
+        );
+    }
+
+    return (
+        <div role="status" aria-live="polite">
+            <ListItem className={classes.status + (warn ? " " + classes.warn : "")}>
+                <ListItemText primary={title} secondary={body} />
+                <ListItemIcon className={classes.statusIcon}>{icon}</ListItemIcon>
+            </ListItem>
+        </div>
+    );
+});
+
+/** A "Show …" row. The icon comes in as a component type, not an element, so
+ *  the props stay comparable from one parent render to the next. */
+const RevealToggle = React.memo(function RevealToggle({ classes, Icon, label, open, onToggle }) {
+    return (
+        <ListItem button onClick={onToggle} aria-expanded={open} className={classes.reveal}>
+            <ListItemIcon><Icon /></ListItemIcon>
+            <ListItemText primary={label} />
+            <ExpandMoreRounded className={classes.chevron + (open ? " open" : "")} />
+        </ListItem>
+    );
+});
+
+/** Inspiration's body: the right note, the skeleton, or the masonry. */
+const InspirationPanel = React.memo(function InspirationPanel({
+                                                                  classes, settled, unavailable, selfId, similar, reveal, nsfw, onOpen, onRetry, onRetrySimilar,
+                                                              }) {
+    useLanguage();
+    const retryOnKey = useMemo(() => activateOnKey(onRetry), [onRetry]);
+    const retrySimilarOnKey = useMemo(() => activateOnKey(onRetrySimilar), [onRetrySimilar]);
+    if (settled && !selfId && unavailable) {
+        // The Worker did not answer for the artwork itself: its neighbours cannot be asked.
+        return (
+            <div className={classes.note}>
+                {t(NS + "inspiration_error")}{" "}
+                <span className={classes.link} role="button" tabIndex={0} onClick={onRetry} onKeyDown={retryOnKey}>
+                    {t(NS + "retry")}
+                </span>
+            </div>
+        );
+    }
+    if (settled && !selfId) return <div className={classes.note}>{t(NS + "inspiration_unindexed")}</div>;
+    if (!similar || similar.status === "loading") return <IdeaSkeleton classes={classes} />;
+    if (similar.status === "error") {
+        return (
+            <div className={classes.note}>
+                {t(NS + "inspiration_error")}{" "}
+                <span className={classes.link} role="button" tabIndex={0} onClick={onRetrySimilar} onKeyDown={retrySimilarOnKey}>
+                    {t(NS + "retry")}
+                </span>
+            </div>
+        );
+    }
+    if (!similar.items.length) return <div className={classes.note}>{t(NS + "no_inspiration")}</div>;
+    return <IdeaGrid items={similar.items} classes={classes} reveal={reveal} nsfw={nsfw} onOpen={onOpen} />;
+});
 
 // ── the section ───────────────────────────────────────────────────────────────
 
@@ -319,98 +438,16 @@ function PostOriginality({ classes, author, permlink, nsfw, locales, onOpenArtwo
     const toggleIdeas = useCallback(() => setIdeasOpen((o) => !o), []);
     const onIdeasEntered = useCallback(() => setIdeasEntered(true), []);
 
-    // ── status line ──
-    let icon, title, body = null, warn = false;
     const status = data ? data.status : null;
-    if (!data) {
-        icon = <CircularProgress size={20} thickness={4} className={classes.spinner} />;
-        title = t(NS + "checking");
-    } else if (status === ORIGINALITY.FAKE) {
-        warn = true;
-        icon = <WarningRounded />;
-        title = t(NS + "fake_title");
-        const name = data.source.author;
-        const who = (
-            <span className={classes.author} role="link" tabIndex={0}
-                  onClick={() => onOpenAuthor && onOpenAuthor(name)}
-                  onKeyDown={activateOnKey(() => onOpenAuthor && onOpenAuthor(name))}>@{name}</span>
-        );
-        body = <T k={NS + (data.identical ? "fake_identical_body" : "fake_copy_body")} vars={{ author: who }} />;
-    } else if (status === ORIGINALITY.UNDETERMINED) {
-        icon = <HelpOutlineRounded />;
-        title = t(NS + "undetermined_title");
-        body = t(NS + "undetermined_body");
-    } else if (status === ORIGINALITY.COPIED) {
-        icon = <VerifiedUserRounded />;
-        title = t(NS + "copied_title");
-        body = t(NS + "copied_body");
-    } else if (status === ORIGINALITY.ORIGINAL || status === ORIGINALITY.POSSIBLE || status === ORIGINALITY.REPOSTED) {
-        icon = <VerifiedUserRounded />;
-        title = t(NS + "original_title");
-        body = t(NS + (status === ORIGINALITY.ORIGINAL ? "original_body" : status === ORIGINALITY.POSSIBLE ? "possible_body" : "reposted_body"));
-    } else if (status === ORIGINALITY.PENDING) {
-        icon = <HourglassEmptyRounded />;
-        title = t(NS + "pending_title");
-        body = t(NS + "pending_body");
-    } else {
-        icon = <InfoOutlined />;
-        title = t(NS + "unavailable_title");
-        body = (
-            <span className={classes.link} role="button" tabIndex={0} onClick={retry} onKeyDown={activateOnKey(retry)}>
-                {t(NS + "retry")}
-            </span>
-        );
-    }
-
-    // ── inspiration body ──
-    let ideas = null;
-    if (ideasOpen || ideasEntered) {
-        if (data && !selfId && status === ORIGINALITY.UNAVAILABLE) {
-            // The Worker did not answer for the artwork itself: its neighbours cannot be asked.
-            ideas = (
-                <div className={classes.note}>
-                    {t(NS + "inspiration_error")}{" "}
-                    <span className={classes.link} role="button" tabIndex={0} onClick={retry} onKeyDown={activateOnKey(retry)}>
-                        {t(NS + "retry")}
-                    </span>
-                </div>
-            );
-        } else if (data && !selfId) {
-            ideas = <div className={classes.note}>{t(NS + "inspiration_unindexed")}</div>;
-        } else if (!similar || similar.status === "loading") {
-            ideas = <IdeaSkeleton classes={classes} />;
-        } else if (similar.status === "error") {
-            ideas = (
-                <div className={classes.note}>
-                    {t(NS + "inspiration_error")}{" "}
-                    <span className={classes.link} role="button" tabIndex={0} onClick={loadSimilar} onKeyDown={activateOnKey(loadSimilar)}>
-                        {t(NS + "retry")}
-                    </span>
-                </div>
-            );
-        } else if (!similar.items.length) {
-            ideas = <div className={classes.note}>{t(NS + "no_inspiration")}</div>;
-        } else {
-            ideas = <IdeaGrid items={similar.items} classes={classes} reveal={ideasEntered} nsfw={!!nsfw} onOpen={onOpenArtwork} />;
-        }
-    }
 
     return (
         <div ref={rootRef} className={classes.root}>
-            <ListSubheader disableSticky>{t(NS + "originality")}</ListSubheader>
-            <div role="status" aria-live="polite">
-                <ListItem className={classes.status + (warn ? " " + classes.warn : "")}>
-                    <ListItemIcon className={classes.statusIcon}>{icon}</ListItemIcon>
-                    <ListItemText primary={title} secondary={body} />
-                </ListItem>
-            </div>
+            <SectionHeader label={t(NS + "originality")} />
+            <OriginalityStatus classes={classes} data={data} onOpenAuthor={onOpenAuthor} onRetry={retry} />
             {items ? (
                 <React.Fragment>
-                    <ListItem button onClick={toggleMatches} aria-expanded={matchesOpen} className={classes.reveal}>
-                        <ListItemIcon><CollectionsRounded /></ListItemIcon>
-                        <ListItemText primary={matchesOpen ? t(NS + "hide_matches") : t(NS + "show_matches", { count: data.truncated ? matches.length + "+" : matches.length })} />
-                        <ExpandMoreRounded className={classes.chevron + (matchesOpen ? " open" : "")} />
-                    </ListItem>
+                    <RevealToggle classes={classes} Icon={CollectionsRounded} open={matchesOpen} onToggle={toggleMatches}
+                                  label={matchesOpen ? t(NS + "hide_matches") : t(NS + "show_matches", { count: data.truncated ? matches.length + "+" : matches.length })} />
                     <Collapse in={matchesOpen} timeout={COLLAPSE_TIMEOUT} onEntered={onMatchesEntered}>
                         {matchesMounted ? (
                             <MatchRow items={items} classes={classes} reveal={matchesEntered} nsfw={!!nsfw}
@@ -420,14 +457,15 @@ function PostOriginality({ classes, author, permlink, nsfw, locales, onOpenArtwo
                 </React.Fragment>
             ) : null}
 
-            <ListSubheader disableSticky>{t(NS + "inspiration")}</ListSubheader>
-            <ListItem button onClick={toggleIdeas} aria-expanded={ideasOpen} className={classes.reveal}>
-                <ListItemIcon><EmojiObjectsRounded /></ListItemIcon>
-                <ListItemText primary={ideasOpen ? t(NS + "hide_inspiration") : t(NS + "show_inspiration")} />
-                <ExpandMoreRounded className={classes.chevron + (ideasOpen ? " open" : "")} />
-            </ListItem>
+            <SectionHeader label={t(NS + "inspiration")} />
+            <RevealToggle classes={classes} Icon={EmojiObjectsRounded} open={ideasOpen} onToggle={toggleIdeas}
+                          label={ideasOpen ? t(NS + "hide_inspiration") : t(NS + "show_inspiration")} />
             <Collapse in={ideasOpen} timeout={COLLAPSE_TIMEOUT} onEntered={onIdeasEntered}>
-                {ideas}
+                {ideasOpen || ideasEntered ? (
+                    <InspirationPanel classes={classes} settled={!!data} unavailable={status === ORIGINALITY.UNAVAILABLE}
+                                      selfId={selfId} similar={similar} reveal={ideasEntered} nsfw={!!nsfw}
+                                      onOpen={onOpenArtwork} onRetry={retry} onRetrySimilar={loadSimilar} />
+                ) : null}
             </Collapse>
         </div>
     );
@@ -442,13 +480,32 @@ const styles = {
     status: {
         alignItems: "flex-start",
         borderRadius: 21,
+        backgroundColor: "#101010",
+        marginBottom: 8,
+        transition: "background-color 240ms cubic-bezier(0.4, 0, 0.2, 1)",
+        "& .MuiListItemText-multiline": {
+            textAlign: "right"
+        },
+        "& .MuiListItemText-primary": {
+            fontFamily: "'Industry Book'",
+        },
         "& .MuiListItemText-secondary": {
             color: "rgba(255, 255, 255, 0.5)",
             lineHeight: 1.4,
+            fontFamily: "'Normative Pro'",
+            fontSize: "1rem"
         },
+        "&:hover": {
+            backgroundColor: "#171717",
+        }
     },
     statusIcon: {
-        marginTop: 6,
+        margin: "auto 12px auto 12px",
+        minWidth: 0,
+        backgroundColor: "#fff",
+        padding: 8,
+        borderRadius: "8px",
+        color: "#000",
     },
     warn: {
         backgroundColor: "rgba(250, 250, 250, 0.06)",
@@ -498,6 +555,9 @@ const styles = {
         padding: "8px 16px 14px 16px",
         scrollSnapType: "x proximity",
         overscrollBehaviorX: "contain",
+        // One row per post, mounted on the first "Show matches": hint a composited
+        // scroller so the sideways scroll (and its snap) stays off the main thread.
+        willChange: "scroll-position",
         scrollbarWidth: "thin",
         scrollbarColor: "#3a3a3a transparent",
         "&::-webkit-scrollbar": { height: 6 },
@@ -513,7 +573,7 @@ const styles = {
         "&.self, &.inert": { cursor: "default" },
         "&.self $tileBox": { boxShadow: "0 0 0 2px #e1e1e1" },
         "&:focus-visible $tileBox": { boxShadow: "0 0 0 2px #fff" },
-        "&:hover $tileImg.loaded": { transform: "scale(1.04)" },
+        "&:hover $tileImg.loaded": { transform: "scale(1.0)" },
     },
     tileBox: {
         position: "relative",
@@ -545,6 +605,7 @@ const styles = {
         position: "absolute",
         top: 5,
         left: 5,
+        fontWeight: "500",
         maxWidth: "calc(100% - 10px)",
         padding: "1px 6px",
         borderRadius: 10,
@@ -575,6 +636,7 @@ const styles = {
         whiteSpace: "nowrap",
         overflow: "hidden",
         textOverflow: "ellipsis",
+        fontFamily: "'Industry Book'"
     },
     captionMeta: {
         display: "block",
@@ -608,7 +670,7 @@ const styles = {
         cursor: "pointer",
         outline: "none",
         "&:focus-visible": { boxShadow: "0 0 0 2px #fff" },
-        "&:hover $tileImg.loaded": { transform: "scale(1.04)" },
+        "&:hover $tileImg.loaded": { transform: "scale(1.0)" },
     },
     skeleton: {
         cursor: "default",

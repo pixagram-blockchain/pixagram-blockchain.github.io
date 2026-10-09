@@ -10,7 +10,7 @@ import * as actions from "../actions/utils";
 import { CellMeasurer } from "@pixagram/virtualized/dist/es/index";
 import MasonryExtended from "../components/MasonryExtended";
 import useWindowDimensions from "../hooks/useWindowDimensions";
-import useMasonryGrid from "../hooks/useMasonryGrid";
+import useMasonryGrid, { useCellExit, DELETE_EXIT_DELAY_MS } from "../hooks/useMasonryGrid";
 import { idle, cancelIdle } from "../utils/idle";
 import viewCache, { postsSignature } from "../utils/viewCache";
 import useVoteSync from "../hooks/useVoteSync";
@@ -18,7 +18,7 @@ import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFres
 import { EASE, RAINBOW_RIPPLE } from "../theme/motion";
 import ImageMeasurer from "../components/ImageMeasurer";
 
-import PaperCard, { isArtworkBlurred } from "../components/PaperCard";
+import PaperCard, { isArtworkBlurred, paperCardLayoutKey } from "../components/PaperCard";
 import Tab from "@material-ui/core/Tab";
 import Tabs from "@material-ui/core/Tabs";
 import PaperCardMenuOption from "../components/PaperCardMenuOption";
@@ -631,6 +631,10 @@ const useFeedData = (api, pathname, gridBridgeRef) => {
     const [hasMore, setHasMore] = useState(true);
     const [loggedInUser, setLoggedInUser] = useState(null);
     const [dataVersion, setDataVersion] = useState(0);
+    // Bumped when a different listing — or the first one — is committed:
+    // the page resets the masonry for it. A refresh of the listing on screen
+    // doesn't move it; MasonryExtended re-flows just the rows that changed.
+    const [layoutEpoch, setLayoutEpoch] = useState(0);
 
     const prevPathnameRef = useRef(pathname);
     const postsRef = useRef(posts); // shadow ref for infinite scroll closure
@@ -737,6 +741,9 @@ const useFeedData = (api, pathname, gridBridgeRef) => {
         const cacheKey = cacheKeyFor(sortIndex, path);
         const keyChanged = cacheKey !== cacheKeyRef.current;
         cacheKeyRef.current = cacheKey;
+        // The first list committed for a new feed identity lays out from
+        // scratch (layoutEpoch); later commits for it are re-flowed in place.
+        let freshLayout = keyChanged || (postsRef.current || []).length === 0;
 
         // Serve the last known list for this feed identity instantly —
         // but only on a cold mount or a genuine sort/tag change. Event-
@@ -755,6 +762,7 @@ const useFeedData = (api, pathname, gridBridgeRef) => {
                 setPosts(overlayPendingVotes(cached.posts));
                 setLoggedInUser(cached.loggedInUser ?? null);
                 setDataVersion(v => v + 1);
+                if (freshLayout) { setLayoutEpoch(e => e + 1); freshLayout = false; }
             }
         }
         setIsLoading(!servedFromCache);
@@ -788,23 +796,26 @@ const useFeedData = (api, pathname, gridBridgeRef) => {
             const replaced = postsSignature(enriched) !== postsSignature(postsRef.current);
             batch(() => {
                 setLoggedInUser(user || null);
-                // dataVersion drives a FULL Masonry reset (clearAll +
-                // clearCellPositions). Only paint+reset when the content is
-                // genuinely new. A cache-served list of the SAME membership is
-                // already on screen with avatars, so keep it rather than
-                // repainting an identical list.
+                // Only commit when the content is genuinely new. A
+                // cache-served list of the SAME membership is already on
+                // screen with avatars, so keep it rather than repainting an
+                // identical list. A new list for the feed already on screen
+                // (a publish, edit or delete refetched) is re-flowed in place
+                // by MasonryExtended; only a new feed identity bumps
+                // layoutEpoch, the full reset.
                 if (!servedFromCache || replaced) {
                     postsKeyRef.current = cacheKey;
                     setPosts(enriched);
                     viewCache.set(cacheKey, { posts: enriched, loggedInUser: user || null });
                     setDataVersion(v => v + 1);
+                    if (freshLayout) setLayoutEpoch(e => e + 1);
                 } else if (votesSignature(enriched) !== votesSignature(postsRef.current)) {
                     // Same membership, fresher vote/payout data — a vote (ours
                     // or anyone's) landed since the cached list was stored.
-                    // Commit it WITHOUT the Masonry reset: card heights don't
-                    // depend on votes. Previously this branch kept the stale
-                    // cached rows, so a vote shown optimistically vanished on
-                    // the next sort round-trip and never came back.
+                    // Commit it as is: card heights don't depend on votes.
+                    // Previously this branch kept the stale cached rows, so a
+                    // vote shown optimistically vanished on the next sort
+                    // round-trip and never came back.
                     postsKeyRef.current = cacheKey;
                     setPosts(enriched);
                     viewCache.patch(cacheKey, { posts: enriched, loggedInUser: user || null });
@@ -1064,9 +1075,24 @@ const useFeedData = (api, pathname, gridBridgeRef) => {
         setPosts(prev => prev.map(p => applyVoteToPost(p, permlink, voter, weight)));
     }, []);
 
+    // A post deleted from this page, once its exit animation has played:
+    // flagged the way a soft delete is, so the visible list drops it and
+    // the view cache (mirror effect above) keeps it dropped.
+    const markPostDeleted = useCallback((id) => {
+        setPosts(prev => {
+            let hit = false;
+            const next = prev.map(p => {
+                if (p.id !== id || p.deleted) return p;
+                hit = true;
+                return { ...p, deleted: true };
+            });
+            return hit ? next : prev;
+        });
+    }, []);
+
     return {
-        sorting, posts, isLoading, loadingMore, loggedInUser, dataVersion,
-        handleSortingChange, handleVoteChange, loadMorePosts,
+        sorting, posts, isLoading, loadingMore, loggedInUser, dataVersion, layoutEpoch,
+        handleSortingChange, handleVoteChange, loadMorePosts, markPostDeleted,
         consumePendingScrollRestore, saveScrollPosition,
     };
 };
@@ -1563,17 +1589,22 @@ const Feed = ({ classes, settings, pathname, api }) => {
     // grid is built after it), set right after useFeedGrid below.
     const gridBridgeRef = useRef(null);
     const {
-        sorting, posts, loggedInUser, dataVersion,
+        sorting, posts, loggedInUser, dataVersion, layoutEpoch,
         handleSortingChange, handleVoteChange, loadMorePosts, loadingMore,
-        consumePendingScrollRestore, saveScrollPosition,
+        consumePendingScrollRestore, saveScrollPosition, markPostDeleted,
     } = useFeedData(api, pathname, gridBridgeRef);
+
+    // Delete animation (useCellExit): `exitingKeys` makes the masonry scale
+    // the leaving card down and fade it out; `exitedKeys` keeps it out of
+    // the list afterwards, whatever a lagging refetch still returns.
+    const { exitingKeys, exitedKeys, exitCell } = useCellExit();
 
     // NSFW filtering: when the filter is ON (_nsfw_filter truthy) drop posts
     // flagged nsfw so they never enter the masonry. Blurring of shown posts is
     // handled by PaperCard via the separate _nsfw_enabled (blur) setting.
     const visiblePosts = useMemo(
-        () => (posts || []).filter((p) => !p.deleted && (!settings._nsfw_filter || !p.nsfw)),
-        [posts, settings._nsfw_filter]
+        () => (posts || []).filter((p) => !p.deleted && !exitedKeys.has(p.id) && (!settings._nsfw_filter || !p.nsfw)),
+        [posts, settings._nsfw_filter, exitedKeys]
     );
 
     const grid = useFeedGrid({
@@ -1612,15 +1643,17 @@ const Feed = ({ classes, settings, pathname, api }) => {
     const [editPostData, setEditPostData] = useState(null);
     const [deletePostData, setDeletePostData] = useState(null);
 
-    // Full masonry reset when data is fully replaced (sorting/filter change).
-    // Clears stale CellMeasurerCache heights from the previous sort's posts.
-    // A layout effect (as FeedPersonal's re-pack): the flush lands before the
-    // commit paints, so a replaced list never shows a frame laid out on the
-    // previous list's heights. It still runs before the passive scroll
-    // restore below.
+    // Full masonry reset when another listing replaces the one on screen
+    // (another sort or tag, a cache-served list): its rows share nothing
+    // with the previous ones. Everything else — a refetch after a publish,
+    // edit or delete, a vote, the NSFW filter flipping — is re-flowed in
+    // place by MasonryExtended: only the rows past the first change move,
+    // and nothing already measured is measured again. A layout effect (as
+    // FeedPersonal's re-pack): the flush lands before the commit paints,
+    // and before the passive scroll restore below.
     useLayoutEffect(() => {
         grid.resetMasonry();
-    }, [dataVersion, settings._nsfw_filter]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [layoutEpoch]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── View-cache scroll persistence ───────────────────────────────────
     // Restore the saved offset when a cache-served list lands (runs on the
@@ -1734,15 +1767,53 @@ const Feed = ({ classes, settings, pathname, api }) => {
     const openCreateDialog = useCallback(() => postNav.setCreateDialogOpen(true), [postNav.setCreateDialogOpen]);
     const closeCreateDialog = useCallback(() => postNav.setCreateDialogOpen(false), [postNav.setCreateDialogOpen]);
 
+    // ── Delete animation ───────────────────────────────────────────────
+    // A post deleted while this page is up — from the card menu's dialog,
+    // or anywhere else that broadcasts it (the API's content_deleted, or a
+    // content_updated carrying the `deleted` flag) — scales down and fades
+    // out on the grid, then leaves the list, and the cards past it glide
+    // into its place. The refetch the data hook schedules for the same
+    // event confirms it later without moving anything.
+    const visiblePostsRef = useRef(visiblePosts);
+    visiblePostsRef.current = visiblePosts;
+    const exitPost = useCallback((post) => {
+        if (post && post.id != null) exitCell(post.id, markPostDeleted, DELETE_EXIT_DELAY_MS);
+    }, [exitCell, markPostDeleted]);
+    useEffect(() => {
+        if (!api?.eventEmitter) return;
+        const exitByRef = (payload) => {
+            if (!payload?.permlink) return;
+            exitPost((visiblePostsRef.current || []).find((p) => isSamePost(p, payload)));
+        };
+        const onContentDeleted = (payload) => exitByRef(payload);
+        const onContentUpdated = (payload) => {
+            if (payload?.jsonMetadata?.deleted === true) exitByRef(payload);
+        };
+        api.eventEmitter.on('content_deleted', onContentDeleted);
+        api.eventEmitter.on('content_updated', onContentUpdated);
+        return () => {
+            api.eventEmitter.off('content_deleted', onContentDeleted);
+            api.eventEmitter.off('content_updated', onContentUpdated);
+        };
+    }, [api, exitPost]);
+
     // ── Own-post management (card menu → page-level dialogs) ───────────
+    // The post the delete dialog was opened for, kept past the dialog's
+    // close for a success callback that arrives after it.
+    const deleteTargetRef = useRef(null);
     const onEditPost = useCallback((data) => { setEditPostData(data); }, []);
-    const onDeletePost = useCallback((data) => { setDeletePostData(data); }, []);
+    const onDeletePost = useCallback((data) => { deleteTargetRef.current = data; setDeletePostData(data); }, []);
     const closeEditPost = useCallback(() => { setEditPostData(null); }, []);
     const closeDeletePost = useCallback(() => { setDeletePostData(null); }, []);
     // The broadcast emits `content_updated`, which the listener above turns
     // into a debounced refetch — nothing else to do here.
     const handlePostEdited = useCallback(() => {}, []);
-    const handlePostDeleted = useCallback(() => {}, []);
+    // The broadcast's content event usually starts the exit first; this
+    // covers a delete that reports success without one. It runs once either
+    // way (useCellExit ignores a key it already has).
+    const handlePostDeleted = useCallback((deleted) => {
+        exitPost(deleted && deleted.id != null ? deleted : deleteTargetRef.current);
+    }, [exitPost]);
 
     // Sync vote into currently open post
     const onVoteChange = useCallback((permlink, voter, weight) => {
@@ -1851,9 +1922,13 @@ const Feed = ({ classes, settings, pathname, api }) => {
     // scroll events (see the note in MasonryExtended).
     const itemsRef = useRef(EMPTY_ITEMS);
     const masonryKeyMapper = useCallback((index) => itemsRef.current[index]?.size?.id, []);
+    // What each card's height depends on (paperCardLayoutKey): an edit that
+    // changes it gets the card re-measured in place and the cards past it
+    // re-flowed. Read through the same ref as the key-mapper.
+    const masonryLayoutKey = useCallback((index) => paperCardLayoutKey(itemsRef.current[index]), []);
     // (overscanByPixels is the useWindowDimensions value already in scope —
     // the grid hook passes it through unchanged.)
-    const { scrollingResetTimeInterval, cellPositioner, setMasonryElement } = grid;
+    const { scrollingResetTimeInterval, cellPositioner, setMasonryElement, onRelayout } = grid;
     const renderMasonry = useCallback((itemsWithSizes) => {
         itemsRef.current = itemsWithSizes || EMPTY_ITEMS;
         return (
@@ -1864,6 +1939,9 @@ const Feed = ({ classes, settings, pathname, api }) => {
                 cellCount={(itemsWithSizes || []).length | 0}
                 itemsWithSizes={itemsWithSizes}
                 keyMapper={masonryKeyMapper}
+                cellLayoutKey={masonryLayoutKey}
+                exitingKeys={exitingKeys}
+                onRelayout={onRelayout}
                 cellMeasurerCache={cellMeasurerCache}
                 cellPositioner={cellPositioner}
                 cellRenderer={cellRenderer}
@@ -1872,9 +1950,9 @@ const Feed = ({ classes, settings, pathname, api }) => {
                 width={pageWidth}
             />
         );
-    }, [scrollingResetTimeInterval, postListHeight, masonryKeyMapper,
-        cellMeasurerCache, cellPositioner, cellRenderer, overscanByPixels,
-        setMasonryElement, pageWidth]);
+    }, [scrollingResetTimeInterval, postListHeight, masonryKeyMapper, masonryLayoutKey,
+        exitingKeys, onRelayout, cellMeasurerCache, cellPositioner, cellRenderer,
+        overscanByPixels, setMasonryElement, pageWidth]);
 
     // ── Render ─────────────────────────────────────────────────────────
     return (

@@ -1,8 +1,8 @@
-import { ready, hashBase58, toBytes } from '@pixagram/pixahash';
+import { ready, hashBase58Async } from '@pixagram/pixahash';
 
 import { default as decodeWEBP } from '@jsquash/webp/decode';
 import { default as decodePNG } from '@jsquash/png/decode';
-import { base64ToBytes, bytesToBase64 } from './b64';
+import { base64ToBytes } from './b64';
 import { probeImageSync } from './image-probe';
 
 // Warm up the WASM hasher during module load so the first hash doesn't wait on
@@ -30,7 +30,7 @@ const PNG_PREFIX = "data:image/png;base64,";
 const CACHE_SIZE = 400;
 // Width of the content-id hash. 64 bits → ~11-char base58 ids, with collision
 // probability negligible for a content cache of this size.
-const HASH_BITS = 64;
+const HASH_BITS = 32;
 // Hard cap on the permanently-failed blacklist so it can't grow without bound
 // over a long session (each miss otherwise adds an entry forever).
 const FAILED_SET_LIMIT = 300;
@@ -64,16 +64,16 @@ function identifyType(input) {
  * Returns null if input is invalid or base64 decoding fails.
  * Assumes the WASM hasher is ready (callers await `hashReady` first).
  */
-function hashThat(input) {
+async function hashThat(input) {
     if (typeof input !== "string" || input.length === 0) return null;
 
     const [type, start] = identifyType(input);
-    const data = type !== "STRING" ? dataUriToBytes(input, start) : toBytes(input);
+    const data = type !== "STRING" ? dataUriToBytes(input, start) : base64ToBytes(input);
     if (!data) return null;
 
     // Key on the decoded payload bytes (base64 payload for data URIs, UTF-8
     // bytes for plain strings). Unchanged derivation — ids stay stable.
-    const hash = hashBase58(new Uint8Array(data.buffer), 0, HASH_BITS);
+    const hash = await hashBase58Async(new Uint8Array(data.buffer), 0, HASH_BITS);
     return { data, type, hash };
 }
 
@@ -264,7 +264,7 @@ export const pngdb = () => {
             // Cache entry was evicted — fall through to recover data/type.
         }
 
-        const parsed = hashThat(base64);
+        const parsed = await hashThat(base64);
         if (!parsed) return null;
 
         const { hash, type, data } = parsed;

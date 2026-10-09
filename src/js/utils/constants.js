@@ -867,7 +867,7 @@ export function parseFeedFocusHash(rawHash) {
 // Like the portal ids above, this vocabulary lives here and nowhere else: a
 // tab missing from these lists can't be linked to.
 export const INFO_TABS = Object.freeze(["ip", "terms", "privacy", "team", "faq", "ethos"]);
-export const GOVERNANCE_TABS = Object.freeze(["viability", "attributes", "methods", "disruptions"]);
+export const GOVERNANCE_TABS = Object.freeze(["viability", "attributes", "methods", "metrics", "tower", "disruptions"]);
 
 // Sub-levels of a governance tab, in the tab view's own order. Only Viability
 // Management has them: GDViabilityManagement's rail — TAB_PROPOSALS,

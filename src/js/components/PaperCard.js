@@ -24,7 +24,7 @@ import { t, useLanguage } from '../utils/text';
 // Version stamp — check in console: window.__PIXA_VERSIONS__
 if (typeof window !== 'undefined') {
     if (!window.__PIXA_VERSIONS__) window.__PIXA_VERSIONS__ = {};
-    window.__PIXA_VERSIONS__.PaperCard = '4.12.1-datelabel';
+    window.__PIXA_VERSIONS__.PaperCard = '4.13.0-layoutkey';
 }
 
 // ── Async, non-critical NSFW detector loading ───────────────────────
@@ -83,6 +83,28 @@ export function isArtworkBlurred(data, id, nsfwEnabled) {
     if (data && data.nsfw === true) return true;    // author/server label
     const mod = getLoadedNsfwDetect();
     return !!mod && mod.getCached(id) === true;     // on-device verdict
+}
+
+// ── Layout key ──────────────────────────────────────────────────────
+// What a card's height depends on: the artwork's aspect (the canvas is
+// column-wide, `image_height` follows the measured size) and the title,
+// the one header line that can wrap. The pages hand it to MasonryExtended
+// as `cellLayoutKey`: when it changes for a card already on the grid (an
+// edit), the card is re-measured in place and the cards past it re-flow.
+// Votes, payout, avatar and date repaint inside the same box and are left
+// out on purpose. `entry` is the masonry entry `{ item, size }`; one string
+// per entry object, so a render costs a WeakMap lookup per cell.
+const LAYOUT_KEYS = new WeakMap();
+export function paperCardLayoutKey(entry) {
+    if (!entry) return undefined;
+    let key = LAYOUT_KEYS.get(entry);
+    if (key === undefined) {
+        const size = entry.size || {};
+        const item = entry.item || {};
+        key = (size.width || 0) + 'x' + (size.height || 0) + '|' + (item.title || '');
+        LAYOUT_KEYS.set(entry, key);
+    }
+    return key;
 }
 
 const styles = theme => ({

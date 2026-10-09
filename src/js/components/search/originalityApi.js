@@ -4,7 +4,7 @@ import { SEARCH_API_URL } from "./config";
 import { artworkImageUrl } from "./searchApi";
 
 // ── Originality: copies of an artwork, and artworks on similar themes ─────────
-// Three routes of the pixagram-search Worker (v3, with PAPH-X copy detection):
+// Three routes of the pixagram-search Worker (v4; PAPH-X copy detection on @pixagram/paph-x):
 //
 //   GET /posts/:author/:permlink    the artwork as the Worker indexed it: its id there (the Worker
 //                                   numbers posts itself), when its current image appeared on-chain
@@ -12,7 +12,12 @@ import { artworkImageUrl } from "./searchApi";
 //                                   image (artwork.stages.paph)
 //   GET /copies/:id?min=suspected   the verdicts copy detection stored for it (D1 only, edge-cached
 //                                   for a minute): every live artwork whose pixels match, with the
-//                                   verdict (Identical, Copy, Suspected) and whether it is mirrored
+//                                   verdict (Identical, Copy, Suspected) and whether it is mirrored;
+//                                   `indexed`: the check has completed for its current image under
+//                                   the Worker's current engine. Asked with nsfw=include: like
+//                                   /search, the Worker leaves NSFW works out otherwise, and an NSFW
+//                                   original copied by a safe work would then go unseen (its image is
+//                                   not shown unless the viewer shows NSFW: see fetchOriginality)
 //   GET /similar/:id                its SigLIP neighbours: the same themes, not the same pixels
 //
 // Who came first is decided HERE, by when each IMAGE appeared on-chain (`image_since`, which the
@@ -128,12 +133,13 @@ function order(a, b, tieBreak) {
     return a.exact && b.exact ? tieBreak : "unknown";
 }
 
-/** A /copies item, seen from `self`. */
-function toMatch(item, self) {
+/** A /copies item, seen from `self`. An NSFW work counts all the same; its image is withheld unless `showNsfw`. */
+function toMatch(item, self, showNsfw) {
     const art = toArtwork(item);
     const copy = item.copy || {};
     return {
         ...art,
+        src: art.nsfw && !showNsfw ? null : art.src,
         state: Number(copy.state),
         mirrored: copy.mirrored === true,
         relation: order(art, self, copy.relation === "earlier" ? "earlier" : "later"),
@@ -202,7 +208,7 @@ const unavailable = (self) => ({
     source: null, identical: false, failed: true,
 });
 
-async function loadOriginality(author, permlink) {
+async function loadOriginality(author, permlink, showNsfw) {
     const post = await getJson("/posts/" + encodeURIComponent(author) + "/" + encodeURIComponent(permlink));
     // Not indexed yet: the Worker follows the chain a few blocks behind.
     if (post.status === 404) {
@@ -216,7 +222,7 @@ async function loadOriginality(author, permlink) {
         return { status: ORIGINALITY.PENDING, self, matches: [], truncated: false, source: null, identical: false, failed: true };
     }
 
-    const copies = await getJson("/copies/" + self.id + "?min=suspected&limit=" + MATCH_LIMIT);
+    const copies = await getJson("/copies/" + self.id + "?min=suspected&nsfw=include&limit=" + MATCH_LIMIT);
     if (copies.status !== 200 || !copies.json || !Array.isArray(copies.json.items)) {
         // Copy detection unreachable (or switched off): the image history can still tell a re-post.
         const verdict = classify(self, [], art.history);
@@ -228,7 +234,7 @@ async function loadOriginality(author, permlink) {
     // Every match counts for the verdict, shown or not: one without an image URL is still evidence.
     const matches = copies.json.items
         .filter((it) => it && it.copy && Number(it.id) !== self.id)
-        .map((it) => toMatch(it, self))
+        .map((it) => toMatch(it, self, showNsfw))
         .filter((m) => m.state >= MATCH.SUSPECTED && m.state <= MATCH.IDENTICAL);
     const verdict = classify(self, matches, art.history, truncated);
     // The stage has not completed for this image: what other checks found may be shown, but
@@ -244,14 +250,16 @@ async function loadOriginality(author, permlink) {
  * The originality of a post: { status, self, matches, truncated, source, identical }.
  *   self      the artwork itself (null when the Worker does not know it yet)
  *   matches   its matches, with `relation` ("earlier" | "later" | "unknown", by image time),
- *             `sameAuthor`, `state` (MATCH.*) and `mirrored`; `src` may be null
+ *             `sameAuthor`, `state` (MATCH.*) and `mirrored`; `src` may be null — always for an
+ *             NSFW match unless `nsfw` (the viewer shows NSFW): it counts for the verdict unseen
  * Always resolves.
  */
-export function fetchOriginality(author, permlink) {
+export function fetchOriginality(author, permlink, { nsfw = false } = {}) {
     const a = String(author || "").replace(/^@/, "");
     const p = String(permlink || "");
     if (!a || !p) return Promise.resolve(unavailable(null));
-    return remember("o:" + a + "/" + p, () => loadOriginality(a, p), () => unavailable(null));
+    const show = nsfw === true;
+    return remember("o:" + a + "/" + p + ":" + (show ? 1 : 0), () => loadOriginality(a, p, show), () => unavailable(null));
 }
 
 /**

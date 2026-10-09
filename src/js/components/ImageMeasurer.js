@@ -14,7 +14,10 @@ const _EMPTY = [];
  * Key properties vs. the previous implementation:
  *
  *   • ID-keyed cache (`Map<id, size>`) — survives reorder, filter,
- *     and append without invalidation.
+ *     and append without invalidation. Each size remembers the image it
+ *     was measured from: an item whose image changes (an edit) is measured
+ *     again, and keeps its previous size until the new one lands — it never
+ *     drops out of the output in between.
  *   • Progressive rendering — children receive items as soon as *any*
  *     measurement resolves; a single slow or broken image never blocks
  *     the entire feed.
@@ -41,8 +44,13 @@ class ImageMeasurer extends React.PureComponent {
 
         // ── Persistent caches (survive across prop changes) ──────────
         this._cache   = new Map();   // id → { width, height, id }
-        this._failed  = new Set();   // ids that permanently failed decode
-        this._pending = new Set();   // ids currently in-flight
+        this._srcOf   = new Map();   // id → the image its cached size was measured from
+        this._wantSrc = new Map();   // id → the item's current image
+        // Failures and in-flight requests are per image, keyed `${id}\n${src}`:
+        // a new image for an id is a new request, and an image that failed
+        // isn't retried until the item points at another one.
+        this._failed  = new Set();
+        this._pending = new Set();
 
         // ── Output memo ──────────────────────────────────────────────
         // `_version` counts successful measurements. The last built
@@ -106,42 +114,53 @@ class ImageMeasurer extends React.PureComponent {
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
             const id   = this._keyOf(item);
+            const src  = image(item) || '';
+            this._wantSrc.set(id, src);
 
-            // Already resolved, permanently failed, or in-flight → skip
-            if (this._cache.has(id) || this._failed.has(id) || this._pending.has(id)) continue;
+            // Measured from this very image → nothing to do
+            if (this._cache.has(id) && this._srcOf.get(id) === src) continue;
 
-            const src = image(item);
+            // This image permanently failed, or is in flight → skip
+            const req = id + '\n' + src;
+            if (this._failed.has(req) || this._pending.has(req)) continue;
+
             if (!src) {
                 // No image URL — treat as permanent failure (nothing to load)
-                this._failed.add(id);
+                this._failed.add(req);
                 continue;
             }
 
-            this._pending.add(id);
+            this._pending.add(req);
 
             pngdby.get_new_img_obj(src)
                 .then((size) => {
-                    this._pending.delete(id);
+                    this._pending.delete(req);
                     if (this._unmounted) return;
 
                     if (size && size.width > 0 && size.height > 0) {
+                        // The item moved on to another image meanwhile: this
+                        // size describes neither what it shows nor what it
+                        // will show.
+                        if (this._wantSrc.get(id) !== src) return;
                         this._cache.set(id, {
                             ...size,
                             id,
                         });
+                        this._srcOf.set(id, src);
                         this._version++;
                         this._scheduleUpdate();
                     } else {
-                        // A failed id is omitted from the output exactly as a
-                        // pending one was, so nothing the children see changes
-                        // — no render pass needed.
-                        this._failed.add(id);
+                        // A failed image changes nothing the children see — a
+                        // new item stays omitted exactly as a pending one was,
+                        // a changed one keeps its previous size — so no render
+                        // pass is needed.
+                        this._failed.add(req);
                     }
                 })
                 .catch(() => {
-                    this._pending.delete(id);
+                    this._pending.delete(req);
                     if (this._unmounted) return;
-                    this._failed.add(id);
+                    this._failed.add(req);
                 });
         }
 
@@ -158,6 +177,8 @@ class ImageMeasurer extends React.PureComponent {
      * and the persistent size cache.  Only items whose measurement
      * succeeded are included — failed/pending items are silently
      * omitted so downstream Masonry never receives incomplete entries.
+     * (An item whose image changed keeps its previous size until the new
+     * image is measured.)
      *
      * Memoized on (items, keyMapper, _version): a render triggered by
      * anything else returns the previous array by reference, with no

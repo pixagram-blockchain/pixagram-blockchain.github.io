@@ -10,9 +10,15 @@
 // titles, documentation sections, popular searches, and the placeholder's
 // examples) and /query (an answer to a question: /ask about the artworks,
 // /help about the platform). Against an older Worker they simply stay silent.
+//
+// v4 keeps all of it, field for field, and answers questions with its own
+// engine: the index's answer first (result_text), and the reasoning model's
+// explanation of it (GPT-OSS 120B) when that passed claim verification. The box
+// shows the index's answer at once and asks for GPT-OSS's explanation right
+// after (EXPLAIN_MODE). Against a v3 Worker the explanation is simply not asked.
 export const SEARCH_API_URL = (
     (typeof window !== "undefined" && window.__PIXAGRAM_SEARCH_API__) ||
-    "https://pixagram-search-v3.p1x4.workers.dev"
+    "https://pixagram-search-v4.p1x4.workers.dev"
 ).replace(/\/+$/, "");
 
 export const LIMITS = Object.freeze({
@@ -58,6 +64,13 @@ export const SUGGEST_DEBOUNCE_MS = 180;
 export const SUGGEST_ROWS = 6;              // suggestion rows in the dropdown
 export const ANSWER_DEBOUNCE_MS = 700;      // after "…?"
 export const ANSWER_IDLE_MS = 1600;         // after a question word and three words, without "?"
+
+// ── v4: GPT-OSS explains the index's answer ───────────────────────────────────
+// The index answers first (the /query answer, in the Worker's own mode); the
+// explanation is a second /ask in this mode, which always runs the reasoning
+// model (GPT-OSS 120B) on what the index found. Each spends one of the visitor's
+// 20 answers a minute, so a question with its explanation costs two.
+export const EXPLAIN_MODE = "balanced";
 
 // The placeholder: the plain "Search" first, then the Worker's examples (in the
 // UI language, from what the index holds), each fading out and the next in.

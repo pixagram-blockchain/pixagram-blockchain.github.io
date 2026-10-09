@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "p
 
 import { CACHE_MAX_TERMS, CACHE_TTL_MS, COMMUNITY_ACCOUNT_RE, DEBOUNCE_MS, LIMITS, SUGGEST_DEBOUNCE_MS, SUGGEST_LIMIT, SUGGEST_ROWS } from "./config";
 import { EMPTY_FILTERS, filtersKey, hasFilters, normalizeFilters } from "./filters";
-import { fetchAnswer, fetchSuggestions, loadExamples, searchIndex, sendFeedback } from "./searchApi";
+import { fetchAnswer, fetchExplanation, fetchSuggestions, loadExamples, searchIndex, sendAnswerFeedback, sendFeedback } from "./searchApi";
 import { answerPlan, ghostFor } from "./intent";
 
 // ── useSearch ─────────────────────────────────────────────────────────────────
@@ -24,7 +24,12 @@ import { answerPlan, ghostFor } from "./intent";
 //                    popular searches, a correction); null when nothing
 //   answer           an answer to the question typed: { q, route, loading: true }
 //                    while it comes, then { q, route, loading: false, data }
-//                    (data: see searchApi.fetchAnswer); null when none
+//                    (data: see searchApi.fetchAnswer); null when none. v4: while
+//                    GPT-OSS explains an answer of the index, `explaining` is true;
+//                    then data is the explained answer (data.explainOutcome
+//                    "explained"), or the same one with explainOutcome "none" (the
+//                    model had nothing verified to add) or "unavailable" (it could
+//                    not answer: controls.explainAgain() asks again)
 //   didYouMean       { text, term }: the search for `term` (trimmed, lower case)
 //                    corrected a word into `text`; null when not
 //   examples         examples for the placeholder, in the UI language (kept
@@ -32,7 +37,8 @@ import { answerPlan, ghostFor } from "./intent";
 //
 //   controls = { setFilters, toggleFilters, suggestAuthors, suggestCommunities,
 //                applyText(text), pickSuggestion(s), acceptCompletion(),
-//                submit(), feedback(item, action) }
+//                submit(), feedback(item, action),
+//                explainAgain(), rateAnswer(queryId, 1 | -1) }
 //
 // useSearch(apiRef, { lang }) — `lang` is the UI language (two letters): the
 // examples and the suggestions' questions come in it. Without it (settings
@@ -54,6 +60,10 @@ import { answerPlan, ghostFor } from "./intent";
 // question or on Enter (intent.answerPlan: answers spend a small budget). A
 // picked suggestion runs at once and hides the suggestions until the next
 // keystroke; an answer always belongs to the text it answers.
+//
+// v4, the answer in two steps: the index's answer as soon as the Worker has it,
+// then GPT-OSS's explanation of it (a second request, in EXPLAIN_MODE), which
+// takes the first one's place when it lands. A new text stops both.
 
 const EMPTY = Object.freeze([]);
 const EMPTY_OBJ = Object.freeze({});
@@ -173,6 +183,7 @@ export function useSearch(apiRef, { lang = null } = {}) {
     const answerPendingRef = useRef(null);      // the key of the answer the timer waits to ask
     const answerAbortRef = useRef(null);
     const answerCacheRef = useRef(new Map());   // route \0 question \0 type → { value }
+    const explainAbortRef = useRef(null);       // v4: GPT-OSS's explanation of the answer shown
     // Trending tags are query-independent and filtered client-side: fetched
     // once per TTL, not once per term.
     const browseTagsRef = useRef(null);
@@ -376,7 +387,7 @@ export function useSearch(apiRef, { lang = null } = {}) {
         if (clear) dispatch({ type: "suggest", suggest: null });
     }, []);
 
-    /** Stop asking for an answer; `clear` also takes the one shown away. */
+    /** Stop asking for an answer (and its explanation); `clear` also takes the one shown away. */
     const cancelAnswer = useCallback((clear) => {
         if (answerTimerRef.current) {
             clearTimeout(answerTimerRef.current);
@@ -387,8 +398,51 @@ export function useSearch(apiRef, { lang = null } = {}) {
             answerAbortRef.current.abort();
             answerAbortRef.current = null;
         }
+        if (explainAbortRef.current) {
+            explainAbortRef.current.abort();
+            explainAbortRef.current = null;
+        }
         if (clear) dispatch({ type: "answer", answer: null });
     }, []);
+
+    /**
+     * v4: ask GPT-OSS to explain the index's answer shown (`answer`, an answer state that is done
+     * loading). The answer stays as it is meanwhile, marked `explaining`; then the explained answer
+     * takes its place, or the outcome is noted on it ("none": nothing verified to add,
+     * "unavailable": no answer from the model, asked again by the next look or explainAgain).
+     */
+    const explainAnswer = useCallback((answer) => {
+        if (explainAbortRef.current) explainAbortRef.current.abort();
+        const ctl = new AbortController();
+        explainAbortRef.current = ctl;
+        const base = answer.data;
+        dispatch({ type: "answer", answer: Object.freeze({ ...answer, explaining: true }) });
+        fetchExplanation(base.question, { signal: ctl.signal, filters: filtersRef.current })
+            .catch((e) => (e && e.name === "AbortError" ? null : { outcome: "unavailable" }))
+            .then((r) => {
+                if (!r || ctl.signal.aborted) return;
+                if (explainAbortRef.current === ctl) explainAbortRef.current = null;
+                // (a new text aborts this request; the key is checked all the same)
+                const cur = answerRef.current;
+                if (cur && cur.key !== answer.key) return;
+                const data = Object.freeze(r.outcome === "explained"
+                    ? { ...r.answer, explainOutcome: "explained" }
+                    : { ...base, explainOutcome: r.outcome, explainModel: r.model || null });
+                // an explanation, or the model's word that it had none, is kept; a failure is not
+                if (r.outcome !== "unavailable") remember(answerCacheRef.current, answer.key, { value: data });
+                dispatch({ type: "answer", answer: Object.freeze({ ...answer, explaining: false, data }) });
+            });
+    }, []);
+
+    /** The answer shown, with GPT-OSS asked (again) to explain it — when it can be and is not being. */
+    const explainAgain = useCallback(() => {
+        const cur = answerRef.current;
+        const d = cur && !cur.loading && !cur.explaining ? cur.data : null;
+        if (d && d.route === "ask" && d.explainable && d.explainOutcome === "unavailable") explainAnswer(cur);
+    }, [explainAnswer]);
+
+    /** A vote on the answer shown (its query_id): 1 helpful, -1 not. */
+    const rateAnswer = useCallback((queryId, rating) => sendAnswerFeedback(queryId, rating), []);
 
     const abortAll = useCallback(() => {
         abortSearch();
@@ -452,7 +506,11 @@ export function useSearch(apiRef, { lang = null } = {}) {
             // way, or waiting for its pause (only Enter hurries that one). A request stopped
             // meanwhile (a reset, a restore) is asked again.
             const cur = answerRef.current;
-            if (cur && cur.key === key && (!cur.loading || answerAbortRef.current)) return;
+            if (cur && cur.key === key && (!cur.loading || answerAbortRef.current)) {
+                // v4: so is an explanation (the answer stays shown while it is asked again)
+                if (cur.explaining && !explainAbortRef.current) explainAnswer(cur);
+                return;
+            }
             if (answerPendingRef.current === key && plan.delay > 0) return;
         }
         cancelAnswer(false);
@@ -462,7 +520,10 @@ export function useSearch(apiRef, { lang = null } = {}) {
         }
         const hit = fresh(answerCacheRef.current.get(key));
         if (hit) {
-            dispatch({ type: "answer", answer: hit.value ? Object.freeze({ q: text, key, route: hit.value.route, loading: false, data: hit.value }) : null });
+            const shown = hit.value ? Object.freeze({ q: text, key, route: hit.value.route, loading: false, data: hit.value }) : null;
+            // an answer whose explanation never came (the model could not answer then): ask again
+            if (shown && shown.data.route === "ask" && shown.data.explainable && !shown.data.explainOutcome) explainAnswer(shown);
+            else dispatch({ type: "answer", answer: shown });
             return;
         }
         dispatch({ type: "answer", answer: null });
@@ -484,13 +545,16 @@ export function useSearch(apiRef, { lang = null } = {}) {
             const shown = data && (data.route !== "search" || data.links.length > 0) ? Object.freeze(data) : null;
             // a failure, or a refusal of the answer budget, is not remembered: the next try asks again
             if (data && !data.retry) remember(answerCacheRef.current, key, { value: shown });
-            dispatch({ type: "answer", answer: shown ? Object.freeze({ q: text, key, route: shown.route, loading: false, data: shown }) : null });
+            const answer = shown ? Object.freeze({ q: text, key, route: shown.route, loading: false, data: shown }) : null;
+            // v4: the index answered; GPT-OSS explains it next (the answer shows meanwhile)
+            if (answer && shown.route === "ask" && shown.explainable) explainAnswer(answer);
+            else dispatch({ type: "answer", answer });
         };
         if (plan.delay > 0) {
             answerPendingRef.current = key;
             answerTimerRef.current = setTimeout(run, plan.delay);
         } else run();
-    }, [cancelAnswer]);
+    }, [cancelAnswer, explainAnswer]);
 
     /**
      * The text changed: typed (`how` = "type": the usual pauses) or put in by
@@ -684,8 +748,9 @@ export function useSearch(apiRef, { lang = null } = {}) {
         () => Object.freeze({
             setFilters, toggleFilters, suggestAuthors, suggestCommunities,
             applyText, pickSuggestion, acceptCompletion, submit, feedback,
+            explainAgain, rateAnswer,
         }),
-        [setFilters, toggleFilters, suggestAuthors, suggestCommunities, applyText, pickSuggestion, acceptCompletion, submit, feedback],
+        [setFilters, toggleFilters, suggestAuthors, suggestCommunities, applyText, pickSuggestion, acceptCompletion, submit, feedback, explainAgain, rateAnswer],
     );
 
     const reset = useCallback(() => {

@@ -1,6 +1,6 @@
 "use strict";
 
-import { COMMUNITY_ACCOUNT_RE, DEFAULT_COLORS, LIMITS, SEARCH_API_URL, SUGGEST_ROWS } from "./config";
+import { COMMUNITY_ACCOUNT_RE, DEFAULT_COLORS, EXPLAIN_MODE, LIMITS, SEARCH_API_URL, SUGGEST_ROWS } from "./config";
 import { filtersToParams, hasFilters } from "./filters";
 
 // ── pixagram-search Worker client ─────────────────────────────────────────────
@@ -306,6 +306,11 @@ export function loadVocab() {
 // it cannot be reached) these resolve to null / the built-in examples and the box
 // behaves as before. Everything from the Worker is checked here: texts are
 // plain strings (rendered as text nodes, never HTML), links are https only.
+//
+// v4 answers the same requests with more: a status, the index's answer apart from
+// the reasoning model's explanation of it, the model's name, a query_id for votes
+// (normalizeAsk); fetchExplanation asks GPT-OSS to explain an answer, and
+// sendAnswerFeedback records a vote on one.
 
 const SUGGESTION_KINDS = new Set(["complete", "question", "title", "help", "popular", "correction"]);
 const ROUTES = new Set(["search", "ask", "help"]);
@@ -423,6 +428,79 @@ export function loadExamples(lang) {
 /** The text of an answer with at most `max` characters, as plain text. */
 const answerText = (v, max = 2000) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
+/** A longer text cut at a word boundary, with "…" when it was cut. */
+function clip(v, max) {
+    const s = typeof v === "string" ? v.trim() : "";
+    if (s.length <= max) return s;
+    const cut = s.slice(0, max);
+    const at = cut.lastIndexOf(" ");
+    return (at > max * 0.6 ? cut.slice(0, at) : cut).replace(/[\s,;:]+$/, "") + "…";
+}
+
+/**
+ * A model's text without the evidence ids it cites ("… cats [R1].", "[E184, E201]"): the Worker
+ * has checked each claim against those cards, which the box does not show.
+ */
+const withoutEvidenceIds = (s) => s.replace(/\s*\[[REDCI]\d+(?:\s*[,;]\s*[REDCI]\d+)*\]/g, "").replace(/\s+([.,;:!?])/g, "$1").trim();
+
+/** A model id as people know it: "@cf/openai/gpt-oss-120b" → "GPT-OSS 120B". */
+export function modelLabel(model) {
+    const id = typeof model === "string" ? model.trim() : "";
+    if (!id) return "";
+    const name = id.slice(id.lastIndexOf("/") + 1).replace(/^[a-z0-9-]+:/i, "");
+    const oss = /^gpt-oss-(\d+)b$/i.exec(name);
+    return oss ? "GPT-OSS " + oss[1] + "B" : name.slice(0, 40);
+}
+
+// v4's answer statuses (v3 sends none).
+const ASK_STATUSES = new Set(["answered", "no_match", "insufficient_evidence", "conflict", "clarify", "not_found"]);
+
+// The answers' own limit: /query asks /ask for at most 24 posts, and the explanation is asked for
+// the same request (another limit may list other posts, and so another answer).
+const ANSWER_LIMIT = 24;
+
+/**
+ * An /ask answer, from the v3 or the v4 Worker, as the box shows it:
+ *   { route: "ask", question, text, value, status, empty, clarify, confidence, items, queryId,
+ *     explanation, model, byModel, explainable }
+ *   text         the index's answer (v4: result_text) — or, when there is none, what the Worker
+ *                says instead (nothing found, the question asked back, a model's synthesis)
+ *   status       v4: answered | no_match | insufficient_evidence | conflict | clarify | not_found;
+ *                null from v3
+ *   explanation  v4: the reasoning model's explanation of the index's answer, when it passed the
+ *                Worker's claim verification ("" when none); `model` names the model that ran
+ *   byModel      the whole text is the model's (a synthesis no operator gives, its claims verified)
+ *   explainable  worth asking GPT-OSS for an explanation: the index answered and no model ran yet
+ */
+function normalizeAsk(a, question) {
+    const items = (Array.isArray(a.items) ? a.items : []).map(normalize).filter((it) => it.src && it.path).slice(0, 8);
+    const value = typeof a.answer === "string" || typeof a.answer === "number" || typeof a.answer === "boolean" ? a.answer : null;
+    const status = typeof a.status === "string" && ASK_STATUSES.has(a.status) ? a.status : null;
+    const answered = status === "answered" || status === "conflict";
+    const resultText = answerText(a.result_text, 600);
+    const explanation = clip(withoutEvidenceIds(answerText(a.explanation, 4000)), 1500);
+    const model = typeof a.model === "string" && a.model ? a.model.slice(0, 120) : null;
+    return {
+        route: "ask",
+        question,
+        // (without a result, a v4 text may be the model's own answer: its evidence ids go too)
+        text: resultText || (status ? clip(withoutEvidenceIds(answerText(a.answer_text, 4000)), 1500) : answerText(a.answer_text, 600)),
+        value,
+        status,
+        // nothing found, nothing to answer from, a zero, or the question asked back: shown dimmed
+        // (v3: a null or zero answer; a v4 answer may be a boolean)
+        empty: status ? !answered || value === 0 : value === null || value === 0,
+        clarify: status === "clarify",
+        confidence: Number(a.confidence) || 0,
+        items,
+        queryId: typeof a.query_id === "string" && a.query_id ? a.query_id : null,
+        explanation,
+        model,
+        byModel: !resultText && !!model && answered,
+        explainable: answered && !!resultText && !explanation && !model,
+    };
+}
+
 function normalizeSources(list) {
     return (Array.isArray(list) ? list : [])
         .map((s, i) => {
@@ -437,7 +515,7 @@ function normalizeSources(list) {
 /**
  * GET /query: the Worker's router decides between a search, an /ask answer and a /help answer
  * (or `route` forces one). Resolves to
- *   { route: "ask",  text, value, confidence, empty, items: [artwork…] }
+ *   { route: "ask",  text, value, confidence, empty, items: [artwork…], … }   (see normalizeAsk)
  *   { route: "help", text, status, sources: [{ n, title, heading, url, excerpt }] }
  *   { route: "search", links: [{ title, heading, url }] }   (documentation pages that match, maybe none)
  *   { route: "search", links: [], retry: true }             (the answer budget is spent: ask again later)
@@ -455,18 +533,7 @@ export async function fetchAnswer(text, { signal, route = null, filters = null, 
     // The client's answer budget was spent: no verdict about the text, ask again later.
     if (json.answer_budget === "spent") return { route: "search", links: [], retry: true };
     const a = json.answer && typeof json.answer === "object" ? json.answer : null;
-    if (json.route === "ask" && a) {
-        const items = (Array.isArray(a.items) ? a.items : []).map(normalize).filter((it) => it.src && it.path).slice(0, 8);
-        const value = typeof a.answer === "string" || typeof a.answer === "number" ? a.answer : null;
-        return {
-            route: "ask",
-            text: answerText(a.answer_text, 600),
-            value,
-            empty: value === null || value === 0,
-            confidence: Number(a.confidence) || 0,
-            items,
-        };
-    }
+    if (json.route === "ask" && a) return normalizeAsk(a, q);
     if (json.route === "help" && a) {
         const status = typeof a.status === "string" ? a.status : "not_found";
         if (status === "disabled" || status === "no_docs") return { route: "search", links: [] };
@@ -476,13 +543,34 @@ export async function fetchAnswer(text, { signal, route = null, filters = null, 
 }
 
 /**
- * Tell the Worker which result was opened (POST /feedback): fire and forget, survives the
- * navigation that follows. Only for items that came with a query_id (v3).
+ * v4: GPT-OSS's explanation of the index's answer to `question` — the same /ask request as the
+ * /query answer, in EXPLAIN_MODE, where the Worker runs the reasoning model on what the index
+ * found and keeps its text only when every claim in it holds against the evidence. Resolves to
+ *   { outcome: "explained", answer }   answer: a whole normalizeAsk answer, the index's answer with
+ *                                      its explanation (the box shows it in place of the first:
+ *                                      a deeper search may have reached more of the index)
+ *   { outcome: "none", model }         the model ran and had nothing verified to add
+ *   { outcome: "unavailable" }         the model or the Worker could not answer (a failure, the
+ *                                      visitor's answer budget spent): worth asking again later
+ * Rethrows only on abort.
  */
-export function sendFeedback(item, action = "click") {
-    if (!item || typeof item.qid !== "string" || !item.qid || !(Number(item.id) > 0)) return;
-    const body = JSON.stringify({ query_id: item.qid, post_id: Number(item.id), rank: item.rank || undefined, action });
-    const url = SEARCH_API_URL + "/feedback";
+export async function fetchExplanation(question, { signal, filters = null, nsfw = "exclude" } = {}) {
+    const q = String(question || "").trim().slice(0, 300);
+    if (!q) return { outcome: "unavailable" };
+    const params = { q, mode: EXPLAIN_MODE, nsfw, limit: String(ANSWER_LIMIT) };
+    if (filters && (filters.type === "artwork" || filters.type === "blog")) params.type = filters.type;
+    const json = await getJson("/ask", params, signal);
+    if (!json || typeof json !== "object" || typeof json.status !== "string") return { outcome: "unavailable" };
+    const answer = normalizeAsk(json, q);
+    if (answer.explanation && answer.model) return { outcome: "explained", answer };
+    if (answer.model) return { outcome: "none", model: answer.model };
+    return { outcome: "unavailable" };
+}
+
+/** POST a small JSON body as a simple request (no CORS preflight), surviving a navigation. */
+function beacon(path, payload) {
+    const body = JSON.stringify(payload);
+    const url = SEARCH_API_URL + path;
     try {
         // text/plain: a simple request, no CORS preflight; the Worker reads the JSON body as is
         const blob = typeof Blob === "function" ? new Blob([body], { type: "text/plain;charset=UTF-8" }) : null;
@@ -491,4 +579,29 @@ export function sendFeedback(item, action = "click") {
     } catch (e) {
         // feedback is best effort
     }
+}
+
+// Votes sent in this page's life (query_id → rating): an answer shown again shows its vote.
+const votes = new Map();
+
+/** v4: a vote on an answer (POST /ask/feedback): 1 helpful, -1 not. Fire and forget, once per answer. */
+export function sendAnswerFeedback(queryId, rating) {
+    if (typeof queryId !== "string" || !queryId || (rating !== 1 && rating !== -1) || votes.has(queryId)) return;
+    votes.set(queryId, rating);
+    if (votes.size > 200) votes.delete(votes.keys().next().value);
+    beacon("/ask/feedback", { query_id: queryId, rating });
+}
+
+/** The vote sent on an answer in this page's life (1 | -1), or 0. */
+export function answerVote(queryId) {
+    return (typeof queryId === "string" && votes.get(queryId)) || 0;
+}
+
+/**
+ * Tell the Worker which result was opened (POST /feedback): fire and forget, survives the
+ * navigation that follows. Only for items that came with a query_id (v3).
+ */
+export function sendFeedback(item, action = "click") {
+    if (!item || typeof item.qid !== "string" || !item.qid || !(Number(item.id) > 0)) return;
+    beacon("/feedback", { query_id: item.qid, post_id: Number(item.id), rank: item.rank || undefined, action });
 }

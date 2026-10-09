@@ -16,8 +16,8 @@ import Tooltip from "@material-ui/core/Tooltip";
 import SettingsIcon from "@material-ui/icons/Settings";
 import DescriptionIcon from "@material-ui/icons/Description";
 import MenuBookIcon from "@material-ui/icons/MenuBook";
-// import BarChartIcon from "@material-ui/icons/BarChart";   // Metrics tab (disabled, see TAB_CONFIG)
-// import DashboardIcon from "@material-ui/icons/Dashboard"; // Control Tower tab (disabled, see TAB_CONFIG)
+import BarChartIcon from "@material-ui/icons/BarChart";
+import DashboardIcon from "@material-ui/icons/Dashboard";
 import WarningIcon from "@material-ui/icons/Warning";
 
 // Import view components — the SwipeableViews children below MUST stay in
@@ -27,8 +27,8 @@ import WarningIcon from "@material-ui/icons/Warning";
 import GDViabilityManagement from "./GDViabilityManagement";
 import GDAttributes from "./GDAttributes";
 import GDMethods from "./GDMethods";
-// import GDMetrics from "./GDMetrics";           // Metrics tab (disabled, see TAB_CONFIG)
-// import GDControlTower from "./GDControlTower"; // Control Tower tab (disabled, see TAB_CONFIG)
+import GDMetrics from "./GDMetrics";
+import GDControlTower from "./GDControlTower";
 import GDDisruptions from "./GDDisruptions";
 
 import { t, subscribe as subscribe_language } from "../utils/text";
@@ -41,7 +41,7 @@ import { t, subscribe as subscribe_language } from "../utils/text";
 // GOVERNANCE_TABS in utils/constants lists the same ids — that list is what
 // the router accepts, so a tab enabled here must be added there too. An id
 // can't contain "-" (it separates the levels): re-enabling "control-tower"
-// means giving it a new id.
+// means giving it a new id (it is "tower").
 const TAB_CONFIG = [
     {
         id: "viability",
@@ -64,7 +64,7 @@ const TAB_CONFIG = [
         description: () => t("components.governance_dialog.associated_to_metrics_download_theory_documents"),
         icon: MenuBookIcon
     },
-    /*{
+    {
         id: "metrics",
         title: () => t("components.governance_dialog.metrics"),
         subtitle: () => t("components.governance_dialog.analytics"),
@@ -72,12 +72,12 @@ const TAB_CONFIG = [
         icon: BarChartIcon
     },
     {
-        id: "control-tower",
+        id: "tower",
         title: () => t("components.governance_dialog.control_tower"),
         subtitle: () => t("components.governance_dialog.dashboard"),
         description: () => t("components.governance_dialog.monitor_the_entire_ecosystem_from_a_centralized"),
         icon: DashboardIcon
-    },*/
+    },
     {
         id: "disruptions",
         title: () => t("components.governance_dialog.disruptions"),
@@ -415,8 +415,8 @@ class GovernanceDialog extends React.PureComponent {
                     />
                     <GDAttributes api={api} />
                     <GDMethods api={api} />
-                    {/* <GDMetrics api={api} /> */}
-                    {/* <GDControlTower api={api} /> */}
+                    <GDMetrics api={api} />
+                    <GDControlTower api={api} />
                     {/* The portal tiles navigate to a community page, so the
                         view closes this (modal) dialog on the way out. */}
                     <GDDisruptions api={api} onClose={this.props.onClose} />

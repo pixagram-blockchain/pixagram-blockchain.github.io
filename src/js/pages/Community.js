@@ -10,7 +10,7 @@ import * as actions from "../actions/utils";
 import { CellMeasurer } from "@pixagram/virtualized/dist/es/index";
 import MasonryExtended from "../components/MasonryExtended";
 import useWindowDimensions from "../hooks/useWindowDimensions";
-import useMasonryGrid from "../hooks/useMasonryGrid";
+import useMasonryGrid, { useCellExit, DELETE_EXIT_DELAY_MS } from "../hooks/useMasonryGrid";
 import useVoteSync from "../hooks/useVoteSync";
 import { usePictureDialog } from "../hooks/usePictureDialog";
 import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto } from "../utils/voteSync";
@@ -22,7 +22,7 @@ import {
     EASE as EASE_STANDARD, TRANSITION_FAST, TRANSITION_MEDIUM, TRANSITION_ENTRY,
     RAINBOW_RIPPLE, RAINBOW_RIPPLE_SIMPLE,
 } from "../theme/motion";
-import PaperCardBlog from "../components/PaperCardBlog";
+import PaperCardBlog, { paperCardBlogLayoutKey } from "../components/PaperCardBlog";
 import PaperCardMenuOption from "../components/PaperCardMenuOption";
 import { ProfileHoverCardLayer } from "../components/ProfileHoverCard";
 import timeAgo from "../utils/TimeAgo";
@@ -1038,14 +1038,17 @@ const useCommunityData = (api, pathname) => {
     const [isJoined, setIsJoined] = useState(false);
     const [loggedInUser, setLoggedInUser] = useState(null);
     const [userRole, setUserRole] = useState(null);
-    // Monotonic counter bumped whenever posts is fully replaced (initial load,
-    // sort change, post_published refetch). The main component watches this
-    // and drives a full Masonry reset — clearing CellMeasurerCache, the
-    // positioner, and Masonry's internal _positionCache. Without this, react-
-    // virtualized keeps cached heights keyed to the previous posts' ids and
-    // renders the new list against stale geometry (visible as overlapping
-    // cards, gaps, or items that don't appear until you scroll past them).
-    const [dataVersion, setDataVersion] = useState(0);
+    // Bumped when the posts of a different list replace the ones on screen —
+    // another community, another sort, or the first list. The main component
+    // resets the masonry for it (CellMeasurerCache, positioner, the Masonry's
+    // position cache). A refetch of the list on screen — after a publish, an
+    // edit, a delete, an edit of the community — doesn't bump it any more:
+    // MasonryExtended re-flows the cards past the first change in place,
+    // measuring only new or changed cards, where the reset re-measured the
+    // whole grid under the reader with a flash.
+    const [layoutEpoch, setLayoutEpoch] = useState(0);
+    // "<community>|<sort>" of the list on screen.
+    const shownListRef = useRef('');
     const prevPathnameRef = useRef(pathname);
 
     useEffect(() => {
@@ -1165,9 +1168,10 @@ const useCommunityData = (api, pathname) => {
 
     // Two-phase post commit, shared by loadCommunity and refetchPosts: the
     // grid paints text-ready cards one round-trip sooner (with the masonry
-    // re-pack, via dataVersion), then avatars are patched in WITHOUT one —
-    // avatar swaps don't change card height. Both commits are guarded by the
-    // posts token. Both pass through overlayPendingVotes: a vote cast a
+    // reset, via layoutEpoch, when `listId` names another list than the one
+    // on screen), then avatars are patched in WITHOUT one — avatar swaps
+    // don't change card height. Both commits are guarded by the posts
+    // token. Both pass through overlayPendingVotes: a vote cast a
     // moment ago isn't in the bridge rows yet (indexer lag) and the pending
     // registry puts it back until the chain shows it.
     //
@@ -1177,7 +1181,7 @@ const useCommunityData = (api, pathname) => {
     // The text-ready commit then overwrote the avatars it had just received,
     // and the grid stayed avatar-less until the next load. An avatar list
     // that arrives early is held and committed in place of the text-ready one.
-    const commitPostsTwoPhase = useCallback(async (rawPosts, token) => {
+    const commitPostsTwoPhase = useCallback(async (rawPosts, token, listId) => {
         let early = null, painted = false;
         const textReady = await enrichPostsList(rawPosts, api, (withAvatars) => {
             if (postsTokenRef.current !== token) return;
@@ -1186,9 +1190,11 @@ const useCommunityData = (api, pathname) => {
         });
         painted = true;
         if (postsTokenRef.current !== token) return;
+        const newList = listId !== shownListRef.current;
+        shownListRef.current = listId;
         batch(() => {
             setPosts(overlayPendingVotes(early || textReady));
-            setDataVersion(v => v + 1);
+            if (newList) setLayoutEpoch(e => e + 1);
             setLoading(false);
         });
     }, [api]);
@@ -1290,10 +1296,10 @@ const useCommunityData = (api, pathname) => {
 
             // 1) Posts — primary content, highest priority. Two-phase via
             //    commitPostsTwoPhase: text-ready cards one round-trip sooner,
-            //    avatars patched in afterwards WITHOUT a dataVersion bump.
+            //    avatars patched in afterwards WITHOUT a masonry reset.
             //    Guarded by the posts token, which a sort switch landing
             //    mid-load claims too.
-            const postsBranch = commitPostsTwoPhase(rawPosts, myPostsToken);
+            const postsBranch = commitPostsTwoPhase(rawPosts, myPostsToken, name + '|' + sortIndex);
 
             // 2) Members — independent of posts; backfills the sidebar list.
             const membersBranch = enrichMemberAccounts(
@@ -1316,7 +1322,7 @@ const useCommunityData = (api, pathname) => {
             batch(() => {
                 setCommunity({ name, _name: name, title: name, description: '', image: '' });
                 setMembers([]); setRules([]); setLoading(false);
-                if (ownsPosts) { setPosts([]); setDataVersion(v => v + 1); }
+                if (ownsPosts) { shownListRef.current = ''; setPosts([]); setLayoutEpoch(e => e + 1); }
             });
         }
     }, [api, refreshViewerState, commitPostsTwoPhase]);
@@ -1332,7 +1338,7 @@ const useCommunityData = (api, pathname) => {
             // Two-phase like the first load: a sort switch paints its cards
             // one round-trip sooner instead of waiting on every author and
             // voter account first.
-            await commitPostsTwoPhase(rawPosts, myPostsToken);
+            await commitPostsTwoPhase(rawPosts, myPostsToken, name + '|' + sortIndex);
         } catch (e) { console.error('[Community] Failed to refetch posts:', e); }
     }, [api, commitPostsTwoPhase]);
 
@@ -1469,7 +1475,7 @@ const useCommunityData = (api, pathname) => {
 
     return {
         communityName, sorting, loading, community, posts, members, rules,
-        isAdmin, isJoined, loggedInUser, userRole, dataVersion,
+        isAdmin, isJoined, loggedInUser, userRole, layoutEpoch,
         handleVoteChange, patchPostStats, toggleJoined, confirmLeave, reload,
     };
 };
@@ -1630,10 +1636,22 @@ const Community = ({ classes, settings, pathname, api }) => {
     const { windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx } = useWindowDimensions();
 
     const {
-        communityName, sorting, community, posts, members, rules,
-        isAdmin, isJoined, loggedInUser, userRole, dataVersion,
+        communityName, sorting, community, posts: loadedPosts, members, rules,
+        isAdmin, isJoined, loggedInUser, userRole, layoutEpoch,
         handleVoteChange, patchPostStats, toggleJoined, confirmLeave, reload,
     } = useCommunityData(api, pathname);
+
+    // Delete animation (useCellExit): `exitingKeys` makes the masonry scale
+    // the leaving card down and fade it out; `exitedKeys` keeps it out of
+    // the list afterwards — the 6 s refetch drops it for good, and a refetch
+    // landing before the bridge has caught up must not bring it back. Every
+    // consumer below (grid, navigation, counts) reads `posts`, the list
+    // without them.
+    const { exitingKeys, exitedKeys, exitCell } = useCellExit();
+    const posts = useMemo(
+        () => (exitedKeys.size ? (loadedPosts || []).filter((p) => !exitedKeys.has(p.id)) : loadedPosts),
+        [loadedPosts, exitedKeys]
+    );
 
     const grid = useCommunityGrid({ windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx });
 
@@ -1699,17 +1717,19 @@ const Community = ({ classes, settings, pathname, api }) => {
         if (grid.shouldCollapseMobileCard) setMobileCardExpanded(false);
     }, [grid.shouldCollapseMobileCard]);
 
-    // Full masonry reset when posts is fully replaced (initial load,
-    // sort change, post_published refetch). Clears stale CellMeasurerCache
-    // heights and Masonry's internal _positionCache so the new list lays
-    // out from scratch. A layout effect (as FeedPersonal's re-pack): the
-    // flush lands before the commit paints, so the new list never shows a
-    // frame drawn on the previous list's heights (overlapping or gapped
-    // cards). Layout effects run before every passive effect, so it still
-    // precedes the lighter [posts] forceUpdate below.
+    // Full masonry reset when another list replaces the one on screen
+    // (another community, another sort, the first load): its cards share
+    // nothing with the previous ones, so the new list lays out from scratch.
+    // A refetch of the same list — after a publish, an edit or a delete — is
+    // re-flowed in place by MasonryExtended instead: only the cards past the
+    // first change move, and nothing already measured is measured again. A
+    // layout effect (as FeedPersonal's re-pack): the flush lands before the
+    // commit paints, so a new list never shows a frame drawn on the previous
+    // list's heights. Layout effects run before every passive effect, so it
+    // still precedes the lighter [posts] forceUpdate below.
     useLayoutEffect(() => {
         grid.resetMasonry();
-    }, [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [layoutEpoch]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // A different community in this same mounted page (Index reconciles
     // same-name pages in place — a portal link from inside a post, say):
@@ -1820,11 +1840,45 @@ const Community = ({ classes, settings, pathname, api }) => {
         setMenuCardXY(Int32Array.of(0, 0)); setMenuCardData({});
     }, []);
 
+    // ── Delete animation ───────────────────────────────────────────────
+    // A post deleted while this page is up — from the card menu's dialog,
+    // or anywhere else that broadcasts it (content_deleted, or a
+    // content_updated carrying the `deleted` flag) — scales down and fades
+    // out on the grid, then leaves the list, and the cards past it glide
+    // into its place. The refetch scheduled for the same event confirms it
+    // later without moving anything.
+    const postsNowRef = useRef(posts);
+    postsNowRef.current = posts;
+    const exitPost = useCallback((post) => {
+        if (post && post.id != null) exitCell(post.id, null, DELETE_EXIT_DELAY_MS);
+    }, [exitCell]);
+    useEffect(() => {
+        if (!api?.on || !api?.off) return;
+        const exitByRef = (payload) => {
+            if (!payload?.permlink) return;
+            exitPost((postsNowRef.current || []).find((p) => !!p && p.permlink === payload.permlink
+                && ((p.author && typeof p.author === 'object') ? p.author.username : p.author) === payload.author));
+        };
+        const onContentDeleted = (payload) => exitByRef(payload);
+        const onContentUpdated = (payload) => {
+            if (payload?.jsonMetadata?.deleted === true) exitByRef(payload);
+        };
+        api.on('content_deleted', onContentDeleted);
+        api.on('content_updated', onContentUpdated);
+        return () => {
+            api.off('content_deleted', onContentDeleted);
+            api.off('content_updated', onContentUpdated);
+        };
+    }, [api, exitPost]);
+
     // ── Own-post management (card menu → page-level dialogs) ───────────
     const [editPostData, setEditPostData] = useState(null);
     const [deletePostData, setDeletePostData] = useState(null);
+    // The post the delete dialog was opened for, kept past the dialog's
+    // close for a success callback that arrives after it.
+    const deleteTargetRef = useRef(null);
     const onEditPost = useCallback((data) => { setEditPostData(data); }, []);
-    const onDeletePost = useCallback((data) => { setDeletePostData(data); }, []);
+    const onDeletePost = useCallback((data) => { deleteTargetRef.current = data; setDeletePostData(data); }, []);
     const closeEditPost = useCallback(() => { setEditPostData(null); }, []);
     const closeDeletePost = useCallback(() => { setDeletePostData(null); }, []);
     // "Edit Content" reuses the community's lazy TextEditorDialog in edit
@@ -1839,7 +1893,12 @@ const Community = ({ classes, settings, pathname, api }) => {
     }, []);
     // Broadcasts emit content_updated → the listener above refetches posts.
     const handlePostEdited = useCallback(() => {}, []);
-    const handlePostDeleted = useCallback(() => {}, []);
+    // The broadcast's content event usually starts the exit first; this
+    // covers a delete that reports success without one. It runs once either
+    // way (useCellExit ignores a key it already has).
+    const handlePostDeleted = useCallback((deleted) => {
+        exitPost(deleted && deleted.id != null ? deleted : deleteTargetRef.current);
+    }, [exitPost]);
     const handleEditorUpdated = useCallback(() => {}, []);
 
     // Mount the (now-lazy) post viewer on first open and keep it mounted so
@@ -1989,6 +2048,10 @@ const Community = ({ classes, settings, pathname, api }) => {
     const postsForKeysRef = useRef(posts);
     postsForKeysRef.current = posts;
     const masonryKeyMapper = useCallback((index) => postsForKeysRef.current?.[index]?.id, []);
+    // What each card's height depends on (paperCardBlogLayoutKey: cover,
+    // title, excerpt): an edit that changes it gets the card re-measured in
+    // place and the cards past it re-flowed. Same ref as the key-mapper.
+    const masonryLayoutKey = useCallback((index) => paperCardBlogLayoutKey(postsForKeysRef.current?.[index]), []);
     const cellRenderer = useCallback((data) => {
         const { index, key, parent, style, isScrolling, top: placedTop } = data;
         const item = posts[index | 0];
@@ -2102,6 +2165,9 @@ const Community = ({ classes, settings, pathname, api }) => {
                         scrollingResetTimeInterval={grid.scrollingResetTimeInterval}
                         cellCount={(posts || []).length | 0} items={posts}
                         keyMapper={masonryKeyMapper}
+                        cellLayoutKey={masonryLayoutKey}
+                        exitingKeys={exitingKeys}
+                        onRelayout={grid.onRelayout}
                         cellMeasurerCache={grid.cellMeasurerCache}
                         cellPositioner={grid.cellPositioner}
                         cellRenderer={cellRenderer}

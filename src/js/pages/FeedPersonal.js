@@ -9,7 +9,7 @@ import * as actions from "../actions/utils";
 import { CellMeasurer } from "@pixagram/virtualized/dist/es/index";
 import MasonryExtended from "../components/MasonryExtended";
 import useWindowDimensions from "../hooks/useWindowDimensions";
-import useMasonryGrid, { GUTTER_SIZE } from "../hooks/useMasonryGrid";
+import useMasonryGrid, { GUTTER_SIZE, useCellExit, DELETE_EXIT_DELAY_MS } from "../hooks/useMasonryGrid";
 import { idle, cancelIdle } from "../utils/idle";
 import viewCache, { postsSignature } from "../utils/viewCache";
 import useVoteSync from "../hooks/useVoteSync";
@@ -18,8 +18,8 @@ import { markFeedSeen, toMs } from "../utils/feedSeen";
 import { EASE } from "../theme/motion";
 import ImageMeasurer from "../components/ImageMeasurer";
 
-import PaperCard, { isArtworkBlurred } from "../components/PaperCard";
-import PaperCardBlog from "../components/PaperCardBlog";
+import PaperCard, { isArtworkBlurred, paperCardLayoutKey } from "../components/PaperCard";
+import PaperCardBlog, { paperCardBlogLayoutKey } from "../components/PaperCardBlog";
 import { enrichPostForBlogCard, isPortalBlogPost, isBlogCard, buildPortalPostUrl } from "../utils/blogCard";
 import PaperCardMenuOption from "../components/PaperCardMenuOption";
 import { ProfileHoverCardLayer } from "../components/ProfileHoverCard";
@@ -144,7 +144,9 @@ const blogEntryOf = (card) => {
     return entry;
 };
 // An artwork the measurer hasn't listed yet: same "not sized" shape the
-// cellRenderer already skips (`!size.height`), so it keeps its index.
+// cellRenderer already skips (`!size.height`), so it keeps its place in the
+// feed. MasonryExtended holds it as a zero-height hole — the blog cards
+// behind it are placed meanwhile — and opens the space once it is sized.
 const PENDING_ENTRY_CACHE = new WeakMap();
 const pendingEntryOf = (post) => {
     let entry = PENDING_ENTRY_CACHE.get(post);
@@ -498,6 +500,11 @@ const useFeedPersonalData = (api, pathname) => {
     const [hasMore, setHasMore] = useState(true);
     const [loggedInUser, setLoggedInUser] = useState(null);
     const [dataVersion, setDataVersion] = useState(0);
+    // Bumped when the first list for a feed identity (the account) is
+    // committed: the page re-packs the masonry for it. A refresh of the feed
+    // on screen doesn't move it — MasonryExtended re-flows just the rows
+    // that changed.
+    const [layoutEpoch, setLayoutEpoch] = useState(0);
     const prevPathnameRef = useRef(pathname);
 
     // ── View cache (stale-while-revalidate) ────────────────────────────
@@ -535,6 +542,9 @@ const useFeedPersonalData = (api, pathname) => {
             const cacheKey = `feedpersonal|${user || 'anon'}`;
             const keyChanged = cacheKey !== cacheKeyRef.current;
             cacheKeyRef.current = cacheKey;
+            // The first list committed for a new identity lays out from
+            // scratch (layoutEpoch); later ones re-flow in place.
+            let freshLayout = keyChanged || (postsRef.current || []).length === 0;
             let servedFromCache = false;
             if (keyChanged || (postsRef.current || []).length === 0) {
                 const cached = viewCache.get(cacheKey);
@@ -547,6 +557,7 @@ const useFeedPersonalData = (api, pathname) => {
                         // registry re-applies it.
                         setPosts(overlayPendingVotes(cached.posts));
                         setDataVersion(v => v + 1);
+                        if (freshLayout) { setLayoutEpoch(e => e + 1); freshLayout = false; }
                         setIsLoading(false);
                     });
                 }
@@ -569,14 +580,14 @@ const useFeedPersonalData = (api, pathname) => {
                     postsKeyRef.current = cacheKey;
                     setPosts(enriched);
                     viewCache.set(cacheKey, { posts: enriched });
-                    // dataVersion means "the loaded list was replaced": it
-                    // drives the masonry re-pack (the caches are index-keyed
-                    // — see the layout effect in the component) as well as
-                    // the cache-served scroll restore. An event refetch that
-                    // comes back with the same membership and order repaints
-                    // in place and must not re-measure the feed under the
-                    // reader, so only a real replacement bumps it.
+                    // dataVersion means "the loaded list was replaced"; it
+                    // keys the cache-served scroll restore. The masonry
+                    // follows a replacement for the feed on screen by itself
+                    // (MasonryExtended re-flows the rows past the first
+                    // change, measuring only what is new), so only a new
+                    // identity — layoutEpoch — re-packs it.
                     if (replaced) setDataVersion(v => v + 1);
+                    if (freshLayout) setLayoutEpoch(e => e + 1);
                 } else if (votesSignature(enriched) !== votesSignature(postsRef.current)) {
                     // Same membership, fresher vote/payout rows: commit without
                     // the Masonry reset (heights don't depend on votes). The
@@ -722,9 +733,24 @@ const useFeedPersonalData = (api, pathname) => {
         setPosts(prev => prev.map(p => applyVoteToPost(p, permlink, voter, weight)));
     }, []);
 
+    // A post deleted from this page, once its exit animation has played:
+    // flagged the way a soft delete is, so the visible list drops it and
+    // the view cache (mirror effect above) keeps it dropped.
+    const markPostDeleted = useCallback((id) => {
+        setPosts(prev => {
+            let hit = false;
+            const next = prev.map(p => {
+                if (p.id !== id || p.deleted) return p;
+                hit = true;
+                return { ...p, deleted: true };
+            });
+            return hit ? next : prev;
+        });
+    }, []);
+
     return {
-        posts, isLoading, loadingMore, hasMore, loggedInUser, dataVersion,
-        handleVoteChange, loadMorePosts,
+        posts, isLoading, loadingMore, hasMore, loggedInUser, dataVersion, layoutEpoch,
+        handleVoteChange, loadMorePosts, markPostDeleted,
         consumePendingScrollRestore, hasPendingScrollRestore, saveScrollPosition,
     };
 };
@@ -1324,11 +1350,16 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
     const createLabel = t("words.create", { TUC: true });
     const { windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx, loadMoreThreshold } = useWindowDimensions();
     const {
-        posts, isLoading, loadingMore, hasMore, loggedInUser, dataVersion,
-        handleVoteChange, loadMorePosts,
+        posts, isLoading, loadingMore, hasMore, loggedInUser, dataVersion, layoutEpoch,
+        handleVoteChange, loadMorePosts, markPostDeleted,
         consumePendingScrollRestore, hasPendingScrollRestore, saveScrollPosition,
     } = useFeedPersonalData(api, pathname);
     const grid = useFeedPersonalGrid({ windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx, loadMoreThreshold, loadMorePosts, loadingMore });
+
+    // Delete animation (useCellExit): `exitingKeys` makes the masonry scale
+    // the leaving card down and fade it out; `exitedKeys` keeps it out of
+    // the list afterwards, whatever a lagging refetch still returns.
+    const { exitingKeys, exitedKeys, exitCell } = useCellExit();
 
     // NSFW filtering: when the filter is ON (_nsfw_filter truthy) drop posts
     // flagged nsfw before they reach the masonry. Blur of shown posts is handled
@@ -1339,7 +1370,7 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
     const { visiblePosts, measurablePosts } = useMemo(() => {
         const visible = [], measurable = [];
         for (const p of (posts || [])) {
-            if (p.deleted || (settings._nsfw_filter && p.nsfw)) continue;
+            if (p.deleted || exitedKeys.has(p.id) || (settings._nsfw_filter && p.nsfw)) continue;
             if (isBlogCard(p)) {
                 visible.push(!settings._nsfw_enabled && p.nsfw && p.image ? withoutCover(p) : p);
             } else {
@@ -1348,7 +1379,7 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
             }
         }
         return { visiblePosts: visible, measurablePosts: measurable.length === visible.length ? visible : measurable };
-    }, [posts, settings._nsfw_filter, settings._nsfw_enabled]);
+    }, [posts, settings._nsfw_filter, settings._nsfw_enabled, exitedKeys]);
 
     const postNav = usePostNavigation({ api, posts: visiblePosts, masonryRef: grid.masonryRef, scrollToIndex: grid.scrollToIndex, setSelectedPostIndex: grid.setSelectedPostIndex, nsfwEnabled: settings._nsfw_enabled });
 
@@ -1521,61 +1552,34 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
     // Friends badges follow it live. The legacy value is only read once, as
     // the floor an account starts from.
 
-    // Full re-pack: clear the index-keyed CellMeasurerCache and recompute
-    // positions — the hook's own layout-change reset, which also drops the
-    // tracked cell positions (getCellPosition must not answer for a layout
-    // that no longer exists).
+    // Full re-pack: clear the CellMeasurerCache and recompute positions —
+    // the hook's own layout-change reset, which also drops the tracked cell
+    // positions (getCellPosition must not answer for a layout that no
+    // longer exists).
     const repackMasonry = () => grid.resetMasonry();
 
-    // ── Re-pack on list replacement ────────────────────────────────────
-    // The CellMeasurerCache and the masonry's position cache are keyed by
-    // INDEX: a measured height and a placed position belong to "the cell at
-    // index i", not to a post. An append (loadMorePosts) and an in-place
-    // vote patch keep every index → post mapping; a replacement does not.
-    // The fresh fetch landing after a cache-served paint with a post
-    // published since, or the 6 s refetch after an own publish / edit /
-    // delete: each shifts posts to new indices while the caches still hold
-    // the previous occupants' heights, so the masonry drew post i+1 in the
-    // slot measured for post i. In a single column of mixed-height cards
-    // that is an overlap wherever the newcomer is taller than the card it
-    // displaced (and a gap where it is shorter). resetMasonry exists for
-    // exactly this event (see its note in useMasonryGrid); this page only
-    // forced an update. dataVersion bumps exactly when the loaded list was
-    // replaced (loadPage): re-pack in a layout effect so the stale layout
-    // is cleared before that commit paints, then hand the reader's offset
-    // back the same best-effort way the cache-served path does, so a
-    // refetch re-packs under the viewport instead of dropping to the top.
-    // Not under a focus seek, which owns the scroll position.
+    // ── Re-pack on a new feed identity ─────────────────────────────────
+    // A list replaced for the feed on screen — the fresh fetch landing after
+    // a cache-served paint with a post published since, the 6 s refetch
+    // after an own publish / edit / delete, the NSFW filter flipping, an
+    // nsfw blog card losing or regaining its cover — is re-flowed in place
+    // by MasonryExtended: measured heights follow their posts to their new
+    // indices, only new or changed cards are measured, and only the cards
+    // past the first change move. (The caches used to be index-keyed with
+    // nothing to re-key them, so each of those events re-packed the whole
+    // feed under the reader, or overlapped cards when it didn't.)
+    // A new identity — an account switch, the first list — still starts
+    // over: re-pack in a layout effect so the previous layout is cleared
+    // before that commit paints, then hand the reader's offset back the same
+    // best-effort way the cache-served path does. Not under a focus seek,
+    // which owns the scroll position.
     const listVersionMountedRef = useRef(false);
     useLayoutEffect(() => {
         if (!listVersionMountedRef.current) { listVersionMountedRef.current = true; return; }
         const top = grid.getScrollTop();
         repackMasonry();
         if (top > 0 && !hasPendingScrollRestore() && !feedFocus.pendingRef.current) return grid.restoreScrollTop(top);
-    }, [dataVersion]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // The NSFW filter flips: the visible cell set (and its index→item
-    // mapping) changes. Layout effects, like the list re-pack above: the
-    // flipped list never paints a frame on the previous one's geometry.
-    const nsfwFilterMountedRef = useRef(false);
-    useLayoutEffect(() => {
-        if (!nsfwFilterMountedRef.current) { nsfwFilterMountedRef.current = true; return; }
-        repackMasonry();
-    }, [settings._nsfw_filter]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // "Show NSFW" flips: artworks only change blur (same height), but an
-    // nsfw blog card gains or loses its cover, and CellMeasurer never
-    // re-measures a cached cell — re-pack only when such a card is loaded.
-    const hasNsfwBlogCoverRef = useRef(false);
-    hasNsfwBlogCoverRef.current = useMemo(
-        () => (posts || []).some((p) => p.nsfw && p.image && isBlogCard(p)),
-        [posts]
-    );
-    const nsfwEnabledMountedRef = useRef(false);
-    useLayoutEffect(() => {
-        if (!nsfwEnabledMountedRef.current) { nsfwEnabledMountedRef.current = true; return; }
-        if (hasNsfwBlogCoverRef.current) repackMasonry();
-    }, [settings._nsfw_enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [layoutEpoch]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const openCardMenu = useCallback((ev, data) => { setMenuCardXY(Int32Array.of(ev.x - 24, ev.y - 24)); setMenuCardData(data); }, []);
     const closeCardMenu = useCallback(() => { setMenuCardXY(Int32Array.of(0, 0)); setMenuCardData({}); }, []);
@@ -1588,16 +1592,55 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
     const openCreateDialog = useCallback(() => postNav.setCreateDialogOpen(true), [postNav.setCreateDialogOpen]);
     const closeCreateDialog = useCallback(() => postNav.setCreateDialogOpen(false), [postNav.setCreateDialogOpen]);
 
+    // ── Delete animation ───────────────────────────────────────────────
+    // A post deleted while this page is up — from the card menu's dialog,
+    // or anywhere else that broadcasts it (the API's content_deleted, or a
+    // content_updated carrying the `deleted` flag) — scales down and fades
+    // out on the grid, then leaves the list, and the cards past it glide
+    // into its place. Artworks and blog cards alike: the motion is the
+    // masonry cell's, not the card's. The refetch the data hook schedules
+    // for the same event confirms it later without moving anything.
+    const visiblePostsRef = useRef(visiblePosts);
+    visiblePostsRef.current = visiblePosts;
+    const exitPost = useCallback((post) => {
+        if (post && post.id != null) exitCell(post.id, markPostDeleted, DELETE_EXIT_DELAY_MS);
+    }, [exitCell, markPostDeleted]);
+    useEffect(() => {
+        if (!api?.eventEmitter) return;
+        const exitByRef = (payload) => {
+            if (!payload?.permlink) return;
+            exitPost((visiblePostsRef.current || []).find((p) => isSamePost(p, payload)));
+        };
+        const onContentDeleted = (payload) => exitByRef(payload);
+        const onContentUpdated = (payload) => {
+            if (payload?.jsonMetadata?.deleted === true) exitByRef(payload);
+        };
+        api.eventEmitter.on('content_deleted', onContentDeleted);
+        api.eventEmitter.on('content_updated', onContentUpdated);
+        return () => {
+            api.eventEmitter.off('content_deleted', onContentDeleted);
+            api.eventEmitter.off('content_updated', onContentUpdated);
+        };
+    }, [api, exitPost]);
+
     // ── Own-post management (card menu → page-level dialogs) ───────────
     const [editPostData, setEditPostData] = useState(null);
     const [deletePostData, setDeletePostData] = useState(null);
+    // The post the delete dialog was opened for, kept past the dialog's
+    // close for a success callback that arrives after it.
+    const deleteTargetRef = useRef(null);
     const onEditPost = useCallback((data) => { setEditPostData(data); }, []);
-    const onDeletePost = useCallback((data) => { setDeletePostData(data); }, []);
+    const onDeletePost = useCallback((data) => { deleteTargetRef.current = data; setDeletePostData(data); }, []);
     const closeEditPost = useCallback(() => { setEditPostData(null); }, []);
     const closeDeletePost = useCallback(() => { setDeletePostData(null); }, []);
     // The broadcast emits `content_updated` → the listener above refetches.
     const handlePostEdited = useCallback(() => {}, []);
-    const handlePostDeleted = useCallback(() => {}, []);
+    // The broadcast's content event usually starts the exit first; this
+    // covers a delete that reports success without one. It runs once either
+    // way (useCellExit ignores a key it already has).
+    const handlePostDeleted = useCallback((deleted) => {
+        exitPost(deleted && deleted.id != null ? deleted : deleteTargetRef.current);
+    }, [exitPost]);
     const onVoteChange = useCallback((permlink, voter, weight) => handleVoteChange(permlink, voter, weight), [handleVoteChange]);
 
     // Mount the (now-lazy) edit/delete dialogs on first use and keep them
@@ -1615,10 +1658,11 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
 
     // ── Masonry entries: measured artworks + blog placeholders ─────────
     // ImageMeasurer only sees artworks; this re-threads the blog entries in
-    // at their feed position. Every visible post keeps a fixed index — the
-    // CellMeasurerCache is index-keyed — so an artwork missing from the
-    // measurer's list (not listed yet) gets an unsized entry rather than
-    // being dropped, which would shift every blog card behind it. The result
+    // at their feed position. Every visible post keeps its place: an artwork
+    // missing from the measurer's list (not listed yet) gets an unsized
+    // entry rather than being dropped, so the cards behind it don't shift
+    // back and forth as the measurer catches up (each shift would re-flow
+    // the grid from there). The result
     // keeps its identity while nothing changed, so MasonryExtended isn't
     // handed a fresh itemsWithSizes on every render. With no blog card loaded
     // the measurer's own list passes through untouched.
@@ -1746,7 +1790,17 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
     // (see the note in MasonryExtended).
     const itemsRef = useRef(EMPTY_ITEMS);
     const masonryKeyMapper = useCallback((index) => itemsRef.current[index]?.size?.id, []);
-    const { scrollingResetTimeInterval, cellPositioner, setMasonryElement, viewWidth, paddingX } = grid;
+    // What each cell's height depends on — a change re-measures that cell in
+    // place and re-flows the cells past it. Artworks: paperCardLayoutKey
+    // (an unsized placeholder reads 0x0, so getting sized counts too). Blog
+    // cards: paperCardBlogLayoutKey (cover, title, excerpt — dropping the
+    // cover with "show NSFW" off counts).
+    const masonryLayoutKey = useCallback((index) => {
+        const entry = itemsRef.current[index];
+        if (!entry) return undefined;
+        return isBlogCard(entry.item) ? paperCardBlogLayoutKey(entry.item) : paperCardLayoutKey(entry);
+    }, []);
+    const { scrollingResetTimeInterval, cellPositioner, setMasonryElement, viewWidth, paddingX, onRelayout } = grid;
     const masonryStyle = useMemo(() => ({ padding: `16px ${paddingX}px 0px ${paddingX}px` }), [paddingX]);
     const renderMasonry = useCallback((measured) => {
         const itemsWithSizes = withBlogEntries(measured);
@@ -1760,6 +1814,9 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
                 cellCount={(itemsWithSizes || []).length | 0}
                 itemsWithSizes={itemsWithSizes}
                 keyMapper={masonryKeyMapper}
+                cellLayoutKey={masonryLayoutKey}
+                exitingKeys={exitingKeys}
+                onRelayout={onRelayout}
                 cellMeasurerCache={cellMeasurerCache}
                 cellPositioner={cellPositioner}
                 cellRenderer={cellRenderer}
@@ -1769,8 +1826,8 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
             />
         );
     }, [withBlogEntries, masonryStyle, scrollingResetTimeInterval, postListHeight,
-        masonryKeyMapper, cellMeasurerCache, cellPositioner, cellRenderer, overscanByPixels,
-        setMasonryElement, viewWidth]);
+        masonryKeyMapper, masonryLayoutKey, exitingKeys, onRelayout, cellMeasurerCache,
+        cellPositioner, cellRenderer, overscanByPixels, setMasonryElement, viewWidth]);
 
     // ── Render ─────────────────────────────────────────────────────────
     return (

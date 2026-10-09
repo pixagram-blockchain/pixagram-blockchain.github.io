@@ -6,10 +6,12 @@ import { unstable_batchedUpdates as batch } from "preact/compat";
 import { HISTORY, buildPostUrl, buildCommentFocusHash, isPostUrl, parsePostUrl, isDeletedPost, isCommunityPostUrl, COMMUNITY_TAG_REGEX, POST_DRAWER_TAB_HASHES } from "../utils/constants";
 import withStyles from "@material-ui/core/styles/withStyles";
 import * as actions from "../actions/utils";
-import { CellMeasurer, CellMeasurerCache, createMasonryCellPositioner } from "@pixagram/virtualized/dist/es/index";
-import MasonryExtended from "../components/MasonryExtended";
+import { CellMeasurer, CellMeasurerCache } from "@pixagram/virtualized/dist/es/index";
+// The positioner comes from MasonryExtended: same library positioner, but it
+// remembers its config, which the Masonry's relayout needs to replay it.
+import MasonryExtended, { createMasonryCellPositioner } from "../components/MasonryExtended";
 import useWindowDimensions from "../hooks/useWindowDimensions";
-import { BAND_REFRESH_FRACTION } from "../hooks/useMasonryGrid";
+import { BAND_REFRESH_FRACTION, useCellExit, DELETE_EXIT_DELAY_MS } from "../hooks/useMasonryGrid";
 import useVoteSync from "../hooks/useVoteSync";
 import { usePictureDialog } from "../hooks/usePictureDialog";
 import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto } from "../utils/voteSync";
@@ -18,7 +20,7 @@ import {
     EASE as E, TRANSITION_FAST as TF, TRANSITION_MEDIUM as TM,
     TRANSITION_ENTRY as TE, RAINBOW_RIPPLE as RIPPLE, slideKF,
 } from "../theme/motion";
-import PaperCard, { isArtworkBlurred } from "../components/PaperCard";
+import PaperCard, { isArtworkBlurred, paperCardLayoutKey } from "../components/PaperCard";
 import PaperCardMenuOption from "../components/PaperCardMenuOption";
 import { ProfileHoverCardLayer } from "../components/ProfileHoverCard";
 import Button from "@material-ui/core/Button";
@@ -1071,9 +1073,6 @@ const useProfileData = (api, pathname) => {
 // ── useTabData ─────────────────────────────────────────────────────────
 // Per-tab bookkeeping (posts 0, comments 1, replies 2, history 3).
 const tabBit = (cat) => 1 << cat;
-const INITIAL_TAB_VERSIONS = [0, 0, 0, 0];
-const bumpTab = (cat) => (v) => { const n = v.slice(); n[cat] += 1; return n; };
-const bumpAllTabs = (v) => v.map((n) => n + 1);
 
 // Who a row is: author/permlink for posts, comments and replies, the
 // account-history id for timeline events.
@@ -1087,23 +1086,29 @@ const rowIdentity = (x) => {
     return String(x.id);
 };
 
-// The height-relevant content of a row, per tab: what a reload has to
-// change for the cell heights cached at that index to go stale. Votes,
-// payouts and avatars repaint in place and are deliberately left out.
+// The height-relevant content of a row, per list tab (comments 1, replies
+// 2, history 3): what has to change for its measured height to go stale.
+// Handed to that tab's MasonryExtended as `cellLayoutKey` (rowLayoutKey):
+// a row whose shape changes is re-measured in place and the rows past it
+// re-flow. Votes, payouts and avatars repaint in place and are deliberately
+// left out. (The posts grid uses PaperCard's own paperCardLayoutKey.)
 const ROW_SHAPES = [
-    (p) => `${rowIdentity(p)}|${p.image}|${p.title}|${p.nsfw ? 1 : 0}|${p.deleted ? 1 : 0}|${(p.tags || []).join(',')}|${p._summary}|${(p._description_html || '').length}`,
+    null,
     (c) => `${rowIdentity(c)}|${c.title}|${c.body}`,
     (r) => `${rowIdentity(r)}|${r.title}|${r.body}|${(r.replyTo && r.replyTo.username) || ''}`,
     (e) => rowIdentity(e),
 ];
-
-const sameRows = (a, b, shape) => {
-    if (a === b) return true;
-    if (!a || !b || a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-        if (!a[i] || !b[i] || shape(a[i]) !== shape(b[i])) return false;
+// One string per row object (a render then costs a WeakMap lookup per cell).
+const ROW_SHAPE_CACHE = [null, new WeakMap(), new WeakMap(), new WeakMap()];
+const rowLayoutKey = (cat, row) => {
+    if (!row) return undefined;
+    const cache = ROW_SHAPE_CACHE[cat];
+    let key = cache.get(row);
+    if (key === undefined) {
+        key = ROW_SHAPES[cat](row);
+        cache.set(row, key);
     }
-    return true;
+    return key;
 };
 
 // A reload fetches the first page again. When the reader had already paged
@@ -1160,15 +1165,12 @@ const useTabData = (api, account, category, ready) => {
     // re-fetched those pages forever or read the empty result as "bottom
     // reached", ending the feed while older events still existed below.
     const timelineFloorRef = useRef(Infinity);
-    // Per-tab data version, bumped when THAT tab's rows are replaced by rows
-    // that lay out differently (see ROW_SHAPES). The page resets the visible
-    // tab's Masonry — CellMeasurerCache, positioner, the Masonry's own
-    // _positionCache — when the visible tab's version moves. It used to be
-    // one shared counter bumped by every load: the visible grid was reset
-    // (every visible cell re-measured, a forced reflow each) for a background
-    // refresh of ANOTHER tab 6 s after any publish or edit, and on every tab
-    // entry for a reload that returned exactly the rows already on screen.
-    const [dataVersions, setDataVersions] = useState(INITIAL_TAB_VERSIONS);
+    // (No per-tab data version any more. A reload that changes a tab's rows —
+    // a publish, an edit, a delete — is re-flowed in place by that tab's
+    // MasonryExtended: measured heights follow their rows, only new or
+    // changed rows are measured, only the rows past the first change move.
+    // The version used to reset the whole grid instead, every visible cell
+    // re-measured with a flash, 6 s after any publish, edit or delete.)
     // Tabs whose first load for this profile has completed. The empty state
     // waits for it — and stays up while a later reload revalidates. It used
     // to follow a single global loading flag, so it flashed for a frame on
@@ -1208,7 +1210,6 @@ const useTabData = (api, account, category, ready) => {
         // newest load of this tab.
         const isLatest = () => currentNameRef.current === name && loadGenRef.current[cat] === gen;
         busyRef.current[cat] += 1;
-        let changed = false;
         try {
             const prev = () => listsRef.current[cat];
             switch (cat) {
@@ -1237,9 +1238,7 @@ const useTabData = (api, account, category, ready) => {
                     // a moment ago isn't in the fetched rows yet (indexer lag);
                     // the pending registry keeps it until the chain shows it.
                     const fresh = overlayPendingVotes(p.map(x => enrichPostForCard(x, account, {})));
-                    const before = prev();
-                    const merged = keepLoadedTail(before, fresh);
-                    changed = !sameRows(before, merged, ROW_SHAPES[0]);
+                    const merged = keepLoadedTail(prev(), fresh);
                     if (merged === fresh) setHasMorePosts(true);
                     setPosts(merged);
                     fetchVoterProfiles(p, account, api)
@@ -1266,9 +1265,7 @@ const useTabData = (api, account, category, ready) => {
                     const ownOnly = {}; if (account?.name) ownOnly[account.name] = account.image;
                     const buildComments = (vp) => overlayPendingVotes(c.map((x,i)=>enrichCommentForCard(x,account,i,vp)).sort((a,b)=>b.date-a.date));
                     const fresh = buildComments(ownOnly);
-                    const before = prev();
-                    const merged = keepLoadedTail(before, fresh);
-                    changed = !sameRows(before, merged, ROW_SHAPES[1]);
+                    const merged = keepLoadedTail(prev(), fresh);
                     if (merged === fresh) setHasMoreComments(true);
                     setComments(merged);
                     fetchVoterProfiles(c, account, api)
@@ -1294,7 +1291,6 @@ const useTabData = (api, account, category, ready) => {
                     // to keep: the fresh page is the list.)
                     const ownOnly = {}; if (account.name) ownOnly[account.name] = account.image;
                     const fresh = overlayPendingVotes(transformRepliesToCardFormat(rr, account, ownOnly, []));
-                    changed = !sameRows(prev(), fresh, ROW_SHAPES[2]);
                     setReplies(fresh);
                     const relAccs = rr.flatMap(r=>[r.author,r.parent_author].filter(Boolean));
                     const allVotes = rr.flatMap(r=>r.active_votes||[]);
@@ -1316,13 +1312,11 @@ const useTabData = (api, account, category, ready) => {
                     let floor = Infinity;
                     for (let i = 0; i < (h||[]).length; i++) { const ix = h[i]?.[0]; if (typeof ix === 'number' && ix < floor) floor = ix; }
                     const fresh = parseAccountHistoryToTimeline(h||[], name);
-                    const before = prev();
-                    const merged = keepLoadedTail(before, fresh);
+                    const merged = keepLoadedTail(prev(), fresh);
                     if (merged === fresh) { setHasMoreTimeline(true); timelineFloorRef.current = floor; }
                         // Kept the deeper pages: the pagination floor stays where
                     // they reached.
                     else timelineFloorRef.current = Math.min(timelineFloorRef.current, floor);
-                    changed = !sameRows(before, merged, ROW_SHAPES[3]);
                     setTimeline(merged);
                     break;
                 }
@@ -1333,8 +1327,6 @@ const useTabData = (api, account, category, ready) => {
             if (currentNameRef.current === name) busyRef.current[cat] = Math.max(0, busyRef.current[cat] - 1);
         }
         if (!isLatest()) return;
-        // Re-lay this tab out only if its rows lay out differently now.
-        if (changed) setDataVersions(bumpTab(cat));
         setLoadedMask(m => m | tabBit(cat));
     }, [api, account]);
 
@@ -1366,11 +1358,11 @@ const useTabData = (api, account, category, ready) => {
         setHasMorePosts(true);
         setHasMoreComments(true);
         setHasMoreTimeline(true);
-        // Nothing loaded and nothing in flight for the new profile yet; every
-        // tab's layout is invalid.
+        // Nothing loaded and nothing in flight for the new profile yet. (The
+        // emptied lists clear the grid's layout: MasonryExtended re-flows from
+        // index 0 with nothing left to place.)
         setLoadedMask(0);
         busyRef.current = [0, 0, 0, 0];
-        setDataVersions(bumpAllTabs);
     }
 
     // Load the visible tab on a tab switch and on a profile switch — once
@@ -1585,11 +1577,25 @@ const useTabData = (api, account, category, ready) => {
     // this object was a fresh literal every render, so every downstream
     // hook keyed on `tabData` recomputed on every Profile render. setPosts
     // is a stable useState setter and isTabBusy a [] callback.
+    // A post deleted from this page, once its exit animation has played:
+    // flagged the way a soft delete is, so the visible list drops it.
+    const markPostDeleted = useCallback((id) => {
+        setPosts(prev => {
+            let hit = false;
+            const next = prev.map(p => {
+                if (p.id !== id || p.deleted) return p;
+                hit = true;
+                return { ...p, deleted: true };
+            });
+            return hit ? next : prev;
+        });
+    }, []);
+
     return useMemo(() => ({
-        posts, comments, replies, timeline, dataVersions, loadedMask, isTabBusy,
-        loadMorePosts, loadMoreComments, loadMoreTimeline, handleVoteChange, setPosts,
-    }), [posts, comments, replies, timeline, dataVersions, loadedMask, isTabBusy,
-        loadMorePosts, loadMoreComments, loadMoreTimeline, handleVoteChange]);
+        posts, comments, replies, timeline, loadedMask, isTabBusy,
+        loadMorePosts, loadMoreComments, loadMoreTimeline, handleVoteChange, setPosts, markPostDeleted,
+    }), [posts, comments, replies, timeline, loadedMask, isTabBusy,
+        loadMorePosts, loadMoreComments, loadMoreTimeline, handleVoteChange, markPostDeleted]);
 };
 
 // ── Scroll chrome store ────────────────────────────────────────────────
@@ -1905,13 +1911,21 @@ const useMasonryGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels,
         topScrollByIndex.current[index] = top; heightByIndex.current[index] = height; xyByIndex.current[index] = [rowIndex, columnIndex];
     }, []);
 
+    // The tab's MasonryExtended re-placed every cell from `from` on (a row
+    // added, removed or changed there): the positions tracked past it are
+    // stale until those cells render again. Called during the Masonry's
+    // render — refs only. Same as the shared hook's.
+    const onRelayout = useCallback((from) => {
+        if (topScrollByIndex.current.length > from) topScrollByIndex.current.length = from;
+        if (heightByIndex.current.length > from) heightByIndex.current.length = from;
+    }, []);
+
     const postListHeight = windowHeight - (isMobile ? 80 : 96);
 
-    // Force-clear all Masonry caches for the specified tab. Used by the
-    // parent whenever a tab's data is fully replaced (post_published /
-    // comment_published refetch). Identical to the [columnWidth, …, category]
-    // layout effect above, but exposed as a callable so a data refetch can
-    // trigger the same flush without piggybacking on a layout-prop change.
+    // Force-clear all Masonry caches for the specified tab. Identical to the
+    // [columnWidth, …, category] layout effect above, but callable. (A tab's
+    // reload no longer calls it: MasonryExtended re-flows changed rows in
+    // place.)
     // The CellMeasurerCache and cellPositioner are shared across all four
     // tabs in this hook, so clearing them is safe — each tab will re-measure
     // its own cells on the next render. We still target a specific tab's
@@ -1933,10 +1947,10 @@ const useMasonryGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixels,
         masonryRefs, setMasonryRef, setRootElement, cellMeasurerCache, cellPositioner, columnWidth, columnCount,
         scrollingResetTimeInterval: SCROLL_MS, scrollStore, scrollTo, scrollToIndex,
         pageWidth, postListHeight, rootDims, overscanByPixels, selectedPostIndex, setSelectedPostIndex,
-        trackElementPosition, gutterSize, resetMasonry,
+        trackElementPosition, gutterSize, resetMasonry, onRelayout,
     }), [setMasonryRef, setRootElement, cellMeasurerCache, cellPositioner, columnWidth, columnCount,
         scrollStore, scrollTo, scrollToIndex, pageWidth, postListHeight, rootDims,
-        overscanByPixels, selectedPostIndex, trackElementPosition, gutterSize, resetMasonry]);
+        overscanByPixels, selectedPostIndex, trackElementPosition, gutterSize, resetMasonry, onRelayout]);
 };
 
 // ── usePostNavigation (Profile) ────────────────────────────────────────
@@ -2472,9 +2486,13 @@ const Profile = ({ classes, settings, pathname, api }) => {
     // truthy) drop posts flagged nsfw before the masonry sees them. Blur of
     // shown posts is handled by PaperCard via _nsfw_enabled. Only the posts grid
     // carries nsfw cards; the other tabs are unchanged.
+    // Delete animation (useCellExit): `exitingKeys` makes the posts grid
+    // scale the leaving card down and fade it out; `exitedKeys` keeps it out
+    // of the list afterwards, whatever a lagging refetch still returns.
+    const { exitingKeys, exitedKeys, exitCell } = useCellExit();
     const visiblePosts = useMemo(
-        () => (tabData.posts || []).filter((p) => !p.deleted && (!settings._nsfw_filter || !p.nsfw)),
-        [tabData.posts, settings._nsfw_filter]
+        () => (tabData.posts || []).filter((p) => !p.deleted && !exitedKeys.has(p.id) && (!settings._nsfw_filter || !p.nsfw)),
+        [tabData.posts, settings._nsfw_filter, exitedKeys]
     );
 
     const postNav = usePostNavigation({ api, posts: visiblePosts, masonryRefs: grid.masonryRefs, scrollToIndex: grid.scrollToIndex, setSelectedPostIndex: grid.setSelectedPostIndex, profileUsername: parsed.username, nsfwEnabled: settings._nsfw_enabled });
@@ -2547,23 +2565,13 @@ const Profile = ({ classes, settings, pathname, api }) => {
     // Force masonry update when data changes
     const activeData = [tabData.posts, tabData.comments, tabData.replies, tabData.timeline][category];
 
-    // Full masonry reset for the VISIBLE tab when its rows were replaced by
-    // rows that lay out differently — its own data version moved (see
-    // useTabData) — or when the NSFW filter changes which posts it shows.
-    // Not on a tab switch: that tab's Masonry mounts fresh against a fresh
-    // cache. A background refresh of another tab, or a reload that returned
-    // the rows already on screen, no longer re-measures the grid being read.
-    // Layout effect: the stale geometry is cleared before the commit paints
-    // (it used to paint one frame of the new rows on the old heights).
-    const activeVersion = tabData.dataVersions[category];
-    const laidOutRef = useRef(null);
-    useLayoutEffect(() => {
-        const last = laidOutRef.current;
-        laidOutRef.current = { category, version: activeVersion, nsfwFilter: settings._nsfw_filter };
-        if (!last || last.category !== category) return;
-        grid.resetMasonry(category);
-    }, [category, activeVersion, settings._nsfw_filter]); // eslint-disable-line react-hooks/exhaustive-deps
-
+    // No masonry reset when the visible tab's rows change (a reload after a
+    // publish, an edit or a delete, the NSFW filter flipping, a profile
+    // switch emptying the lists): its MasonryExtended re-flows the rows past
+    // the first change in place, measuring only what is new or changed —
+    // where the old per-tab reset re-measured every visible cell, with a
+    // flash, under the reader. Layout changes (column width, tab switch)
+    // still start over in the grid hook.
     useEffect(() => { const m = grid.masonryRefs.current[category]; if (m) m.forceUpdate(); }, [activeData, category]);
 
     const locales = settings._selected_locales_code;
@@ -2694,12 +2702,46 @@ const Profile = ({ classes, settings, pathname, api }) => {
     const openCardMenu = useCallback((ev, data) => { setMenuCardXY(Int32Array.of(ev.x-24,ev.y-24)); setMenuCardData(data); }, []);
     const closeCardMenu = useCallback(() => { setMenuCardXY(Int32Array.of(0,0)); setMenuCardData({}); }, []);
 
+    // ── Delete animation ───────────────────────────────────────────────
+    // A post of this profile deleted while the page is up — from the card
+    // menu's dialog, or anywhere else that broadcasts it (the API's
+    // content_deleted, or a content_updated carrying the `deleted` flag) —
+    // scales down and fades out on the posts grid, then leaves the list, and
+    // the cards past it glide into its place. The tab refetch scheduled for
+    // the same event confirms it later without moving anything.
+    const { markPostDeleted } = tabData;
+    const visiblePostsRef = useRef(visiblePosts);
+    visiblePostsRef.current = visiblePosts;
+    const exitPost = useCallback((post) => {
+        if (post && post.id != null) exitCell(post.id, markPostDeleted, DELETE_EXIT_DELAY_MS);
+    }, [exitCell, markPostDeleted]);
+    useEffect(() => {
+        if (!api?.eventEmitter) return;
+        const exitByRef = (payload) => {
+            if (!payload?.permlink) return;
+            exitPost((visiblePostsRef.current || []).find((p) => isSamePost(p, payload)));
+        };
+        const onContentDeleted = (payload) => exitByRef(payload);
+        const onContentUpdated = (payload) => {
+            if (payload?.jsonMetadata?.deleted === true) exitByRef(payload);
+        };
+        api.eventEmitter.on('content_deleted', onContentDeleted);
+        api.eventEmitter.on('content_updated', onContentUpdated);
+        return () => {
+            api.eventEmitter.off('content_deleted', onContentDeleted);
+            api.eventEmitter.off('content_updated', onContentUpdated);
+        };
+    }, [api, exitPost]);
+
     // ── Own-content management (card menu → page-level dialogs) ────────
     const [editPostData, setEditPostData] = useState(null);
     const [deletePostData, setDeletePostData] = useState(null);
     const [deleteCommentData, setDeleteCommentData] = useState(null);
+    // The post the delete dialog was opened for, kept past the dialog's
+    // close for a success callback that arrives after it.
+    const deleteTargetRef = useRef(null);
     const onEditPost = useCallback((data) => { setEditPostData(data); }, []);
-    const onDeletePost = useCallback((data) => { setDeletePostData(data); }, []);
+    const onDeletePost = useCallback((data) => { deleteTargetRef.current = data; setDeletePostData(data); }, []);
     const onDeleteComment = useCallback((data) => { setDeleteCommentData(data); }, []);
     const closeEditPost = useCallback(() => { setEditPostData(null); }, []);
     const closeDeletePost = useCallback(() => { setDeletePostData(null); }, []);
@@ -2720,7 +2762,12 @@ const Profile = ({ classes, settings, pathname, api }) => {
     // Broadcasts emit content_updated / content_deleted → the tab listeners
     // above refetch after the chain-indexing debounce.
     const handlePostEdited = useCallback(() => {}, []);
-    const handlePostDeleted = useCallback(() => {}, []);
+    // The broadcast's content event usually starts the exit first; this
+    // covers a delete that reports success without one. It runs once either
+    // way (useCellExit ignores a key it already has).
+    const handlePostDeleted = useCallback((deleted) => {
+        exitPost(deleted && deleted.id != null ? deleted : deleteTargetRef.current);
+    }, [exitPost]);
     // Called by DeleteCommentModal once the delete_comment broadcast succeeds.
     // The modal owns the network call + its own loading/error state; the
     // content_deleted listener refetches the affected tabs.
@@ -2901,7 +2948,8 @@ const Profile = ({ classes, settings, pathname, api }) => {
         height: grid.postListHeight,
         overscanByPixels: grid.overscanByPixels,
         width: grid.pageWidth,
-    }), [grid.scrollingResetTimeInterval, grid.postListHeight, grid.overscanByPixels, grid.pageWidth]);
+        onRelayout: grid.onRelayout,
+    }), [grid.scrollingResetTimeInterval, grid.postListHeight, grid.overscanByPixels, grid.pageWidth, grid.onRelayout]);
 
     // ── Masonry key-mappers, one per tab, created once ─────────────────
     // All four were inline lambdas — a fresh `keyMapper` prop on every
@@ -2921,6 +2969,13 @@ const Profile = ({ classes, settings, pathname, api }) => {
     const commentsKeyMapper = useCallback((i) => { const c = commentsRef.current?.[i]; return c ? c.date : `missing_${i}`; }, []);
     const repliesKeyMapper = useCallback((i) => { const r = repliesRef.current?.[i]; return r ? r.date : `missing_${i}`; }, []);
     const timelineKeyMapper = useCallback((i) => { const ev = timelineRef.current?.[i]; return ev ? ev.id : `tl_${i}`; }, []);
+    // What each cell's height depends on, per tab (PaperCard's own key for
+    // the posts grid, ROW_SHAPES for the lists): a row whose key changes —
+    // an edit — is re-measured in place and the rows past it re-flow.
+    const postsLayoutKey = useCallback((i) => paperCardLayoutKey(postsItemsRef.current[i]), []);
+    const commentsLayoutKey = useCallback((i) => rowLayoutKey(1, commentsRef.current?.[i]), []);
+    const repliesLayoutKey = useCallback((i) => rowLayoutKey(2, repliesRef.current?.[i]), []);
+    const timelineLayoutKey = useCallback((i) => rowLayoutKey(3, timelineRef.current?.[i]), []);
 
     // The posts tab's ImageMeasurer render-prop, memoized on what it forwards
     // (it was an inline arrow, failing ImageMeasurer's PureComponent compare
@@ -2933,10 +2988,11 @@ const Profile = ({ classes, settings, pathname, api }) => {
         return (
             <MasonryExtended key="masonry-profile-posts" {...masonryProps}
                              cellCount={(itemsWithSizes||[]).length|0} itemsWithSizes={itemsWithSizes}
-                             keyMapper={postsKeyMapper} cellMeasurerCache={gridCache} cellPositioner={gridPositioner}
+                             keyMapper={postsKeyMapper} cellLayoutKey={postsLayoutKey} exitingKeys={exitingKeys}
+                             cellMeasurerCache={gridCache} cellPositioner={gridPositioner}
                              cellRenderer={cellRendererPosts} ref={setMasonryRef(0)} />
         );
-    }, [masonryProps, postsKeyMapper, gridCache, gridPositioner, cellRendererPosts, setMasonryRef]);
+    }, [masonryProps, postsKeyMapper, postsLayoutKey, exitingKeys, gridCache, gridPositioner, cellRendererPosts, setMasonryRef]);
 
     let body = null;
     if (!isEmpty) {
@@ -2945,9 +3001,9 @@ const Profile = ({ classes, settings, pathname, api }) => {
                 {renderPostsMasonry}
             </ImageMeasurer>
         );
-        else if (category === 1) body = (<div className={classes.masonry} key="comments"><MasonryExtended key="masonry-comments" {...masonryProps} cellCount={(tabData.comments||[]).length|0} items={tabData.comments} keyMapper={commentsKeyMapper} cellMeasurerCache={grid.cellMeasurerCache} cellPositioner={grid.cellPositioner} cellRenderer={cellRendererComments} ref={grid.setMasonryRef(1)} /></div>);
-        else if (category === 2) body = (<div className={classes.masonry} key="replies"><MasonryExtended key="masonry-replies" {...masonryProps} cellCount={(tabData.replies||[]).length|0} items={tabData.replies} keyMapper={repliesKeyMapper} cellMeasurerCache={grid.cellMeasurerCache} cellPositioner={grid.cellPositioner} cellRenderer={cellRendererReplies} ref={grid.setMasonryRef(2)} /></div>);
-        else body = (<div className={`${classes.masonry} ${classes.masonryTimeline}`} key="timeline"><MasonryExtended key="masonry-timeline" {...masonryProps} cellCount={(tabData.timeline||[]).length|0} items={tabData.timeline} keyMapper={timelineKeyMapper} cellMeasurerCache={grid.cellMeasurerCache} cellPositioner={grid.cellPositioner} cellRenderer={cellRendererTimeline} ref={grid.setMasonryRef(3)} /></div>);
+        else if (category === 1) body = (<div className={classes.masonry} key="comments"><MasonryExtended key="masonry-comments" {...masonryProps} cellCount={(tabData.comments||[]).length|0} items={tabData.comments} keyMapper={commentsKeyMapper} cellLayoutKey={commentsLayoutKey} cellMeasurerCache={grid.cellMeasurerCache} cellPositioner={grid.cellPositioner} cellRenderer={cellRendererComments} ref={grid.setMasonryRef(1)} /></div>);
+        else if (category === 2) body = (<div className={classes.masonry} key="replies"><MasonryExtended key="masonry-replies" {...masonryProps} cellCount={(tabData.replies||[]).length|0} items={tabData.replies} keyMapper={repliesKeyMapper} cellLayoutKey={repliesLayoutKey} cellMeasurerCache={grid.cellMeasurerCache} cellPositioner={grid.cellPositioner} cellRenderer={cellRendererReplies} ref={grid.setMasonryRef(2)} /></div>);
+        else body = (<div className={`${classes.masonry} ${classes.masonryTimeline}`} key="timeline"><MasonryExtended key="masonry-timeline" {...masonryProps} cellCount={(tabData.timeline||[]).length|0} items={tabData.timeline} keyMapper={timelineKeyMapper} cellLayoutKey={timelineLayoutKey} cellMeasurerCache={grid.cellMeasurerCache} cellPositioner={grid.cellPositioner} cellRenderer={cellRendererTimeline} ref={grid.setMasonryRef(3)} /></div>);
     }
 
     // ── Sidebar/mobile props ───────────────────────────────────────────

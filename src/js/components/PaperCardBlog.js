@@ -38,6 +38,32 @@ const SHOW_COVER_TAGS = false;
 // so PaperCardActions isn't handed a fresh `style` on every render.
 const ACTIONS_STYLE = { padding: '0px 16px 0px 4px', marginTop: 'auto' };
 
+// The excerpt line under the cover, as the card derives it (see `excerpt`
+// in the component).
+const excerptOf = (data) =>
+    data.excerpt || (data.content ? data.content.replace(/<[^>]*>/g, '').substring(0, 200) + '...' : '');
+
+// ── Layout key ──────────────────────────────────────────────────────
+// What a blog card's height depends on, for the masonry hosts'
+// `cellLayoutKey` (FeedPersonal, Community): the cover — present or not; its
+// box has a fixed size for a given column width — the title, the one header
+// line that wraps, and the excerpt, clamped to three lines. When it changes
+// for a card already on the grid (an edit, the cover dropped while "show
+// NSFW" is off), MasonryExtended re-measures that card in place and re-flows
+// the cards past it. Votes, payout, comment count, avatar, date, reading
+// time and the portal name repaint inside the same box (the subheader is one
+// ellipsized line), and muting only filters it. One string per card object.
+const LAYOUT_KEYS = new WeakMap();
+export function paperCardBlogLayoutKey(data) {
+    if (!data) return undefined;
+    let key = LAYOUT_KEYS.get(data);
+    if (key === undefined) {
+        key = (data.image ? '1' : '0') + '|' + (data.title || '') + '|' + excerptOf(data);
+        LAYOUT_KEYS.set(data, key);
+    }
+    return key;
+}
+
 const styles = theme => ({
     card: {
         width: '100%',
@@ -70,12 +96,21 @@ const styles = theme => ({
     // (stats.hide or stats.gray). Grayscale+dim by default so the moderation
     // state is always visible at a glance; hover restores the full card so
     // users can still read the content on demand. Transition is smooth.
+    // The transitions outrank the card's own by specificity (same selectors,
+    // declared after `card`), not by !important: an !important here also
+    // beat the masonry's inline transition — the card is the masonry cell —
+    // so a muted card jumped instead of gliding, and vanished at once instead
+    // of playing its delete exit.
     cardMuted: {
         filter: 'grayscale(1) brightness(0.5)',
-        transition: 'filter 225ms cubic-bezier(0.4, 0, 0.2, 1) !important',
         '&:hover': {
             filter: 'grayscale(0) brightness(1)',
-            transition: 'filter 175ms cubic-bezier(0.4, 0, 0.2, 1) !important',
+        },
+        '&.MuiCard-root': {
+            transition: 'filter 225ms cubic-bezier(0.4, 0, 0.2, 1)',
+        },
+        '&.MuiCard-root:hover': {
+            transition: 'filter 175ms cubic-bezier(0.4, 0, 0.2, 1)',
         },
     },
     // `noMargin`: drops the card's own spacing for hosts whose masonry spacer
@@ -533,8 +568,8 @@ function PaperCardBlog({
     // Memoized: stripping tags out of the whole content string is the one
     // per-render cost worth pinning down (vote patches re-render the card).
     const excerpt = useMemo(
-        () => data.excerpt || (data.content ? data.content.replace(/<[^>]*>/g, '').substring(0, 200) + '...' : ''),
-        [data.excerpt, data.content]
+        () => excerptOf(data),
+        [data.excerpt, data.content] // eslint-disable-line react-hooks/exhaustive-deps
     );
 
     const renderImageContent = (isMobile = false) => (

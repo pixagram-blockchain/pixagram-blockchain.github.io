@@ -16,7 +16,8 @@
 //   <SearchFilters …/>       the filter panel (show · time · colour · authors · communities)
 //   <TokenField …/>          multi-value text field with suggestions (authors, communities)
 //   <SuggestionList/>        what the Worker proposes for the text typed (top of the dropdown)
-//   <AnswerCard/>            the answer to a question: /ask (artworks) or /help (documentation)
+//   <AnswerCard/>            the answer to a question: /ask (artworks) or /help (documentation);
+//                            v4: the index's answer, then GPT-OSS's explanation of it, and a vote
 //   <UserResult/> <CommunityResult/> <TagResult/> <PostResult/>   rows
 //   <ArtworkMasonry/> <ArtworkCard/>                 two-column artwork grid + plain image card
 //   artworkPath(item)        "/<category>/@author/permlink" for history.push
@@ -44,6 +45,7 @@ export { AnswerCard } from "./AnswerCard";
 export {
     searchIndex, searchArtworks, artworkPath, artworkImageUrl, loadVocab, getVocab,
     fetchSuggestions, loadExamples, fetchAnswer, sendFeedback,
+    fetchExplanation, sendAnswerFeedback, answerVote, modelLabel,
 } from "./searchApi";
 export { answerPlan, looksLikeQuestion, ghostFor } from "./intent";
 export {
@@ -53,4 +55,4 @@ export {
 export { normalizeTag, isValidTag } from "./tags";
 export { searchStyles } from "./styles";
 export { highlightNode } from "./highlight";
-export { SEARCH_API_URL, LIMITS, DEFAULT_COLORS } from "./config";
+export { SEARCH_API_URL, LIMITS, DEFAULT_COLORS, EXPLAIN_MODE } from "./config";

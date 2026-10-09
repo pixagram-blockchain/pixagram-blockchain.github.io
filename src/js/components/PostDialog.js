@@ -1,5 +1,5 @@
 import * as React from "preact/compat";
-import { useReducer, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from "preact/compat";
+import { useReducer, useRef, useState, useCallback, useEffect, useLayoutEffect, useMemo } from "preact/compat";
 import withStyles from "@material-ui/core/styles/withStyles";
 import Card from '@material-ui/core/Card';
 import Backdrop from '@material-ui/core/Backdrop';
@@ -243,11 +243,56 @@ const collections = [
 ];
 
 // Memoized Components for optimization
-const ColorBadge = React.memo(({ color, classes }) => (
-    <Tooltip key={color.hex} arrow interactive title={color.hex + " (" + color.percentage.toFixed(2) + "%)"}>
-        <div className={classes.colorBadge} style={{ backgroundColor: color.hex }}></div>
-    </Tooltip>
-), (a, b) => a.color.hex === b.color.hex);
+
+/* ── Colour palette ───────────────────────────────────────────────────
+ * Up to 256 swatches. Each one used to mount its own MUI <Tooltip> (a
+ * dozen hooks, listeners and a cloned child apiece): 256 tooltips built in
+ * one synchronous render when the deferred palette lands, a long task right
+ * while the drawer is being scrolled or swiped. The swatches are now bare
+ * divs carrying their label in data-color, and the palette shares ONE
+ * tooltip, re-aimed at the swatch under the pointer (or finger) through
+ * PopperProps.anchorEl — the Popper props are spread after its own anchor.
+ * The palette is a memo hoisted out of DetailsView: it renders when the
+ * colours change, never on a copy tick or a favorite toggle. */
+const EMPTY_COLORS = Object.freeze([]);
+
+const ColorBadge = React.memo(function ColorBadge({ color, className }) {
+    return (
+        <div className={className}
+             data-color={color.hex + " (" + color.percentage.toFixed(2) + "%)"}
+             style={{ backgroundColor: color.hex }} />
+    );
+}, (a, b) =>
+    a.className === b.className
+    && a.color.hex === b.color.hex
+    // the label is read off the DOM by the shared tooltip: a new post with the
+    // same hex but another share must not keep the old percentage
+    && a.color.percentage === b.color.percentage);
+
+const ColorPalette = React.memo(function ColorPalette({ colors, classes }) {
+    const paletteRef = useRef(null);
+    const [swatch, setSwatch] = useState(null);
+    const track = useCallback((e) => {
+        const box = paletteRef.current, el = e.target;
+        // Interactive tooltip: hovering its popper forwards that hover here too —
+        // only a target inside the palette re-aims it. A gap between swatches
+        // clears the label (an empty title keeps the tooltip shut).
+        if (!box || !el || !box.contains(el)) return;
+        setSwatch(el.hasAttribute && el.hasAttribute("data-color") ? el : null);
+    }, []);
+    // A swatch of the previous post's palette has left the DOM: never anchor on it.
+    const anchor = swatch && swatch.isConnected ? swatch : null;
+    const popperProps = useMemo(() => (anchor ? { anchorEl: anchor } : undefined), [anchor]);
+    return (
+        <Tooltip arrow interactive title={anchor ? anchor.getAttribute("data-color") : ""} PopperProps={popperProps}>
+            <div ref={paletteRef} className={classes.colorBadges} onMouseOver={track} onTouchStart={track}>
+                {colors.map((o) => (
+                    <ColorBadge key={o.hex} color={o} className={classes.colorBadge} />
+                ))}
+            </div>
+        </Tooltip>
+    );
+});
 
 const TagChip = React.memo(({ tag, index, onTagClick }) => (
     <Chip
@@ -256,6 +301,16 @@ const TagChip = React.memo(({ tag, index, onTagClick }) => (
         onClick={() => onTagClick(tag.toLowerCase())}
     />
 ), (a, b) => a.tag === b.tag);
+
+const TagList = React.memo(function TagList({ tags, className, onTagClick }) {
+    return (
+        <div className={className}>
+            {tags.map((text, index) => (
+                <TagChip key={index} tag={text} index={index} onTagClick={onTagClick} />
+            ))}
+        </div>
+    );
+});
 
 // Live relative date bridge — renders useLiveTimeAgo's label as its own
 // tiny component so each tick (every second while the post is under a
@@ -469,6 +524,161 @@ const CollectionItem = React.memo(({ collection }) => (
     );
 });
 
+/* ── Details tab, split into sections ─────────────────────────────────
+ * DetailsView used to rebuild the whole tab on any change of its props:
+ * the copy-link tick re-ran the description sanitizer, re-diffed every tag
+ * chip and every colour swatch; a favorite toggle did the same. Each
+ * section below is a memo hoisted to module scope (stable identity, never
+ * recreated by a parent render) and only takes the props it displays, so
+ * a change now re-renders the one section that shows it. The sections
+ * return Fragments: the DOM — and classes.list's descendant selectors — is
+ * exactly what the single tree produced. Sections with copy subscribe to
+ * the language themselves (useLanguage): a memo bail-out above them can no
+ * longer leave their text in the previous language. */
+const STYLE_DESCRIPTION = Object.freeze({
+    margin: 0,
+    color: "rgba(255, 255, 255, 0.5)",
+    userSelect: "text",
+    lineHeight: "1.125",
+    fontSize: "1rem",
+    letterSpacing: 0,
+    textAlign: "justify"
+});
+const STYLE_POINTER = Object.freeze({ cursor: "pointer" });
+const STYLE_FULL_WIDTH = Object.freeze({ width: "100%" });
+const STYLE_FAVORITE_ON = Object.freeze({ color: "#e3e3e3", marginLeft: "auto", flexShrink: 0 });
+const STYLE_FAVORITE_OFF = Object.freeze({ color: "#8a8a8a", marginLeft: "auto", flexShrink: 0 });
+
+/* Description — sanitized by the pipeline, safe for innerHTML. safeHTML()
+ * now runs when the description changes, not on every render of the tab. */
+const PostDescription = React.memo(function PostDescription({ html, summary }) {
+    const markup = useMemo(() => (html ? { __html: safeHTML(html) } : null), [html]);
+    if (markup) {
+        return <Typography variant="body1" color="textSecondary" component="div" style={STYLE_DESCRIPTION} dangerouslySetInnerHTML={markup} />;
+    }
+    if (summary) {
+        return <Typography variant="body1" color="textSecondary" component="p" style={STYLE_DESCRIPTION}>{summary}</Typography>;
+    }
+    return null;
+});
+
+const ImageSection = React.memo(function ImageSection({ width, height, colors, classes }) {
+    useLanguage();
+    return (
+        <React.Fragment>
+            <ListSubheader disableSticky>{t("components.post_dialog.image")}</ListSubheader>
+            <ListItem>
+                <ListItemIcon><SwapHoriz /></ListItemIcon>
+                <ListItemText>{t("components.post_dialog.px_width", {
+                    width: width
+                })}</ListItemText>
+            </ListItem>
+            <ListItem>
+                <ListItemIcon><SwapVert /></ListItemIcon>
+                <ListItemText>{t("components.post_dialog.px_height", {
+                    height: height
+                })}</ListItemText>
+            </ListItem>
+            <ListItem>
+                <ListItemIcon><Palette /></ListItemIcon>
+                <ListItemText>{t("components.post_dialog.colors", {
+                    color_count: colors.length
+                })}</ListItemText>
+            </ListItem>
+            <ColorPalette colors={colors} classes={classes} />
+        </React.Fragment>
+    );
+});
+
+const ArtworkSection = React.memo(function ArtworkSection({ type, kb, onDownloadArtwork, onOpenLicenseDialog }) {
+    useLanguage();
+    return (
+        <React.Fragment>
+            <ListSubheader disableSticky>{t("components.post_dialog.artwork")}</ListSubheader>
+            <Tooltip title={t("components.post_dialog.download_the_original_image")}>
+                <ListItem onClick={onDownloadArtwork} style={STYLE_POINTER}>
+                    <ListItemIcon><Info /></ListItemIcon>
+                    <ListItemText>{type.toUpperCase()} of {kb.toFixed(2)} kB</ListItemText>
+                </ListItem>
+            </Tooltip>
+            <Tooltip title={t("components.post_dialog.view_the_artworks_license")}>
+                <ListItem onClick={onOpenLicenseDialog} style={STYLE_POINTER}>
+                    <ListItemIcon><License /></ListItemIcon>
+                    <ListItemText>{t("components.post_dialog.pixa_license_1_0")}</ListItemText>
+                </ListItem>
+            </Tooltip>
+        </React.Fragment>
+    );
+});
+
+/* Owner only — rendered by DetailsView behind isOwner. */
+const ManageSection = React.memo(function ManageSection({ onEditPost }) {
+    useLanguage();
+    return (
+        <React.Fragment>
+            <ListSubheader disableSticky>{t("components.post_dialog.manage")}</ListSubheader>
+            <Tooltip title={t("components.post_dialog.edit_title_description_tags_nsfw_and_deleted")}>
+                <ListItem onClick={onEditPost} style={STYLE_POINTER}>
+                    <ListItemIcon><EditRounded /></ListItemIcon>
+                    <ListItemText>{t("words.edit_post_details")}</ListItemText>
+                </ListItem>
+            </Tooltip>
+        </React.Fragment>
+    );
+});
+
+/* `postId` is not displayed: it re-renders the field when the post changes,
+ * which is when the address bar it reads has moved on (as before, the URL is
+ * read at render time — and again at click time for the copy itself). */
+const ShareSection = React.memo(function ShareSection({ postId, copied, onCopy, className }) {
+    useLanguage();
+    const copy = useCallback(() => onCopy(window.location.href.replace("#info", "")), [onCopy]);
+    return (
+        <React.Fragment>
+            <ListSubheader disableSticky>{t("components.post_dialog.share")}</ListSubheader>
+            <FormControl className={className} variant="filled" style={STYLE_FULL_WIDTH}>
+                <InputLabel htmlFor="filled-adornment-copy">{t("components.post_dialog.current_url")}</InputLabel>
+                <FilledInput
+                    id="filled-adornment-copy"
+                    type={'text'}
+                    fullWidth
+                    value={window.location.href.replace("#info", "")}
+                    endAdornment={
+                        <InputAdornment position="end">
+                            <Tooltip title={t("components.post_dialog.copy_the_link_to_the_clipboard")}>
+                                <IconButton
+                                    aria-label={t("components.post_dialog.copy_text_url")}
+                                    onClick={copy}
+                                    edge="end"
+                                >
+                                    {copied ? <ClipboardCheck/> : <ClipboardText/>}
+                                </IconButton>
+                            </Tooltip>
+                        </InputAdornment>
+                    }
+                />
+            </FormControl>
+        </React.Fragment>
+    );
+});
+
+const ActionsSection = React.memo(function ActionsSection({ isFavorite, onToggleFavorite }) {
+    useLanguage();
+    return (
+        <React.Fragment>
+            <ListSubheader disableSticky>{t("components.post_dialog.actions")}</ListSubheader>
+            <Tooltip title={isFavorite ? "Remove this artwork from your favorites" : "Save this artwork to your favorites"}>
+                <ListItem onClick={onToggleFavorite} style={STYLE_POINTER}>
+                    <ListItemText>{isFavorite ? "Remove from favorites" : "Add to favorites"}</ListItemText>
+                    {isFavorite
+                        ? <FavoriteRounded style={STYLE_FAVORITE_ON} />
+                        : <FavoriteBorderRounded style={STYLE_FAVORITE_OFF} />}
+                </ListItem>
+            </Tooltip>
+        </React.Fragment>
+    );
+});
+
 // Memoized View Components
 const DetailsView = React.memo(({
                                     id,
@@ -493,116 +703,16 @@ const DetailsView = React.memo(({
                                     onOpenAuthor
                                 }) => (
     <React.Fragment>
-        {/* Description — sanitized by the pipeline, safe for innerHTML */}
-        {data._description_html ? (
-            <Typography variant="body1" color="textSecondary" component="div" style={{
-                margin: 0,
-                color: "rgba(255, 255, 255, 0.5)",
-                userSelect: "text",
-                lineHeight: "1.125",
-                fontSize: "1rem",
-                letterSpacing: 0,
-                textAlign: "justify"
-            }} dangerouslySetInnerHTML={{ __html: safeHTML(data._description_html) }} />
-        ) : data._summary ? (
-            <Typography variant="body1" color="textSecondary" component="p" style={{
-                margin: 0,
-                color: "rgba(255, 255, 255, 0.5)",
-                userSelect: "text",
-                lineHeight: "1.125",
-                fontSize: "1rem",
-                letterSpacing: 0,
-                textAlign: "justify"
-            }}>
-                {data._summary}
-            </Typography>
-        ) : null}
-        <div className={classes.chipTags}>
-            {tags.map((text, index) => (
-                <TagChip key={index} tag={text} index={index} onTagClick={onTagClick} />
-            ))}
-        </div>
+        <PostDescription html={data._description_html} summary={data._summary} />
+        <TagList tags={tags} className={classes.chipTags} onTagClick={onTagClick} />
         <List className={classes.list}>
-            <ListSubheader disableSticky>{t("components.post_dialog.image")}</ListSubheader>
-            <ListItem>
-                <ListItemIcon><SwapHoriz /></ListItemIcon>
-                <ListItemText>{t("components.post_dialog.px_width", {
-                    width: metadata.width
-                })}</ListItemText>
-            </ListItem>
-            <ListItem>
-                <ListItemIcon><SwapVert /></ListItemIcon>
-                <ListItemText>{t("components.post_dialog.px_height", {
-                    height: metadata.height
-                })}</ListItemText>
-            </ListItem>
-            <ListItem>
-                <ListItemIcon><Palette /></ListItemIcon>
-                <ListItemText>{t("components.post_dialog.colors", {
-                    color_count: (metadata.colors || []).length
-                })}</ListItemText>
-            </ListItem>
-            <div className={classes.colorBadges}>
-                {(metadata.colors || []).map((o) => (
-                    <ColorBadge key={o.hex} color={o} classes={classes} />
-                ))}
-            </div>
-            <ListSubheader disableSticky>{t("components.post_dialog.artwork")}</ListSubheader>
-            <Tooltip title={t("components.post_dialog.download_the_original_image")}>
-                <ListItem onClick={onDownloadArtwork} style={{ cursor: "pointer" }}>
-                    <ListItemIcon><Info /></ListItemIcon>
-                    <ListItemText>{type.toUpperCase()} of {kb.toFixed(2)} kB</ListItemText>
-                </ListItem>
-            </Tooltip>
-            <Tooltip title={t("components.post_dialog.view_the_artworks_license")}>
-                <ListItem onClick={onOpenLicenseDialog} style={{ cursor: "pointer" }}>
-                    <ListItemIcon><License /></ListItemIcon>
-                    <ListItemText>{t("components.post_dialog.pixa_license_1_0")}</ListItemText>
-                </ListItem>
-            </Tooltip>
-            {isOwner && <ListSubheader disableSticky>{t("components.post_dialog.manage")}</ListSubheader>}
-            {isOwner && (
-                <Tooltip title={t("components.post_dialog.edit_title_description_tags_nsfw_and_deleted")}>
-                    <ListItem onClick={onEditPost} style={{ cursor: "pointer" }}>
-                        <ListItemIcon><EditRounded /></ListItemIcon>
-                        <ListItemText>{t("words.edit_post_details")}</ListItemText>
-                    </ListItem>
-                </Tooltip>
-            )}
-            <ListSubheader disableSticky>{t("components.post_dialog.share")}</ListSubheader>
-            <Tooltip title={t("components.post_dialog.copy_the_link_and_past_it_on")}>
-                <FormControl className={classes.urlLink} variant="filled" style={{width: "100%"}}>
-                    <InputLabel htmlFor="filled-adornment-copy">{t("components.post_dialog.current_url")}</InputLabel>
-                    <FilledInput
-                        id="filled-adornment-copy"
-                        type={'text'}
-                        fullWidth
-                        value={window.location.href}
-                        endAdornment={
-                            <InputAdornment position="end">
-                                <Tooltip title={t("components.post_dialog.copy_the_link_to_the_clipboard")}>
-                                    <IconButton
-                                        aria-label={t("components.post_dialog.copy_text_url")}
-                                        onClick={() => onCopy(window.location.href)}
-                                        edge="end"
-                                    >
-                                        {copied ? <ClipboardCheck /> : <ClipboardText />}
-                                    </IconButton>
-                                </Tooltip>
-                            </InputAdornment>
-                        }
-                    />
-                </FormControl>
-            </Tooltip>
-            <ListSubheader disableSticky>{t("components.post_dialog.actions")}</ListSubheader>
-            <Tooltip title={isFavorite ? "Remove this artwork from your favorites" : "Save this artwork to your favorites"}>
-                <ListItem onClick={onToggleFavorite} style={{ cursor: "pointer" }}>
-                    <ListItemText>{isFavorite ? "Remove from favorites" : "Add to favorites"}</ListItemText>
-                    {isFavorite
-                        ? <FavoriteRounded style={{ color: "#e3e3e3", marginLeft: "auto", flexShrink: 0 }} />
-                        : <FavoriteBorderRounded style={{ color: "#8a8a8a", marginLeft: "auto", flexShrink: 0 }} />}
-                </ListItem>
-            </Tooltip>
+            <ImageSection width={metadata.width} height={metadata.height}
+                          colors={metadata.colors || EMPTY_COLORS} classes={classes} />
+            <ArtworkSection type={type} kb={kb}
+                            onDownloadArtwork={onDownloadArtwork} onOpenLicenseDialog={onOpenLicenseDialog} />
+            {isOwner ? <ManageSection onEditPost={onEditPost} /> : null}
+            <ShareSection postId={id} copied={copied} onCopy={onCopy} className={classes.urlLink} />
+            <ActionsSection isFavorite={isFavorite} onToggleFavorite={onToggleFavorite} />
             {/* Originality (copies on-chain) + Inspiration (similar themes), from the search
                 Worker. Keyed by post so every artwork opens with both collapsed. */}
             <PostOriginality
@@ -632,6 +742,109 @@ const DetailsView = React.memo(({
     return true;
 });
 
+/* ── Comments tab pieces ──────────────────────────────────────────────
+ * Hoisted styles (no per-render objects to allocate and diff) and memo
+ * sub-components: the breadcrumb only renders when the reply path changes,
+ * the sort radios (three ButtonBase-backed Radios) only when the sort does —
+ * not every time a page of comments lands or the loader flips. */
+const STYLE_BREADCRUMB_BAR = Object.freeze({ display: "flow", height: "48px", position: "relative", width: "calc(100% - 32px)", margin: "24px 16px 0px 16px" });
+const STYLE_BREADCRUMB_TOGGLE = Object.freeze({ float: "left", display: "flex", position: "relative" });
+const STYLE_BREADCRUMB_LABEL = Object.freeze({ verticalAlign: "middle", lineHeight: "48px", color: "#fff" });
+const STYLE_BREADCRUMB_ARROW = Object.freeze({ color: "#575757", transform: "rotate(-180deg)", margin: "8px 0px 8px 0px" });
+const STYLE_SORT_FIELDSET = Object.freeze({ display: "flow", position: "relative", width: "calc(100% - 32px)", margin: "24px 16px 0px 16px" });
+const STYLE_SORT_LEGEND = Object.freeze({ color: "#fff", margin: "10px 8px 8px 0px", float: "left", fontWeight: "bold" });
+const STYLE_SORT_GROUP = Object.freeze({ justifyContent: "end", float: "right" });
+const STYLE_SORT_OPTION = Object.freeze({ color: "#888" });
+const SORT_OPTIONS = Object.freeze(["Hype", "Votes", "New"]);
+const STYLE_COMMENTS_LOADING = Object.freeze({ display: "flex", justifyContent: "center", padding: "32px 0" });
+const STYLE_COMMENTS_SPINNER = Object.freeze({ color: "#888" });
+const STYLE_COMMENTS_EMPTY = Object.freeze({ textAlign: "center", padding: "32px 16px" });
+const STYLE_COMMENTS_EMPTY_ICON = Object.freeze({ fontSize: 48, color: "#333", marginBottom: 8 });
+const STYLE_COMMENTS_EMPTY_TITLE = Object.freeze({ color: "#666", marginBottom: 4 });
+const STYLE_COMMENTS_EMPTY_HINT = Object.freeze({ color: "#444" });
+
+const ReplyBreadcrumb = React.memo(function ReplyBreadcrumb({ currentComments, showParent, onToggleShowParent, onSliceReplies, className }) {
+    useLanguage();
+    return (
+        <div style={STYLE_BREADCRUMB_BAR}>
+            <div style={STYLE_BREADCRUMB_TOGGLE}>
+                <IconButton onClick={onToggleShowParent}>
+                    {!showParent ? <VisibilityRounded /> : <VisibilityOffRounded />}
+                </IconButton>
+                <FormLabel component="legend" style={STYLE_BREADCRUMB_LABEL}>{t("words.reply_to")}</FormLabel>
+            </div>
+            <div className={className}>
+                {currentComments.map((data, i) => {
+                    const author = data.author || {};
+                    return (
+                        <React.Fragment key={i}>
+                            {i > 0 && <ArrowForwardIosIcon key={"arrow-" + i} style={STYLE_BREADCRUMB_ARROW} />}
+                            <Avatar
+                                key={"avatar-" + i}
+                                alt={author.name}
+                                onClick={() => { onSliceReplies(i) }}
+                                src={author.image}
+                            />
+                        </React.Fragment>
+                    );
+                })}
+            </div>
+        </div>
+    );
+});
+
+const SortControl = React.memo(function SortControl({ sorting, onSortingChange }) {
+    useLanguage();
+    return (
+        <FormControl component="fieldset" style={STYLE_SORT_FIELDSET}>
+            <FormLabel component="legend" style={STYLE_SORT_LEGEND}>{t("words.sort_by")}</FormLabel>
+            <RadioGroup
+                value={sorting}
+                defaultValue={"Hype"}
+                onChange={onSortingChange}
+                row
+                aria-label="sorting"
+                name="sorting"
+                style={STYLE_SORT_GROUP}
+            >
+                {SORT_OPTIONS.map((label) => (
+                    <FormControlLabel
+                        style={STYLE_SORT_OPTION}
+                        labelPlacement="end"
+                        key={label}
+                        value={label}
+                        control={<Radio color="primary" />}
+                        label={label}
+                    />
+                ))}
+            </RadioGroup>
+        </FormControl>
+    );
+});
+
+const CommentsLoading = React.memo(function CommentsLoading() {
+    return (
+        <div style={STYLE_COMMENTS_LOADING}>
+            <CircularProgress size={32} style={STYLE_COMMENTS_SPINNER} />
+        </div>
+    );
+});
+
+const CommentsEmpty = React.memo(function CommentsEmpty() {
+    useLanguage();
+    return (
+        <div style={STYLE_COMMENTS_EMPTY}>
+            <CommentRounded style={STYLE_COMMENTS_EMPTY_ICON} />
+            <Typography variant="body1" style={STYLE_COMMENTS_EMPTY_TITLE}>
+                {t("words.no_comments_yet")}
+            </Typography>
+            <Typography variant="body2" style={STYLE_COMMENTS_EMPTY_HINT}>
+                {t("words.be_the_first_to_share_your_thoughts")}
+            </Typography>
+        </div>
+    );
+});
+
 /* OPT #17: Replaced JSON.stringify comparison with shallow reference + length check */
 const CommentsView = React.memo(({
                                      id,
@@ -659,44 +872,9 @@ const CommentsView = React.memo(({
     <div>
         <Collapse in={currentComments.length > 0}>
             <div>
-                <div style={{
-                    display: "flow",
-                    height: "48px",
-                    position: "relative",
-                    width: "calc(100% - 32px)",
-                    margin: "24px 16px 0px 16px"
-                }}>
-                    <div style={{ float: "left", display: "flex", position: "relative" }}>
-                        <IconButton onClick={onToggleShowParent}>
-                            {!showParent ? <VisibilityRounded /> : <VisibilityOffRounded />}
-                        </IconButton>
-                        <FormLabel component="legend" style={{
-                            verticalAlign: "middle",
-                            lineHeight: "48px",
-                            color: "#fff"
-                        }}>{t("words.reply_to")}</FormLabel>
-                    </div>
-                    <div className={classes.repliesGroup}>
-                        {currentComments.map((data, i) => {
-                            const author = data.author || {};
-                            return (
-                                <React.Fragment key={i}>
-                                    {i > 0 && <ArrowForwardIosIcon key={"arrow-" + i} style={{
-                                        color: "#575757",
-                                        transform: "rotate(-180deg)",
-                                        margin: "8px 0px 8px 0px"
-                                    }} />}
-                                    <Avatar
-                                        key={"avatar-" + i}
-                                        alt={author.name}
-                                        onClick={() => { onSliceReplies(i) }}
-                                        src={author.image}
-                                    />
-                                </React.Fragment>
-                            );
-                        })}
-                    </div>
-                </div>
+                <ReplyBreadcrumb currentComments={currentComments} showParent={showParent}
+                                 onToggleShowParent={onToggleShowParent} onSliceReplies={onSliceReplies}
+                                 className={classes.repliesGroup} />
             </div>
         </Collapse>
         <Collapse in={showParent}>
@@ -714,58 +892,17 @@ const CommentsView = React.memo(({
                 ))}
             </div>
         </Collapse>
-        <FormControl component="fieldset" style={{
-            display: "flow",
-            position: "relative",
-            width: "calc(100% - 32px)",
-            margin: "24px 16px 0px 16px"
-        }}>
-            <FormLabel component="legend" style={{
-                color: "#fff",
-                margin: "10px 8px 8px 0px",
-                float: "left",
-                fontWeight: "bold"
-            }}>{t("words.sort_by")}</FormLabel>
-            <RadioGroup
-                value={sorting}
-                defaultValue={"Hype"}
-                onChange={onSortingChange}
-                row
-                aria-label="sorting"
-                name="sorting"
-                style={{ justifyContent: "end", float: "right" }}
-            >
-                {["Hype", "Votes", "New"].map((label) => (
-                    <FormControlLabel
-                        style={{ color: "#888" }}
-                        labelPlacement="end"
-                        key={label}
-                        value={label}
-                        control={<Radio color="primary" />}
-                        label={label}
-                    />
-                ))}
-            </RadioGroup>
-        </FormControl>
+        <SortControl sorting={sorting} onSortingChange={onSortingChange} />
         <List>
-            {commentsLoading ? (
-                <div style={{ display: "flex", justifyContent: "center", padding: "32px 0" }}>
-                    <CircularProgress size={32} style={{ color: "#888" }} />
-                </div>
-            ) : comments.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "32px 16px" }}>
-                    <CommentRounded style={{ fontSize: 48, color: "#333", marginBottom: 8 }} />
-                    <Typography variant="body1" style={{ color: "#666", marginBottom: 4 }}>
-                        {t("words.no_comments_yet")}
-                    </Typography>
-                    <Typography variant="body2" style={{ color: "#444" }}>
-                        {t("words.be_the_first_to_share_your_thoughts")}
-                    </Typography>
-                </div>
-            ) : comments.map((comment, id) => (
+            {commentsLoading ? <CommentsLoading /> : comments.length === 0 ? <CommentsEmpty /> : comments.map((comment, id) => (
                 /* permlink key: instances travel with their comment on sort —
                    no cross-comment slot reuse (spurious vote-bounce) and no
-                   reply-cache invalidation/refetch on every sort change. */
+                   reply-cache invalidation/refetch on every sort change.
+                   onShowReplies / onReply are handed through as they are: they
+                   used to be wrapped in a fresh arrow per comment per render,
+                   which gave every CommentInList new props on every render of
+                   this view and defeated its memoization — each render of the
+                   tab re-rendered the whole thread. */
                 (<CommentInList
                     id={id}
                     key={comment.permlink || id}
@@ -774,9 +911,9 @@ const CommentsView = React.memo(({
                     account={account}
                     focusKey={focusKey}
                     focusPathKeys={focusPathKeys}
-                    onShowReplies={(comment, ancestors) => onShowReplies(comment, ancestors)}
+                    onShowReplies={onShowReplies}
                     onLoadReplies={onLoadReplies}
-                    onReply={(comment, ancestors) => onReply(comment, ancestors)}
+                    onReply={onReply}
                     onEdit={onEditComment}
                     onDelete={onDeleteComment}
                 />)
@@ -797,258 +934,261 @@ const CommentsView = React.memo(({
     return true;
 });
 
-const NFTView = React.memo(({ id, data }) => (
-    <div style={STYLE_NFT_COMING_SOON_WRAP}>
-        {/* Blurred, non-interactive preview of the upcoming NFT marketplace */}
-        <div style={STYLE_NFT_BLURRED} aria-hidden="true">
-            <div style={{ paddingBottom: 96 }}>
-                {/* NFT Header Section */}
-                <div style={{
-                    background: "#0f0f0f",
-                    borderRadius: 16,
-                    padding: 21,
-                    margin: "8px 0px 16px",
-                    position: "relative",
-                    overflow: "hidden"
-                }}>
+const NFTView = React.memo(function NFTView({ id, data }) {
+    useLanguage(); // memo'd on the post id alone: subscribe so a language switch still reaches it
+    return (
+        <div style={STYLE_NFT_COMING_SOON_WRAP}>
+            {/* Blurred, non-interactive preview of the upcoming NFT marketplace */}
+            <div style={STYLE_NFT_BLURRED} aria-hidden="true">
+                <div style={{ paddingBottom: 96 }}>
+                    {/* NFT Header Section */}
                     <div style={{
-                        position: "absolute",
-                        top: 0,
-                        right: 0,
-                        width: "50%",
-                        height: "100%",
-                        pointerEvents: "none"
-                    }} />
+                        background: "#0f0f0f",
+                        borderRadius: 16,
+                        padding: 21,
+                        margin: "8px 0px 16px",
+                        position: "relative",
+                        overflow: "hidden"
+                    }}>
+                        <div style={{
+                            position: "absolute",
+                            top: 0,
+                            right: 0,
+                            width: "50%",
+                            height: "100%",
+                            pointerEvents: "none"
+                        }} />
 
-                    <div style={{ position: "relative", zIndex: 1 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
-                            <div>
-                                <Typography variant="h6" style={{ color: "#fff", fontWeight: "bold", marginBottom: 8 }}>{t("components.post_dialog.nft", {
-                                    String: String(data.id||"08374393").substring(0, 8) || "A1B2C3D4"
-                                })}</Typography>
-                                <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
-                                    <Chip
-                                        label={rarity.label}
-                                        style={{
-                                            color: rarity.color,
-                                            fontWeight: "bold"
-                                        }}
-                                    />
-                                    <Typography variant="body2" style={{ color: "#aaa" }}>
-                                        {maxEditions} editions
-                                    </Typography>
+                        <div style={{ position: "relative", zIndex: 1 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
+                                <div>
+                                    <Typography variant="h6" style={{ color: "#fff", fontWeight: "bold", marginBottom: 8 }}>{t("components.post_dialog.nft", {
+                                        String: String(data.id||"08374393").substring(0, 8) || "A1B2C3D4"
+                                    })}</Typography>
+                                    <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
+                                        <Chip
+                                            label={rarity.label}
+                                            style={{
+                                                color: rarity.color,
+                                                fontWeight: "bold"
+                                            }}
+                                        />
+                                        <Typography variant="body2" style={{ color: "#aaa" }}>
+                                            {maxEditions} editions
+                                        </Typography>
+                                    </div>
+                                    <div style={{ display: "flex", gap: 20, marginTop: 8 }}>
+                                        <div>
+                                            <Typography variant="caption" style={{ color: "#888", display: "block" }}>
+                                                {t("components.post_dialog.floor_price")}
+                                            </Typography>
+                                            <Typography variant="body2" style={{ color: "#fff", fontWeight: "bold" }}>
+                                                {floorPrice ? `${floorPrice} ${currency}` : "No offers"}
+                                            </Typography>
+                                        </div>
+                                        <div>
+                                            <Typography variant="caption" style={{ color: "#888", display: "block" }}>
+                                                {t("components.post_dialog.last_sale")}
+                                            </Typography>
+                                            <Typography variant="body2" style={{ color: "#fff", fontWeight: "bold" }}>
+                                                {lastSalePrice ? `${lastSalePrice} ${currency}` : "—"}
+                                            </Typography>
+                                        </div>
+                                        <div>
+                                            <Typography variant="caption" style={{ color: "#888", display: "block" }}>
+                                                {t("components.post_dialog.available")}
+                                            </Typography>
+                                            <Typography variant="body2" style={{ color: "#fff", fontWeight: "bold" }}>
+                                                {availableEditions.length}/{maxEditions}
+                                            </Typography>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div style={{ display: "flex", gap: 20, marginTop: 8 }}>
-                                    <div>
-                                        <Typography variant="caption" style={{ color: "#888", display: "block" }}>
-                                            {t("components.post_dialog.floor_price")}
-                                        </Typography>
-                                        <Typography variant="body2" style={{ color: "#fff", fontWeight: "bold" }}>
-                                            {floorPrice ? `${floorPrice} ${currency}` : "No offers"}
-                                        </Typography>
-                                    </div>
-                                    <div>
-                                        <Typography variant="caption" style={{ color: "#888", display: "block" }}>
-                                            {t("components.post_dialog.last_sale")}
-                                        </Typography>
-                                        <Typography variant="body2" style={{ color: "#fff", fontWeight: "bold" }}>
-                                            {lastSalePrice ? `${lastSalePrice} ${currency}` : "—"}
-                                        </Typography>
-                                    </div>
-                                    <div>
-                                        <Typography variant="caption" style={{ color: "#888", display: "block" }}>
-                                            {t("components.post_dialog.available")}
-                                        </Typography>
-                                        <Typography variant="body2" style={{ color: "#fff", fontWeight: "bold" }}>
-                                            {availableEditions.length}/{maxEditions}
-                                        </Typography>
-                                    </div>
-                                </div>
+                                <IconButton style={{ color: "#666" }}>
+                                    <MoreVertRounded />
+                                </IconButton>
                             </div>
-                            <IconButton style={{ color: "#666" }}>
-                                <MoreVertRounded />
-                            </IconButton>
                         </div>
                     </div>
-                </div>
 
-                {/* Market Status */}
-                {availableEditions.length > 0 ? (
-                    <Card style={{ backgroundColor: "#1a1a1a", marginBottom: 20, borderRadius: 12 }}>
-                        <CardContent>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                                <Typography variant="subtitle1" style={{ color: "#fff", fontWeight: "bold" }}>
-                                    {t("components.post_dialog.available_editions")}
-                                </Typography>
-                                <Typography variant="body2" style={{ color: "#ffffff" }}>{t("components.post_dialog.for_sale_2", {
-                                    availableEdition_count: availableEditions.length
-                                })}</Typography>
-                            </div>
+                    {/* Market Status */}
+                    {availableEditions.length > 0 ? (
+                        <Card style={{ backgroundColor: "#1a1a1a", marginBottom: 20, borderRadius: 12 }}>
+                            <CardContent>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                                    <Typography variant="subtitle1" style={{ color: "#fff", fontWeight: "bold" }}>
+                                        {t("components.post_dialog.available_editions")}
+                                    </Typography>
+                                    <Typography variant="body2" style={{ color: "#ffffff" }}>{t("components.post_dialog.for_sale_2", {
+                                        availableEdition_count: availableEditions.length
+                                    })}</Typography>
+                                </div>
 
-                            <div style={{
-                                backgroundColor: "#0f0f0f",
-                                borderRadius: 8,
-                                padding: 16,
-                                marginBottom: 16
-                            }}>
-                                <Typography variant="caption" style={{ color: "#ffffff", fontWeight: "bold" }}>
-                                    {t("components.post_dialog.best_price")}
-                                </Typography>
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
-                                    <div>
-                                        <Typography variant="h5" style={{ color: "#fff", fontWeight: "bold" }}>
-                                            {floorPrice} {currency}
-                                        </Typography>
-                                        <Typography variant="body2" style={{ color: "#666" }}>
-                                            ${(floorPrice * 5.69).toFixed(2)} USD
+                                <div style={{
+                                    backgroundColor: "#0f0f0f",
+                                    borderRadius: 8,
+                                    padding: 16,
+                                    marginBottom: 16
+                                }}>
+                                    <Typography variant="caption" style={{ color: "#ffffff", fontWeight: "bold" }}>
+                                        {t("components.post_dialog.best_price")}
+                                    </Typography>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+                                        <div>
+                                            <Typography variant="h5" style={{ color: "#fff", fontWeight: "bold" }}>
+                                                {floorPrice} {currency}
+                                            </Typography>
+                                            <Typography variant="body2" style={{ color: "#666" }}>
+                                                ${(floorPrice * 5.69).toFixed(2)} USD
+                                            </Typography>
+                                        </div>
+                                        <Typography variant="body2" style={{ color: "#888" }}>
+                                            Edition #{availableEditions.find(e => e.price === floorPrice)?.edition}
                                         </Typography>
                                     </div>
-                                    <Typography variant="body2" style={{ color: "#888" }}>
-                                        Edition #{availableEditions.find(e => e.price === floorPrice)?.edition}
-                                    </Typography>
                                 </div>
-                            </div>
 
-                            <Button
-                                variant="contained"
-                                fullWidth
-                                style={{
-                                    backgroundColor: "#fff",
-                                    color: "#000",
-                                    fontWeight: "bold",
-                                    marginBottom: 12
-                                }}
-                            >{t("components.post_dialog.buy_now", {
-                                floorPrice: floorPrice,
-                                currency: currency
-                            })}</Button>
+                                <Button
+                                    variant="contained"
+                                    fullWidth
+                                    style={{
+                                        backgroundColor: "#fff",
+                                        color: "#000",
+                                        fontWeight: "bold",
+                                        marginBottom: 12
+                                    }}
+                                >{t("components.post_dialog.buy_now", {
+                                    floorPrice: floorPrice,
+                                    currency: currency
+                                })}</Button>
 
-                            <Button
-                                variant="outlined"
-                                fullWidth
-                                style={{
-                                    borderColor: "#666",
-                                    color: "#fff"
-                                }}
-                            >{t("components.post_dialog.view_all_available", {
-                                availableEdition_count: availableEditions.length
-                            })}</Button>
-                        </CardContent>
-                    </Card>
-                ) : (
-                    <Card style={{ backgroundColor: "#0f0f0f", marginBottom: 20, borderRadius: 12 }}>
+                                <Button
+                                    variant="outlined"
+                                    fullWidth
+                                    style={{
+                                        borderColor: "#666",
+                                        color: "#fff"
+                                    }}
+                                >{t("components.post_dialog.view_all_available", {
+                                    availableEdition_count: availableEditions.length
+                                })}</Button>
+                            </CardContent>
+                        </Card>
+                    ) : (
+                        <Card style={{ backgroundColor: "#0f0f0f", marginBottom: 20, borderRadius: 12 }}>
+                            <CardContent>
+                                <Typography variant="subtitle1" style={{ color: "#fff", fontWeight: "bold", marginBottom: 16 }}>
+                                    {t("components.post_dialog.no_editions_for_sale")}
+                                </Typography>
+
+                                <div style={{ textAlign: "center", padding: "20px 0" }}>
+                                    <Typography variant="body1" style={{ color: "#888", marginBottom: 16 }}>{t("components.post_dialog.all_editions_are_currently_held_by_collectors", {
+                                        maxEditions: maxEditions
+                                    })}</Typography>
+
+                                    {avgSalePrice > 0 && (
+                                        <Typography variant="body2" style={{ color: "#666", marginBottom: 20 }}>{t("components.post_dialog.average_sale_price", {
+                                            avgSalePrice: avgSalePrice.toFixed(0),
+                                            currency: currency
+                                        })}</Typography>
+                                    )}
+                                </div>
+
+                                <Button
+                                    variant="contained"
+                                    fullWidth
+                                    style={{
+                                        backgroundColor: "#000000",
+                                        color: "#fff",
+                                        fontWeight: "bold",
+                                        marginBottom: 12
+                                    }}
+                                >
+                                    {t("components.post_dialog.make_collection_offer")}
+                                </Button>
+                            </CardContent>
+                        </Card>
+                    )}
+
+                    {/* All Editions */}
+                    <Card style={{ backgroundColor: "#1a1a1a", marginBottom: 20, borderRadius: 12 }}>
                         <CardContent>
                             <Typography variant="subtitle1" style={{ color: "#fff", fontWeight: "bold", marginBottom: 16 }}>
-                                {t("components.post_dialog.no_editions_for_sale")}
+                                {t("components.post_dialog.all_editions")}
                             </Typography>
-
-                            <div style={{ textAlign: "center", padding: "20px 0" }}>
-                                <Typography variant="body1" style={{ color: "#888", marginBottom: 16 }}>{t("components.post_dialog.all_editions_are_currently_held_by_collectors", {
-                                    maxEditions: maxEditions
-                                })}</Typography>
-
-                                {avgSalePrice > 0 && (
-                                    <Typography variant="body2" style={{ color: "#666", marginBottom: 20 }}>{t("components.post_dialog.average_sale_price", {
-                                        avgSalePrice: avgSalePrice.toFixed(0),
-                                        currency: currency
-                                    })}</Typography>
-                                )}
-                            </div>
-
-                            <Button
-                                variant="contained"
-                                fullWidth
-                                style={{
-                                    backgroundColor: "#000000",
-                                    color: "#fff",
-                                    fontWeight: "bold",
-                                    marginBottom: 12
-                                }}
-                            >
-                                {t("components.post_dialog.make_collection_offer")}
-                            </Button>
+                            {editionsData.map((ed) => (
+                                <EditionRow key={ed.edition} edition={ed} />
+                            ))}
                         </CardContent>
                     </Card>
-                )}
 
-                {/* All Editions */}
-                <Card style={{ backgroundColor: "#1a1a1a", marginBottom: 20, borderRadius: 12 }}>
-                    <CardContent>
-                        <Typography variant="subtitle1" style={{ color: "#fff", fontWeight: "bold", marginBottom: 16 }}>
-                            {t("components.post_dialog.all_editions")}
-                        </Typography>
-                        {editionsData.map((ed) => (
-                            <EditionRow key={ed.edition} edition={ed} />
-                        ))}
-                    </CardContent>
-                </Card>
+                    {/* Ownership History */}
+                    <Card style={{ backgroundColor: "#1a1a1a", marginBottom: 20, borderRadius: 12 }}>
+                        <CardContent>
+                            <Typography variant="subtitle1" style={{ color: "#fff", fontWeight: "bold", marginBottom: 16 }}>
+                                {t("components.post_dialog.ownership_history")}
+                            </Typography>
+                            <div style={{ borderLeft: "2px solid #333", marginLeft: 8, paddingLeft: 16 }}>
+                                {ownershipHistory.map((event, index) => (
+                                    <OwnershipEvent key={index} event={event} index={index} />
+                                ))}
+                            </div>
+                        </CardContent>
+                    </Card>
 
-                {/* Ownership History */}
-                <Card style={{ backgroundColor: "#1a1a1a", marginBottom: 20, borderRadius: 12 }}>
-                    <CardContent>
-                        <Typography variant="subtitle1" style={{ color: "#fff", fontWeight: "bold", marginBottom: 16 }}>
-                            {t("components.post_dialog.ownership_history")}
-                        </Typography>
-                        <div style={{ borderLeft: "2px solid #333", marginLeft: 8, paddingLeft: 16 }}>
-                            {ownershipHistory.map((event, index) => (
-                                <OwnershipEvent key={index} event={event} index={index} />
-                            ))}
-                        </div>
-                    </CardContent>
-                </Card>
+                    {/* Collections */}
+                    <Card style={{ backgroundColor: "#1a1a1a", marginBottom: 20, borderRadius: 12 }}>
+                        <CardContent>
+                            <Typography variant="subtitle1" style={{ color: "#fff", fontWeight: "bold", marginBottom: 8 }}>
+                                {t("components.post_dialog.collections")}
+                            </Typography>
+                            <List>
+                                {collections.map((collection) => (
+                                    <CollectionItem key={collection.id} collection={collection} />
+                                ))}
+                            </List>
+                        </CardContent>
+                    </Card>
 
-                {/* Collections */}
-                <Card style={{ backgroundColor: "#1a1a1a", marginBottom: 20, borderRadius: 12 }}>
-                    <CardContent>
-                        <Typography variant="subtitle1" style={{ color: "#fff", fontWeight: "bold", marginBottom: 8 }}>
-                            {t("components.post_dialog.collections")}
-                        </Typography>
-                        <List>
-                            {collections.map((collection) => (
-                                <CollectionItem key={collection.id} collection={collection} />
-                            ))}
-                        </List>
-                    </CardContent>
-                </Card>
-
-                {/* Actions */}
-                <Card style={{ backgroundColor: "#1a1a1a", borderRadius: 12 }}>
-                    <CardContent>
-                        <List>
-                            <ListItem button style={{ borderRadius: 8 }}>
-                                <ListItemIcon><ShareRounded style={{ color: "#666" }} /></ListItemIcon>
-                                <ListItemText primary={t("components.post_dialog.share")} />
-                            </ListItem>
-                            <ListItem button style={{ borderRadius: 8 }}>
-                                <ListItemIcon><PrintRounded style={{ color: "#666" }} /></ListItemIcon>
-                                <ListItemText primary={t("components.post_dialog.print")} />
-                            </ListItem>
-                            <ListItem button style={{ borderRadius: 8 }}>
-                                <ListItemIcon><SecurityRounded style={{ color: "#666" }} /></ListItemIcon>
-                                <ListItemText primary={t("components.post_dialog.report")} />
-                            </ListItem>
-                        </List>
-                    </CardContent>
-                </Card>
-            </div>
-        </div>
-
-        {/* Coming-soon overlay — sticky card stays in view while the blurred preview scrolls */}
-        <div style={STYLE_NFT_OVERLAY}>
-            <div style={STYLE_NFT_OVERLAY_CARD}>
-                <div style={STYLE_NFT_OVERLAY_ICON_WRAP}>
-                    <HourglassEmptyRounded style={STYLE_NFT_OVERLAY_ICON} />
+                    {/* Actions */}
+                    <Card style={{ backgroundColor: "#1a1a1a", borderRadius: 12 }}>
+                        <CardContent>
+                            <List>
+                                <ListItem button style={{ borderRadius: 8 }}>
+                                    <ListItemIcon><ShareRounded style={{ color: "#666" }} /></ListItemIcon>
+                                    <ListItemText primary={t("components.post_dialog.share")} />
+                                </ListItem>
+                                <ListItem button style={{ borderRadius: 8 }}>
+                                    <ListItemIcon><PrintRounded style={{ color: "#666" }} /></ListItemIcon>
+                                    <ListItemText primary={t("components.post_dialog.print")} />
+                                </ListItem>
+                                <ListItem button style={{ borderRadius: 8 }}>
+                                    <ListItemIcon><SecurityRounded style={{ color: "#666" }} /></ListItemIcon>
+                                    <ListItemText primary={t("components.post_dialog.report")} />
+                                </ListItem>
+                            </List>
+                        </CardContent>
+                    </Card>
                 </div>
-                <Typography variant="h6" style={STYLE_NFT_OVERLAY_TITLE}>
-                    {t("words.coming_soon")}
-                </Typography>
-                <Typography variant="body2" style={STYLE_NFT_OVERLAY_CAPTION}>
-                    {t("components.post_dialog.the_nft_marketplace_is_on_its_way")}
-                </Typography>
+            </div>
+
+            {/* Coming-soon overlay — sticky card stays in view while the blurred preview scrolls */}
+            <div style={STYLE_NFT_OVERLAY}>
+                <div style={STYLE_NFT_OVERLAY_CARD}>
+                    <div style={STYLE_NFT_OVERLAY_ICON_WRAP}>
+                        <HourglassEmptyRounded style={STYLE_NFT_OVERLAY_ICON} />
+                    </div>
+                    <Typography variant="h6" style={STYLE_NFT_OVERLAY_TITLE}>
+                        {t("words.coming_soon")}
+                    </Typography>
+                    <Typography variant="body2" style={STYLE_NFT_OVERLAY_CAPTION}>
+                        {t("components.post_dialog.the_nft_marketplace_is_on_its_way")}
+                    </Typography>
+                </div>
             </div>
         </div>
-    </div>
-), function (a, b){return a.id === b.id; });
+    );
+}, function (a, b){return a.id === b.id; });
 
 /* ══════════════════════════════════════════════════════════════════════
  * PERF: Memoized bottom-bar components — each bar only re-renders
@@ -1092,6 +1232,7 @@ const BottomBarComments = React.memo(function BottomBarComments({
     useLanguage();
     const loggedOut = !account;
     const padding = (replyTarget || editTarget) ? "8px 16px 12px" : "12px 16px";
+    const rootStyle = useMemo(() => ({ ...barStyle, padding }), [barStyle, padding]);
     const fieldLabel = editTarget
         ? "Edit your comment"
         : replyTarget
@@ -1103,11 +1244,11 @@ const BottomBarComments = React.memo(function BottomBarComments({
             });
     return (
         <Fade in={visible} timeout={FADE_TIMEOUT_BOTTOMBAR}>
-            <div style={{ ...barStyle, padding }}>
+            <div style={rootStyle}>
                 {editTarget ? (
                     <div style={STYLE_REPLY_ROW}>
                         <Typography variant="caption" style={STYLE_REPLY_CAPTION}>
-                            <EditRounded style={{ fontSize: 13, verticalAlign: "text-bottom", marginRight: 4 }} />
+                            <EditRounded style={STYLE_EDIT_HINT_ICON} />
                             {t("words.editing_your_comment_saving_broadcasts_the_cha")}
                         </Typography>
                         <IconButton size="small" style={STYLE_REPLY_CLOSE_BTN} onClick={onCancelEdit}>
@@ -1171,7 +1312,7 @@ const BottomBarComments = React.memo(function BottomBarComments({
                         )}
                     </Grid>
                 </Grid>
-                <ToxicityWatcher targetId="comment-textfield" label="comment" style={{ paddingLeft: 48 }} />
+                <ToxicityWatcher targetId="comment-textfield" label="comment" style={STYLE_TOXICITY_WATCHER} />
             </div>
         </Fade>
     );
@@ -1185,9 +1326,10 @@ const BottomBarComments = React.memo(function BottomBarComments({
 
 const BottomBarNFT = React.memo(function BottomBarNFT({ visible, barStyle }) {
     useLanguage();
+    const rootStyle = useMemo(() => ({ ...barStyle, padding: "12px 16px" }), [barStyle]);
     return (
         <Fade in={visible} timeout={FADE_TIMEOUT_BOTTOMBAR}>
-            <div style={{ ...barStyle, padding: "12px 16px" }}>
+            <div style={rootStyle}>
                 {/* Blurred + inert while the NFT marketplace is coming soon */}
                 <div style={STYLE_NFT_BAR_DISABLED} aria-hidden="true">
                     <Grid container spacing={1} alignItems="center">
@@ -1253,7 +1395,121 @@ const VotesView = React.memo(function VotesView({ authorsEntries, votesRenderer 
  * re-render when only image-animation state changes (_hidden, zoom,
  * _size, _download_loading).  This is the single biggest render-cost
  * cut: every arrow-nav dispatch({}) no longer traverses this tree.
+ *
+ * Inside it, each region is its own memo hoisted to module scope —
+ * DrawerHeader, DrawerTabs, DrawerViews, the three bottom bars — fed
+ * only the values it shows. A vote, a comment being sent or the reply
+ * target changing used to re-render the header, the Tabs and the whole
+ * SwipeableViews (and every slide wrapper) along with the bar that
+ * actually changed; now only that bar renders. DrawerHeader takes the
+ * author fields as primitives, so a host refreshing `data` (new object,
+ * same post) leaves it alone.
  * ══════════════════════════════════════════════════════════════════════ */
+const EMPTY_AUTHOR = Object.freeze({});
+const STYLE_TABS_EXPANDED = Object.freeze({ transform: "translateY(72px)" });
+const STYLE_TABS_COMPACT = Object.freeze({ transform: "translateY(16px)" });
+
+const DrawerHeader = React.memo(function DrawerHeader({
+                                                          classes, hidden, locales,
+                                                          authorImage, authorName, authorUsername, title, date,
+                                                          showClose, onOpenAuthor, onMenuToggle
+                                                      }) {
+    const fadeKey = hidden ? "0" : "1";
+    return (
+        <CardHeader
+            className={classes.cardHeader}
+            avatar={<Fade in={!hidden} timeout={FADE_TIMEOUT_AVATAR} key={fadeKey}><Avatar src={authorImage} onClick={onOpenAuthor} /></Fade>}
+            action={<IconButton onClick={onMenuToggle}>{showClose ? <CloseIcon style={STYLE_ICON_GRAY} /> : <InfoOutlined style={STYLE_ICON_GRAY} />}</IconButton>}
+            title={<Fade in={!hidden} timeout={FADE_TIMEOUT_TITLE} key={fadeKey}><span>{title}</span></Fade>}
+            subheader={
+                <Fade in={!hidden} timeout={FADE_TIMEOUT_SUBHEADER} key={fadeKey}>
+                    <span>
+                        <Tooltip arrow title={new Date(date).toLocaleDateString(locales, TOOLTIP_DATE_OPTIONS)}>
+                            <span className={classes.subheaderDate}><LiveTimeAgo date={date || Date.now()} /></span>
+                        </Tooltip>
+                        <span className={classes.subheaderBy}> by </span>
+                        <Tooltip title={"@" + authorUsername}>
+                            <span className={classes.subheaderName} onClick={onOpenAuthor}>{authorName}</span>
+                        </Tooltip>
+                    </span>
+                </Fade>
+            } />
+    );
+});
+
+const DrawerTabs = React.memo(function DrawerTabs({ className, value, hidden, onChange }) {
+    return (
+        <Fade in={!hidden} timeout={FADE_TIMEOUT_TABS} key={hidden ? "0" : "1"}>
+            <Tabs style={value < 1 ? STYLE_TABS_EXPANDED : STYLE_TABS_COMPACT}
+                  className={className} value={value} variant="fullWidth"
+                  indicatorColor="primary" textColor="primary" onChange={onChange} fullwidth={true}>
+                <Tab icon={<DescriptionRounded />} />
+                <Tab icon={<CommentRounded />} />
+                <Tab icon={<LabelRounded />} />
+            </Tabs>
+        </Fade>
+    );
+});
+
+/* The four tab slides. SwipeableViews is not pure — any render above it
+ * re-ran its whole render (slide styles, Children.map, the four slide
+ * wrappers) even when every view then bailed out; as its own memo it only
+ * renders when a value one of the views shows changes.
+ *
+ * Scrolling: react-swipeable-views puts `overflow-x: hidden` on its root,
+ * which leaves overflow-y at auto — the root was a vertical scroller too,
+ * the one that "took over, scrolling every tab at once" (see useCardDrawer).
+ * SWIPEABLE_ROOT_STYLE makes it overflow: hidden — a clip, never a user
+ * scroller — so the active slide is the only thing that scrolls, and
+ * classes.swipeRoot hints scroll-position compositing on that slide alone. */
+const DrawerViews = React.memo(function DrawerViews({
+                                                        classes, hidden, index, onChangeIndex,
+                                                        /* details */ data, metadata, type, kb, tags, copied, isOwner, isFavorite, nsfw, locales,
+                                                        onTagClick, onDownloadArtwork, onOpenLicenseDialog, onCopy, onEditPost, onToggleFavorite,
+                                                        onOpenArtwork, onOpenAuthor,
+                                                        /* comments */ currentComments, showParent, sorting, comments, commentsLoading, api, account,
+                                                        focusKey, focusPathKeys,
+                                                        onToggleShowParent, onSliceReplies, onSortingChange, onShowReplies, onLoadReplies,
+                                                        onReply, onEditComment, onDeleteComment,
+                                                        /* votes */ authorsEntries, votesRenderer
+                                                    }) {
+    return (
+        <Fade in={!hidden} timeout={FADE_TIMEOUT_SWIPEABLE} key={hidden ? "0" : "1"}>
+            <SwipeableViews ignoreNativeScroll={true} className={classes.swipeRoot}
+                            style={SWIPEABLE_ROOT_STYLE} containerStyle={SWIPEABLE_CONTAINER_STYLE}
+                            animateHeight={false} animateTransitions={true} disableLazyLoading={true}
+                            resistance={true} springConfig={SWIPEABLE_SPRING}
+                            index={index} onChangeIndex={onChangeIndex} disabled={false} key="swipe-able-view">
+                <CardContent key="view-0" style={STYLE_CARDCONTENT_0}>
+                    <DetailsView id={data.id} data={data} metadata={metadata} classes={classes} type={type} kb={kb}
+                                 tags={tags} onTagClick={onTagClick} onDownloadArtwork={onDownloadArtwork}
+                                 onOpenLicenseDialog={onOpenLicenseDialog} copied={copied} onCopy={onCopy}
+                                 isOwner={isOwner} onEditPost={onEditPost}
+                                 isFavorite={isFavorite} onToggleFavorite={onToggleFavorite}
+                                 nsfw={nsfw} locales={locales}
+                                 onOpenArtwork={onOpenArtwork} onOpenAuthor={onOpenAuthor} />
+                </CardContent>
+                <CardContent key="view-1" style={STYLE_CARDCONTENT_1}>
+                    <CommentsView id={data.id} currentComments={currentComments} showParent={showParent}
+                                  sorting={sorting} comments={comments} classes={classes} locales={locales}
+                                  commentsLoading={commentsLoading} api={api} account={account}
+                                  focusKey={focusKey} focusPathKeys={focusPathKeys}
+                                  onToggleShowParent={onToggleShowParent} onSliceReplies={onSliceReplies}
+                                  onSortingChange={onSortingChange} onShowReplies={onShowReplies} onLoadReplies={onLoadReplies}
+                                  onOpenAuthor={onOpenAuthor} onReply={onReply}
+                                  onEditComment={onEditComment} onDeleteComment={onDeleteComment} />
+                </CardContent>
+                <CardContent key="view-2" style={STYLE_CARDCONTENT_2}>
+                    <NFTView id={data.id} data={data} />
+                </CardContent>
+                <CardContent key="view-3" style={STYLE_CARDCONTENT_3}>
+                    <VotesView authorsEntries={authorsEntries} votesRenderer={votesRenderer} />
+                </CardContent>
+            </SwipeableViews>
+        </Fade>
+    );
+});
+
 const DrawerCardInner = React.memo(function DrawerCardInner({
                                                                 /* layout */ classes, open, _view_mobile_opened, _view_right_mobile_enabled,
                                                                 /* header */ data, _hidden2, locales, openAuthorFromData, menuToggle,
@@ -1274,72 +1530,33 @@ const DrawerCardInner = React.memo(function DrawerCardInner({
                                                                 clearReplyTarget, cancelEditComment, submitComment, onCommentKeyDown,
                                                                 /* card ref */ setMenuCardRefCb
                                                             }) {
-    useLanguage();
     const tags = data.tags || EMPTY_TAGS;
+    const author = data.author || EMPTY_AUTHOR;
     return (
         <Card ref={setMenuCardRefCb}
               className={classes.card + ((open && _view_mobile_opened) ? " opened " : " closed ") + (open ? " visible " : " hidden ")}>
             <Collapse timeout={COLLAPSE_TIMEOUT} in={tab_value < 1} className={classes.collapse}>
-                <CardHeader
-                    className={classes.cardHeader}
-                    avatar={<Fade in={!_hidden2} timeout={FADE_TIMEOUT_AVATAR} key={_hidden2 ? "0" : "1"}><Avatar src={(data.author || {}).image} onClick={openAuthorFromData} /></Fade>}
-                    action={<IconButton onClick={menuToggle}>{(_view_mobile_opened || !_view_right_mobile_enabled) ? <CloseIcon style={STYLE_ICON_GRAY} /> : <InfoOutlined style={STYLE_ICON_GRAY} />}</IconButton>}
-                    title={<Fade in={!_hidden2} timeout={FADE_TIMEOUT_TITLE} key={_hidden2 ? "0" : "1"}><span>{data.title}</span></Fade>}
-                    subheader={
-                        <Fade in={!_hidden2} timeout={FADE_TIMEOUT_SUBHEADER} key={_hidden2 ? "0" : "1"}>
-                            <span>
-                                <Tooltip arrow title={new Date(data.date).toLocaleDateString(locales, TOOLTIP_DATE_OPTIONS)}>
-                                    <span className={classes.subheaderDate}><LiveTimeAgo date={data.date || Date.now()} /></span>
-                                </Tooltip>
-                                <span className={classes.subheaderBy}> by </span>
-                                <Tooltip title={"@" + (data.author || {}).username}>
-                                    <span className={classes.subheaderName} onClick={openAuthorFromData}>{(data.author || {}).name}</span>
-                                </Tooltip>
-                            </span>
-                        </Fade>
-                    } />
+                <DrawerHeader classes={classes} hidden={_hidden2} locales={locales}
+                              authorImage={author.image} authorName={author.name} authorUsername={author.username}
+                              title={data.title} date={data.date}
+                              showClose={_view_mobile_opened || !_view_right_mobile_enabled}
+                              onOpenAuthor={openAuthorFromData} onMenuToggle={menuToggle} />
             </Collapse>
-            <Fade in={!_hidden2} timeout={FADE_TIMEOUT_TABS} key={_hidden2 ? "0" : "1"}>
-                <Tabs style={{ transform: `translateY(${tab_value < 1 ? 72 : 16}px)` }}
-                      className={classes.cardTabs} value={tab_value} variant="fullWidth"
-                      indicatorColor="primary" textColor="primary" onChange={handleTabChange} fullwidth={true}>
-                    <Tab icon={<DescriptionRounded />} />
-                    <Tab icon={<CommentRounded />} />
-                    <Tab icon={<LabelRounded />} />
-                </Tabs>
-            </Fade>
-            <Fade in={!_hidden2} timeout={FADE_TIMEOUT_SWIPEABLE} key={_hidden2 ? "0" : "1"}>
-                <SwipeableViews ignoreNativeScroll={true} containerStyle={SWIPEABLE_CONTAINER_STYLE}
-                                animateHeight={false} animateTransitions={true} disableLazyLoading={true}
-                                resistance={true} springConfig={SWIPEABLE_SPRING}
-                                index={tab_value} onChangeIndex={handleChangeIndex} disabled={false} key="swipe-able-view">
-                    <CardContent key="view-0" style={STYLE_CARDCONTENT_0}>
-                        <DetailsView id={data.id} data={data} metadata={metadata} classes={classes} type={type} kb={kb}
-                                     tags={tags} onTagClick={handleTagClick} onDownloadArtwork={handleDownloadArtwork}
-                                     onOpenLicenseDialog={handleOpenLicenseDialog} copied={_copied} onCopy={handleCopy}
-                                     isOwner={isOwner} onEditPost={openEditPost}
-                                     isFavorite={isFavorite} onToggleFavorite={onToggleFavorite}
-                                     nsfw={nsfw} locales={locales}
-                                     onOpenArtwork={openRelatedArtwork} onOpenAuthor={openAuthor} />
-                    </CardContent>
-                    <CardContent key="view-1" style={STYLE_CARDCONTENT_1}>
-                        <CommentsView id={data.id} currentComments={_current_comments} showParent={_show_parent}
-                                      sorting={_sorting} comments={sortedComments} classes={classes} locales={locales}
-                                      commentsLoading={_comments_loading} api={api} account={account}
-                                      focusKey={focusKey} focusPathKeys={focusPathKeys}
-                                      onToggleShowParent={toggleShowParent} onSliceReplies={sliceReplies}
-                                      onSortingChange={handleSortingChange} onShowReplies={showReplies} onLoadReplies={onLoadReplies}
-                                      onOpenAuthor={openAuthor} onReply={replyToComment}
-                                      onEditComment={startEditComment} onDeleteComment={requestDeleteComment} />
-                    </CardContent>
-                    <CardContent key="view-2" style={STYLE_CARDCONTENT_2}>
-                        <NFTView id={data.id} data={data} />
-                    </CardContent>
-                    <CardContent key="view-3" style={STYLE_CARDCONTENT_3}>
-                        <VotesView authorsEntries={authorsEntries} votesRenderer={votesRenderer} />
-                    </CardContent>
-                </SwipeableViews>
-            </Fade>
+            <DrawerTabs className={classes.cardTabs} value={tab_value} hidden={_hidden2} onChange={handleTabChange} />
+            <DrawerViews classes={classes} hidden={_hidden2} index={tab_value} onChangeIndex={handleChangeIndex}
+                         data={data} metadata={metadata} type={type} kb={kb} tags={tags} copied={_copied}
+                         isOwner={isOwner} isFavorite={isFavorite} nsfw={nsfw} locales={locales}
+                         onTagClick={handleTagClick} onDownloadArtwork={handleDownloadArtwork}
+                         onOpenLicenseDialog={handleOpenLicenseDialog} onCopy={handleCopy}
+                         onEditPost={openEditPost} onToggleFavorite={onToggleFavorite}
+                         onOpenArtwork={openRelatedArtwork} onOpenAuthor={openAuthor}
+                         currentComments={_current_comments} showParent={_show_parent} sorting={_sorting}
+                         comments={sortedComments} commentsLoading={_comments_loading} api={api} account={account}
+                         focusKey={focusKey} focusPathKeys={focusPathKeys}
+                         onToggleShowParent={toggleShowParent} onSliceReplies={sliceReplies}
+                         onSortingChange={handleSortingChange} onShowReplies={showReplies} onLoadReplies={onLoadReplies}
+                         onReply={replyToComment} onEditComment={startEditComment} onDeleteComment={requestDeleteComment}
+                         authorsEntries={authorsEntries} votesRenderer={votesRenderer} />
             <BottomBarActions
                 visible={tab_value === 0 && !_hidden2} barStyle={barStyle} api={api}
                 upvoteLoading={_upvoteLoading} downvoteLoading={_downvoteLoading}
@@ -1373,6 +1590,10 @@ const DrawerCardInner = React.memo(function DrawerCardInner({
     if (a._sorting !== b._sorting || a._comments_loading !== b._comments_loading) return false;
     if (a._show_parent !== b._show_parent || a._current_comments !== b._current_comments) return false;
     if (a.sortedComments !== b.sortedComments || a.authorsEntries !== b.authorsEntries) return false;
+    /* The deep-linked comment focus and the api: CommentsView compares both,
+     * but this gate never let a change of them through on its own — the
+     * pinned thread only brightened once something unrelated re-rendered. */
+    if (a.focusKey !== b.focusKey || a.focusPathKeys !== b.focusPathKeys || a.api !== b.api) return false;
     if (a.metadata !== b.metadata || a._copied !== b._copied) return false;
     /* Deep-check metadata fields: Preact's batching can merge two patchReducer
      * calls such that the metadata reference doesn't change between renders
@@ -1429,6 +1650,15 @@ const FADE_TIMEOUT_SWIPEABLE = Object.freeze({ appear: 200, enter: 200, exit: 20
 const COLLAPSE_TIMEOUT = Object.freeze({ delay: 0, enter: 360, exit: 360 });
 const SWIPEABLE_SPRING = Object.freeze({ tension: 450, friction: 60, duration: '300ms', easeFunction: 'cubic-bezier(0.280, 0.840, 0.420, 1)', delay: '25ms' });
 const SWIPEABLE_CONTAINER_STYLE = Object.freeze({ height: "100%" });
+/* Merged over the library's `overflow-x: hidden` root: a clip on both axes, so the
+ * root is never a (vertical) user scroller and only the active slide scrolls.
+ * Still a scroll container per spec, so its flex min-height stays 0. */
+const SWIPEABLE_ROOT_STYLE = Object.freeze({ overflow: "hidden" });
+const STYLE_EDIT_HINT_ICON = Object.freeze({ fontSize: 13, verticalAlign: "text-bottom", marginRight: 4 });
+const STYLE_TOXICITY_WATCHER = Object.freeze({ paddingLeft: 48 });
+const STYLE_VOTER_AVATAR = Object.freeze({ borderRadius: "12px", cursor: "pointer" });
+const STYLE_DELAY_300 = Object.freeze({ transitionDelay: "300ms" });
+const STYLE_DELAY_600 = Object.freeze({ transitionDelay: "600ms" });
 const STYLE_ICON_GRAY = Object.freeze({ color: "#666" });
 const STYLE_REPLY_ROW = Object.freeze({ display: "flex", alignItems: "center", marginBottom: 6, gap: 6 });
 const STYLE_REPLY_CAPTION = Object.freeze({ color: "#888" });
@@ -1478,6 +1708,61 @@ const STYLE_CANVAS_CONTEXT = Object.freeze({ zIndex: 1, userSelect: "none", touc
 const NOOP = () => {};
 const PREVENT_CONTEXT = (e) => { e.preventDefault(); e.stopImmediatePropagation(); };
 
+/* ══════════════════════════════════════════════════════════════════════
+ * PERF: artwork-stage controls and the dialogs, as module-level memos.
+ * PostDialog itself re-renders on every dispatch — a wheel zoom commits
+ * once per frame, a pinch once per frame, the hero and nav choreography
+ * several times per open. Each of those used to re-render the two arrows
+ * (a Fade + Transition apiece), the download IconButton (ButtonBase +
+ * TouchRipple), the license, edit and delete dialogs and the download
+ * overlay, none of which had changed. Behind these boundaries they render
+ * only when their own props do.
+ * ══════════════════════════════════════════════════════════════════════ */
+const NavArrow = React.memo(function NavArrow({ className, iconClassName, iconStyle, onClick }) {
+    return (
+        <Fade in timeout={900}>
+            <div className={className} onClick={onClick}>
+                <ArrowForwardIosIcon style={iconStyle} className={iconClassName} />
+            </div>
+        </Fade>
+    );
+});
+
+const DownloadControl = React.memo(function DownloadControl({ className, progressClassName, progressClasses, loading, onDownload }) {
+    return (
+        <div style={STYLE_DOWNLOAD_WRAP} className={className}>
+            <IconButton onClick={onDownload}><CloudDownload /></IconButton>
+            {loading && <CircularProgress thickness={3} size={64} classes={progressClasses} className={progressClassName} />}
+        </div>
+    );
+});
+
+/* Tap-to-save overlay (see classes.downloadOverlay). */
+const DownloadOverlay = React.memo(function DownloadOverlay({ classes, filename, onCancel, onConfirm }) {
+    const confirm = useCallback((e) => { e.stopPropagation(); onConfirm(); }, [onConfirm]);
+    return (
+        <Fade in timeout={250}>
+            <div className={classes.downloadOverlay} onClick={onCancel}>
+                <div className={classes.downloadOverlayInner} onClick={confirm}>
+                    <Fade in timeout={400} style={STYLE_DELAY_300}>
+                        <CloudDownload className={classes.downloadOverlayIcon} />
+                    </Fade>
+                    <Fade in timeout={400} style={STYLE_DELAY_600}>
+                        <span className={classes.downloadOverlayText}>{filename}</span>
+                    </Fade>
+                </div>
+            </div>
+        </Fade>
+    );
+});
+
+/* Shallow-compared boundaries around the imported dialogs: every prop they
+ * take is a stable callback, a memoized object or a value that only moves
+ * when the dialog's own state does. */
+const LicenseDialogMemo = React.memo(LicenseDialog);
+const EditPostDialogMemo = React.memo(EditPostDialog);
+const DeleteCommentModalMemo = React.memo(DeleteCommentModal);
+
 const styles = (theme) => ({
     backdrop: {
         zIndex: theme.zIndex.drawer + 1,
@@ -1505,7 +1790,8 @@ const styles = (theme) => ({
     },
     list: {
         "& .MuiListSubheader-root": {
-            fontSize: "1rem !important"
+            fontSize: "1rem !important",
+            color: "#fff"
         }
     },
     colorBadges: {
@@ -1570,12 +1856,14 @@ const styles = (theme) => ({
             backdropFilter: "brightness(0.5)",
             backgroundPosition: "center",
             backgroundRepeat: "no-repeat",
-            filter: "opacity(0)",
-            transition: "filter 225ms cubic-bezier(0.4, 0, 0.2, 1) 35ms",
+            // opacity, not filter: opacity() — composited on the GPU in every
+            // engine, no filter surface to rasterize for the hover fade
+            opacity: 0,
+            transition: "opacity 225ms cubic-bezier(0.4, 0, 0.2, 1) 35ms",
         },
         "& .MuiAvatar-root:hover::after": {
-            filter: "opacity(1)",
-            transition: "filter 175ms cubic-bezier(0.4, 0, 0.2, 1) 5ms",
+            opacity: 1,
+            transition: "opacity 175ms cubic-bezier(0.4, 0, 0.2, 1) 5ms",
         }
     },
     subheaderName: {
@@ -1594,20 +1882,28 @@ const styles = (theme) => ({
         userSelect: "none",
         contain: "style layout"
     },
+    /* The artwork's animation channel (inner wrapper): real `opacity` +
+     * `transform`, the two properties every engine animates on the
+     * compositor. It used to be `filter: opacity()` — a filter effect the
+     * GPU path doesn't take everywhere (Firefox runs filter animations on
+     * the main thread) — because the same element also carried the
+     * imperative reveal latch as inline `opacity`. The latch now lives on
+     * the outer transform wrapper (see setImageRefCb), so this element's
+     * opacity is free for the classes. */
     hidden: {
-        filter: "opacity(0)",
+        opacity: 0,
         transform: "scale(.5)",
         transformOrigin: "50% 50%",
-        transition: "transform 220ms cubic-bezier(0.3, 0, 0.8, 0.15), filter 260ms cubic-bezier(0.3, 0, 0.8, 0.15)",
-        willChange: "transform, filter, opacity",
+        transition: "transform 220ms cubic-bezier(0.3, 0, 0.8, 0.15), opacity 260ms cubic-bezier(0.3, 0, 0.8, 0.15)",
+        willChange: "transform, opacity",
         backfaceVisibility: "hidden",
         contain: "layout style",
     },
     appear: {
-        filter: "opacity(1)",
+        opacity: 1,
         transform: "scale(1)",
         transformOrigin: "50% 50%",
-        transition: "transform 350ms cubic-bezier(0.2, 0.9, 0.3, 1), filter 320ms cubic-bezier(0.2, 0.9, 0.3, 1)",
+        transition: "transform 350ms cubic-bezier(0.2, 0.9, 0.3, 1), opacity 320ms cubic-bezier(0.2, 0.9, 0.3, 1)",
         willChange: "auto",
         backfaceVisibility: "hidden",
         contain: "layout style",
@@ -1615,26 +1911,26 @@ const styles = (theme) => ({
     dismiss: {
         transformOrigin: "50% 50%",
         animation: "$artDismiss 200ms cubic-bezier(0.4, 0, 1, 1) forwards",
-        willChange: "transform, filter",
+        willChange: "transform, opacity",
         backfaceVisibility: "hidden",
         "@global": {
             "@keyframes artDismiss": {
-                "0%":   { transform: "scale(1)",    filter: "opacity(1)" },
-                "30%":  { transform: "scale(1.06)", filter: "opacity(.4)" },
-                "100%": { transform: "scale(0.55)", filter: "opacity(0)" },
+                "0%":   { transform: "scale(1)",    opacity: 1 },
+                "30%":  { transform: "scale(1.06)", opacity: 0.4 },
+                "100%": { transform: "scale(0.55)", opacity: 0 },
             }
         }
     },
     bounceAppear: {
         transformOrigin: "50% 50%",
         animation: "$artBounceIn 400ms cubic-bezier(0.2, 0.9, 0.3, 1) forwards",
-        willChange: "transform, filter",
+        willChange: "transform, opacity",
         backfaceVisibility: "hidden",
         contain: "layout style",
         "@global": {
             "@keyframes artBounceIn": {
-                "0%":   { transform: "scale(0.6)",  filter: "opacity(0)" },
-                "100%": { transform: "scale(1)",    filter: "opacity(1)" },
+                "0%":   { transform: "scale(0.6)",  opacity: 0 },
+                "100%": { transform: "scale(1)",    opacity: 1 },
             }
         }
     },
@@ -1652,17 +1948,20 @@ const styles = (theme) => ({
         width: `${DRAWER_WIDTH}px`,
         padding: "16px 16px 16px 0px",
         contain: "size style layout",
-        willChange: "transform, filter",
+        // opacity rather than filter: opacity() — compositor-only slide-in. The
+        // reverse-hero fade-out (closingChrome) sits on the Card inside, so this
+        // fill-mode `both` animation never holds the drawer against it.
+        willChange: "transform, opacity",
         animation: "$slideInFromRight both 500ms cubic-bezier(0.4, 0, 0.2, 1) 80ms",
         "@global": {
             "@keyframes slideInFromRight": {
                 "0%": {
                     transform: "translateX(420px) !important",
-                    filter: "opacity(0)"
+                    opacity: 0
                 },
                 "100%": {
                     transform: "translateX(0px) !important",
-                    filter: "opacity(1)"
+                    opacity: 1
                 },
             }
         },
@@ -1709,7 +2008,7 @@ const styles = (theme) => ({
         width: `${DRAWER_WIDTH}px`,
         padding: "16px 16px 16px 0px",
         contain: "size style layout",
-        filter: "opacity(0)",
+        opacity: 0,
         transform: "translateX(420px)",
         pointerEvents: "none",
         animation: "none !important",
@@ -1720,7 +2019,7 @@ const styles = (theme) => ({
             top: "0px",
             padding: "0px",
             transform: "translateY(100%)",
-            filter: "opacity(0)",
+            opacity: 0,
         }
     },
     viewRightHidden: {
@@ -1981,7 +2280,9 @@ const styles = (theme) => ({
         "& .MuiTab-fullWidth": {
             backgroundColor: "transparent",
             color: "#989898",
-            transition: "all 225ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
+            // the two properties that change — `all` also tweened every
+            // layout-affecting change on the tab buttons
+            transition: "background-color 225ms cubic-bezier(0.4, 0, 0.2, 1) 0ms, color 225ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
             borderRadius: "21px"
         },
         "& .MuiTab-fullWidth:hover": {
@@ -2020,6 +2321,14 @@ const styles = (theme) => ({
             backgroundColor: "#ffffff24"
         }
     },
+    /* SwipeableViews root (see DrawerViews). Only the active slide — the one
+     * react-swipeable-views marks aria-hidden="false" — gets the scroll
+     * compositing hint; the three parked slides don't hold a layer each. */
+    swipeRoot: {
+        "& > .react-swipeable-view-container > [aria-hidden=\"false\"]": {
+            willChange: "scroll-position",
+        },
+    },
     /* OPT #14: CSS containment for the canvas wrapper to isolate repaints */
     canvasWrapper: {
         contain: "strict",
@@ -2032,7 +2341,7 @@ const styles = (theme) => ({
         backfaceVisibility: "hidden",
     },
     heroAppear: {
-        filter: "opacity(1)",
+        opacity: 1,
         transform: "none",
         transformOrigin: "50% 50%",
         willChange: "auto",
@@ -2100,8 +2409,14 @@ const styles = (theme) => ({
             transition: "opacity 140ms cubic-bezier(0.4, 0, 0.2, 1) !important",
         },
         "& $viewRight, & $viewRightNoAnim, & $viewRightHidden, & $viewRightHiddenNoDelay, & $viewRightPrerender": {
-            opacity: 0,
             pointerEvents: "none",
+        },
+        // The drawer's fade-out runs on the Card inside it: the drawer element
+        // itself carries the slide-in animation, now on real `opacity` with
+        // fill-mode `both` — an animated value outranks a normal declaration,
+        // so an opacity set on the drawer would be held at 1 by that fill.
+        "& $card": {
+            opacity: 0,
             transition: "opacity 220ms cubic-bezier(0.4, 0, 0.2, 1)",
         },
     },
@@ -2275,12 +2590,20 @@ function createInst() {
         cardWrapperEl: null,
         cardScrolling: false,
         cardActiveScrollable: null,
+        cardFrozen: null,            // inline styles to put back after a card drag
+        cardPullCandidate: false,    // undecided gesture that looks like a pull-down at the top
+        cardDragFromContent: false,  // the drag started on the tab content (not header/tabs)
+        cardDragVelocity: 0,         // px/ms, + = down (flick-to-close)
+        cardLastMoveT: 0,
+        cardScrollTimes: null,       // WeakMap<scroller, performance.now() of its last scroll>
+
         lastPointerY: 0,
         scrollVelocity: 0,
         scrollMomentumRaf: null,
 
         // Pinch
         pinchStartDist: null,
+        rafPinchId: null,            // one transform write + one zoom commit per frame
         startZoom: 1.33,
         twoPointer: false,
         twoPointerTimeout: null,
@@ -2353,14 +2676,18 @@ function createInst() {
         blurEl1: null,
         blurEl2: null,
         committedImage: null,        // src currently mounted on blurEl1/2
-        // The inner div that holds the canvas + blur layers. We drive its
-        // opacity imperatively in setImgd so the canvas can paint
-        // (canvas.width/height/drawImage) while the inner div is held at
+        // The reveal latch: the element wrapping the canvas + blur layers
+        // whose inline opacity we drive imperatively in setImgd so the canvas
+        // can paint (canvas.width/height/drawImage) while it is held at
         // opacity 0, and the moment the bitmap is ready + the start
         // transform is committed, we flip to 1. This replaces the prior
         // double-rAF dance that left a window of visible pre-transition
         // state and ultimately ordered things wrong (start position not
         // guaranteed to paint before the transition class was added).
+        // It is the OUTER transform wrapper (imageRef), not the inner div:
+        // the inner div's opacity belongs to the hidden/appear/dismiss/
+        // bounceAppear classes, which animate real (GPU) opacity now — on a
+        // shared element the inline latch would override the classes.
         innerEl: null,
         // Drag axis disambiguation for the bottom-drawer. We compare the
         // first ~10 px of pointer travel: if |dx| dominates we lock to
@@ -2537,16 +2864,25 @@ function useImageGestures(viewRef, imageRef, inst, stateRef, dispatch) {
         }
     }, []);
 
+    /* Pinch frame: pointermove fires for BOTH fingers, often several times
+     * per frame on high-rate digitizers, and each one used to write the
+     * transform and dispatch a zoom — 2–4 full PostDialog renders per
+     * frame. The zoom is tracked on every move (hit-tests read it), the
+     * transform write and the React commit happen once per frame. */
+    const applyPinch = useCallback(() => {
+        inst.rafPinchId = null;
+        applyTransform();
+        dispatch({ zoom: inst.currentZoom });
+    }, []);
+
     const handlePointerMove = useCallback((e) => {
         if (inst.activePointers && inst.activePointers.has(e.pointerId)) {
             inst.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
             if (inst.activePointers.size === 2 && inst.pinchStartDist) {
                 const pts = [...inst.activePointers.values()];
                 const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
-                const zoom = Math.max(0.2, Math.min(inst.startZoom * (dist / inst.pinchStartDist), 5));
-                inst.currentZoom = zoom;
-                applyTransform();
-                dispatch({ zoom });
+                inst.currentZoom = Math.max(0.2, Math.min(inst.startZoom * (dist / inst.pinchStartDist), 5));
+                if (!inst.rafPinchId) inst.rafPinchId = requestAnimationFrame(applyPinch);
                 return;
             }
         }
@@ -2595,23 +2931,57 @@ function useImageGestures(viewRef, imageRef, inst, stateRef, dispatch) {
     return { applyTransform, getImageRect };
 }
 
+/* "At the top" with a pixel of slack — on high-DPR screens a scroller can
+ * come to rest at a fractional offset like 0.4. No scroller counts as top. */
+function scrollerAtTop(el) {
+    return !el || el.scrollTop < 1;
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  * useCardDrawer — handles mobile card drag, scroll, snap, momentum.
  * ══════════════════════════════════════════════════════════════════════ */
 function useCardDrawer(cardRef, cardWrapperRef, inst, stateRef, dispatch) {
 
+    /* Freeze the drawer's content for the length of a card drag ("hidden"):
+     * no taps, no native panning — and thaw it afterwards (""), putting every
+     * inline value back exactly as it was.
+     *
+     * Two things this used to get wrong, together behind "scrolling up on a
+     * phone jumps to the top of the Details tab":
+     *   - It hid the overflow of elements INSIDE the scroller (the swipeable
+     *     container, its slides). That collapses the scroller's scroll range,
+     *     so the browser clamps its offset to 0 — the jump to the top.
+     *     Native scrolling is now stopped on the scroller itself, whose
+     *     overflow-y: hidden keeps both its range and its offset.
+     *   - On release it cleared overflow/touch-action/pointer-events to "",
+     *     wiping the values React and SwipeableViews had set inline: the
+     *     slides stopped being scroll containers after the first touch, and
+     *     the shared root took over, scrolling every tab at once. */
     const setCardContentScroll = useCallback((overflow) => {
+        if (overflow !== "hidden") {
+            const saved = inst.cardFrozen;
+            inst.cardFrozen = null;
+            if (saved) for (let i = saved.length - 1; i >= 0; i--) saved[i][0][saved[i][1]] = saved[i][2];
+            return;
+        }
         const cardEl = cardRef.current;
-        if (!cardEl) return;
-        const isDrag = overflow === "hidden";
-        const scrollables = cardEl.querySelectorAll(
+        if (!cardEl || inst.cardFrozen) return;
+        const saved = [];
+        const parts = cardEl.querySelectorAll(
             '.MuiCardContent-root, .react-swipeable-view-container, .react-swipeable-view-container > div'
         );
-        for (let i = 0; i < scrollables.length; i++) {
-            scrollables[i].style.overflow = overflow;
-            scrollables[i].style.touchAction = isDrag ? "none" : "";
-            scrollables[i].style.pointerEvents = isDrag ? "none" : "";
+        for (let i = 0; i < parts.length; i++) {
+            const s = parts[i].style;
+            saved.push([s, "touchAction", s.touchAction], [s, "pointerEvents", s.pointerEvents]);
+            s.touchAction = "none";
+            s.pointerEvents = "none";
         }
+        const scroller = inst.cardActiveScrollable;
+        if (scroller && scroller.isConnected) {
+            saved.push([scroller.style, "overflowY", scroller.style.overflowY]);
+            scroller.style.overflowY = "hidden";
+        }
+        inst.cardFrozen = saved;
     }, []);
 
     const setupDragStyles = useCallback(() => {
@@ -2620,9 +2990,17 @@ function useCardDrawer(cardRef, cardWrapperRef, inst, stateRef, dispatch) {
         setCardContentScroll("hidden");
     }, []);
 
+    /* The element that actually scrolls under the pointer: the nearest
+     * ancestor that is a vertical scroll container with something to scroll
+     * (the SwipeableViews slide around a tab's CardContent). It used to be the
+     * CardContent itself, which never scrolls — so "at the top" was always
+     * true and every downward swipe on a scrolled tab became a card drag. */
     const findScrollableParent = useCallback((el) => {
         while (el && el !== cardRef.current) {
-            if (el.classList && el.classList.contains("MuiCardContent-root")) return el;
+            if (el.nodeType === 1 && el.scrollHeight > el.clientHeight + 1) {
+                const oy = getComputedStyle(el).overflowY;
+                if (oy === "auto" || oy === "scroll" || oy === "overlay") return el;
+            }
             el = el.parentElement;
         }
         return null;
@@ -2681,11 +3059,23 @@ function useCardDrawer(cardRef, cardWrapperRef, inst, stateRef, dispatch) {
 
     const handleDown = useCallback((e) => {
         if (!stateRef.current._view_right_mobile_enabled) return;
+        // A new finger always starts a new gesture. A drag still running
+        // (a second finger landed mid-drag, or its pointerup never came) is
+        // abandoned: the card goes back to rest and the content thaws —
+        // it used to stay shifted by the old offset with its content frozen.
+        if (inst.cardDragging) {
+            inst.cardDragging = false;
+            const w = cardWrapperRef.current;
+            if (w) { w.style.transform = ""; w.style.transition = ""; w.style.willChange = ""; w.style.overflow = ""; }
+        }
+        if (inst.cardFrozen) setCardContentScroll("");
         if (inst.scrollMomentumRaf) { cancelAnimationFrame(inst.scrollMomentumRaf); inst.scrollMomentumRaf = null; }
         inst.cardYStart = e.pageY; inst.cardXStart = e.pageX;
-        inst.cardYOffset = 0; inst.cardPointerId = e.pointerId;
+        inst.cardYOffset = 0; inst.pendingCardOffset = 0; inst.cardPointerId = e.pointerId;
         inst.cardIsHidden = !stateRef.current._view_mobile_opened;
         inst.lastPointerY = e.pageY; inst.scrollVelocity = 0;
+        inst.cardPullCandidate = false; inst.cardDragVelocity = 0; inst.cardLastMoveT = 0;
+        inst.cardDragFromContent = !!(e.target && e.target.closest && e.target.closest(".react-swipeable-view-container"));
         // Axis-lock starts unset. We wait until the first ~8 px of travel
         // to decide horizontal-vs-vertical, so a quick sideways swipe over
         // the drawer doesn't accidentally start a drag-down — SwipeableViews
@@ -2718,8 +3108,27 @@ function useCardDrawer(cardRef, cardWrapperRef, inst, stateRef, dispatch) {
      * the gesture as vertical. 1.0 is a 45° split; 1.2 biases slightly
      * toward horizontal so SwipeableViews wins close calls. */
     const VERTICAL_BIAS = 1.2;
+    /* Pull-to-close from the tab content. A pull only grabs the drawer when
+     * the content under the finger is at its top AND has been still for
+     * CONTENT_SCROLL_LOCK_MS — so the reflex swipe right after a fling
+     * reaches the top doesn't throw the drawer away. Released, it closes
+     * when pulled past CONTENT_PULL_CLOSE px or flicked down past
+     * CONTENT_FLICK_MIN px; anything less springs back. (Drags on the
+     * header and tabs keep the short drawerSettings.hysteresisOpened.) */
+    const CONTENT_SCROLL_LOCK_MS = 400;
+    const CONTENT_PULL_CLOSE = 96;
+    const CONTENT_FLICK_MIN = 24;
+    const CONTENT_FLICK_VELOCITY = 0.4;    // px/ms, downward, at release
+
+    const scrollerSettled = useCallback((el) => {
+        const t = el && inst.cardScrollTimes ? inst.cardScrollTimes.get(el) : undefined;
+        return t === undefined || performance.now() - t > CONTENT_SCROLL_LOCK_MS;
+    }, []);
 
     const handleMove = useCallback((e) => {
+        // Only the pointer that started the gesture moves it — not a second
+        // finger, and not a mouse hovering after (or without) a press.
+        if (e.pointerId !== inst.cardPointerId) return;
         // ── Axis-lock phase (drawer open, gesture not yet classified). ───
         // We need this BEFORE the cardScrolling/cardDragging branches so a
         // horizontal swipe never triggers either — it should pass straight
@@ -2728,13 +3137,20 @@ function useCardDrawer(cardRef, cardWrapperRef, inst, stateRef, dispatch) {
             const dY = e.pageY - inst.cardYStart;
             const dX = e.pageX - inst.cardXStart;
             const absX = Math.abs(dX), absY = Math.abs(dY);
+            const scrollable = inst.cardActiveScrollable;
+            const pullable = scrollerAtTop(scrollable) && scrollerSettled(scrollable);
+            // Shaping up as a pull-down where nothing can scroll up? Then
+            // handleTouchMove keeps the browser from starting a native
+            // scroll, which would cancel this gesture before it can drag.
+            inst.cardPullCandidate = pullable && dY > 0 && absY > absX * VERTICAL_BIAS;
             if (absX < AXIS_LOCK_THRESHOLD && absY < AXIS_LOCK_THRESHOLD) {
                 // Not enough travel yet — let the gesture continue without
-                // committing. Crucially we do NOT preventDefault here, so
-                // SwipeableViews's own touch handler can still observe the
-                // movement and start a horizontal swipe if it wants.
+                // committing. We do NOT preventDefault the pointer event,
+                // so SwipeableViews's own touch handler can still observe
+                // the movement and start a horizontal swipe if it wants.
                 return;
             }
+            inst.cardPullCandidate = false;
             if (absY > absX * VERTICAL_BIAS) {
                 // Vertical lock: commit to scroll/drag path.
                 inst.cardAxisLocked = "v";
@@ -2744,12 +3160,11 @@ function useCardDrawer(cardRef, cardWrapperRef, inst, stateRef, dispatch) {
                 inst.cardYStart = e.pageY;
                 inst.cardXStart = e.pageX;
                 inst.lastPointerY = e.pageY;
-                const scrollable = inst.cardActiveScrollable;
-                const atTop = !scrollable || scrollable.scrollTop <= 0;
                 // If there's no scrollable under the pointer (user is on
                 // the header/tabs/bottom bar) OR the scrollable is already
-                // at top AND they're pulling down, go straight to drag.
-                if ((!scrollable || atTop) && dY > 0) {
+                // at top (and settled) AND they're pulling down, go
+                // straight to drag.
+                if (pullable && dY > 0) {
                     inst.cardScrolling = false; inst.cardDragging = true;
                     setupDragStyles();
                 } else {
@@ -2773,7 +3188,7 @@ function useCardDrawer(cardRef, cardWrapperRef, inst, stateRef, dispatch) {
             inst.lastPointerY = e.pageY;
             inst.scrollVelocity = 0.6 * incY + 0.4 * inst.scrollVelocity;
             const scrollable = inst.cardActiveScrollable;
-            const atTop = !scrollable || scrollable.scrollTop <= 0;
+            const atTop = scrollerAtTop(scrollable);
             // Pull-down past top: switch to drag-down. We use a small extra
             // hysteresis (8 px past zero) so brief over-scrolls don't trip
             // the drag prematurely. The same threshold the old code used.
@@ -2788,35 +3203,56 @@ function useCardDrawer(cardRef, cardWrapperRef, inst, stateRef, dispatch) {
         }
         if (!inst.cardDragging) return;
         const dY = e.pageY - inst.cardYStart, dX = Math.abs(e.pageX - inst.cardXStart);
+        // Release velocity for flick-to-close (smoothed, px/ms, + = down).
+        if (inst.cardLastMoveT) {
+            const dt = e.timeStamp - inst.cardLastMoveT;
+            if (dt > 0) inst.cardDragVelocity = 0.7 * ((e.pageY - inst.lastPointerY) / dt) + 0.3 * inst.cardDragVelocity;
+        }
+        inst.cardLastMoveT = e.timeStamp; inst.lastPointerY = e.pageY;
         if (Math.abs(dY) > 4) { e.preventDefault(); e.stopPropagation(); }
         inst.pendingCardOffset = inst.cardIsHidden ? Math.min(0, dY + dX) : Math.max(0, dY - dX);
         if (!inst.rafCardId) inst.rafCardId = requestAnimationFrame(applyCardDrag);
     }, []);
 
     const handleUp = useCallback((e) => {
+        // Only the pointer that owns the gesture ends it; a second finger
+        // lifting (or a click where no gesture started) changes nothing.
+        if (e.pointerId !== inst.cardPointerId) return;
+        inst.cardPointerId = null; inst.cardPullCandidate = false;
+        try { cardRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
         // Horizontal-lock or gesture that never crossed the axis threshold:
         // we never touched scroll/drag state, so there's nothing to undo.
         // Just reset the lock and let SwipeableViews (or a plain tap) own it.
         if (inst.cardAxisLocked !== "v") {
             inst.cardAxisLocked = null;
-            try { cardRef.current.releasePointerCapture(inst.cardPointerId); } catch (_) {}
             return;
         }
         inst.cardAxisLocked = null;
         if (inst.cardScrolling) {
             inst.cardScrolling = false;
-            try { cardRef.current.releasePointerCapture(inst.cardPointerId); } catch (_) {}
-            applyScrollMomentum(); return;
+            // pointercancel: the browser took the gesture over as a native
+            // scroll and flings it itself — a JS fling on top of it would
+            // push the content twice as far.
+            if (e.type !== "pointercancel") applyScrollMomentum();
+            return;
         }
         if (!inst.cardDragging) return;
         inst.cardDragging = false;
-        try { cardRef.current.releasePointerCapture(inst.cardPointerId); } catch (_) {}
         setCardContentScroll("");
 
-        const offset = inst.cardYOffset, hidden = inst.cardIsHidden;
+        // Decide on where the finger is, not on the last painted frame
+        // (cardYOffset trails it by up to one rAF — a whole step on a flick).
+        const offset = inst.pendingCardOffset, hidden = inst.cardIsHidden;
         const { hysteresisClosed, hysteresisOpened } = inst.drawerSettings;
         const shouldOpen = hidden && Math.abs(offset) > hysteresisClosed;
-        const shouldClose = !hidden && Math.abs(offset) > hysteresisOpened;
+        let shouldClose = !hidden && Math.abs(offset) > hysteresisOpened;
+        if (shouldClose && inst.cardDragFromContent) {
+            // Pulled from the content: only a deliberate pull or a flick
+            // (still moving when released) closes.
+            const moving = e.timeStamp - inst.cardLastMoveT < 100;
+            shouldClose = offset > CONTENT_PULL_CLOSE ||
+                (offset > CONTENT_FLICK_MIN && moving && inst.cardDragVelocity > CONTENT_FLICK_VELOCITY);
+        }
         const w = cardWrapperRef.current;
 
         if (shouldOpen || shouldClose) {
@@ -2836,6 +3272,25 @@ function useCardDrawer(cardRef, cardWrapperRef, inst, stateRef, dispatch) {
         }
     }, []);
 
+    /* Pointer events can't stop the browser from scrolling natively, and a
+     * native scroll that starts takes the gesture away (pointercancel). The
+     * card's touch-action: none doesn't help inside the tabs: every scroll
+     * container resets it for panning. So a pull-down at the top of the
+     * content was cancelled after a few pixels and never closed the drawer.
+     * Cancelling the touchmoves of a drag — and of a pull-down that is about
+     * to become one — keeps the gesture ours. */
+    const handleTouchMove = useCallback((e) => {
+        if (inst.cardPointerId === null || !e.cancelable) return;
+        if (inst.cardDragging || (inst.cardAxisLocked === null && inst.cardPullCandidate)) e.preventDefault();
+    }, []);
+
+    // When each scroller in the drawer last moved (see scrollerSettled).
+    const handleScroll = useCallback((e) => {
+        const t = e.target;
+        if (!t || t.nodeType !== 1) return;
+        (inst.cardScrollTimes || (inst.cardScrollTimes = new WeakMap())).set(t, performance.now());
+    }, []);
+
     // Attach / detach event listeners
     useEffect(() => {
         const el = cardRef.current;
@@ -2844,10 +3299,16 @@ function useCardDrawer(cardRef, cardWrapperRef, inst, stateRef, dispatch) {
             ["pointerdown", handleDown],
             ["pointermove", handleMove],
             ["pointerup", handleUp],
-            ["pointercancel", handleUp]
+            ["pointercancel", handleUp],
+            ["touchmove", handleTouchMove]
         ];
         events.forEach(([ev, fn]) => el.addEventListener(ev, fn, { passive: false, capture: true }));
-        return () => events.forEach(([ev, fn]) => el.removeEventListener(ev, fn, { passive: false, capture: true }));
+        // scroll doesn't bubble, but it does pass through the capture phase
+        el.addEventListener("scroll", handleScroll, { passive: true, capture: true });
+        return () => {
+            events.forEach(([ev, fn]) => el.removeEventListener(ev, fn, { passive: false, capture: true }));
+            el.removeEventListener("scroll", handleScroll, { passive: true, capture: true });
+        };
     }, [cardRef.current]);
 
     return { setCardContentScroll };
@@ -4215,8 +4676,17 @@ function PostDialog(props) {
         }
     }, [computeSize]);
 
+    // The outer transform wrapper is also the reveal latch (inst.innerEl —
+    // see createInst): setImgd flips its inline opacity 0 → 1 once the canvas
+    // has its new pixels at the start position. React never writes `opacity`
+    // on this element (its style object has no such key), so the imperative
+    // value survives every re-render.
     const setImageRefCb = useCallback((el) => {
-        if (el) imageRef.current = el;
+        if (!el) return;
+        imageRef.current = el;
+        inst.innerEl = el;
+        // Initial state: hidden until the first paint commits.
+        if (!inst.committedImage) el.style.opacity = "0";
     }, []);
 
     const setCanvasRefCb = useCallback((can) => {
@@ -4259,17 +4729,6 @@ function PostDialog(props) {
         if (inst.committedImage && el.getAttribute("src") !== inst.committedImage) el.src = inst.committedImage;
     }, []);
 
-    // Ref to the inner div that wraps blurs + canvas. Held on `inst` so
-    // setImgd can flip its opacity imperatively (0 before paint, 1 the
-    // instant the canvas has its new pixels committed at the start
-    // position) without round-tripping through React state.
-    const setInnerRefCb = useCallback((el) => {
-        if (!el) return;
-        inst.innerEl = el;
-        // Initial state: hidden until the first paint commits.
-        if (!inst.committedImage) el.style.opacity = "0";
-    }, []);
-
     /* ================================================================
      * EFFECTS — lifecycle
      * ================================================================ */
@@ -4286,6 +4745,7 @@ function PostDialog(props) {
             if (inst.rafDragId) cancelAnimationFrame(inst.rafDragId);
             if (inst.rafCardId) cancelAnimationFrame(inst.rafCardId);
             if (inst.rafWheelId) cancelAnimationFrame(inst.rafWheelId);
+            if (inst.rafPinchId) cancelAnimationFrame(inst.rafPinchId);
             if (inst.resizeRaf) cancelAnimationFrame(inst.resizeRaf);
             if (inst.heroTransitionTimer) clearTimeout(inst.heroTransitionTimer);
             if (inst.closingHeroTimer) clearTimeout(inst.closingHeroTimer);
@@ -4796,7 +5256,7 @@ function PostDialog(props) {
             <ListItem key={key} style={style}>
                 <ListItemAvatar>
                     <Tooltip title={`@${author.username}`}>
-                        <Avatar src={author.image} style={{ borderRadius: "12px", cursor: "pointer" }} className="pixelated" onClick={() => openAuthor(author.username)} />
+                        <Avatar src={author.image} style={STYLE_VOTER_AVATAR} className="pixelated" onClick={() => openAuthor(author.username)} />
                     </Tooltip>
                 </ListItemAvatar>
                 <ListItemText primary={author.name} secondary="0.1 PS with 100%" />
@@ -4827,8 +5287,13 @@ function PostDialog(props) {
      * whenever the displayed post changes, and kept live via subscribe()
      * so a removal from the FavoriteManagerDialog opened above this
      * dialog un-fills the row immediately. Index-only lookup — cheap. */
+    // Keyed on the author's NAME, not the author object: the host hands a new
+    // `data` (and author object) for every vote or comment-count refresh, and
+    // each one re-ran this effect — a favorites-store lookup plus an
+    // unsubscribe/subscribe — for the very same post.
+    const favoriteAuthor = (data.author || {}).username;
     useEffect(() => {
-        const author = (data.author || {}).username;
+        const author = favoriteAuthor;
         const permlink = data.permlink;
         if (!author || !permlink) { dispatch({ _is_favorite: false }); return; }
         let cancelled = false;
@@ -4841,7 +5306,7 @@ function PostDialog(props) {
         check();
         const unsubscribe = favorites.subscribe(check);
         return () => { cancelled = true; unsubscribe(); };
-    }, [data.permlink, data.author, props.api, dispatch]);
+    }, [data.permlink, favoriteAuthor, props.api, dispatch]);
 
     /* Optimistic toggle: flip the row instantly, snapshot everything the
      * store needs from the already-hydrated post, revert on failure.
@@ -4913,8 +5378,8 @@ function PostDialog(props) {
 
     /* PERF: Stable _data for LicenseDialog — only recalculated when post changes */
     const _data = useMemo(
-        () => ({ image: data.image, title: data.title, author: (data.author || {}).username }),
-        [data.image, data.title, data.author]
+        () => ({ image: data.image, title: data.title, author: favoriteAuthor }),
+        [data.image, data.title, favoriteAuthor]
     );
 
     /* PERF: Stable account image — avoids deep lookup on every render */
@@ -5040,28 +5505,21 @@ function PostDialog(props) {
                 <div style={STYLE_ROOT_CONTAINER}>
                     <div className={classes.viewLeft} ref={setViewRefCb}>
                         <div style={STYLE_CLOSE_OVERLAY} onClick={onRequestClose} />
-                        <div style={STYLE_DOWNLOAD_WRAP} className={classes.downloadWrap}>
-                            <IconButton onClick={downloadWithWatermark}><CloudDownload /></IconButton>
-                            {_download_loading && <CircularProgress thickness={3} size={64} classes={progressClasses} className={classes.downloadButtonProgress} />}
-                        </div>
+                        <DownloadControl className={classes.downloadWrap} progressClassName={classes.downloadButtonProgress}
+                                         progressClasses={progressClasses} loading={_download_loading}
+                                         onDownload={downloadWithWatermark} />
                         {/* Arrows render only when the host page has a target in
                             that direction: availability runs the same blur-skipping
                             walk navigation uses, so a direction with nothing but
                             blurred cards left (or the list edge) hands `undefined`
                             and the arrow disappears — same convention as orphans. */}
                         {props.onPrevious && (
-                            <Fade in timeout={900}>
-                                <div className={classes.back} onClick={handleArrowPrev}>
-                                    <ArrowForwardIosIcon style={STYLE_ARROW_PREV} className={classes.arrowIcon} />
-                                </div>
-                            </Fade>
+                            <NavArrow className={classes.back} iconClassName={classes.arrowIcon}
+                                      iconStyle={STYLE_ARROW_PREV} onClick={handleArrowPrev} />
                         )}
                         {props.onNext && (
-                            <Fade in timeout={900}>
-                                <div className={classes.forward} onClick={handleArrowNext}>
-                                    <ArrowForwardIosIcon className={classes.arrowIcon} />
-                                </div>
-                            </Fade>
+                            <NavArrow className={classes.forward} iconClassName={classes.arrowIcon}
+                                      onClick={handleArrowNext} />
                         )}
                         <div ref={setImageRefCb}
                              style={{
@@ -5072,7 +5530,7 @@ function PostDialog(props) {
                                  userSelect: "none", touchAction: "none", pointerEvents: "none",
                                  cursor: inst.dragging ? "grabbing" : "grab",
                              }}>
-                            <div ref={setInnerRefCb} className={imageAnimClass} style={STYLE_IMG_ANIM_INNER}>
+                            <div className={imageAnimClass} style={STYLE_IMG_ANIM_INNER}>
                                 {/* Blur backplate: src is set imperatively by the canvas
                                     reveal step (see setImgd) so it swaps atomically with
                                     the canvas pixels. Driving it through React diff caused
@@ -5122,11 +5580,11 @@ function PostDialog(props) {
                             setMenuCardRefCb={setMenuCardRefCb} />
                     </div>}
                 </div>
-                <LicenseDialog open={_license_dialog_opened} onClose={closeLicenseDialog}
-                               licenseBase={_license_base} customization={_license_customization} data={_data} />
+                <LicenseDialogMemo open={_license_dialog_opened} onClose={closeLicenseDialog}
+                                   licenseBase={_license_base} customization={_license_customization} data={_data} />
                 {/* Post metadata editor — owner only (Manage → Edit post details) */}
                 {isOwner && (
-                    <EditPostDialog
+                    <EditPostDialogMemo
                         open={_edit_post_open}
                         onClose={closeEditPost}
                         api={props.api}
@@ -5136,7 +5594,7 @@ function PostDialog(props) {
                     />
                 )}
                 {/* Delete-own-comment confirmation (delete_comment broadcast) */}
-                <DeleteCommentModal
+                <DeleteCommentModalMemo
                     open={Boolean(_delete_target)}
                     api={props.api}
                     account={props.account}
@@ -5145,19 +5603,8 @@ function PostDialog(props) {
                     onDeleted={handleCommentDeleted}
                 />
                 {_download_ready && (
-                    <Fade in timeout={250}>
-                        <div className={classes.downloadOverlay} onClick={cancelDownload}>
-                            <div className={classes.downloadOverlayInner}
-                                 onClick={(e) => { e.stopPropagation(); confirmDownload(); }}>
-                                <Fade in timeout={400} style={{ transitionDelay: "300ms" }}>
-                                    <CloudDownload className={classes.downloadOverlayIcon} />
-                                </Fade>
-                                <Fade in timeout={400} style={{ transitionDelay: "600ms" }}>
-                                    <span className={classes.downloadOverlayText}>{_download_ready.filename}</span>
-                                </Fade>
-                            </div>
-                        </div>
-                    </Fade>
+                    <DownloadOverlay classes={classes} filename={_download_ready.filename}
+                                     onCancel={cancelDownload} onConfirm={confirmDownload} />
                 )}
             </Backdrop>
         </Portal>

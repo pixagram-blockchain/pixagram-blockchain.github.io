@@ -40,8 +40,9 @@ import { AnswerCard } from "./AnswerCard";
 // v3, above the sections: what the Worker proposes for the text typed
 // (SuggestionList, rows picked with the mouse or the keys SearchBar handles),
 // "did you mean …?" when the search corrected a word, and the answer to a
-// question (AnswerCard). Opening an artwork or a post from the results tells the
-// Worker which one (controls.feedback), so its ranking learns.
+// question (AnswerCard; v4: with GPT-OSS's explanation, and a vote through
+// controls). Opening an artwork or a post from the results tells the Worker
+// which one (controls.feedback), so its ranking learns.
 
 const EMPTY = Object.freeze([]);
 
@@ -199,7 +200,7 @@ export const SearchResults = React.memo(
                             </p>
                         ) : null}
                         {answering ? (
-                            <AnswerCard classes={classes} answer={answer} onGoToUsername={onGoToUsername} onOpenArtwork={openArtwork} />
+                            <AnswerCard classes={classes} answer={answer} controls={controls} onGoToUsername={onGoToUsername} onOpenArtwork={openArtwork} />
                         ) : null}
                         {loading ? (
                             <div className={classes.loading}>

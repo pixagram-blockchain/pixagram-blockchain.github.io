@@ -1,19 +1,26 @@
 "use strict";
-import React, { useCallback, useMemo, useState } from "preact/compat";
+import React, { useCallback, useEffect, useMemo, useState } from "preact/compat";
 import CircularProgress from "@material-ui/core/CircularProgress";
 import QuestionAnswerOutlined from "@material-ui/icons/QuestionAnswerOutlined";
 import LibraryBooksOutlined from "@material-ui/icons/LibraryBooksOutlined";
+import ThumbUpOutlined from "@material-ui/icons/ThumbUpOutlined";
+import ThumbDownOutlined from "@material-ui/icons/ThumbDownOutlined";
 
 import { t, useLanguage } from "../../utils/text";
 
 import { tr } from "./highlight";
+import { answerVote, modelLabel } from "./searchApi";
 
 // ── AnswerCard ────────────────────────────────────────────────────────────────
 // The answer to the question typed, above the results (useSearch.answer):
 //
 //   about the artworks (/ask)        the sentence, "@author" mentions as links to
 //                                    the profile, then the artworks behind it as
-//                                    thumbnails that open them
+//                                    thumbnails that open them. v4: the index's
+//                                    answer first; under it GPT-OSS's explanation
+//                                    of it, marked with the model's name, once it
+//                                    has come (a line says it is on its way, or
+//                                    why there is none); a vote on the answer
 //   about the platform (/help)       the documentation's answer, its [n]
 //                                    citations as links to the sections, then
 //                                    the sections (with their excerpts when the
@@ -106,6 +113,78 @@ function AnswerThumb({ classes, item, onOpen }) {
     );
 }
 
+/** The model that wrote a text: a small label ("GPT-OSS 120B"). */
+function ModelBadge({ classes, model }) {
+    const label = modelLabel(model);
+    if (!label) return null;
+    return (
+        <span className={classes.answerModel} title={tr(t, "components.search_results.checked_against_the_index", "Every claim checked against the index")}>
+            {label}
+        </span>
+    );
+}
+
+/**
+ * v4: GPT-OSS's part under the index's answer — its explanation once it has come; while it comes,
+ * a line that says so; afterwards, when there is none, why (and, when the model could not answer,
+ * a way to ask again).
+ */
+function Explanation({ classes, data, explaining, onGoToUsername, onRetry }) {
+    if (explaining) {
+        return (
+            <div className={classes.answerExplaining} aria-busy="true" aria-live="polite">
+                <CircularProgress size={12} style={{ color: "#777" }} />
+                <span>{tr(t, "components.search_results.gpt_oss_is_explaining", "GPT-OSS is explaining…")}</span>
+            </div>
+        );
+    }
+    if (data.explanation && !data.byModel) {
+        return (
+            <div className={classes.answerExplanation}>
+                <ModelBadge classes={classes} model={data.model} />
+                <p className={classes.answerText}>{withMentions(data.explanation, onGoToUsername, classes.answerMention)}</p>
+            </div>
+        );
+    }
+    if (data.explainOutcome === "none") {
+        return <p className={classes.answerNote}>{tr(t, "components.search_results.gpt_oss_had_nothing_verified_to_add", "GPT-OSS had nothing verified to add.")}</p>;
+    }
+    if (data.explainOutcome === "unavailable") {
+        return (
+            <p className={classes.answerNote}>
+                {tr(t, "components.search_results.gpt_oss_could_not_answer", "GPT-OSS could not answer just now.")}{" "}
+                {onRetry ? (
+                    <button type="button" className={classes.answerRetry} onClick={onRetry}>
+                        {tr(t, "components.search_results.try_again", "Try again")}
+                    </button>
+                ) : null}
+            </p>
+        );
+    }
+    return null;
+}
+
+/** v4: was the answer helpful? One vote per answer (its query_id), sent to the Worker. */
+function Vote({ classes, queryId, onRate }) {
+    const [vote, setVote] = useState(() => answerVote(queryId));
+    useEffect(() => setVote(answerVote(queryId)), [queryId]);
+    const up = useCallback(() => { onRate(queryId, 1); setVote(1); }, [onRate, queryId]);
+    const down = useCallback(() => { onRate(queryId, -1); setVote(-1); }, [onRate, queryId]);
+    if (vote) {
+        return <div className={classes.answerVote}><span>{tr(t, "components.search_results.thanks_for_your_feedback", "Thanks for your feedback")}</span></div>;
+    }
+    return (
+        <div className={classes.answerVote}>
+            <button type="button" className={classes.answerVoteButton} onClick={up} aria-label={tr(t, "components.search_results.helpful", "Helpful")} title={tr(t, "components.search_results.helpful", "Helpful")}>
+                <ThumbUpOutlined />
+            </button>
+            <button type="button" className={classes.answerVoteButton} onClick={down} aria-label={tr(t, "components.search_results.not_helpful", "Not helpful")} title={tr(t, "components.search_results.not_helpful", "Not helpful")}>
+                <ThumbDownOutlined />
+            </button>
+        </div>
+    );
+}
+
 function Sources({ classes, sources, excerpts }) {
     if (!sources.length) return null;
     return (
@@ -124,10 +203,12 @@ function Sources({ classes, sources, excerpts }) {
 }
 
 export const AnswerCard = React.memo(
-    ({ classes, answer, onGoToUsername, onOpenArtwork }) => {
+    ({ classes, answer, controls, onGoToUsername, onOpenArtwork }) => {
         useLanguage();
         const data = answer && !answer.loading ? answer.data : null;
         const thumbs = useMemo(() => (data && data.route === "ask" ? data.items.slice(0, 6) : []), [data]);
+        const onRetry = controls && controls.explainAgain ? controls.explainAgain : null;
+        const onRate = controls && controls.rateAnswer ? controls.rateAnswer : null;
         if (!answer) return null;
 
         if (answer.loading) {
@@ -144,18 +225,23 @@ export const AnswerCard = React.memo(
         if (!data) return null;
 
         if (data.route === "ask") {
+            // nothing found or nothing to answer from: dimmed; a question asked back is read as it is
+            const dim = data.empty && !data.clarify;
             return (
-                <div className={classes.answerCard + (data.empty ? " " + classes.answerEmpty : "")} role="region" aria-live="polite" aria-label={tr(t, "components.search_results.answer", "Answer")}>
+                <div className={classes.answerCard + (dim ? " " + classes.answerEmpty : "")} role="region" aria-live="polite" aria-label={tr(t, "components.search_results.answer", "Answer")}>
                     <div className={classes.answerHead}>
                         <QuestionAnswerOutlined />
                         <span>{tr(t, "components.search_results.answer", "Answer")}</span>
+                        {data.byModel ? <ModelBadge classes={classes} model={data.model} /> : null}
                     </div>
                     <p className={classes.answerText}>{withMentions(data.text, onGoToUsername, classes.answerMention)}</p>
+                    <Explanation classes={classes} data={data} explaining={!!answer.explaining} onGoToUsername={onGoToUsername} onRetry={onRetry} />
                     {thumbs.length ? (
                         <div className={classes.answerThumbs}>
                             {thumbs.map((item) => <AnswerThumb key={item.id} classes={classes} item={item} onOpen={onOpenArtwork} />)}
                         </div>
                     ) : null}
+                    {data.queryId && onRate && !answer.explaining ? <Vote classes={classes} queryId={data.queryId} onRate={onRate} /> : null}
                 </div>
             );
         }
@@ -187,6 +273,7 @@ export const AnswerCard = React.memo(
     },
     (prev, next) =>
         prev.answer === next.answer &&
+        prev.controls === next.controls &&
         prev.onGoToUsername === next.onGoToUsername &&
         prev.onOpenArtwork === next.onOpenArtwork &&
         prev.classes === next.classes,
