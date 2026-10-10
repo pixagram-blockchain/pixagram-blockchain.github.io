@@ -72,28 +72,21 @@ const PRESETS_TRANSFORM = {
     resolution: 1280,
     aspect_ratio: "1:1",
     use_tiled: false,
-    tile_size: 860,
-    tile_overlap: 192,
+    tile_size: 768,
+    tile_overlap: 256,
 };
-const PRESET_GENERATE = {
-    negative_prompt: "Ugly, real, artifacts, blurry, disformed, photo-realistic, photo, photography, realistic, low-quality, text, white edges, border.",
-    cfg_scale: 1.0,
-    steps: 8,
-    seed: -1,
-};
+
 export const transform = async (file, step_n, fidelity, callback = () => {}, callback2 = () => {}, description = "", style = "retroart") => {
 
     return new Promise(async function (resolve, reject) {
         callback("AI CONVERT");
-        callback2("COMPUTE", Date.now(), Date.now() + 60 * 1000);
-        console.log({
-            fidelity,
-            step_n
-        })
+        callback2("COMPUTE", Date.now(), Date.now() + 40 * 1000);
+
         var input_image = (file.size > 1000000) ? await resizeImageTo2MP(file) : file;
         var num_inference_steps = step_n;
-        var img2img_strength = (0.775 - Math.min(0.4, Math.max(0, fidelity)));
-        var guidance_scale = Math.max(1, 0.2+(step_n|0)/8);
+        var img2img_strength = (0.825 - Math.min(0.4, Math.max(0, fidelity)));
+        var guidance_scale = Math.max(1.0, 0.225+(step_n|0)/8);
+        var lora_intensity = PRESETS_TRANSFORM.lora_intensity + (step_n/100);
 
         var dynamic_config = {
             ...PRESETS_TRANSFORM,
@@ -102,6 +95,7 @@ export const transform = async (file, step_n, fidelity, callback = () => {}, cal
             img2img_strength,
             input_image,
             guidance_scale,
+            lora_intensity,
             additional_prompt: PRESETS_TRANSFORM.additional_prompt + " " + description,
         };
         try {
@@ -109,7 +103,6 @@ export const transform = async (file, step_n, fidelity, callback = () => {}, cal
             const client = await Client.connect("primerz/face-to-pixel-art-4K");
             const result = await client.predict("/process_image", dynamic_config);
 
-            console.log(result, "hey")
             const data = result.data || [];
             const image = data[0] || {};
             const url = image["url"] || image;
@@ -126,28 +119,32 @@ export const transform = async (file, step_n, fidelity, callback = () => {}, cal
 }
 
 
-export const generate = async (text, ratio, steps, callback = () => {}, callback2 = () => {}) => {
+export const generate = async (text, ratio, num_inference_steps, callback = () => {}, callback2 = () => {}) => {
 
     return new Promise(async function (resolve, reject) {
         callback("AI CONVERT");
-        callback2("COMPUTE", Date.now(), Date.now() + 6 * 1000);
+        callback2("COMPUTE", Date.now(), Date.now() + 8 * 1000);
 
+        var dynamic_config = {
+            ...PRESETS_TRANSFORM,
+            num_inference_steps,
+            additional_prompt: text,
+        };
         try {
 
-            const client = await Client.connect("primerz/pixel-art");
+            const client = await Client.connect("primerz/face-to-pixel-art-4K");
+            const result = await client.predict("/process_image", dynamic_config);
 
-            client.predict("/process_text", {...PRESET_GENERATE, prompt: text, aspect_ratio: ratio, steps}).then(async (result) => {
-                console.log(result)
-                const data = result.data || [];
-                const image = data[0] || {};
-                const url = image["url"] || "";
-                const blob = await(await fetch(url)).blob();
-                resolve(blob, text);
-            }).catch((data) => {
-                reject(data.message)
-            });
+            const data = result.data || [];
+            const image = data[0] || {};
+            const url = image["url"] || image;
+            const blob = await (await fetch(url)).blob();
+            const prompt = data[1] || " Output: ";
+            const title = prompt.split("Output: ")[1];
+            resolve(blob, title);
 
         } catch (e) {
+            console.log(e)
             reject("Please Try Again Later")
         }
     });
