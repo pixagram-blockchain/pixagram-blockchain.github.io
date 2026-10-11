@@ -9,6 +9,7 @@ import RoomRounded from "@material-ui/icons/RoomRounded";
 import LinkRounded from "@material-ui/icons/LinkRounded";
 import CalendarTodayRounded from "@material-ui/icons/CalendarTodayRounded";
 import { safeHttpUrl } from "../utils/safeUrl";
+import { AccountActivity } from "./AccountCharts";
 
 import { t, getLocaleCode, useLanguage } from "../utils/text";
 
@@ -99,26 +100,34 @@ const ProfileDescription = React.memo(({ classes, account }) => {
     const websiteHref = hasWebsite ? safeHttpUrl(website) : null;
     const hasAnyContent = hasDescription || hasLocation || hasWebsite || hasCreated || hasLinks || hasAddresses || hasContacts;
 
+    // Below "About": the account's last 30 days from the statistics service (votes, publications,
+    // rewards, followers). It loads with this tab and keeps its own empty and offline states.
+    const activity = <AccountActivity account={account} headerClassName={classes.metaListHeader} />;
+
     if (!hasAnyContent) {
         return (
-            <List dense>
-                <ListSubheader disableSticky className={classes.metaListHeader}>
-                    {t("components.profile_description.about")}
-                </ListSubheader>
-                <ListItem>
-                    <ListItemText
-                        secondary={
-                            <Typography style={{fontSize: "12px", color: "#888", lineHeight: "1rem", fontStyle: "italic"}} component="span" variant="body1">
-                                {t("components.profile_description.no_profile_information_available")}
-                            </Typography>
-                        }
-                    />
-                </ListItem>
-            </List>
+            <React.Fragment>
+                <List dense>
+                    <ListSubheader disableSticky className={classes.metaListHeader}>
+                        {t("components.profile_description.about")}
+                    </ListSubheader>
+                    <ListItem>
+                        <ListItemText
+                            secondary={
+                                <Typography style={{fontSize: "12px", color: "#888", lineHeight: "1rem", fontStyle: "italic"}} component="span" variant="body1">
+                                    {t("components.profile_description.no_profile_information_available")}
+                                </Typography>
+                            }
+                        />
+                    </ListItem>
+                </List>
+                {activity}
+            </React.Fragment>
         );
     }
 
     return (
+        <React.Fragment>
         <List dense>
             {(hasDescription || hasLocation || hasWebsite || hasCreated) && (
                 <ListSubheader disableSticky className={classes.metaListHeader}>
@@ -168,6 +177,10 @@ const ProfileDescription = React.memo(({ classes, account }) => {
                     />
                 </ListItem>
             )}
+        </List>
+        {activity}
+        {(hasLinks || hasAddresses || hasContacts) && (
+        <List dense>
             {hasLinks && (
                 <React.Fragment>
                     <ListSubheader disableSticky className={classes.metaListHeader}>
@@ -262,6 +275,8 @@ const ProfileDescription = React.memo(({ classes, account }) => {
                 </React.Fragment>
             )}
         </List>
+        )}
+        </React.Fragment>
     );
 });
 

@@ -17,7 +17,9 @@
 //   <TokenField …/>          multi-value text field with suggestions (authors, communities)
 //   <SuggestionList/>        what the Worker proposes for the text typed (top of the dropdown)
 //   <AnswerCard/>            the answer to a question: /ask (artworks) or /help (documentation);
-//                            v4: the index's answer, then GPT-OSS's explanation of it, and a vote
+//                            v4.8: the index's answer, the model's long answer (its citations as
+//                            links), the index's facts, the reasoning trail, caveats, follow-up
+//                            chips, and a vote; AnswerMarkdown.js renders the Worker's light Markdown
 //   <UserResult/> <CommunityResult/> <TagResult/> <PostResult/>   rows
 //   <ArtworkMasonry/> <ArtworkCard/>                 two-column artwork grid + plain image card
 //   artworkPath(item)        "/<category>/@author/permlink" for history.push
@@ -45,8 +47,9 @@ export { AnswerCard } from "./AnswerCard";
 export {
     searchIndex, searchArtworks, artworkPath, artworkImageUrl, loadVocab, getVocab,
     fetchSuggestions, loadExamples, fetchAnswer, sendFeedback,
-    fetchExplanation, sendAnswerFeedback, answerVote, modelLabel,
+    fetchElaboration, mergeElaboration, sendAnswerFeedback, answerVote, modelLabel,
 } from "./searchApi";
+export { renderBlocks, renderInline, parseBlocks, citationNumbers } from "./AnswerMarkdown";
 export { answerPlan, looksLikeQuestion, ghostFor } from "./intent";
 export {
     EMPTY_FILTERS, TIME_PRESETS, TYPE_OPTIONS, COLOR_MODES,
@@ -55,4 +58,4 @@ export {
 export { normalizeTag, isValidTag } from "./tags";
 export { searchStyles } from "./styles";
 export { highlightNode } from "./highlight";
-export { SEARCH_API_URL, LIMITS, DEFAULT_COLORS, EXPLAIN_MODE } from "./config";
+export { SEARCH_API_URL, LIMITS, DEFAULT_COLORS } from "./config";

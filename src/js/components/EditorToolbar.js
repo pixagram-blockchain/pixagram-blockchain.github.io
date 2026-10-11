@@ -8,7 +8,7 @@ import Grow from "@material-ui/core/Grow";
 import FormatBoldIcon from "@material-ui/icons/FormatBold";
 import FormatItalicIcon from "@material-ui/icons/FormatItalic";
 import FormatQuoteIcon from "@material-ui/icons/FormatQuote";
-import MarkdownIcon from "../../icons/Markdown";
+import MarkdownIcon from "../icons/Markdown";
 import LinkIcon from "@material-ui/icons/Link";
 import ImageIcon from "@material-ui/icons/Image";
 import FormatListBulletedIcon from "@material-ui/icons/FormatListBulleted";

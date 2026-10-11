@@ -49,7 +49,7 @@ export const MATCH = Object.freeze({ SUSPECTED: 2, COPY: 3, IDENTICAL: 4 });
 // The Worker's own cap. /copies is ordered by verdict strength, not by date, so a cut list may
 // miss the earliest work: a full page never yields "published first".
 const MATCH_LIMIT = 100;
-const SIMILAR_SHOWN = 8;    // artworks shown under Inspiration
+const SIMILAR_SHOWN = 16;    // artworks shown under Inspiration
 const TTL_MS = 120000;      // arrow-nav back and forth does not ask twice
 const CACHE_MAX = 64;
 

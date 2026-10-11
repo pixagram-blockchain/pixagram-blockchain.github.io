@@ -9,7 +9,7 @@ import CircularProgress from "@material-ui/core/CircularProgress";
 
 import CloseIcon from "@material-ui/icons/Close";
 import PublishIcon from "@material-ui/icons/Publish";
-import {safeHTML} from "../../utils/api/sanitizer";
+import {safeHTML} from "../utils/api/sanitizer";
 
 import { t, useLanguage } from "../utils/text";
 

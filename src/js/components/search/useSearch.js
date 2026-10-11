@@ -1,9 +1,12 @@
 "use strict";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "preact/compat";
 
-import { CACHE_MAX_TERMS, CACHE_TTL_MS, COMMUNITY_ACCOUNT_RE, DEBOUNCE_MS, LIMITS, SUGGEST_DEBOUNCE_MS, SUGGEST_LIMIT, SUGGEST_ROWS } from "./config";
+import {
+    CACHE_MAX_TERMS, CACHE_TTL_MS, COMMUNITY_ACCOUNT_RE, CONVERSATION_TTL_MS, DEBOUNCE_MS, ELABORATION_MAX_POLLS, ELABORATION_POLL_MS,
+    ELABORATION_RETRY_MS, LIMITS, SUGGEST_DEBOUNCE_MS, SUGGEST_LIMIT, SUGGEST_ROWS,
+} from "./config";
 import { EMPTY_FILTERS, filtersKey, hasFilters, normalizeFilters } from "./filters";
-import { fetchAnswer, fetchExplanation, fetchSuggestions, loadExamples, searchIndex, sendAnswerFeedback, sendFeedback } from "./searchApi";
+import { fetchAnswer, fetchElaboration, fetchSuggestions, loadExamples, mergeElaboration, searchIndex, sendAnswerFeedback, sendFeedback } from "./searchApi";
 import { answerPlan, ghostFor } from "./intent";
 
 // ── useSearch ─────────────────────────────────────────────────────────────────
@@ -24,12 +27,15 @@ import { answerPlan, ghostFor } from "./intent";
 //                    popular searches, a correction); null when nothing
 //   answer           an answer to the question typed: { q, route, loading: true }
 //                    while it comes, then { q, route, loading: false, data }
-//                    (data: see searchApi.fetchAnswer); null when none. v4: while
-//                    GPT-OSS explains an answer of the index, `explaining` is true;
-//                    then data is the explained answer (data.explainOutcome
-//                    "explained"), or the same one with explainOutcome "none" (the
-//                    model had nothing verified to add) or "unavailable" (it could
-//                    not answer: controls.explainAgain() asks again)
+//                    (data: see searchApi.fetchAnswer); null when none. v4.8:
+//                    the index's answer shows at once; while the model's part is
+//                    on its way `elaborating` is true; then data is the whole
+//                    answer (data.elaborationOutcome "ready"), or the first one
+//                    with elaborationOutcome "none" (the model had nothing
+//                    verified to add) or "unavailable" (it could not answer:
+//                    controls.elaborateAgain() asks again)
+//   overview         v4.8: { text, lines } — the Worker's one-line summary of the
+//                    artworks found for the term; null when none
 //   didYouMean       { text, term }: the search for `term` (trimmed, lower case)
 //                    corrected a word into `text`; null when not
 //   examples         examples for the placeholder, in the UI language (kept
@@ -38,7 +44,7 @@ import { answerPlan, ghostFor } from "./intent";
 //   controls = { setFilters, toggleFilters, suggestAuthors, suggestCommunities,
 //                applyText(text), pickSuggestion(s), acceptCompletion(),
 //                submit(), feedback(item, action),
-//                explainAgain(), rateAnswer(queryId, 1 | -1) }
+//                elaborateAgain(), rateAnswer(queryId, 1 | -1) }
 //
 // useSearch(apiRef, { lang }) — `lang` is the UI language (two letters): the
 // examples and the suggestions' questions come in it. Without it (settings
@@ -61,16 +67,19 @@ import { answerPlan, ghostFor } from "./intent";
 // picked suggestion runs at once and hides the suggestions until the next
 // keystroke; an answer always belongs to the text it answers.
 //
-// v4, the answer in two steps: the index's answer as soon as the Worker has it,
-// then GPT-OSS's explanation of it (a second request, in EXPLAIN_MODE), which
-// takes the first one's place when it lands. A new text stops both.
+// v4.8, the answer in two steps: the index's answer with its digest as soon as
+// the Worker has it (/query with defer=1), then the model's part — the body, the
+// reasoning trail, its follow-ups — from GET /ask/elaboration/:id, merged into
+// the first answer when it lands. A new text stops both. After an answer, the
+// suggestions are asked with after=<query_id>, so its follow-ups come first
+// while the next question is typed (for CONVERSATION_TTL_MS).
 
 const EMPTY = Object.freeze([]);
 const EMPTY_OBJ = Object.freeze({});
 
 export const SEARCH_IDLE = Object.freeze({
     users: EMPTY, tags: EMPTY, communities: EMPTY, communityTitles: EMPTY_OBJ,
-    artworks: EMPTY, posts: EMPTY,
+    artworks: EMPTY, posts: EMPTY, overview: null,
     filters: EMPTY_FILTERS, filtersOpen: false,
     loading: false, artworksLoading: false,
     suggest: null, answer: null, didYouMean: null, examples: EMPTY,
@@ -87,7 +96,7 @@ function reducer(state, action) {
             return { ...state, users: action.users, tags: action.tags, communities: action.communities, communityTitles: action.communityTitles, loading: false };
         case "index":
             return {
-                ...state, artworks: action.artworks, posts: action.posts, artworksLoading: false,
+                ...state, artworks: action.artworks, posts: action.posts, overview: action.overview || null, artworksLoading: false,
                 didYouMean: action.didYouMean ? Object.freeze({ text: action.didYouMean, term: action.term }) : null,
             };
         case "cached":
@@ -148,6 +157,8 @@ async function fetchProfiles(pixaAPI, names) {
 }
 
 const str = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+/** v4.8: whether an answer's model part is still to be fetched: pending at a URL, with no final outcome yet. */
+const wantsElaboration = (d) => !!d && d.route === "ask" && !!d.elaboration && d.elaboration.status === "pending" && !!d.elaboration.url && d.elaborationOutcome !== "ready" && d.elaborationOutcome !== "none";
 /** The dropdown is open while there is a term, an active filter, or the panel is out. */
 const openFor = (query, filters, panel) => query.length > 0 || hasFilters(filters) || !!panel;
 const imageOf = (p) => (p && typeof p.profile_image === "string" && p.profile_image ? p.profile_image : null);
@@ -183,7 +194,8 @@ export function useSearch(apiRef, { lang = null } = {}) {
     const answerPendingRef = useRef(null);      // the key of the answer the timer waits to ask
     const answerAbortRef = useRef(null);
     const answerCacheRef = useRef(new Map());   // route \0 question \0 type → { value }
-    const explainAbortRef = useRef(null);       // v4: GPT-OSS's explanation of the answer shown
+    const elaborateAbortRef = useRef(null);     // v4.8: the model's part of the answer shown, on its way
+    const conversationRef = useRef(null);       // v4.8: { qid, at } of the last answer (for /suggest?after=)
     // Trending tags are query-independent and filtered client-side: fetched
     // once per TTL, not once per term.
     const browseTagsRef = useRef(null);
@@ -329,8 +341,8 @@ export function useSearch(apiRef, { lang = null } = {}) {
         const indexCached = fresh(indexCacheRef.current.get(indexKey));
         const indexPromise = indexCached
             ? Promise.resolve(indexCached)
-            : searchIndex(trimmed, { signal: indexCtl.signal, filters, limit: LIMITS.artworks, postsLimit: LIMITS.posts })
-                .catch((e) => (e && e.name === "AbortError" ? null : { artworks: EMPTY, posts: EMPTY }));
+            : searchIndex(trimmed, { signal: indexCtl.signal, filters, limit: LIMITS.artworks, postsLimit: LIMITS.posts, lang: langRef.current })
+                .catch((e) => (e && e.name === "AbortError" ? null : { artworks: EMPTY, posts: EMPTY, overview: null }));
 
         if (chain) {
             if (chainAbortRef.current) chainAbortRef.current.abort();
@@ -360,8 +372,8 @@ export function useSearch(apiRef, { lang = null } = {}) {
 
         const index = await indexPromise;
         if (indexCtl.signal.aborted || index === null) return;
-        dispatch({ type: "index", artworks: index.artworks, posts: index.posts, didYouMean: index.didYouMean, term: trimmed });
-        if (!indexCached) remember(indexCacheRef.current, indexKey, { artworks: index.artworks, posts: index.posts, didYouMean: index.didYouMean || null });
+        dispatch({ type: "index", artworks: index.artworks, posts: index.posts, overview: index.overview || null, didYouMean: index.didYouMean, term: trimmed });
+        if (!indexCached) remember(indexCacheRef.current, indexKey, { artworks: index.artworks, posts: index.posts, overview: index.overview || null, didYouMean: index.didYouMean || null });
     }, [apiRef, chainSearch, communityList, titlesObj]);
 
     /** The search's own debounce and requests (suggestions and answers have theirs). */
@@ -387,7 +399,7 @@ export function useSearch(apiRef, { lang = null } = {}) {
         if (clear) dispatch({ type: "suggest", suggest: null });
     }, []);
 
-    /** Stop asking for an answer (and its explanation); `clear` also takes the one shown away. */
+    /** Stop asking for an answer (and its elaboration); `clear` also takes the one shown away. */
     const cancelAnswer = useCallback((clear) => {
         if (answerTimerRef.current) {
             clearTimeout(answerTimerRef.current);
@@ -398,48 +410,79 @@ export function useSearch(apiRef, { lang = null } = {}) {
             answerAbortRef.current.abort();
             answerAbortRef.current = null;
         }
-        if (explainAbortRef.current) {
-            explainAbortRef.current.abort();
-            explainAbortRef.current = null;
+        if (elaborateAbortRef.current) {
+            elaborateAbortRef.current.abort();
+            elaborateAbortRef.current = null;
         }
         if (clear) dispatch({ type: "answer", answer: null });
     }, []);
 
-    /**
-     * v4: ask GPT-OSS to explain the index's answer shown (`answer`, an answer state that is done
-     * loading). The answer stays as it is meanwhile, marked `explaining`; then the explained answer
-     * takes its place, or the outcome is noted on it ("none": nothing verified to add,
-     * "unavailable": no answer from the model, asked again by the next look or explainAgain).
-     */
-    const explainAnswer = useCallback((answer) => {
-        if (explainAbortRef.current) explainAbortRef.current.abort();
-        const ctl = new AbortController();
-        explainAbortRef.current = ctl;
-        const base = answer.data;
-        dispatch({ type: "answer", answer: Object.freeze({ ...answer, explaining: true }) });
-        fetchExplanation(base.question, { signal: ctl.signal, filters: filtersRef.current })
-            .catch((e) => (e && e.name === "AbortError" ? null : { outcome: "unavailable" }))
-            .then((r) => {
-                if (!r || ctl.signal.aborted) return;
-                if (explainAbortRef.current === ctl) explainAbortRef.current = null;
-                // (a new text aborts this request; the key is checked all the same)
-                const cur = answerRef.current;
-                if (cur && cur.key !== answer.key) return;
-                const data = Object.freeze(r.outcome === "explained"
-                    ? { ...r.answer, explainOutcome: "explained" }
-                    : { ...base, explainOutcome: r.outcome, explainModel: r.model || null });
-                // an explanation, or the model's word that it had none, is kept; a failure is not
-                if (r.outcome !== "unavailable") remember(answerCacheRef.current, answer.key, { value: data });
-                dispatch({ type: "answer", answer: Object.freeze({ ...answer, explaining: false, data }) });
-            });
+    /** v4.8: the answer shown is the one the next suggestions follow (for CONVERSATION_TTL_MS). */
+    const noteConversation = useCallback((data) => {
+        if (data && data.route === "ask" && data.queryId) conversationRef.current = { qid: data.queryId, at: Date.now() };
     }, []);
 
-    /** The answer shown, with GPT-OSS asked (again) to explain it — when it can be and is not being. */
-    const explainAgain = useCallback(() => {
+    /**
+     * v4.8: fetch the model's part of the answer shown (`answer`, an answer state that is done
+     * loading, whose data.elaboration is pending at a URL). The first answer stays as it is
+     * meanwhile, marked `elaborating`; then the whole answer takes its place (elaborationOutcome
+     * "ready"), or the outcome is noted on it ("none": the model had nothing verified to add, the
+     * index's answer stands; "unavailable": no answer from the model — asked again by the next
+     * look or elaborateAgain). The Worker runs the model on the first call and answers when it is
+     * done; "pending" (another call is running it) is polled, a transient failure tried once more.
+     */
+    const elaborateAnswer = useCallback((answer) => {
+        if (elaborateAbortRef.current) elaborateAbortRef.current.abort();
+        const ctl = new AbortController();
+        elaborateAbortRef.current = ctl;
+        const base = answer.data;
+        dispatch({ type: "answer", answer: Object.freeze({ ...answer, elaborating: true }) });
+        const sleep = (ms) => new Promise((resolve) => {
+            const timer = setTimeout(resolve, ms);
+            ctl.signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+        });
+        (async () => {
+            let polls = 0;
+            let retried = false;
+            let r;
+            for (;;) {
+                try {
+                    r = await fetchElaboration(base.elaboration.url, { signal: ctl.signal });
+                } catch (e) {
+                    if (e && e.name === "AbortError") return;
+                    r = { outcome: "unavailable" };
+                }
+                if (ctl.signal.aborted) return;
+                if (r.outcome === "pending" && polls < ELABORATION_MAX_POLLS) {
+                    polls++;
+                    await sleep(ELABORATION_POLL_MS);
+                } else if (r.outcome === "failed" && r.retry && !retried) {
+                    retried = true;
+                    await sleep(ELABORATION_RETRY_MS);
+                } else break;
+                if (ctl.signal.aborted) return;
+            }
+            if (elaborateAbortRef.current === ctl) elaborateAbortRef.current = null;
+            // (a new text aborts this request; the key is checked all the same)
+            const cur = answerRef.current;
+            if (cur && cur.key !== answer.key) return;
+            const outcome = r.outcome === "ready" ? "ready" : r.outcome === "failed" ? "none" : "unavailable";
+            const data = Object.freeze(outcome === "ready"
+                ? { ...mergeElaboration(base, r.fields), elaborationOutcome: "ready" }
+                : { ...base, elaborationOutcome: outcome });
+            // the model's part, or its final word that it has none, is kept; a failure is not
+            if (outcome !== "unavailable") remember(answerCacheRef.current, answer.key, { value: data });
+            noteConversation(data);
+            dispatch({ type: "answer", answer: Object.freeze({ ...answer, elaborating: false, data }) });
+        })();
+    }, [noteConversation]);
+
+    /** The answer shown, with its model part asked for again — when it could not come and is not being asked. */
+    const elaborateAgain = useCallback(() => {
         const cur = answerRef.current;
-        const d = cur && !cur.loading && !cur.explaining ? cur.data : null;
-        if (d && d.route === "ask" && d.explainable && d.explainOutcome === "unavailable") explainAnswer(cur);
-    }, [explainAnswer]);
+        const d = cur && !cur.loading && !cur.elaborating ? cur.data : null;
+        if (d && wantsElaboration(d) && d.elaborationOutcome === "unavailable") elaborateAnswer(cur);
+    }, [elaborateAnswer]);
 
     /** A vote on the answer shown (its query_id): 1 helpful, -1 not. */
     const rateAnswer = useCallback((queryId, rating) => sendAnswerFeedback(queryId, rating), []);
@@ -464,7 +507,10 @@ export function useSearch(apiRef, { lang = null } = {}) {
             dispatch({ type: "suggest", suggest: null });
             return;
         }
-        const key = (lang || "") + "\0" + text;
+        // v4.8: after an answer, its follow-ups come first while the next question is typed
+        const conv = conversationRef.current;
+        const after = conv && Date.now() - conv.at < CONVERSATION_TTL_MS ? conv.qid : null;
+        const key = (lang || "") + "\0" + (after || "") + "\0" + text;
         const hit = fresh(suggestCacheRef.current.get(key));
         if (hit) {
             dispatch({ type: "suggest", suggest: hit.value });
@@ -476,7 +522,7 @@ export function useSearch(apiRef, { lang = null } = {}) {
             suggestAbortRef.current = ctl;
             let r = null;
             try {
-                r = await fetchSuggestions(text, { signal: ctl.signal, lang });
+                r = await fetchSuggestions(text, { signal: ctl.signal, lang, after });
             } catch (e) {
                 if (e && e.name === "AbortError") return;
             }
@@ -507,8 +553,8 @@ export function useSearch(apiRef, { lang = null } = {}) {
             // meanwhile (a reset, a restore) is asked again.
             const cur = answerRef.current;
             if (cur && cur.key === key && (!cur.loading || answerAbortRef.current)) {
-                // v4: so is an explanation (the answer stays shown while it is asked again)
-                if (cur.explaining && !explainAbortRef.current) explainAnswer(cur);
+                // v4.8: so is an elaboration (the answer stays shown while it is asked again)
+                if (cur.elaborating && !elaborateAbortRef.current) elaborateAnswer(cur);
                 return;
             }
             if (answerPendingRef.current === key && plan.delay > 0) return;
@@ -521,8 +567,9 @@ export function useSearch(apiRef, { lang = null } = {}) {
         const hit = fresh(answerCacheRef.current.get(key));
         if (hit) {
             const shown = hit.value ? Object.freeze({ q: text, key, route: hit.value.route, loading: false, data: hit.value }) : null;
-            // an answer whose explanation never came (the model could not answer then): ask again
-            if (shown && shown.data.route === "ask" && shown.data.explainable && !shown.data.explainOutcome) explainAnswer(shown);
+            if (shown) noteConversation(shown.data);
+            // an answer whose model part never came (the model could not answer then): ask again
+            if (shown && wantsElaboration(shown.data)) elaborateAnswer(shown);
             else dispatch({ type: "answer", answer: shown });
             return;
         }
@@ -546,15 +593,16 @@ export function useSearch(apiRef, { lang = null } = {}) {
             // a failure, or a refusal of the answer budget, is not remembered: the next try asks again
             if (data && !data.retry) remember(answerCacheRef.current, key, { value: shown });
             const answer = shown ? Object.freeze({ q: text, key, route: shown.route, loading: false, data: shown }) : null;
-            // v4: the index answered; GPT-OSS explains it next (the answer shows meanwhile)
-            if (answer && shown.route === "ask" && shown.explainable) explainAnswer(answer);
+            if (shown) noteConversation(shown);
+            // v4.8: the index answered; the model's part comes next (the answer shows meanwhile)
+            if (answer && wantsElaboration(shown)) elaborateAnswer(answer);
             else dispatch({ type: "answer", answer });
         };
         if (plan.delay > 0) {
             answerPendingRef.current = key;
             answerTimerRef.current = setTimeout(run, plan.delay);
         } else run();
-    }, [cancelAnswer, explainAnswer]);
+    }, [cancelAnswer, elaborateAnswer, noteConversation]);
 
     /**
      * The text changed: typed (`how` = "type": the usual pauses) or put in by
@@ -594,7 +642,7 @@ export function useSearch(apiRef, { lang = null } = {}) {
                 type: "cached",
                 results: {
                     users: chainCached.users, tags: chainCached.tags, communities: chainCached.communities, communityTitles: titlesObj(),
-                    artworks: indexCached.artworks, posts: indexCached.posts,
+                    artworks: indexCached.artworks, posts: indexCached.posts, overview: indexCached.overview || null,
                     didYouMean: indexCached.didYouMean ? Object.freeze({ text: indexCached.didYouMean, term: trimmed }) : null,
                 },
             });
@@ -647,7 +695,9 @@ export function useSearch(apiRef, { lang = null } = {}) {
     /**
      * A suggestion picked: its text in the box, searched at once; a question
      * also asks for its answer (to /ask, or a documentation section to /help).
-     * A title with its post is opened by the dropdown itself.
+     * A title with its post is opened by the dropdown itself. v4.8: an answer's
+     * follow-up question or related search (a chip under the answer, or a
+     * "followup" row) is the same: its text, sent where its route says.
      */
     const pickSuggestion = useCallback((s) => {
         if (!s || typeof s.text !== "string" || !s.text) return;
@@ -748,9 +798,10 @@ export function useSearch(apiRef, { lang = null } = {}) {
         () => Object.freeze({
             setFilters, toggleFilters, suggestAuthors, suggestCommunities,
             applyText, pickSuggestion, acceptCompletion, submit, feedback,
-            explainAgain, rateAnswer,
+            elaborateAgain, rateAnswer,
+            explainAgain: elaborateAgain, // v4's name, for a caller that still uses it
         }),
-        [setFilters, toggleFilters, suggestAuthors, suggestCommunities, applyText, pickSuggestion, acceptCompletion, submit, feedback, explainAgain, rateAnswer],
+        [setFilters, toggleFilters, suggestAuthors, suggestCommunities, applyText, pickSuggestion, acceptCompletion, submit, feedback, elaborateAgain, rateAnswer],
     );
 
     const reset = useCallback(() => {
@@ -759,6 +810,7 @@ export function useSearch(apiRef, { lang = null } = {}) {
         queryRef.current = "";
         filtersRef.current = EMPTY_FILTERS;
         filtersOpenRef.current = false;
+        // (the conversation stays: the next question typed may follow the answer just closed)
         setQuery("");
         dispatch({ type: "reset" });
     }, [abortAll]);

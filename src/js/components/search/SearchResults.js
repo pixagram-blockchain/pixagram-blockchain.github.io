@@ -40,9 +40,10 @@ import { AnswerCard } from "./AnswerCard";
 // v3, above the sections: what the Worker proposes for the text typed
 // (SuggestionList, rows picked with the mouse or the keys SearchBar handles),
 // "did you mean …?" when the search corrected a word, and the answer to a
-// question (AnswerCard; v4: with GPT-OSS's explanation, and a vote through
-// controls). Opening an artwork or a post from the results tells the Worker
-// which one (controls.feedback), so its ranking learns.
+// question (AnswerCard; v4.8: the long answer, its follow-ups as chips, and a
+// vote through controls). v4.8 also puts the Worker's one-line overview of the
+// artworks found above their grid. Opening an artwork or a post from the
+// results tells the Worker which one (controls.feedback), so its ranking learns.
 
 const EMPTY = Object.freeze([]);
 
@@ -59,7 +60,7 @@ export const SearchResults = React.memo(
          onGoToUsername, onGoToTag, onGoToCommunity, onGoToArtwork, onGoToPost, onSetTagNavigation,
      }) => {
         useLanguage();
-        const { users, tags, communities, artworks, posts, loading, artworksLoading, filters, filtersOpen, answer, didYouMean } = results;
+        const { users, tags, communities, artworks, posts, loading, artworksLoading, filters, filtersOpen, answer, didYouMean, overview } = results;
         const filtering = hasFilters(filters);
 
         // Opening a result reports it (the Worker's ranker learns which ones people open).
@@ -126,9 +127,16 @@ export const SearchResults = React.memo(
             </div>
         ) : null;
 
+        // v4.8: the Worker's overview of the artworks found ("37 artworks match (showing 15). Most by
+        // @nova…"), above the grid; an answer above already sums the question up, so not with one
+        const overviewLine = overview && artworks.length > 0 && !answering && query.trim() ? (
+            <p className={classes.overview} title={overview.text}>{overview.text}</p>
+        ) : null;
+
         const artworkSection = (artworks.length > 0 || artworksLoading) ? (
             <div className={indexClass}>
                 <ListSubheader className={classes.subheaderSticky}>{tr(t, "words.artworks", "Artworks")}</ListSubheader>
+                {overviewLine}
                 {artworks.length > 0
                     ? <ArtworkMasonry items={artworks} onOpen={openArtwork} />
                     : (

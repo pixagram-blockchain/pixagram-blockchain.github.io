@@ -6,8 +6,23 @@
 export const TOWER_URL =
     (typeof window !== "undefined" && window.__PIXA_TOWER_URL__) || "https://tower-api.p1x4.workers.dev/v1";
 
-const cache = new Map(); // path -> { at, value }
+const cache = new Map(); // path -> { at, value }, oldest first
 const inflight = new Map(); // path -> Promise
+
+// Entries older than any ttl the views use are dropped, and the cache never holds more than MAX_ENTRIES:
+// views that poll for a moving time window would otherwise add new paths for as long as they stay open.
+const MAX_AGE = 15 * 60000;
+const MAX_ENTRIES = 300;
+
+function remember(path, value) {
+    const now = Date.now();
+    cache.delete(path); // re-inserted last, so the Map stays ordered by age
+    cache.set(path, { at: now, value });
+    for (const [key, entry] of cache) {
+        if (cache.size <= MAX_ENTRIES && now - entry.at < MAX_AGE) break;
+        cache.delete(key);
+    }
+}
 
 export function towerGet(path, ttl = 60000) {
     const hit = cache.get(path);
@@ -23,7 +38,7 @@ export function towerGet(path, ttl = 60000) {
                     throw err;
                 }
                 const value = { data: body.data, meta: body.meta || {}, stale: res.headers.get("x-tower-stale") === "1" };
-                cache.set(path, { at: Date.now(), value });
+                remember(path, value);
                 return value;
             })
         )

@@ -23,6 +23,8 @@ import { PagedLoader } from "../utils/api/paged-list";
 import { getProfiles } from "../utils/api/account-cache";
 
 import { t } from "../utils/text";
+import { FollowHistory } from "./AccountCharts";
+import { tr, CollapseSection } from "./GDTowerKit";
 
 import { withLanguage } from "../utils/withLanguage";
 // ── FollowListModal (progressive) ──────────────────────────────────────
@@ -159,6 +161,7 @@ class FollowListModal extends React.PureComponent {
             _followingDone: false,
             _followingSet: new Set(), // logged-in user's follows
             _loggedInUser: null,
+            _chartSummary: { followers: "", following: "" }, // shown in the chart sections' headers
         };
 
         // Async-staleness guard: bumped on every (re)start and cancel.
@@ -217,6 +220,7 @@ class FollowListModal extends React.PureComponent {
             _followersDone: false,
             _followingDone: false,
             _followingSet: new Set(),
+            _chartSummary: { followers: "", following: "" },
         });
 
         // Resolve the session user (drives the follow checkboxes) without
@@ -435,6 +439,34 @@ class FollowListModal extends React.PureComponent {
         );
     };
 
+    _setChartSummary = (kind) => (text) => {
+        this.setState((s) => ({ _chartSummary: { ...s._chartSummary, [kind]: text } }));
+    };
+    _onFollowersSummary = this._setChartSummary("followers");
+    _onFollowingSummary = this._setChartSummary("following");
+
+    /**
+     * Collapsed chart above each list: the count over time (and, for followers, follows gained and
+     * lost), from the statistics service. Nothing is fetched until it is opened.
+     */
+    _renderChart = (kind) => {
+        const account = this.props.account;
+        const username = account && account.name;
+        if (!username) return null;
+        const title = kind === "followers"
+            ? tr("components.account_charts.followers_over_time", "Followers over time")
+            : tr("components.account_charts.following_over_time", "Following over time");
+        return (
+            <CollapseSection key={kind + ":" + username} title={title} count={this.state._chartSummary[kind]} style={{ margin: "0px 0px 8px 0px" }}>
+                <FollowHistory
+                    username={username}
+                    kind={kind}
+                    onSummary={kind === "followers" ? this._onFollowersSummary : this._onFollowingSummary}
+                />
+            </CollapseSection>
+        );
+    };
+
     _handleTabChange = (e, value) => {
         this.setState({ _tab: value }, this.swipeableViewScrollTop);
     };
@@ -443,8 +475,9 @@ class FollowListModal extends React.PureComponent {
         const { classes } = this.props;
         const { _followers, _following, _followersFirst, _followingFirst } = this.state;
 
-        const renderList = (users, firstPageLanded, emptyText) => (
+        const renderList = (users, firstPageLanded, emptyText, kind) => (
             <DialogContent scroll={"paper"} className={classes.dialogContent}>
+                {this._renderChart(kind)}
                 {!firstPageLanded ? (
                     <div className={classes.loadingContainer}><CircularProgress color={"secondary"} /></div>
                 ) : (
@@ -471,8 +504,8 @@ class FollowListModal extends React.PureComponent {
         );
 
         return [
-            renderList(_followers, _followersFirst, "No followers yet"),
-            renderList(_following, _followingFirst, "Not following anyone yet"),
+            renderList(_followers, _followersFirst, "No followers yet", "followers"),
+            renderList(_following, _followingFirst, "Not following anyone yet", "following"),
         ];
     };
 

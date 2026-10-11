@@ -120,7 +120,6 @@ function renderPostBody(api, body) {
     return safeHTML(body);
 }
 
-
 async function getMetadata(source){
     if(!source) return null;
 

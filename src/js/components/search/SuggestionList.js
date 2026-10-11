@@ -8,6 +8,7 @@ import TrendingUp from "@material-ui/icons/TrendingUp";
 import Spellcheck from "@material-ui/icons/Spellcheck";
 import CallMade from "@material-ui/icons/CallMade";
 import OpenInNew from "@material-ui/icons/OpenInNew";
+import SubdirectoryArrowRight from "@material-ui/icons/SubdirectoryArrowRight";
 
 import { t, useLanguage } from "../../utils/text";
 
@@ -18,8 +19,9 @@ import { fold, splitSuggestion } from "./intent";
 // What the v3 Worker proposes for the text typed, at the top of the dropdown:
 // one row per suggestion, its kind as an icon (a search, a question it answers,
 // a documentation section, a post's title with its thumbnail, a popular search,
-// a spelling correction). The part already typed is dimmed, the rest is bright,
-// so the row reads as "what you would get".
+// a spelling correction; v4.8: a follow-up of the answer shown, sent where its
+// route says). The part already typed is dimmed, the rest is bright, so the row
+// reads as "what you would get".
 //
 //   click / Enter on the highlighted row   pick it (SearchBar decides: a title
 //                                          opens its post, the rest is searched,
@@ -46,6 +48,7 @@ const ICONS = {
     title: ImageOutlined,
     popular: TrendingUp,
     correction: Spellcheck,
+    followup: SubdirectoryArrowRight,
 };
 
 const keepFocus = (e) => e.preventDefault();
@@ -122,7 +125,7 @@ const SuggestionRow = React.memo(
             onFill(s);
         }, [onFill, s]);
         const canFill = fillable(s);
-        const badge = s.route === "ask" ? labels.answer : s.route === "help" ? labels.docs : null;
+        const badge = s.kind === "followup" ? labels.followUp : s.route === "ask" ? labels.answer : s.route === "help" ? labels.docs : null;
         return (
             <li
                 id={optionId(i)}
@@ -189,8 +192,9 @@ export const SuggestionList = React.memo(
         const docs = tr(t, "components.search_results.docs", "Docs");
         const fill = tr(t, "components.search_results.edit_this_search", "Edit this search");
         const openPage = tr(t, "components.search_results.open_the_page", "Open the page");
+        const followUp = tr(t, "components.search_results.follow_up", "Follow-up");
         // One object per language: the rows compare it by identity.
-        const labels = useMemo(() => ({ answer, docs, fill, openPage }), [answer, docs, fill, openPage]);
+        const labels = useMemo(() => ({ answer, docs, fill, openPage, followUp }), [answer, docs, fill, openPage, followUp]);
         if (!items.length) return null;
         return (
             <ul id={LISTBOX_ID} role="listbox" className={classes.sugList} aria-label={tr(t, "components.search_results.suggestions", "Suggestions")}>

@@ -6,10 +6,24 @@ import Typography from "@material-ui/core/Typography";
 import LinearProgress from "@material-ui/core/LinearProgress";
 import FlagIcon from "@material-ui/icons/Flag";
 import CheckCircleIcon from "@material-ui/icons/CheckCircle";
+// Recharts by module, as the wallet imports it: one copy of the library in the app.
+import { ResponsiveContainer } from "recharts/lib/component/ResponsiveContainer";
+import { BarChart } from "recharts/lib/chart/BarChart";
+import { Bar } from "recharts/lib/cartesian/Bar";
+import { XAxis } from "recharts/lib/cartesian/XAxis";
+import { YAxis } from "recharts/lib/cartesian/YAxis";
+import { CartesianGrid } from "recharts/lib/cartesian/CartesianGrid";
+import { ReferenceLine } from "recharts/lib/cartesian/ReferenceLine";
+import { Tooltip } from "recharts/lib/component/Tooltip";
+import { LabelList } from "recharts/lib/component/LabelList";
 
 import { withLanguage } from "../utils/withLanguage";
-import { towerGet, fmtCompact, fmtInt, fmtPct, fmtAgo } from "../utils/tower";
-import { tr, trf, Section, Card, Tile, Pill, Meter, Empty, Skeleton, Visible } from "./GDTowerKit";
+import { towerGet, towerSeries, nowSec, fmtCompact, fmtInt, fmtPct, fmtAgo } from "../utils/tower";
+import {
+    tr, trf, Section, Card, Tile, Pill, Meter, Empty, Skeleton, Visible, ChartTip, Legend,
+    SERIES, AXIS, GRID, BAR_CURSOR, BAR, HBAR, stackShape, axisTick, bucketLabel, fillBuckets, niceScale, tickFormat, newestOnly
+} from "./GDTowerKit";
+import GDReports from "./GDReports";
 
 const K = "components.gdcontrol_tower.";
 
@@ -92,6 +106,27 @@ const CAPTURE_LABELS = {
     majority: () => tr(K + "majority", "Majority of the schedule"),
     hardfork_quorum: () => tr(K + "hardfork_quorum", "Hardfork quorum")
 };
+
+const DAY = 86400;
+
+// Witness charts (last 30 days, day buckets).
+const VOTE_STACK = stackShape(["approvals", "removals"]);
+const CONCENTRATION = [1, 5, 10, 20, 50];
+const FRESHNESS = [["<15m", "<15m"], ["15-30m", "15–30m"], ["30-60m", "30–60m"], ["1-24h", "1–24h"], [">24h", ">24h"]];
+const NAME_TICK = { ...AXIS.tick, fontFamily: "'Normative Pro'", fontSize: 12, fill: "#aaa" };
+const VALUE_LABEL = { fill: "#aaa", fontSize: 11, fontFamily: "'Geist Mono', monospace" };
+const dayTick = (b) => axisTick(b, "day");
+const dayLabel = (b) => bucketLabel(b, "day");
+
+/** Sum of a per-witness series over its points: Map witness → total (the overall total, dim "", left out). */
+function perDim(points) {
+    const m = new Map();
+    for (const p of points || []) if (p.dim !== "") m.set(p.dim, (m.get(p.dim) || 0) + (p.value || 0));
+    return m;
+}
+
+/** Sum of a series' overall total (dim ""). */
+const totalOf = (points) => (points || []).reduce((t, p) => t + (p.dim === "" ? p.value || 0 : 0), 0);
 
 const styles = theme => ({
     dialogContent: { padding: "24px", [theme.breakpoints.down("sm")]: { padding: "16px" } },
@@ -186,6 +221,16 @@ const styles = theme => ({
     statValue: { fontSize: "13px", color: "#fff", fontFamily: "'Geist Mono', monospace", textAlign: "right" },
     statMeter: { gridColumn: "1 / -1", marginTop: "-4px" },
     spacer: { height: "16px" },
+    chart: { width: "100%", height: "200px" },
+    chartShort: { width: "100%", height: "160px" },
+    listTitle: {
+        fontSize: "11px",
+        color: "#666",
+        fontFamily: "'Industry Book'",
+        textTransform: "uppercase",
+        letterSpacing: "0.5px",
+        margin: "16px 0 4px 0"
+    },
     note: { fontSize: "12px", color: "#666", fontFamily: "'Normative Pro'", marginTop: "12px", lineHeight: 1.5 },
     // goals (same card as the original GDMetrics goals)
     goals: {
@@ -257,7 +302,8 @@ class GDControlTower extends React.PureComponent {
             treasury: soft(towerGet("/metrics/treasury_distribution/latest?grain=day", 600000).then((r) => r.data.values)),
             stickiness: soft(towerGet("/metrics/stickiness/latest?grain=day", 600000).then((r) => r.data.values)),
             curation: soft(towerGet("/metrics/curation_share_observed/latest?grain=day", 600000).then((r) => r.data.values)),
-            fee: soft(towerGet("/metrics/account_creation_fee/latest?grain=hour", 600000).then((r) => r.data.values))
+            fee: soft(towerGet("/metrics/account_creation_fee/latest?grain=hour", 600000).then((r) => r.data.values)),
+            ...this._witnessJobs(soft)
         };
         const keys = Object.keys(jobs);
         Promise.all(keys.map((k) => jobs[k])).then((values) => {
@@ -266,6 +312,25 @@ class GDControlTower extends React.PureComponent {
             keys.forEach((k, i) => (d[k] = values[i]));
             this.setState({ d, loading: false });
         });
+    }
+
+    /** Witness activity over the last 30 days (day buckets) and the witness gauges, cached 5 minutes. */
+    _witnessJobs(soft) {
+        const { from, to } = this._window();
+        const series = (m) => soft(towerSeries(m, { grain: "day", from, to, dim: "*" }, 300000));
+        const latest = (m, g) => soft(towerGet(`/metrics/${m}/latest?grain=${g}`, 300000).then((r) => newestOnly(r.data.values)));
+        return {
+            production: series("block_production"),
+            approvals: series("witness_approvals"),
+            removals: series("witness_removals"),
+            stakeAdded: series("witness_stake_added"),
+            stakeRemoved: series("witness_stake_removed"),
+            producerPay: series("producer_rewards"),
+            concentration: latest("vote_concentration", "day"),
+            interestVotes: latest("witness_interest_rate", "hour"),
+            freshness: latest("feed_freshness", "hour"),
+            versions: latest("witness_versions", "hour")
+        };
     }
 
     // ------------------------------------------------------------ 2. system state
@@ -666,6 +731,358 @@ class GDControlTower extends React.PureComponent {
         );
     }
 
+    // ------------------------------------------------------------ witnesses, last 30 days
+
+    /** The 30 days the witness charts cover: whole days, up to the end of the current hour (stable for the cache). */
+    _window() {
+        const to = Math.ceil((nowSec() + 1) / 3600) * 3600;
+        return { from: Math.ceil((to - 30 * DAY) / DAY) * DAY, to };
+    }
+
+    /** PIXA per VESTS, to show stake metrics (VESTS) as Pixa Power. About 1 on Pixa. */
+    _ratio() {
+        const s = this.state.d.ov ? this.state.d.ov.supply : null;
+        return s && s.vests_ratio ? s.vests_ratio : 1;
+    }
+
+    _wait(height) {
+        return this.state.loading ? <Skeleton height={height} /> : <Empty>{tr(K + "no_data", "No data.")}</Empty>;
+    }
+
+    _renderProduction() {
+        const { classes } = this.props;
+        const { d } = this.state;
+        const { from, to } = this._window();
+        const pts = d.production;
+        const days = pts
+            ? fillBuckets(
+                pts.filter((p) => p.dim === "").map((p) => ({ bucket: p.bucket, missed: p.extra ? p.extra.missed || 0 : 0, produced: p.extra ? p.extra.produced || 0 : 0 })),
+                from, to, "day", ["missed", "produced"]
+            )
+            : [];
+        const produced = days.reduce((t, r) => t + r.produced, 0);
+        const missed = days.reduce((t, r) => t + r.missed, 0);
+        const per = new Map();
+        for (const p of pts || []) {
+            if (p.dim === "" || !p.extra) continue;
+            const x = per.get(p.dim) || { produced: 0, missed: 0 };
+            x.produced += p.extra.produced || 0;
+            x.missed += p.extra.missed || 0;
+            per.set(p.dim, x);
+        }
+        const all = Array.from(per.entries()).map(([w, x]) => ({ w, ...x, rate: x.produced + x.missed ? x.missed / (x.produced + x.missed) : 0 }));
+        const missing = all.filter((x) => x.missed > 0).sort((a, b) => b.missed - a.missed || b.produced - a.produced);
+        // Enough decimals that a witness who missed blocks never reads 100%.
+        const filled = (p, m) => {
+            if (m === 0) return "100%";
+            for (const digits of [2, 3, 4]) {
+                const v = fmtPct(p / (p + m), digits);
+                if (!v.startsWith("100")) return v;
+            }
+            return "> 99.99%";
+        };
+        const scale = niceScale(0, Math.max(1, ...days.map((r) => r.missed)), 6, true, true);
+        return (
+            <Card
+                title={tr(K + "block_production", "Block production")}
+                subtitle={produced + missed ? trf(K + "slots_filled_n", "{n} of slots filled · 30 days", { n: filled(produced, missed) }) : tr(K + "last_30_days", "last 30 days")}
+                info={tr(K + "block_production_info", "Blocks produced over scheduled slots, per day. A missed block is a slot its witness left empty: the chain carries on with the next witness, 3 seconds later.")}
+            >
+                {!pts ? this._wait(220) : produced + missed === 0 ? (
+                    <Empty>{tr(K + "no_production", "No block recorded in these 30 days yet.")}</Empty>
+                ) : (
+                    <>
+                        {missed === 0 ? (
+                            <Empty>{tr(K + "no_missed", "No block missed in 30 days.")}</Empty>
+                        ) : (
+                            <div className={classes.chartShort}>
+                                <ResponsiveContainer>
+                                    <BarChart data={days} margin={{ top: 8, right: 16, bottom: 0, left: -16 }} barCategoryGap="24%">
+                                        <CartesianGrid {...GRID} />
+                                        <XAxis dataKey="bucket" tickFormatter={dayTick} {...AXIS} minTickGap={24} />
+                                        <YAxis {...AXIS} width={48} domain={scale.domain} ticks={scale.ticks} interval={0} tickFormatter={tickFormat(scale.step)} />
+                                        <Tooltip
+                                            cursor={BAR_CURSOR}
+                                            content={<ChartTip labelFormatter={dayLabel} valueFormatter={(v, p) => `${fmtInt(v)} · ${trf(K + "of_n_slots", "of {n} slots", { n: fmtInt(p.payload.missed + p.payload.produced) })}`} />}
+                                        />
+                                        <Bar dataKey="missed" name={tr(K + "missed_blocks", "Missed blocks")} fill={SERIES[1].fill} {...BAR} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        )}
+                        {missing.length ? (
+                            <>
+                                <div className={classes.listTitle}>{tr(K + "missed_by_witness", "Missed by witness")}</div>
+                                <div className={classes.rows}>
+                                    {missing.slice(0, 8).map((x) => (
+                                        <div key={x.w} className={classes.row}>
+                                            <div className={classes.rowMain}>
+                                                <div className={classes.rowTitle}>@{x.w}</div>
+                                                <div className={classes.rowSub}>{trf(K + "produced_missed_n", "{p} produced · {m} missed", { p: fmtInt(x.produced), m: fmtInt(x.missed) })}</div>
+                                            </div>
+                                            <div className={classes.rowValue}>
+                                                {x.rate > 0.01 ? <Pill level={x.rate > 0.04 ? "red" : "amber"} icon={false}>{filled(x.produced, x.missed)}</Pill> : filled(x.produced, x.missed)}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                {all.length > missing.length ? (
+                                    <div className={classes.note}>{trf(K + "others_missed_none_n", "Witnesses with no missed block: {n}.", { n: fmtInt(all.length - missing.length) })}</div>
+                                ) : null}
+                            </>
+                        ) : null}
+                    </>
+                )}
+            </Card>
+        );
+    }
+
+    _renderWitnessVotes() {
+        const { classes } = this.props;
+        const { d } = this.state;
+        const { from, to } = this._window();
+        const ratio = this._ratio();
+        const byDay = new Map();
+        const row = (b) => {
+            if (!byDay.has(b)) byDay.set(b, { bucket: b, approvals: 0, removals: 0 });
+            return byDay.get(b);
+        };
+        for (const p of d.approvals || []) if (p.dim === "") row(p.bucket).approvals = p.value || 0;
+        for (const p of d.removals || []) if (p.dim === "") row(p.bucket).removals = -(p.value || 0);
+        const days = fillBuckets(Array.from(byDay.values()).sort((a, b) => a.bucket - b.bucket), from, to, "day", ["approvals", "removals"]);
+        const nA = days.reduce((t, r) => t + r.approvals, 0);
+        const nR = days.reduce((t, r) => t - r.removals, 0);
+        const added = perDim(d.stakeAdded);
+        const removed = perDim(d.stakeRemoved);
+        const aN = perDim(d.approvals);
+        const rN = perDim(d.removals);
+        const movers = Array.from(new Set([...aN.keys(), ...rN.keys()]))
+            .map((w) => ({ w, net: ((added.get(w) || 0) - (removed.get(w) || 0)) * ratio, a: aN.get(w) || 0, r: rN.get(w) || 0 }))
+            .filter((x) => x.a || x.r)
+            .sort((a, b) => Math.abs(b.net) - Math.abs(a.net) || b.a + b.r - (a.a + a.r))
+            .slice(0, 5);
+        const names = { approvals: tr(K + "approvals", "Approvals"), removals: tr(K + "removals", "Removals") };
+        return (
+            <Card
+                title={tr(K + "witness_votes", "Witness votes")}
+                subtitle={nA + nR ? trf(K + "approvals_removals_n", "approvals {a} · removals {r} · 30 days", { a: fmtInt(nA), r: fmtInt(nR) }) : tr(K + "last_30_days", "last 30 days")}
+                info={tr(K + "witness_votes_info", "Witness approvals and removals cast each day. Below, the witnesses whose backing moved most: the stake behind each vote when it was cast, own and proxied, as Pixa Power.")}
+            >
+                {!d.approvals && !d.removals ? this._wait(220) : nA + nR === 0 ? (
+                    <Empty>{tr(K + "no_witness_votes", "No witness vote in 30 days.")}</Empty>
+                ) : (
+                    <>
+                        <div className={classes.chartShort}>
+                            <ResponsiveContainer>
+                                <BarChart data={days} margin={{ top: 8, right: 16, bottom: 0, left: -16 }} stackOffset="sign" barCategoryGap="24%">
+                                    <CartesianGrid {...GRID} />
+                                    <XAxis dataKey="bucket" tickFormatter={dayTick} {...AXIS} minTickGap={24} />
+                                    <YAxis {...AXIS} allowDecimals={false} width={48} tickFormatter={(v) => fmtInt(Math.abs(v))} />
+                                    <ReferenceLine y={0} stroke="rgba(255,255,255,0.18)" />
+                                    <Tooltip cursor={BAR_CURSOR} content={<ChartTip labelFormatter={dayLabel} names={names} valueFormatter={(v) => fmtInt(Math.abs(v))} />} />
+                                    <Bar dataKey="approvals" name={names.approvals} stackId="w" fill={SERIES[0].fill} {...BAR} shape={VOTE_STACK} />
+                                    <Bar dataKey="removals" name={names.removals} stackId="w" fill={SERIES[2].fill} {...BAR} shape={VOTE_STACK} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                        <Legend items={[{ label: names.approvals, color: SERIES[0].fill, shape: "block" }, { label: names.removals, color: SERIES[2].fill, shape: "block" }]} />
+                        {movers.length ? (
+                            <>
+                                <div className={classes.listTitle}>{tr(K + "backing_moved", "Backing that moved most")}</div>
+                                <div className={classes.rows}>
+                                    {movers.map((x) => (
+                                        <div key={x.w} className={classes.row}>
+                                            <div className={classes.rowMain}>
+                                                <div className={classes.rowTitle}>@{x.w}</div>
+                                                <div className={classes.rowSub}>{trf(K + "approvals_removals_short_n", "approvals {a} · removals {r}", { a: fmtInt(x.a), r: fmtInt(x.r) })}</div>
+                                            </div>
+                                            <div className={classes.rowValue}>{`${x.net < 0 ? "−" : "+"}${fmtCompact(Math.abs(x.net))} PXP`}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </>
+                        ) : null}
+                    </>
+                )}
+            </Card>
+        );
+    }
+
+    _renderProducerPay() {
+        const { classes } = this.props;
+        const { d } = this.state;
+        const ratio = this._ratio();
+        const total = totalOf(d.producerPay) * ratio;
+        const rows = Array.from(perDim(d.producerPay).entries())
+            .map(([w, v]) => ({ w, pxp: v * ratio }))
+            .filter((x) => x.pxp > 0)
+            .sort((a, b) => b.pxp - a.pxp)
+            .slice(0, 12);
+        return (
+            <Card
+                title={tr(K + "producer_rewards", "Producer rewards")}
+                subtitle={d.producerPay ? trf(K + "pxp_30d_n", "{n} PXP · 30 days", { n: fmtCompact(total) }) : ""}
+                info={tr(K + "producer_rewards_info", "Pixa Power paid to each witness for the blocks it produced, at the current VESTS ratio.")}
+            >
+                {!d.producerPay ? this._wait(220) : rows.length === 0 ? (
+                    <Empty>{tr(K + "no_producer_rewards", "No producer reward in 30 days.")}</Empty>
+                ) : (
+                    <div style={{ width: "100%", height: `${Math.max(120, rows.length * 30)}px` }}>
+                        <ResponsiveContainer>
+                            <BarChart data={rows} layout="vertical" margin={{ top: 0, right: 64, bottom: 0, left: 0 }} barCategoryGap="24%">
+                                <XAxis type="number" hide domain={[0, "dataMax"]} />
+                                <YAxis type="category" dataKey="w" {...AXIS} width={112} tickFormatter={(w) => "@" + w} tick={NAME_TICK} interval={0} />
+                                <Tooltip
+                                    cursor={BAR_CURSOR}
+                                    content={<ChartTip labelFormatter={(l) => "@" + l} valueFormatter={(v) => `${fmtCompact(v)} PXP · ${fmtPct(total ? v / total : 0, 1)}`} />}
+                                />
+                                <Bar dataKey="pxp" name={tr(K + "earned", "Earned")} fill={SERIES[1].fill} {...HBAR}>
+                                    <LabelList dataKey="pxp" position="right" formatter={(v) => fmtCompact(v)} style={VALUE_LABEL} />
+                                </Bar>
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                )}
+            </Card>
+        );
+    }
+
+    _renderConcentration() {
+        const { classes } = this.props;
+        const { d } = this.state;
+        const vc = new Map((d.concentration || []).map((v) => [v.dim, v]));
+        const data = CONCENTRATION.filter((k) => vc.has("top" + k) && vc.get("top" + k).value != null).map((k) => ({
+            k, label: trf(K + "top_n", "Top {n}", { n: k }), share: vc.get("top" + k).value
+        }));
+        const extra = data.length ? vc.get("top" + data[0].k).extra : null;
+        return (
+            <Card
+                title={tr(K + "vote_concentration", "Vote concentration")}
+                subtitle={extra ? trf(K + "entities_largest_n", "voting entities: {n} · largest @{who}", { n: fmtInt(extra.entities), who: extra.largest || "–" }) : ""}
+                info={tr(K + "vote_concentration_info", "Share of the stake voting for witnesses held by the largest voting entities; stake proxied to an account counts with that account. The fewer entities above the 50% line, the easier the schedule is to capture.")}
+            >
+                {!d.concentration ? this._wait(200) : data.length === 0 ? (
+                    <Empty>{tr(K + "no_concentration", "Computed once a day from the Tower's balances: the first value appears after the first daily run.")}</Empty>
+                ) : (
+                    <div className={classes.chart}>
+                        <ResponsiveContainer>
+                            <BarChart data={data} margin={{ top: 20, right: 16, bottom: 0, left: -8 }} barCategoryGap="24%">
+                                <CartesianGrid {...GRID} />
+                                <XAxis dataKey="label" {...AXIS} interval={0} />
+                                <YAxis {...AXIS} width={48} domain={[0, 1]} ticks={[0, 0.25, 0.5, 0.75, 1]} tickFormatter={(v) => fmtPct(v, 0)} />
+                                <ReferenceLine y={0.5} stroke="rgba(255,255,255,0.3)" strokeDasharray="4 4" />
+                                <Tooltip
+                                    cursor={BAR_CURSOR}
+                                    content={<ChartTip valueFormatter={(v) => `${fmtPct(v, 1)} ${tr(K + "of_voting_stake", "of the voting stake")}`} />}
+                                />
+                                <Bar dataKey="share" name={tr(K + "share_of_votes", "Share of the voting stake")} fill={SERIES[1].fill} {...BAR}>
+                                    <LabelList dataKey="share" position="top" formatter={(v) => fmtPct(v, 0)} style={VALUE_LABEL} />
+                                </Bar>
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                )}
+            </Card>
+        );
+    }
+
+    _renderInterestVotes() {
+        const { classes } = this.props;
+        const { d } = this.state;
+        const iv = d.interestVotes;
+        const med = iv ? iv.find((v) => v.dim === "") : null;
+        const median = med && med.value != null ? med.value : null;
+        const rows = (iv || [])
+            .filter((v) => v.dim !== "" && v.value != null)
+            .map((v) => ({ w: v.dim, rate: v.value }))
+            .sort((a, b) => b.rate - a.rate || (a.w < b.w ? -1 : 1));
+        const pct = (v) => `${Number(v.toFixed(2))}%`;
+        const allZero = !median && rows.every((r) => !r.rate);
+        return (
+            <Card
+                title={tr(K + "interest_votes", "PXS interest rate")}
+                subtitle={median != null ? trf(K + "median_rate_n", "{n} now: the median of the elected witnesses' votes", { n: pct(median) }) : ""}
+                info={tr(K + "interest_votes_info", "The interest paid on PXS in savings is the median of the rates the elected witnesses vote. Each bar is one witness's vote; the line is the median.")}
+            >
+                {!iv ? this._wait(160) : rows.length === 0 ? (
+                    <Empty>{tr(K + "no_rate_votes", "No witness has voted a rate yet.")}</Empty>
+                ) : allZero ? (
+                    <Empty>{tr(K + "all_zero_rate", "Every witness votes 0%: PXS in savings earns no interest.")}</Empty>
+                ) : (
+                    <div style={{ width: "100%", height: `${Math.max(120, rows.length * 30)}px` }}>
+                        <ResponsiveContainer>
+                            <BarChart data={rows} layout="vertical" margin={{ top: 0, right: 56, bottom: 0, left: 0 }} barCategoryGap="24%">
+                                <XAxis type="number" hide domain={[0, "dataMax"]} />
+                                <YAxis type="category" dataKey="w" {...AXIS} width={112} tickFormatter={(w) => "@" + w} tick={NAME_TICK} interval={0} />
+                                {median ? <ReferenceLine x={median} stroke="rgba(255,255,255,0.3)" strokeDasharray="4 4" /> : null}
+                                <Tooltip cursor={BAR_CURSOR} content={<ChartTip labelFormatter={(l) => "@" + l} valueFormatter={(v) => pct(v)} />} />
+                                <Bar dataKey="rate" name={tr(K + "rate_vote", "Rate voted")} fill={SERIES[1].fill} {...HBAR}>
+                                    <LabelList dataKey="rate" position="right" formatter={(v) => pct(v)} style={VALUE_LABEL} />
+                                </Bar>
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                )}
+            </Card>
+        );
+    }
+
+    _renderFreshness() {
+        const { classes } = this.props;
+        const { d } = this.state;
+        const fr = new Map((d.freshness || []).map((v) => [v.dim, v.value || 0]));
+        const data = FRESHNESS.map(([k, label]) => ({ k, label, n: fr.get(k) || 0 }));
+        const elected = data.reduce((t, x) => t + x.n, 0);
+        const versions = (d.versions || []).slice().sort((a, b) => (b.value || 0) - (a.value || 0));
+        const hf = versions.length && versions[0].extra && versions[0].extra.hf_votes ? Object.entries(versions[0].extra.hf_votes).sort((a, b) => b[1] - a[1]) : [];
+        return (
+            <Card
+                title={tr(K + "feeds_versions", "Feed freshness and versions")}
+                subtitle={d.freshness ? trf(K + "elected_n", "elected witnesses: {n}", { n: fmtInt(elected) }) : ""}
+                info={tr(K + "feeds_versions_info", "How long ago each elected witness last published a price feed, then the software the witnesses with a signing key run and the hardfork they vote for.")}
+            >
+                {!d.freshness ? this._wait(160) : (
+                    <div className={classes.chartShort}>
+                        <ResponsiveContainer>
+                            <BarChart data={data} margin={{ top: 20, right: 16, bottom: 0, left: -16 }} barCategoryGap="24%">
+                                <CartesianGrid {...GRID} />
+                                <XAxis dataKey="label" {...AXIS} interval={0} />
+                                <YAxis {...AXIS} allowDecimals={false} width={48} />
+                                <Tooltip
+                                    cursor={BAR_CURSOR}
+                                    content={<ChartTip labelFormatter={(l) => trf(K + "feed_updated_n", "Feed updated {n} ago", { n: l })} valueFormatter={(v) => fmtInt(v)} />}
+                                />
+                                <Bar dataKey="n" name={tr(K + "witnesses", "Witnesses")} fill={SERIES[1].fill} {...BAR}>
+                                    <LabelList dataKey="n" position="top" formatter={(v) => (v ? fmtInt(v) : "")} style={VALUE_LABEL} />
+                                </Bar>
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                )}
+                {versions.length ? (
+                    <>
+                        <div className={classes.listTitle}>{tr(K + "witnesses_by_version", "Witnesses by version")}</div>
+                        <div className={classes.rows}>
+                            {versions.map((v) => (
+                                <div key={v.dim} className={classes.row}>
+                                    <div className={classes.rowMain}>
+                                        <div className={classes.rowTitle}>{v.dim === "unknown" ? tr(K + "unknown_version", "not reported") : v.dim}</div>
+                                    </div>
+                                    <div className={classes.rowValue}>{fmtInt(v.value || 0)}</div>
+                                </div>
+                            ))}
+                        </div>
+                        {hf.length ? (
+                            <div className={classes.note}>
+                                {tr(K + "hardfork_votes", "Hardfork votes")}: {hf.map(([ver, n]) => `${ver === "unknown" ? "–" : ver} × ${n}`).join(" · ")}
+                            </div>
+                        ) : null}
+                    </>
+                ) : null}
+            </Card>
+        );
+    }
+
     render() {
         const { classes } = this.props;
         return (
@@ -686,6 +1103,19 @@ class GDControlTower extends React.PureComponent {
                     <div className={classes.grid2}>
                         {this._renderCapture()}
                         {this._renderWitnesses()}
+                    </div>
+
+                    <Section
+                        title={tr(K + "s_witness_activity", "Witnesses, last 30 days")}
+                        description={tr(K + "s_witness_activity_desc", "Block production, the votes that move the schedule, what producers earn, how concentrated the vote is, and what witnesses set and run.")}
+                    />
+                    <div className={classes.grid2}>
+                        {this._renderProduction()}
+                        {this._renderWitnessVotes()}
+                        {this._renderProducerPay()}
+                        {this._renderConcentration()}
+                        {this._renderInterestVotes()}
+                        {this._renderFreshness()}
                     </div>
 
                     <Section
@@ -717,6 +1147,16 @@ class GDControlTower extends React.PureComponent {
                         {this._renderDiscussions()}
                         {this._renderActions()}
                     </div>
+
+                    <Section
+                        title={tr(K + "s_reports", "Reports")}
+                        description={tr(K + "s_reports_desc", "Witness reports for each day, week and month, compared with the period before, ready to post.")}
+                    />
+                    <GDReports
+                        kinds={["witnesses"]}
+                        title={tr(K + "witness_reports", "Witness reports")}
+                        info={tr(K + "witness_reports_info", "Written by the Tower when a period closes; the current period is built on request. Ranking, votes, production, missed blocks, parameters, feeds and versions, against the period before.")}
+                    />
                 </div>
             </DialogContent>
         );

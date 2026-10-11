@@ -117,6 +117,8 @@ import ExpandMoreRounded from "@material-ui/icons/ExpandMoreRounded";
 import DescriptionRounded from "@material-ui/icons/DescriptionRounded";
 import ShowChartRounded from "@material-ui/icons/ShowChartRounded";
 import WalletHistory from "./WalletHistory";
+import { BalanceHistory } from "./AccountCharts";
+import { tr } from "./GDTowerKit";
 import RewardClaimAnimation from "./RewardClaimAnimation";
 import { cssBackgroundImage } from "../utils/safeUrl";
 
@@ -4330,6 +4332,14 @@ class PixaWalletDialog extends React.PureComponent {
                                 rewardPxp: formatInteger(_rewardPxp)
                             })}</span>
                             </Button>}
+                            {/* Balances, rewards and transfers over time, from the statistics service.
+                                Collapsed by default; nothing is fetched until it is opened. */}
+                            {this._render_section_header("history:charts", tr("components.account_charts.balance_history", "Balance history"))}
+                            <Collapse in={this._is_section_expanded("history:charts")} mountOnEnter unmountOnExit>
+                                <div style={{margin: "0px 0px 16px 0px"}}>
+                                    <BalanceHistory username={account.username} />
+                                </div>
+                            </Collapse>
                             <WalletHistory
                                 history={_walletHistory}
                                 username={account.username}

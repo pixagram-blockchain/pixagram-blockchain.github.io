@@ -12,10 +12,19 @@
 // /help about the platform). Against an older Worker they simply stay silent.
 //
 // v4 keeps all of it, field for field, and answers questions with its own
-// engine: the index's answer first (result_text), and the reasoning model's
-// explanation of it (GPT-OSS 120B) when that passed claim verification. The box
-// shows the index's answer at once and asks for GPT-OSS's explanation right
-// after (EXPLAIN_MODE). Against a v3 Worker the explanation is simply not asked.
+// engine: the index's answer first (result_text), and a reasoning model's
+// explanation of it when that passed claim verification.
+//
+// v4.8 makes the answer a long one (the Worker's README, "Rich answers"): the
+// index's answer with a deterministic digest (facts, overview, caveats,
+// follow-up questions, related searches) comes back at once (/query with
+// defer=1), and the model's part — a body of several paragraphs, its reasoning
+// trail, its own follow-ups, every sentence verified — is fetched afterwards
+// from GET /ask/elaboration/:query_id and merged in. /help answers at length
+// too, with follow-up questions and related sections; every search carries a
+// one-line overview; /suggest?after=<query_id> continues the conversation.
+// Against a v4 Worker the extra fields are simply absent and the box shows the
+// v4 answer; against a v3 one, the v3 answer.
 export const SEARCH_API_URL = (
     (typeof window !== "undefined" && window.__PIXAGRAM_SEARCH_API__) ||
     "https://pixagram-search-v4.p1x4.workers.dev"
@@ -65,12 +74,33 @@ export const SUGGEST_ROWS = 6;              // suggestion rows in the dropdown
 export const ANSWER_DEBOUNCE_MS = 700;      // after "…?"
 export const ANSWER_IDLE_MS = 1600;         // after a question word and three words, without "?"
 
-// ── v4: GPT-OSS explains the index's answer ───────────────────────────────────
-// The index answers first (the /query answer, in the Worker's own mode); the
-// explanation is a second /ask in this mode, which always runs the reasoning
-// model (GPT-OSS 120B) on what the index found. Each spends one of the visitor's
-// 20 answers a minute, so a question with its explanation costs two.
-export const EXPLAIN_MODE = "balanced";
+// ── v4.8: the long answer, in two steps ───────────────────────────────────────
+// /query?defer=1 answers from the index at once (one of the visitor's 20
+// answers a minute); the model's part comes from GET /ask/elaboration/:id,
+// which is on the ordinary request budget: the Worker runs the model the first
+// time it is asked and holds the request meanwhile (up to its own model
+// timeout, about two minutes for the deepest questions), so one call usually
+// brings the whole elaboration. "pending" means another call is running it:
+// asked again after ELABORATION_POLL_MS, ELABORATION_MAX_POLLS times at most.
+// A transient failure (retry: true) is asked once more after
+// ELABORATION_RETRY_MS; afterwards the card offers "Try again".
+export const ELABORATION_POLL_MS = 1500;
+export const ELABORATION_MAX_POLLS = 60;
+export const ELABORATION_RETRY_MS = 1200;
+
+// The answer's follow-up questions and related searches shown as chips under
+// it (the Worker sends up to SEARCH_FOLLOW_UPS, six by default).
+export const FOLLOW_UPS_SHOWN = 4;
+export const SEARCHES_SHOWN = 3;
+
+// After an answer, /suggest is asked with after=<query_id> so the answer's own
+// follow-ups come first while typing: the Worker keeps them for half an hour.
+export const CONVERSATION_TTL_MS = 25 * 60_000;
+
+// The answer's longer parts: the body is shown whole up to this many
+// characters, then cut with "Read more"; the facts, the reasoning trail and the
+// caveats are folded by default (one click opens them).
+export const BODY_FOLD_CHARS = 1400;
 
 // The placeholder: the plain "Search" first, then the Worker's examples (in the
 // UI language, from what the index holds), each fading out and the next in.
