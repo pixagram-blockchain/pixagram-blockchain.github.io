@@ -33,7 +33,9 @@
  *             underscore for a regional file: "pt_br" for locales/pt_br.js.
  *   coverage  how much of the catalog is filled in, 0–1. Shown as a badge in
  *             Settings. Informational only — a 6 % locale renders fine, every
- *             missing key just falls through to English.
+ *             missing key just falls through to English. Measured, not
+ *             estimated: `node i18n/locale-coverage.mjs src/locales` prints
+ *             these lines with the counts behind them.
  *
  * If you list a code whose file does not exist, nothing breaks: setLanguage()
  * fails to load it and falls back. The only symptom is an optimistic flag in
@@ -42,32 +44,32 @@
  */
 export const LOCALE_FILES = [
     { code: "en", coverage: 1.00 },   // the source of truth
-    { code: "de", coverage: 0.95 },
-    { code: "es", coverage: 0.95 },
-    { code: "fr", coverage: 0.95 },
-    { code: "hi", coverage: 0.95 },
-    { code: "id", coverage: 0.95 },
-    { code: "it", coverage: 0.95 },
-    { code: "ja", coverage: 0.95 },
-    { code: "ko", coverage: 0.95 },
-    { code: "pt", coverage: 0.95 },
-    { code: "ru", coverage: 0.95 },
-    { code: "zh", coverage: 0.95 },
-    { code: "el", coverage: 0.95 },
-    { code: "bn", coverage: 0.95 },
-    { code: "no", coverage: 0.95 },
-    { code: "sv", coverage: 0.95 },
-    { code: "cs", coverage: 0.95 },
-    { code: "da", coverage: 0.95 },
-    { code: "sk", coverage: 0.95 },
-    { code: "uk", coverage: 0.95 },
-    { code: "fi", coverage: 0.95 },
-    { code: "hu", coverage: 0.95 },
-    { code: "ta", coverage: 0.95 },
-    { code: "tr", coverage: 0.95 },
-    { code: "nl", coverage: 0.95 },
-    { code: "pl", coverage: 0.95 },
-    { code: "ro", coverage: 0.95 }
+    { code: "de", coverage: 0.92 },
+    { code: "es", coverage: 0.92 },
+    { code: "fr", coverage: 0.92 },
+    { code: "hi", coverage: 0.92 },
+    { code: "id", coverage: 0.92 },
+    { code: "it", coverage: 0.92 },
+    { code: "ja", coverage: 0.92 },
+    { code: "ko", coverage: 0.92 },
+    { code: "pt", coverage: 0.92 },
+    { code: "ru", coverage: 0.92 },
+    { code: "zh", coverage: 0.92 },
+    { code: "el", coverage: 0.92 },
+    { code: "bn", coverage: 0.92 },
+    { code: "no", coverage: 0.92 },
+    { code: "sv", coverage: 0.92 },
+    { code: "cs", coverage: 0.92 },
+    { code: "da", coverage: 0.92 },
+    { code: "sk", coverage: 0.92 },
+    { code: "uk", coverage: 0.92 },
+    { code: "fi", coverage: 0.92 },
+    { code: "hu", coverage: 0.92 },
+    { code: "ta", coverage: 0.92 },
+    { code: "tr", coverage: 0.92 },
+    { code: "nl", coverage: 0.92 },
+    { code: "pl", coverage: 0.92 },
+    { code: "ro", coverage: 0.92 }
     // { code: "pt_br", coverage: 0.40 },   // regional file, once it exists
 ];
 

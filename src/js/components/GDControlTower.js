@@ -20,7 +20,7 @@ import { LabelList } from "recharts/lib/component/LabelList";
 import { withLanguage } from "../utils/withLanguage";
 import { towerGet, towerSeries, nowSec, fmtCompact, fmtInt, fmtPct, fmtAgo } from "../utils/tower";
 import {
-    tr, trf, Section, Card, Tile, Pill, Meter, Empty, Skeleton, Visible, ChartTip, Legend,
+    tr, trf, Card, Tile, Pill, Meter, Empty, Skeleton, Visible, ChartTip, Legend, AccordionSection, ACCORDION_MS,
     SERIES, AXIS, GRID, BAR_CURSOR, BAR, HBAR, stackShape, axisTick, bucketLabel, fillBuckets, niceScale, tickFormat, newestOnly
 } from "./GDTowerKit";
 import GDReports from "./GDReports";
@@ -130,6 +130,7 @@ const totalOf = (points) => (points || []).reduce((t, p) => t + (p.dim === "" ? 
 
 const styles = theme => ({
     dialogContent: { padding: "24px", [theme.breakpoints.down("sm")]: { padding: "16px" } },
+    sections: { marginTop: "16px" },
     // system state banner
     banner: {
         backgroundColor: "#101010",
@@ -273,52 +274,133 @@ const styles = theme => ({
     goalProgressText: { display: "flex", justifyContent: "space-between", marginTop: "8px", fontSize: "12px", fontFamily: "'Geist Mono', monospace", color: "#888" }
 });
 
+// The view's sections, in order, under the system state banner. Each is closed until opened and only one is
+// open at a time; the open one is named in the address (+governance-tower-<id>, ids without "-"). A section
+// loads its data when it opens.
+const SECTIONS = [
+    { id: "state", title: () => tr(K + "s_state", "System state"), description: () => tr(K + "s_state_desc", "Alerts raised by the Tower. Red means act now, amber means watch.") },
+    { id: "steering", title: () => tr(K + "s_steering", "System steering"), description: () => tr(K + "s_steering_desc", "Who produces the blocks, how much it would cost to take control, and how much of the stake takes part.") },
+    { id: "witnesses", title: () => tr(K + "s_witness_activity", "Witnesses, last 30 days"), description: () => tr(K + "s_witness_activity_desc", "Block production, the votes that move the schedule, what producers earn, how concentrated the vote is, and what witnesses set and run.") },
+    { id: "attributes", title: () => tr(K + "s_attributes", "System attributes"), description: () => tr(K + "s_attributes_desc", "The parameters the chain runs on now, as voted by witnesses or set by the protocol.") },
+    { id: "goals", title: () => tr(K + "s_goals", "System goals"), description: () => tr(K + "s_goals_desc", "The objectives the network steers towards, measured live.") },
+    { id: "funds", title: () => tr(K + "s_funds", "Funds and price feeds"), description: () => tr(K + "s_funds_desc", "Proposals to the Decentralized Pixa Fund, and the feeds that set PXS conversions.") },
+    { id: "events", title: () => tr(K + "s_events", "System events and actions"), description: () => tr(K + "s_events_desc", "Where the community discusses the system, and what governance did in response to alerts.") },
+    { id: "reports", title: () => tr(K + "s_reports", "Reports"), description: () => tr(K + "s_reports_desc", "Witness reports for each day, week and month, compared with the period before, ready to post.") }
+];
+const SECTION_IDS = SECTIONS.map((x) => x.id);
+
+// What each section reads (keys of `_jobs`). The banner's status and alerts are always read; the reports
+// card loads itself.
+const ALWAYS = ["status", "alerts"];
+const SECTION_DATA = {
+    state: [],
+    steering: ["gov", "witnesses"],
+    witnesses: ["ov", "production", "approvals", "removals", "stakeAdded", "stakeRemoved", "producerPay", "concentration", "interestVotes", "freshness", "versions"],
+    attributes: ["ov", "fee", "curation", "witnesses"],
+    goals: ["gov", "ov", "treasury", "stickiness"],
+    funds: ["dpf", "witnesses", "ov"],
+    events: ["portals", "actions"],
+    reports: []
+};
+
 class GDControlTower extends React.PureComponent {
-    state = { loading: true, d: {} };
+    // `localSection` is the open section when no parent drives it (no onSectionChange).
+    state = { loading: true, d: {}, localSection: null };
     root = React.createRef();
     seq = 0;
+    heads = {}; // section id -> its header button, to bring an opened section into view
+    headRefs = {};
 
     componentDidMount() {
         this.visible = new Visible(() => this.load(), 60000);
         this.visible.attach(this.root.current);
+        if (this._open()) this._reveal(this._open());
+    }
+
+    componentDidUpdate(prevProps, prevState) {
+        const open = this._open();
+        if (open === this._open(prevProps, prevState)) return;
+        if (open) {
+            // load the section now if the view is on screen, else as soon as it is
+            const shown = !!(this.visible && this.visible.visible);
+            if (!shown && this.visible) this.visible.last = 0;
+            this.setState({ loading: true }, () => shown && this.load());
+            this._reveal(open);
+        }
     }
 
     componentWillUnmount() {
         if (this.visible) this.visible.detach();
+        clearTimeout(this.revealTimer);
+    }
+
+    /** The open section: the parent's `section` prop when it drives the view, else the view's own choice. */
+    _open(props = this.props, state = this.state) {
+        const s = props.onSectionChange ? props.section : state.localSection;
+        return SECTION_IDS.indexOf(s) >= 0 ? s : null;
+    }
+
+    /** Opens `id`, closing the open one, or closes `id` when it is the open one. */
+    _toggle = (id) => {
+        const next = this._open() === id ? null : id;
+        if (this.props.onSectionChange) this.props.onSectionChange(next);
+        else this.setState({ localSection: next });
+    };
+
+    /** Brings a section's header to the top once the section closing above it has folded. */
+    _reveal(id) {
+        clearTimeout(this.revealTimer);
+        this.revealTimer = setTimeout(() => {
+            const el = this.heads[id];
+            if (el && el.scrollIntoView) el.scrollIntoView({ block: "start", behavior: "smooth" });
+        }, ACCORDION_MS + 30);
+    }
+
+    _headRef(id) {
+        if (!this.headRefs[id]) this.headRefs[id] = (el) => (this.heads[id] = el);
+        return this.headRefs[id];
     }
 
     load() {
         const seq = ++this.seq;
-        const soft = (p) => p.catch(() => null);
-        const jobs = {
-            status: soft(towerGet("/status", 10000)),
-            ov: soft(towerGet("/overview", 30000).then((r) => r.data)),
-            alerts: soft(towerGet("/alerts?state=open&limit=50", 30000).then((r) => r.data)),
-            gov: soft(towerGet("/governance", 60000).then((r) => r.data)),
-            witnesses: soft(towerGet("/witnesses", 60000).then((r) => r.data)),
-            dpf: soft(towerGet("/dpf", 300000).then((r) => r.data)),
-            actions: soft(towerGet("/actions?limit=8", 300000).then((r) => r.data)),
-            portals: soft(towerGet("/portals", 300000).then((r) => r.data)),
-            treasury: soft(towerGet("/metrics/treasury_distribution/latest?grain=day", 600000).then((r) => r.data.values)),
-            stickiness: soft(towerGet("/metrics/stickiness/latest?grain=day", 600000).then((r) => r.data.values)),
-            curation: soft(towerGet("/metrics/curation_share_observed/latest?grain=day", 600000).then((r) => r.data.values)),
-            fee: soft(towerGet("/metrics/account_creation_fee/latest?grain=hour", 600000).then((r) => r.data.values)),
-            ...this._witnessJobs(soft)
-        };
-        const keys = Object.keys(jobs);
-        Promise.all(keys.map((k) => jobs[k])).then((values) => {
+        const open = this._open();
+        const jobs = this._jobs();
+        const keys = [...ALWAYS, ...(SECTION_DATA[open] || [])].filter((k, i, all) => all.indexOf(k) === i);
+        Promise.all(keys.map((k) => jobs[k]())).then((values) => {
             if (seq !== this.seq) return;
-            const d = {};
+            const d = { ...this.state.d };
             keys.forEach((k, i) => (d[k] = values[i]));
             this.setState({ d, loading: false });
         });
     }
 
+    /** Every request the view can make, as functions, so a section starts only its own. */
+    _jobs() {
+        const soft = (p) => p.catch(() => null);
+        const get = (path, ttl) => () => soft(towerGet(path, ttl).then((r) => r.data));
+        const values = (path, ttl) => () => soft(towerGet(path, ttl).then((r) => r.data.values));
+        return {
+            status: () => soft(towerGet("/status", 10000)),
+            ov: get("/overview", 30000),
+            alerts: get("/alerts?state=open&limit=50", 30000),
+            gov: get("/governance", 60000),
+            witnesses: get("/witnesses", 60000),
+            dpf: get("/dpf", 300000),
+            actions: get("/actions?limit=8", 300000),
+            portals: get("/portals", 300000),
+            treasury: values("/metrics/treasury_distribution/latest?grain=day", 600000),
+            stickiness: values("/metrics/stickiness/latest?grain=day", 600000),
+            curation: values("/metrics/curation_share_observed/latest?grain=day", 600000),
+            fee: values("/metrics/account_creation_fee/latest?grain=hour", 600000),
+            ...this._witnessJobs(soft)
+        };
+    }
+
     /** Witness activity over the last 30 days (day buckets) and the witness gauges, cached 5 minutes. */
     _witnessJobs(soft) {
         const { from, to } = this._window();
-        const series = (m) => soft(towerSeries(m, { grain: "day", from, to, dim: "*" }, 300000));
-        const latest = (m, g) => soft(towerGet(`/metrics/${m}/latest?grain=${g}`, 300000).then((r) => newestOnly(r.data.values)));
+        const series = (m) => () => soft(towerSeries(m, { grain: "day", from, to, dim: "*" }, 300000));
+        const latest = (m, g) => () => soft(towerGet(`/metrics/${m}/latest?grain=${g}`, 300000).then((r) => newestOnly(r.data.values)));
         return {
             production: series("block_production"),
             approvals: series("witness_approvals"),
@@ -1083,32 +1165,20 @@ class GDControlTower extends React.PureComponent {
         );
     }
 
-    render() {
+    _renderSection(id) {
         const { classes } = this.props;
-        return (
-            <DialogContent className={classes.dialogContent}>
-                <div ref={this.root}>
-                    {this._renderBanner()}
-
-                    <Section
-                        title={tr(K + "s_state", "System state")}
-                        description={tr(K + "s_state_desc", "Alerts raised by the Tower. Red means act now, amber means watch.")}
-                    />
-                    {this._renderAlerts()}
-
-                    <Section
-                        title={tr(K + "s_steering", "System steering")}
-                        description={tr(K + "s_steering_desc", "Who produces the blocks, how much it would cost to take control, and how much of the stake takes part.")}
-                    />
+        switch (id) {
+            case "state":
+                return this._renderAlerts();
+            case "steering":
+                return (
                     <div className={classes.grid2}>
                         {this._renderCapture()}
                         {this._renderWitnesses()}
                     </div>
-
-                    <Section
-                        title={tr(K + "s_witness_activity", "Witnesses, last 30 days")}
-                        description={tr(K + "s_witness_activity_desc", "Block production, the votes that move the schedule, what producers earn, how concentrated the vote is, and what witnesses set and run.")}
-                    />
+                );
+            case "witnesses":
+                return (
                     <div className={classes.grid2}>
                         {this._renderProduction()}
                         {this._renderWitnessVotes()}
@@ -1117,46 +1187,61 @@ class GDControlTower extends React.PureComponent {
                         {this._renderInterestVotes()}
                         {this._renderFreshness()}
                     </div>
-
-                    <Section
-                        title={tr(K + "s_attributes", "System attributes")}
-                        description={tr(K + "s_attributes_desc", "The parameters the chain runs on now, as voted by witnesses or set by the protocol.")}
-                    />
-                    {this._renderAttributes()}
-
-                    <Section
-                        title={tr(K + "s_goals", "System goals")}
-                        description={tr(K + "s_goals_desc", "The objectives the network steers towards, measured live.")}
-                    />
-                    {this._renderGoals()}
-
-                    <Section
-                        title={tr(K + "s_funds", "Funds and price feeds")}
-                        description={tr(K + "s_funds_desc", "Proposals to the Decentralized Pixa Fund, and the feeds that set PXS conversions.")}
-                    />
+                );
+            case "attributes":
+                return this._renderAttributes();
+            case "goals":
+                return this._renderGoals();
+            case "funds":
+                return (
                     <div className={classes.grid2}>
                         {this._renderDpf()}
                         {this._renderFeeds()}
                     </div>
-
-                    <Section
-                        title={tr(K + "s_events", "System events and actions")}
-                        description={tr(K + "s_events_desc", "Where the community discusses the system, and what governance did in response to alerts.")}
-                    />
+                );
+            case "events":
+                return (
                     <div className={classes.grid2}>
                         {this._renderDiscussions()}
                         {this._renderActions()}
                     </div>
-
-                    <Section
-                        title={tr(K + "s_reports", "Reports")}
-                        description={tr(K + "s_reports_desc", "Witness reports for each day, week and month, compared with the period before, ready to post.")}
-                    />
+                );
+            case "reports":
+                return (
                     <GDReports
                         kinds={["witnesses"]}
                         title={tr(K + "witness_reports", "Witness reports")}
                         info={tr(K + "witness_reports_info", "Written by the Tower when a period closes; the current period is built on request. Ranking, votes, production, missed blocks, parameters, feeds and versions, against the period before.")}
                     />
+                );
+            default:
+                return null;
+        }
+    }
+
+    render() {
+        const { classes } = this.props;
+        const open = this._open();
+        return (
+            <DialogContent className={classes.dialogContent}>
+                <div ref={this.root}>
+                    {this._renderBanner()}
+
+                    <div className={classes.sections}>
+                        {SECTIONS.map((x) => (
+                            <AccordionSection
+                                key={x.id}
+                                scope="tower"
+                                id={x.id}
+                                title={x.title()}
+                                description={x.description()}
+                                open={open === x.id}
+                                onToggle={this._toggle}
+                                headRef={this._headRef(x.id)}
+                                render={() => this._renderSection(x.id)}
+                            />
+                        ))}
+                    </div>
                 </div>
             </DialogContent>
         );

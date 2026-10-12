@@ -9,6 +9,8 @@ import FormGroup from "@material-ui/core/FormGroup";
 import FormControlLabel from "@material-ui/core/FormControlLabel";
 import Checkbox from "@material-ui/core/Checkbox";
 import Switch from "@material-ui/core/Switch";
+import IconButton from "@material-ui/core/IconButton";
+import CircularProgress from "@material-ui/core/CircularProgress";
 
 import CallReceivedRounded from "@material-ui/icons/CallReceivedRounded";
 import CallMadeRounded from "@material-ui/icons/CallMadeRounded";
@@ -20,8 +22,10 @@ import PeopleAltRounded from "@material-ui/icons/PeopleAltRounded";
 import ReplayRounded from "@material-ui/icons/ReplayRounded";
 import LockRounded from "@material-ui/icons/LockRounded";
 import HelpOutlineRounded from "@material-ui/icons/HelpOutlineRounded";
+import ExpandMoreRounded from "@material-ui/icons/ExpandMoreRounded";
 
 import useLiveTimeAgo from "../hooks/useLiveTimeAgo";
+import { useScrollParentWindowing, useEndReached } from "../hooks/useScrollParentWindowing";
 
 // tx is aliased: this file uses `tx` for a blockchain transaction
 // (describeOperation(tx, …), for (const tx of history)), so importing the
@@ -419,87 +423,16 @@ const DIR_STYLE = {
 };
 
 /* ────────────────────────────────────────────────────────────────────────────
- * Lightweight fixed-height windowing (no dependency).
- * Renders only the rows in view + a small overscan, padded by top/bottom
- * spacers so the scrollbar stays correct. Swap for react-window's
- * <FixedSizeList> if you'd rather use the maintained library — the row markup
- * below drops straight into its `children` render-prop.
+ * Windowing: rows are fixed-height and windowed against the DIALOG's own
+ * scrollbar (no inner scroll box) — see hooks/useScrollParentWindowing, now
+ * shared with FollowListModal.
  * ──────────────────────────────────────────────────────────────────────────── */
 const ROW_H = 64;
 const OVERSCAN = 8;
-
-// Find the nearest scrollable ancestor so we virtualize against the DIALOG'S own
-// scrollbar instead of introducing a second one inside the list. Mirrors the
-// predicate the wallet already uses elsewhere (auto | scroll | overlay).
-function findScrollParent(node) {
-    let el = node && node.parentElement;
-    while (el) {
-        const oy = window.getComputedStyle(el).overflowY;
-        if (oy === "auto" || oy === "scroll" || oy === "overlay") return el;
-        el = el.parentElement;
-    }
-    return null; // none found → fall back to the window
-}
-
-// Windowing driven by an ancestor scroll container (or the window). Visibility is
-// computed from bounding rects, so it stays correct even though the swipeable
-// view applies CSS transforms. Only the intersecting rows are mounted; spacers
-// preserve the scroll height.
-function useScrollParentWindowing(itemCount, rowHeight) {
-    const listRef = React.useRef(null);
-    const rafRef = React.useRef(0);
-    const [range, setRange] = React.useState({ start: 0, end: Math.min(itemCount, 30) });
-
-    React.useLayoutEffect(() => {
-        const node = listRef.current;
-        if (!node) return;
-        const scrollParent = findScrollParent(node);
-        const target = scrollParent || window;
-
-        const measure = () => {
-            rafRef.current = 0;
-            const el = listRef.current;
-            if (!el) return;
-            const listTop = el.getBoundingClientRect().top;
-            let viewTop, viewBottom;
-            if (scrollParent) {
-                const pr = scrollParent.getBoundingClientRect();
-                viewTop = pr.top;
-                viewBottom = pr.bottom;
-            } else {
-                viewTop = 0;
-                viewBottom = window.innerHeight || document.documentElement.clientHeight;
-            }
-            const localStart = Math.max(0, viewTop - listTop);
-            const localEnd = Math.max(0, viewBottom - listTop);
-            const start = Math.max(0, Math.floor(localStart / rowHeight) - OVERSCAN);
-            const end = Math.min(itemCount, Math.ceil(localEnd / rowHeight) + OVERSCAN);
-            setRange((prev) => (prev.start === start && prev.end === end ? prev : { start, end }));
-        };
-
-        const schedule = () => {
-            if (rafRef.current) return;
-            rafRef.current = requestAnimationFrame(measure);
-        };
-
-        measure();
-        target.addEventListener("scroll", schedule, { passive: true });
-        window.addEventListener("resize", schedule);
-        let ro;
-        if (scrollParent && typeof ResizeObserver === "function") {
-            ro = new ResizeObserver(schedule);
-            ro.observe(scrollParent);
-        }
-        return () => {
-            target.removeEventListener("scroll", schedule);
-            window.removeEventListener("resize", schedule);
-            if (ro) ro.disconnect();
-            if (rafRef.current) cancelAnimationFrame(rafRef.current);
-        };
-    }, [itemCount, rowHeight]);
-
-    return { listRef, start: range.start, end: range.end };
-}
+// Pages that load without adding a single VISIBLE row (the filters hide
+// them) before auto-loading pauses behind a "load more" button. Stops a
+// narrow filter from walking an account's entire history unattended.
+const MAX_BARREN_AUTOLOADS = 5;
 
 /* ── A single ledger row (memoized) ───────────────────────────────────────── */
 const HistoryRow = React.memo(function HistoryRow({ row, classes, locales }) {
@@ -556,11 +489,17 @@ const HistoryRow = React.memo(function HistoryRow({ row, classes, locales }) {
  *   username    : string                                  (account.username)
  *   locales     : string | string[]
  *   vestToPixa  : (rawVests:number) => number             (live rate from parent)
+ *   hasMore     : boolean   older pages may exist              (default false)
+ *   loadingMore : boolean   a page request is in flight
+ *   loadError   : boolean   the last page request failed (auto-load stops)
+ *   onLoadMore  : () => void  fetch the next older page; the parent guards
+ *                             against double calls and calls after the end
  *
  * Scrolling belongs to the dialog: the list renders at full virtual height and
  * windows against the nearest scrollable ancestor — no inner scrollbar.
  * ──────────────────────────────────────────────────────────────────────────── */
-function WalletHistory({ history, username, locales, vestToPixa, classes }) {
+function WalletHistory({ history, username, locales, vestToPixa, classes,
+                           hasMore = false, loadingMore = false, loadError = false, onLoadMore }) {
     // Re-render on a language switch; `locale` also re-keys the rows memo so
     // the few subtitle strings formatted at describe time follow it too.
     useLanguage();
@@ -603,7 +542,44 @@ function WalletHistory({ history, username, locales, vestToPixa, classes }) {
     }, [history, username, vestToPixa, fIncoming, fOutgoing, fPersonal, fRewards, fHideSpam, locale]);
 
     // 2) Virtualize against the dialog's own scrollbar (no inner scroll area).
-    const { listRef, start, end } = useScrollParentWindowing(rows.length, ROW_H);
+    const { listRef, start, end } = useScrollParentWindowing(rows.length, ROW_H, OVERSCAN);
+
+    // 3) Load older pages automatically near the end. A page whose rows are
+    //    all hidden by the filters still counts as progress for the parent,
+    //    so `version` (raw length) re-arms the check; after a few such
+    //    "barren" pages in a row, auto-loading pauses behind a button.
+    const historyLen = (history || []).length;
+    const lens = React.useRef({ h: historyLen, r: rows.length });
+    const barren = React.useRef(0);
+    const [autoPaused, setAutoPaused] = React.useState(false);
+    React.useEffect(() => {
+        const prev = lens.current;
+        if (historyLen < prev.h) barren.current = 0;            // reset / refetch
+        else if (historyLen > prev.h) {
+            barren.current = rows.length > prev.r ? 0 : barren.current + 1;
+        }
+        lens.current = { h: historyLen, r: rows.length };
+        const paused = barren.current >= MAX_BARREN_AUTOLOADS;
+        setAutoPaused((p) => (p === paused ? p : paused));
+    }, [historyLen, rows.length]);
+    React.useEffect(() => {                                     // filters changed
+        barren.current = 0;
+        setAutoPaused(false);
+    }, [fIncoming, fOutgoing, fPersonal, fRewards, fHideSpam]);
+
+    const canLoad = !!hasMore && typeof onLoadMore === "function";
+    useEndReached({
+        end,
+        count: rows.length,
+        enabled: canLoad && !loadingMore && !loadError && !autoPaused,
+        onEndReached: onLoadMore,
+        version: historyLen,
+    });
+    const manualLoad = () => {
+        barren.current = 0;
+        setAutoPaused(false);
+        if (onLoadMore) onLoadMore();
+    };
     const slice = rows.slice(start, end);
     const topPad = start * ROW_H;
     const bottomPad = Math.max(0, (rows.length - end) * ROW_H);
@@ -636,7 +612,9 @@ function WalletHistory({ history, username, locales, vestToPixa, classes }) {
                 </FormGroup>
             </FormControl>
             {rows.length === 0 ? (
-                <Typography className={classes.empty} variant="body2">{t("components.wallet_history.no_transactions_found")}</Typography>
+                (canLoad && !loadError && !autoPaused) ? null : (
+                    <Typography className={classes.empty} variant="body2">{t("components.wallet_history.no_transactions_found")}</Typography>
+                )
             ) : (
                 <div ref={listRef}>
                     <List dense disablePadding>
@@ -648,6 +626,18 @@ function WalletHistory({ history, username, locales, vestToPixa, classes }) {
                     </List>
                 </div>
             )}
+            {/* Footer: spinner while a page loads; a button when auto-loading
+                stopped (request failed, or filters hid several pages); nothing
+                once the history has ended. */}
+            {canLoad && loadingMore ? (
+                <div className={classes.more}><CircularProgress size={24} color="secondary" /></div>
+            ) : canLoad && (loadError || autoPaused) ? (
+                <div className={classes.more}>
+                    <IconButton aria-label="Load more" onClick={manualLoad}>
+                        {loadError ? <ReplayRounded /> : <ExpandMoreRounded />}
+                    </IconButton>
+                </div>
+            ) : null}
         </div>
     );
 }
@@ -741,6 +731,12 @@ const styles = (theme) => ({
     },
 
     empty: { color: "#666", padding: 16 },
+    more: {
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        minHeight: 64,
+    },
 });
 
 export default withStyles(styles)(WalletHistory);

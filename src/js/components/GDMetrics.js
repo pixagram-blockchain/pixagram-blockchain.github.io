@@ -20,8 +20,9 @@ import {
     towerGet, towerSeries, PERIODS, nowSec, sumWindows, pivot, fmtCompact, fmtInt, fmtPct, fmtAgo
 } from "../utils/tower";
 import {
-    tr, trf, Section, Card, Tile, ChartTip, Legend, Pill, Switch, Empty, Skeleton, Meter, Visible,
-    SERIES, AXIS, GRID, CURSOR, BAR_CURSOR, ACTIVE_DOT, INK, BAR, HBAR, stackShape, niceScale, tickFormat, axisTick, bucketLabel, fillBuckets, newestOnly
+    tr, trf, Card, Tile, ChartTip, Legend, Pill, Switch, Empty, Skeleton, Meter, Visible,
+    SERIES, AXIS, GRID, CURSOR, BAR_CURSOR, ACTIVE_DOT, INK, BAR, HBAR, stackShape, niceScale, tickFormat, axisTick, bucketLabel, fillBuckets, newestOnly,
+    AccordionSection, ACCORDION_MS
 } from "./GDTowerKit";
 import GDReports from "./GDReports";
 
@@ -40,6 +41,7 @@ const styles = theme => ({
         flexWrap: "wrap"
     },
     asOf: { fontSize: "12px", color: "#666", fontFamily: "'Geist Mono', monospace" },
+    sections: { marginTop: "16px" },
     tiles: {
         display: "grid",
         gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
@@ -188,20 +190,93 @@ const byDim = (values) => new Map((values || []).map((v) => [v.dim, v]));
 /** Top `n` dimensions of a Map by value, without the total (dim ""). */
 const topOf = (m, n) => Array.from(m.entries()).filter(([k, v]) => k !== "" && v > 0).sort((a, b) => b[1] - a[1]).slice(0, n);
 
+// The view's sections, in order. Each is closed until opened and only one is open at a time; the open one is
+// named in the address (+governance-metrics-<id>, ids without "-"). A section loads its data when it opens.
+const SECTIONS = [
+    { id: "pulse", title: () => tr(K + "pulse", "Pulse"), description: () => tr(K + "pulse_description", "Activity on the Pixa chain over the selected period, against the period before.") },
+    { id: "activity", title: () => tr(K + "activity", "Activity"), description: () => tr(K + "activity_description", "Who is active, and what they publish.") },
+    { id: "controversy", title: () => tr(K + "controversy", "Controversy"), description: () => tr(K + "controversy_description", "Where stake disagrees: the topics that divide voters, by portal and by post.") },
+    { id: "economy", title: () => tr(K + "economy", "Economy"), description: () => tr(K + "economy_description", "Supply, the PXS debt ratio, the price feed, how stake is spread and where rewards go.") },
+    { id: "finance", title: () => tr(K + "finance", "Finance"), description: () => tr(K + "finance_description", "Who holds the supply, how much is created, and how PIXA and PXS move: conversions, savings, staking and transfers.") },
+    { id: "network", title: () => tr(K + "network", "Network"), description: () => tr(K + "network_description", "Who joins and takes part, the apps and tags they use, how stake is spread and what posts earn.") },
+    { id: "artwork", title: () => tr(K + "artwork", "Artwork"), description: () => tr(K + "artwork_description", "How artworks are received, their formats, and who leads among artists and curators.") },
+    { id: "chain", title: () => tr(K + "chain_and_onboarding", "Chain and onboarding"), description: () => tr(K + "chain_description", "Throughput, and how new accounts become active members.") },
+    { id: "reports", title: () => tr(K + "reports", "Reports"), description: () => tr(K + "reports_description", "Finance and statistics reports for each day, week and month, compared with the period before, ready to post.") }
+];
+const SECTION_IDS = SECTIONS.map((x) => x.id);
+
+// What each section reads (keys of `_jobs`). "status" (the block line at the top) is always read; the
+// onboarding funnel loads on its own (loadFunnel) and the reports card loads itself.
+const SECTION_DATA = {
+    pulse: ["overview", "created", "artworks", "blogs", "votes", "tx", "rewardsV", "dauTotal"],
+    activity: ["activity", "activityTotal", "artworks", "blogs", "votesDim", "artists"],
+    controversy: ["portals", "controversial"],
+    economy: ["overview", "debt", "feed", "pxp", "rewards"],
+    finance: ["split", "inflation", "burns", "conv", "collateral", "savings", "savFlows", "interest", "power", "pdStarted", "delegFlows", "delegated", "transfers", "market", "marketVol"],
+    network: ["regs", "everActive", "creators", "apps", "tags", "bandsS", "bandsA", "payStats", "payouts"],
+    artwork: ["engagement", "formats", "topArtists", "topCurators"],
+    chain: ["tps"],
+    reports: []
+};
+
 class GDMetrics extends React.PureComponent {
     // `period` is the period the data in `d` was loaded for; `pending` is the one asked for while it loads,
     // so the charts never draw one period's data on another period's time axis.
-    state = { period: "7d", pending: null, cohortWeeksAgo: 2, loading: true, error: null, d: {}, meta: null };
+    // `localSection` is the open section when no parent drives it (no onSectionChange).
+    state = { period: "7d", pending: null, cohortWeeksAgo: 2, loading: true, error: null, d: {}, meta: null, localSection: null };
     root = React.createRef();
     seq = 0;
+    heads = {}; // section id -> its header button, to bring an opened section into view
+    headRefs = {};
 
     componentDidMount() {
         this.visible = new Visible(() => this.load(), 60000);
         this.visible.attach(this.root.current);
+        if (this._open()) this._reveal(this._open());
+    }
+
+    componentDidUpdate(prevProps, prevState) {
+        const open = this._open();
+        if (open === this._open(prevProps, prevState)) return;
+        if (open) {
+            // load the section now if the view is on screen, else as soon as it is
+            const shown = !!(this.visible && this.visible.visible);
+            if (!shown && this.visible) this.visible.last = 0;
+            this.setState({ loading: true }, () => shown && this.load());
+            this._reveal(open);
+        }
     }
 
     componentWillUnmount() {
         if (this.visible) this.visible.detach();
+        clearTimeout(this.revealTimer);
+    }
+
+    /** The open section: the parent's `section` prop when it drives the view, else the view's own choice. */
+    _open(props = this.props, state = this.state) {
+        const s = props.onSectionChange ? props.section : state.localSection;
+        return SECTION_IDS.indexOf(s) >= 0 ? s : null;
+    }
+
+    /** Opens `id`, closing the open one, or closes `id` when it is the open one. */
+    _toggle = (id) => {
+        const next = this._open() === id ? null : id;
+        if (this.props.onSectionChange) this.props.onSectionChange(next);
+        else this.setState({ localSection: next });
+    };
+
+    /** Brings a section's header to the top once the section closing above it has folded. */
+    _reveal(id) {
+        clearTimeout(this.revealTimer);
+        this.revealTimer = setTimeout(() => {
+            const el = this.heads[id];
+            if (el && el.scrollIntoView) el.scrollIntoView({ block: "start", behavior: "smooth" });
+        }, ACCORDION_MS + 30);
+    }
+
+    _headRef(id) {
+        if (!this.headRefs[id]) this.headRefs[id] = (el) => (this.heads[id] = el);
+        return this.headRefs[id];
     }
 
     _setPeriod = (period) => {
@@ -224,6 +299,25 @@ class GDMetrics extends React.PureComponent {
     load() {
         const seq = ++this.seq;
         const period = this.state.pending || this.state.period;
+        const open = this._open();
+        const jobs = this._jobs(period);
+        const keys = ["status", ...(SECTION_DATA[open] || [])].filter((k, i, all) => all.indexOf(k) === i);
+        Promise.all(keys.map((k) => jobs[k]())).then((values) => {
+            if (seq !== this.seq) return;
+            // Data of another period is dropped: a section opened later loads its own (the funnel is per cohort).
+            const d = period === this.state.period ? { ...this.state.d } : { funnel: this.state.d.funnel };
+            keys.forEach((k, i) => (d[k] = values[i]));
+            const ok = values.some((v) => v !== null);
+            this.setState({
+                d, period, pending: null, loading: false, meta: d.status ? d.status.meta : this.state.meta,
+                error: ok ? null : tr(K + "unreachable", "The statistics service cannot be reached right now.")
+            });
+        });
+        if (open === "chain") this.loadFunnel();
+    }
+
+    /** Every request the view can make for `period`, as functions, so a section starts only its own. */
+    _jobs(period) {
         const P = PERIODS[period];
         // Through the hour now running. Ends are rounded up and starts down to 5 minutes, so the polls of the
         // next 5 minutes ask for the same paths and are served from the cache.
@@ -236,45 +330,33 @@ class GDMetrics extends React.PureComponent {
         const dayFrom = period === "24h" ? r5(end - 3 * 86400) : from2;
         const opt = { grain: g, from: from2, to };
         const soft = (p) => p.catch(() => null);
-
-        const jobs = {
-            overview: soft(towerGet("/overview", 30000).then((r) => r.data)),
-            created: soft(towerSeries("accounts_created", opt)),
-            artworks: soft(towerSeries("artworks_created", opt)),
-            blogs: soft(towerSeries("blog_posts_created", opt)),
-            votes: soft(towerSeries("votes_cast", opt)),
-            tx: soft(towerSeries("transactions", opt)),
-            rewardsV: soft(towerSeries("rewards_paid_vests", opt)),
-            dau: soft(towerSeries("active_accounts", { grain: "day", from: dayFrom, to, dim: "*" })),
-            dauTotal: soft(towerSeries("active_accounts", { grain: "day", from: dayFrom, to, dim: "" })),
-            activity: soft(towerSeries("active_accounts", { grain: g, from, to, dim: "*" })),
-            activityTotal: soft(towerSeries("active_accounts", { grain: g, from, to, dim: "" })),
-            tps: soft(towerSeries("tps", { grain: g, from, to, dim: "*" })),
-            debt: soft(towerSeries("pxs_debt_ratio", { grain: period === "24h" ? "hour" : "day", from, to })),
-            feed: soft(towerGet(`/feed?grain=${period === "24h" ? "hour" : "day"}&from=${from}&to=${to}`, 300000).then((r) => r.data)),
-            pxp: soft(towerGet("/distribution/pxp", 300000).then((r) => r.data)),
-            rewards: soft(towerGet(`/rewards?window=${period}`, 120000).then((r) => r.data)),
-            portals: soft(towerGet("/portals", 300000).then((r) => r.data)),
-            controversial: soft(towerGet(`/posts/controversial?window=${period === "24h" ? "7d" : period}&limit=8`, 300000).then((r) => r.data)),
-            status: soft(towerGet("/status", 15000)),
+        const series = (metric, o) => () => soft(towerSeries(metric, o));
+        const get = (path, ttl) => () => soft(towerGet(path, ttl).then((r) => r.data));
+        return {
+            status: () => soft(towerGet("/status", 15000)),
+            overview: get("/overview", 30000),
+            created: series("accounts_created", opt),
+            artworks: series("artworks_created", opt),
+            blogs: series("blog_posts_created", opt),
+            votes: series("votes_cast", opt),
+            tx: series("transactions", opt),
+            rewardsV: series("rewards_paid_vests", opt),
+            dauTotal: series("active_accounts", { grain: "day", from: dayFrom, to, dim: "" }),
+            activity: series("active_accounts", { grain: g, from, to, dim: "*" }),
+            activityTotal: series("active_accounts", { grain: g, from, to, dim: "" }),
+            tps: series("tps", { grain: g, from, to, dim: "*" }),
+            debt: series("pxs_debt_ratio", { grain: period === "24h" ? "hour" : "day", from, to }),
+            feed: get(`/feed?grain=${period === "24h" ? "hour" : "day"}&from=${from}&to=${to}`, 300000),
+            pxp: get("/distribution/pxp", 300000),
+            rewards: get(`/rewards?window=${period}`, 120000),
+            portals: get("/portals", 300000),
+            controversial: get(`/posts/controversial?window=${period === "24h" ? "7d" : period}&limit=8`, 300000),
             // Finance, network and artwork sections. Daily metrics show at least the last 7 days.
             ...this._extraJobs(soft, period, from, to)
         };
-        const keys = Object.keys(jobs);
-        Promise.all(keys.map((k) => jobs[k])).then((values) => {
-            if (seq !== this.seq) return;
-            const d = { ...this.state.d };
-            keys.forEach((k, i) => (d[k] = values[i]));
-            const ok = values.some((v) => v !== null);
-            this.setState({
-                d, period, pending: null, loading: false, meta: d.status ? d.status.meta : null,
-                error: ok ? null : tr(K + "unreachable", "The statistics service cannot be reached right now.")
-            });
-        });
-        this.loadFunnel();
     }
 
-    /** Requests for the finance, network and artwork sections (cached 5 minutes: they move slowly). */
+    /** Requests of the newer sections, as functions (cached 5 minutes: they move slowly). */
     _extraJobs(soft, period, from0, to0) {
         // Rounded to 5 minutes, so a refresh inside that window reuses the cached responses.
         const to = to0 - (to0 % 300) + 300;
@@ -283,8 +365,8 @@ class GDMetrics extends React.PureComponent {
         const dg = period === "24h" ? "hour" : "day"; // gauges
         const dFrom = period === "24h" ? to - 7 * 86400 : from; // daily metrics
         const T = 300000;
-        const series = (metric, grain, f, dim = "*") => soft(towerSeries(metric, { grain, from: f, to, dim }, T));
-        const latest = (metric, grain) => soft(towerGet(`/metrics/${metric}/latest?grain=${grain}`, T).then((r) => newestOnly(r.data.values)));
+        const series = (metric, grain, f, dim = "*") => () => soft(towerSeries(metric, { grain, from: f, to, dim }, T));
+        const latest = (metric, grain) => () => soft(towerGet(`/metrics/${metric}/latest?grain=${grain}`, T).then((r) => newestOnly(r.data.values)));
         return {
             votesDim: series("votes_cast", g, from),
             artists: series("artists", "day", dFrom),
@@ -1422,9 +1504,46 @@ class GDMetrics extends React.PureComponent {
         return <Empty>{emptyText || tr(K + "no_data", "No data for this period yet.")}</Empty>;
     }
 
+    _renderSection(id) {
+        switch (id) {
+            case "pulse":
+                return this._renderPulse();
+            case "activity":
+                return (
+                    <>
+                        {this._renderActivity()}
+                        {this._renderVotesAndArtists()}
+                    </>
+                );
+            case "controversy":
+                return this._renderControversy();
+            case "economy":
+                return this._renderEconomy();
+            case "finance":
+                return this._renderFinance();
+            case "network":
+                return this._renderNetwork();
+            case "artwork":
+                return this._renderArtwork();
+            case "chain":
+                return this._renderChainAndFunnel();
+            case "reports":
+                return (
+                    <GDReports
+                        kinds={["finance", "statistics"]}
+                        title={tr(K + "reports_card", "Finance and statistics reports")}
+                        info={tr(K + "reports_info", "Written by the Tower when a period closes; the current period is built on request. Copy puts the Markdown on the clipboard.")}
+                    />
+                );
+            default:
+                return null;
+        }
+    }
+
     render() {
         const { classes } = this.props;
         const { period, pending, error, meta } = this.state;
+        const open = this._open();
         return (
             <DialogContent className={classes.dialogContent}>
                 <div ref={this.root}>
@@ -1440,58 +1559,21 @@ class GDMetrics extends React.PureComponent {
                     </div>
                     {error ? <div className={classes.error}><Pill level="amber">{tr(K + "offline", "offline")}</Pill>{error}</div> : null}
 
-                    <Section
-                        title={tr(K + "pulse", "Pulse")}
-                        description={tr(K + "pulse_description", "Activity on the Pixa chain over the selected period, against the period before.")}
-                    />
-                    {this._renderPulse()}
-
-                    <Section title={tr(K + "activity", "Activity")} description={tr(K + "activity_description", "Who is active, and what they publish.")} />
-                    {this._renderActivity()}
-                    {this._renderVotesAndArtists()}
-
-                    <Section
-                        title={tr(K + "controversy", "Controversy")}
-                        description={tr(K + "controversy_description", "Where stake disagrees: the topics that divide voters, by portal and by post.")}
-                    />
-                    {this._renderControversy()}
-
-                    <Section
-                        title={tr(K + "economy", "Economy")}
-                        description={tr(K + "economy_description", "Supply, the PXS debt ratio, the price feed, how stake is spread and where rewards go.")}
-                    />
-                    {this._renderEconomy()}
-
-                    <Section
-                        title={tr(K + "finance", "Finance")}
-                        description={tr(K + "finance_description", "Who holds the supply, how much is created, and how PIXA and PXS move: conversions, savings, staking and transfers.")}
-                    />
-                    {this._renderFinance()}
-
-                    <Section
-                        title={tr(K + "network", "Network")}
-                        description={tr(K + "network_description", "Who joins and takes part, the apps and tags they use, how stake is spread and what posts earn.")}
-                    />
-                    {this._renderNetwork()}
-
-                    <Section
-                        title={tr(K + "artwork", "Artwork")}
-                        description={tr(K + "artwork_description", "How artworks are received, their formats, and who leads among artists and curators.")}
-                    />
-                    {this._renderArtwork()}
-
-                    <Section title={tr(K + "chain_and_onboarding", "Chain and onboarding")} description={tr(K + "chain_description", "Throughput, and how new accounts become active members.")} />
-                    {this._renderChainAndFunnel()}
-
-                    <Section
-                        title={tr(K + "reports", "Reports")}
-                        description={tr(K + "reports_description", "Finance and statistics reports for each day, week and month, compared with the period before, ready to post.")}
-                    />
-                    <GDReports
-                        kinds={["finance", "statistics"]}
-                        title={tr(K + "reports_card", "Finance and statistics reports")}
-                        info={tr(K + "reports_info", "Written by the Tower when a period closes; the current period is built on request. Copy puts the Markdown on the clipboard.")}
-                    />
+                    <div className={classes.sections}>
+                        {SECTIONS.map((x) => (
+                            <AccordionSection
+                                key={x.id}
+                                scope="metrics"
+                                id={x.id}
+                                title={x.title()}
+                                description={x.description()}
+                                open={open === x.id}
+                                onToggle={this._toggle}
+                                headRef={this._headRef(x.id)}
+                                render={() => this._renderSection(x.id)}
+                            />
+                        ))}
+                    </div>
                 </div>
             </DialogContent>
         );

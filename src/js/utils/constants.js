@@ -1,6 +1,9 @@
 import {createBrowserHistory} from "history";
 export const HISTORY = createBrowserHistory();
-export const LANGUAGES = ["en", "fr", "id", "pt", "it", "de", "ja", "zh", "ko", "ru", "hi", "es"];
+// The languages that have a file in locales/. The list itself is LOCALE_FILES
+// in utils/locale-status.js, which also drives the Settings picker; it is
+// re-exported here so an import from either file gets the same languages.
+export { LANGUAGES } from "./locale-status";
 
 /*
  * The page routes system is working with regex, tabs system (weird) isn't great but it will change
@@ -851,7 +854,10 @@ export function parseFeedFocusHash(rawHash) {
 //   signup                            no argument
 //   info-<tab>                        INFO_TABS
 //   governance-<tab>[-<section>]      GOVERNANCE_TABS; a tab with sub-levels
-//                                     (GOVERNANCE_SECTIONS) always names one
+//                                     (GOVERNANCE_SECTIONS) always names one,
+//                                     except an accordion tab
+//                                     (GOVERNANCE_ACCORDIONS): it names one only
+//                                     while that section is open
 //   search[-<payload>]                base64url(UTF-8 JSON {q, f, p}); that
 //                                     alphabet has "-" in it, so everything
 //                                     after "search-" is the payload
@@ -869,14 +875,25 @@ export function parseFeedFocusHash(rawHash) {
 export const INFO_TABS = Object.freeze(["ip", "terms", "privacy", "team", "faq", "ethos"]);
 export const GOVERNANCE_TABS = Object.freeze(["viability", "attributes", "methods", "metrics", "tower", "disruptions"]);
 
-// Sub-levels of a governance tab, in the tab view's own order. Only Viability
-// Management has them: GDViabilityManagement's rail — TAB_PROPOSALS,
-// TAB_WITNESSES ("vote": the witness election, the HowToVote tab),
-// TAB_TOKENOMICS. A tab listed here always names one of its sections in the
-// address (the first by default); the others never carry one.
+// Sub-levels of a governance tab, in the tab view's own order:
+//   viability  GDViabilityManagement's rail — TAB_PROPOSALS, TAB_WITNESSES
+//              ("vote": the witness election, the HowToVote tab), TAB_TOKENOMICS
+//   metrics    GDMetrics' accordion sections
+//   tower      GDControlTower's accordion sections (under the system state
+//              banner)
+// A tab listed here names one of its sections in the address — the first by
+// default — unless it is an accordion (below); the tabs not listed never carry
+// one. The views read their section ids from here.
 export const GOVERNANCE_SECTIONS = Object.freeze({
     viability: Object.freeze(["proposals", "vote", "tokenomics"]),
+    metrics: Object.freeze(["pulse", "activity", "controversy", "economy", "finance", "network", "artwork", "chain", "reports"]),
+    tower: Object.freeze(["state", "steering", "witnesses", "attributes", "goals", "funds", "events", "reports"]),
 });
+
+// Tabs whose sections fold as an accordion: at most one open, and all may be
+// closed, which is how the tab opens. Their address names a section only while
+// one is open; a missing or unknown one reads as "all closed", not as the first.
+export const GOVERNANCE_ACCORDIONS = Object.freeze(["metrics", "tower"]);
 
 const META_SEPARATOR_REGEX = /\+|%2b/i; // a "+" some client percent-encoded is still one
 const META_MAX_LENGTH = 2048;
@@ -991,12 +1008,13 @@ export function buildMetaPath(pathname, meta) {
     return raw ? path + "+" + raw : path;
 }
 
-// `wanted` when it is one of `tab`'s sections, else the tab's first; null for
-// a tab without sections.
+// `wanted` when it is one of `tab`'s sections, else the tab's first — or null
+// for an accordion tab (all closed) and for a tab without sections.
 function sectionFor(tab, wanted) {
     const sections = GOVERNANCE_SECTIONS[tab];
     if (!sections) return null;
-    return sections.indexOf(wanted) >= 0 ? wanted : sections[0];
+    if (sections.indexOf(wanted) >= 0) return wanted;
+    return GOVERNANCE_ACCORDIONS.indexOf(tab) >= 0 ? null : sections[0];
 }
 
 // ── Search payload: base64url(UTF-8 JSON) ──

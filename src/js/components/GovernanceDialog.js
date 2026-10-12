@@ -32,6 +32,7 @@ import GDControlTower from "./GDControlTower";
 import GDDisruptions from "./GDDisruptions";
 
 import { t, subscribe as subscribe_language } from "../utils/text";
+import { GOVERNANCE_ACCORDIONS } from "../utils/constants";
 
 // Copy is resolved at render time (thunks), so a language switch repaints
 // the header; the dialog subscribes to language changes itself because its
@@ -240,10 +241,17 @@ class GovernanceDialog extends React.PureComponent {
         // only: an instance field, never a reason to render by itself.
         this._sections = {};
         this._keepSection(props.meta);
+        // Metrics and Control Tower: the section open in their accordion (null: all closed).
+        this._handleMetricsSection = this._sectionHandler("metrics");
+        this._handleTowerSection = this._sectionHandler("tower");
     }
 
+    // An accordion tab (Metrics, Control Tower) may have every section closed,
+    // which its address says by naming none: that is kept too.
     _keepSection(meta) {
-        if (meta && meta.section) this._sections[meta.tab] = meta.section;
+        if (!meta) return;
+        if (GOVERNANCE_ACCORDIONS.indexOf(meta.tab) >= 0) this._sections[meta.tab] = meta.section || null;
+        else if (meta.section) this._sections[meta.tab] = meta.section;
     }
 
     shouldComponentUpdate(nextProps, nextState, nextContext) {
@@ -278,7 +286,9 @@ class GovernanceDialog extends React.PureComponent {
         if (nextProps.meta && nextProps.meta !== this.props.meta) {
             const meta = nextProps.meta;
             const tab = tabIndexOf(meta);
-            const sectionMoved = !!meta.section && meta.section !== this._sections[meta.tab];
+            const sectionMoved = GOVERNANCE_ACCORDIONS.indexOf(meta.tab) >= 0
+                ? (meta.section || null) !== (this._sections[meta.tab] || null)
+                : !!meta.section && meta.section !== this._sections[meta.tab];
             this._keepSection(meta);
             if (tab !== this.state._tab_value) {
                 this.setState({ _tab_value: tab }, () => this.forceUpdate());
@@ -314,6 +324,20 @@ class GovernanceDialog extends React.PureComponent {
         if (shown && shown.id === "viability" && this.props.onMetaChange) {
             this.props.onMetaChange({ kind: "governance", tab: "viability", section });
         }
+    }
+
+    // Same for a view whose sections fold as an accordion: `section` is the one
+    // left open, or null when the user closed it (the address then names the
+    // tab alone).
+    _sectionHandler(id) {
+        return (section) => {
+            this._sections[id] = section || null;
+            this.forceUpdate();
+            const shown = TAB_CONFIG[this.state._tab_value];
+            if (shown && shown.id === id && this.props.onMetaChange) {
+                this.props.onMetaChange({ kind: "governance", tab: id, section: section || null });
+            }
+        };
     }
 
     _swipeableViewScrollTop = () => {
@@ -415,8 +439,16 @@ class GovernanceDialog extends React.PureComponent {
                     />
                     <GDAttributes api={api} />
                     <GDMethods api={api} />
-                    <GDMetrics api={api} />
-                    <GDControlTower api={api} />
+                    <GDMetrics
+                        api={api}
+                        section={this._sections.metrics || null}
+                        onSectionChange={this._handleMetricsSection}
+                    />
+                    <GDControlTower
+                        api={api}
+                        section={this._sections.tower || null}
+                        onSectionChange={this._handleTowerSection}
+                    />
                     {/* The portal tiles navigate to a community page, so the
                         view closes this (modal) dialog on the way out. */}
                     <GDDisruptions api={api} onClose={this.props.onClose} />

@@ -463,7 +463,35 @@ const styles = () => ({
     collapseCount: { fontSize: "12px", color: "#666", fontWeight: 400, fontFamily: "'Geist Mono', monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
     collapseChevron: { color: "#666", transition: "transform 200ms ease", flex: "0 0 auto" },
     collapseChevronOpen: { transform: "rotate(180deg)" },
-    collapseBody: { padding: "4px 0 12px 0" }
+    collapseBody: { padding: "4px 0 12px 0" },
+    // accordion of a view's sections (Metrics, Control Tower): one open at a time
+    accordion: { "& + &": { marginTop: "2px" } },
+    accordionHeading: { margin: 0 },
+    accordionHead: {
+        appearance: "none",
+        border: "none",
+        background: "transparent",
+        color: "inherit",
+        textAlign: "left",
+        cursor: "pointer",
+        width: "calc(100% + 24px)",
+        margin: "0 -12px",
+        padding: "14px 12px",
+        borderRadius: "16px",
+        scrollMarginTop: "8px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "16px",
+        transition: "background-color 150ms ease",
+        "&:hover": { backgroundColor: "rgba(255,255,255,0.03)" },
+        "&:focus-visible": { outline: "none", boxShadow: "inset 0 0 0 2px #555" }
+    },
+    accordionText: { display: "flex", flexDirection: "column", minWidth: 0 },
+    accordionTitle: { fontSize: "18px", fontWeight: 600, color: "#fff", fontFamily: "'Industry Book'", lineHeight: 1.3 },
+    accordionDescription: { display: "block", fontSize: "14px", color: "#888", fontFamily: "'Normative Pro'", marginTop: "2px", maxWidth: "640px", lineHeight: 1.45 },
+    accordionChevron: { color: "#666", fontSize: "26px", flex: "0 0 auto", transition: "transform 200ms ease" },
+    accordionBody: { padding: "4px 0 28px 0" }
 });
 
 const withKit = withStyles(styles);
@@ -718,6 +746,47 @@ const CollapseSectionView = withKit(({ classes, title, count, open, mounted, onT
         </Collapse>
     </div>
 ));
+
+/** Duration of an accordion section opening or closing, in ms. */
+export const ACCORDION_MS = 250;
+
+/**
+ * One section of an accordion, controlled: `open` comes from the view (and the address), `onToggle(id)`
+ * asks for it to open or close. The body is only in the page while open, so a closed section draws nothing.
+ * `scope` keeps ids unique when several views are mounted at once; `headRef` receives the header button.
+ * Give the body as `render` (a function) rather than children when it is costly to build: it is then only
+ * called while the section is open or folding.
+ */
+const Lazy = ({ render }) => render();
+
+export const AccordionSection = withKit(({ classes, scope, id, title, description, open, onToggle, headRef, render, children }) => {
+    const bodyId = `gd-${scope}-${id}`;
+    return (
+        <div className={classes.accordion}>
+            <Typography component="h2" className={classes.accordionHeading}>
+                <button
+                    type="button"
+                    ref={headRef}
+                    className={classes.accordionHead}
+                    onClick={() => onToggle(id)}
+                    aria-expanded={open}
+                    aria-controls={bodyId}
+                >
+                    <span className={classes.accordionText}>
+                        <span className={classes.accordionTitle}>{title}</span>
+                        {description ? <span className={classes.accordionDescription}>{description}</span> : null}
+                    </span>
+                    <ExpandMoreRoundedIcon className={`${classes.accordionChevron} ${open ? classes.collapseChevronOpen : ""}`} />
+                </button>
+            </Typography>
+            <Collapse in={open} timeout={ACCORDION_MS} unmountOnExit>
+                <div id={bodyId} role="region" aria-label={typeof title === "string" ? title : undefined} className={classes.accordionBody}>
+                    {render ? <Lazy render={render} /> : children}
+                </div>
+            </Collapse>
+        </div>
+    );
+});
 
 // ---------------------------------------------------------------- loading
 

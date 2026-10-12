@@ -1142,6 +1142,48 @@ const RECENT_RECIPIENT_OPS = [
 ];
 const RECENT_RECIPIENTS_MAX = 12;
 
+/**
+ * Wallet history paging. The first window keeps its 1000 rows because the
+ * incoming-delegation scan and the recent-recipients strip read it; older
+ * rows then load on scroll, HISTORY_PAGE at a time, by reverse index.
+ *
+ * Nodes disagree on what `limit` counts when an operation filter is set:
+ * some count matching ops (a full page can span thousands of indices), some
+ * count raw ops (a page can come back short or even empty while older
+ * matches exist). _history_page_outcome handles both, and switches to the
+ * stricter "short page = end" rule as soon as a page proves the node counts
+ * matches. HISTORY_MAX_EMPTY_PAGES bounds the empty windows walked in one
+ * load on raw-counting nodes.
+ */
+const HISTORY_FIRST_PAGE = 1000;
+const HISTORY_PAGE = 500;
+const HISTORY_MAX_EMPTY_PAGES = 3;
+
+/**
+ * Normalize a history entry's op to { name, payload }:
+ *   - Condenser: entry.op = ["op_name", {payload}]
+ *   - AppBase:   entry.op = { type: "op_name_operation", value: {payload} }
+ */
+const _normalizeHistoryOp = (rawOp) => {
+    if (Array.isArray(rawOp)) {
+        return { name: rawOp[0], payload: rawOp[1] || {} };
+    }
+    if (rawOp && typeof rawOp === 'object') {
+        const rawType = rawOp.type || '';
+        const name = rawType.endsWith('_operation')
+            ? rawType.slice(0, -'_operation'.length)
+            : rawType;
+        return { name, payload: rawOp.value || {} };
+    }
+    return { name: '', payload: {} };
+};
+
+/** Raw [idx, entry] rows → WalletHistory rows (same shape for every page). */
+const _historyRow = ([idx, entry]) => {
+    const { name, payload } = _normalizeHistoryOp(entry && entry.op);
+    return { idx, type: name, data: payload, timestamp: entry && entry.timestamp };
+};
+
 /** X-axis label granularity for a price range expressed in days. */
 const priceChartDateType = (days) => {
     const n = Number(days) || 0;
@@ -1427,6 +1469,9 @@ class PixaWalletDialog extends React.PureComponent {
             // Default collapsed for a cleaner view; counts surface in the header.
             _expandedSections: {},
             _walletHistory: [],
+            // Older-history paging: 'idle' | 'loading' | 'ended' | 'error'.
+            // The cursor and seen-set live in this._hist (not state).
+            _historyStatus: 'idle',
             // Accounts this wallet has sent assets to, newest first, unique.
             // Feeds the "people you've sent to before" quick-pick strip in
             // PixaWalletSendDialog. [{ username, image, name }]
@@ -1453,6 +1498,9 @@ class PixaWalletDialog extends React.PureComponent {
         const prevUsername = (this.state.account || {}).username || '';
         const newUsername = normalizedAccount.username || '';
         var isNewAccount = newUsername !== prevUsername;
+        // Drop the previous wallet's paging; an in-flight page sees the
+        // swap (this._hist !== h) and discards its rows.
+        if (isNewAccount) this._hist = null;
         var isNewlyClosed = new_props.open === false && this.state.open;
         var isNewlyOpened = new_props.open === true && !this.state.open;
         const initialViewChanged = new_props.initialView !== undefined && new_props.initialView !== this.state._tab_value;
@@ -1561,11 +1609,12 @@ class PixaWalletDialog extends React.PureComponent {
                 : [walletFilter, 0];
 
             let rawHistory = null;
+            let source = 'appbase';
             if (typeof api.accounts.getAccountHistoryFull === 'function') {
                 rawHistory = await api.accounts.getAccountHistoryFull({
                     account: username,
                     start: -1,
-                    limit: 1000,
+                    limit: HISTORY_FIRST_PAGE,
                     includeReversible: true,
                     operationFilterLow: filterLow,
                     operationFilterHigh: filterHigh,
@@ -1578,24 +1627,127 @@ class PixaWalletDialog extends React.PureComponent {
             if (!rawHistory || rawHistory.length === 0) {
                 try {
                     const legacy = await api.accounts.getAccountHistory(
-                        username, -1, 1000, walletFilter
+                        username, -1, HISTORY_FIRST_PAGE, walletFilter
                     );
                     if (Array.isArray(legacy) && legacy.length > 0) {
                         rawHistory = legacy;
+                        source = 'legacy';
                     } else {
                         const unfiltered = await api.accounts.getAccountHistory(
-                            username, -1, 1000
+                            username, -1, HISTORY_FIRST_PAGE
                         );
                         rawHistory = Array.isArray(unfiltered) ? unfiltered : (rawHistory || []);
+                        source = 'unfiltered';
                     }
                 } catch (e) {
                     rawHistory = rawHistory || [];
                 }
             }
-            return rawHistory || [];
+            // `source` is remembered so older pages come from the same path.
+            return { rows: rawHistory || [], source };
         } catch (e) {
-            return [];
+            return { rows: [], source: 'appbase' };
         }
+    };
+
+    /**
+     * Where the next older page starts, and whether the history has ended,
+     * given the page just read (start = -1 for the first window).
+     * The reverse index strictly decreases, so paging always terminates.
+     */
+    _history_page_outcome = (h, start, limit, batch) => {
+        let lo = Infinity, hi = -Infinity;
+        for (const r of (batch || [])) {
+            const i = Number(r && r[0]);
+            if (!Number.isFinite(i)) continue;
+            if (i < lo) lo = i;
+            if (i > hi) hi = i;
+        }
+        // A page spanning more indices than `limit` can only come from a
+        // node that counts MATCHING ops — from then on a short page is final.
+        if (lo !== Infinity && hi - lo + 1 > limit) h.matchedCount = true;
+        const exact = h.source === 'unfiltered' || h.matchedCount;
+        const count = (batch || []).length;
+
+        if (lo === Infinity) {
+            if (start === -1 || exact) return { nextStart: -1, ended: true };
+            const next = start - limit;           // raw window was empty: step past it
+            return { nextStart: next, ended: next < 0 };
+        }
+        if (exact && count < limit) return { nextStart: lo - 1, ended: true };
+        let next = lo - 1;
+        if (start !== -1 && !exact) next = Math.min(next, start - limit);
+        return { nextStart: next, ended: next < 0 };
+    };
+
+    /** One older page from the same API path the first window used. */
+    _fetch_history_page = async (h, start, limit) => {
+        const { api } = this.state;
+        const [filterLow, filterHigh] = Array.isArray(h.walletFilter)
+            ? h.walletFilter
+            : [h.walletFilter, 0];
+        let rows;
+        if (h.source === 'appbase') {
+            rows = await api.accounts.getAccountHistoryFull({
+                account: h.account,
+                start,
+                limit,
+                includeReversible: true,
+                operationFilterLow: filterLow,
+                operationFilterHigh: filterHigh,
+            });
+        } else if (h.source === 'legacy') {
+            rows = await api.accounts.getAccountHistory(h.account, start, limit, h.walletFilter);
+        } else {
+            rows = await api.accounts.getAccountHistory(h.account, start, limit);
+        }
+        return Array.isArray(rows) ? rows : [];
+    };
+
+    /**
+     * Append the next older page to the wallet history (WalletHistory calls
+     * this as the user scrolls near the end). One request at a time, never
+     * after the end, and rows from a wallet that was switched meanwhile are
+     * dropped. Keeps fetching until a page brings something new or the
+     * history ends, so a deduped/empty window can't stall the scroll trigger.
+     */
+    _load_more_history = async () => {
+        const h = this._hist;
+        if (!h || h.status === 'loading' || h.status === 'ended') return;
+        h.status = 'loading';
+        this.setState({ _historyStatus: 'loading' });
+
+        const fresh = [];
+        try {
+            let empties = 0;
+            while (h.status === 'loading') {
+                if (h.nextStart < 0) { h.status = 'ended'; break; }
+                const start = h.nextStart;
+                const batch = await this._fetch_history_page(h, start, HISTORY_PAGE);
+                if (this._hist !== h) return;
+                for (const row of batch) {
+                    const i = Number(row && row[0]);
+                    if (!Number.isFinite(i) || h.seen.has(i)) continue;
+                    h.seen.add(i);
+                    fresh.push(row);
+                }
+                const out = this._history_page_outcome(h, start, HISTORY_PAGE, batch);
+                h.nextStart = out.nextStart;
+                if (out.ended) h.status = 'ended';
+                else if (fresh.length > 0) h.status = 'idle';
+                else if (++empties >= HISTORY_MAX_EMPTY_PAGES) h.status = 'ended';
+            }
+        } catch (e) {
+            if (this._hist !== h) return;
+            console.warn('[PixaWalletDialog] load more history error:', e && e.message);
+            h.status = 'error';
+        }
+
+        const older = fresh.map(_historyRow).sort((a, b) => Number(b.idx) - Number(a.idx));
+        this.setState((s) => ({
+            _walletHistory: older.length ? (s._walletHistory || []).concat(older) : s._walletHistory,
+            _historyStatus: h.status,
+        }));
     };
 
     /**
@@ -1908,6 +2060,7 @@ class PixaWalletDialog extends React.PureComponent {
                 return [];
             })();
             const _pHistory = this._fetch_wallet_history_raw(account.username, walletFilter);
+            let historySource = 'appbase';
 
             const [
                 _outgoingRows,
@@ -1915,10 +2068,13 @@ class PixaWalletDialog extends React.PureComponent {
                 _recurrentRows,
                 _conversionRows,
                 _collateralizedRows,
-                rawHistory,
+                _historyResult,
             ] = await Promise.all([
                 _pOutgoing, _pSavings, _pRecurrent, _pConversions, _pCollateralized, _pHistory,
             ]);
+
+            const rawHistory = (_historyResult && _historyResult.rows) || [];
+            historySource = (_historyResult && _historyResult.source) || 'appbase';
 
             // ── Map outgoing delegations ─────────────────────────────────────
             let outgoingDelegations = (_outgoingRows || []).map(d => ({
@@ -2033,20 +2189,7 @@ class PixaWalletDialog extends React.PureComponent {
                 //   - AppBase account_history_api returns:
                 //         entry.op = { type: "op_name_operation", value: {payload} }
                 //   Normalize to { name, payload } so downstream code is shape-agnostic.
-                const _normalizeOp = (rawOp) => {
-                    if (Array.isArray(rawOp)) {
-                        return { name: rawOp[0], payload: rawOp[1] || {} };
-                    }
-                    if (rawOp && typeof rawOp === 'object') {
-                        // AppBase: strip "_operation" suffix if present
-                        const rawType = rawOp.type || '';
-                        const name = rawType.endsWith('_operation')
-                            ? rawType.slice(0, -'_operation'.length)
-                            : rawType;
-                        return { name, payload: rawOp.value || {} };
-                    }
-                    return { name: '', payload: {} };
-                };
+                const _normalizeOp = _normalizeHistoryOp;
 
                 const incomingMap = {};
                 for (const [, entry] of rawHistory) {
@@ -2159,17 +2302,7 @@ class PixaWalletDialog extends React.PureComponent {
                 }
 
                 // Build wallet transaction list (already filtered by bitmask)
-                history = rawHistory
-                    .map(([idx, entry]) => {
-                        const { name, payload } = _normalizeOp(entry.op);
-                        return {
-                            idx,
-                            type: name,
-                            data: payload,
-                            timestamp: entry.timestamp,
-                        };
-                    })
-                    .reverse();
+                history = rawHistory.map(_historyRow).reverse();
             } catch (e) { /* ignore */ }
 
             // Recent recipients: every account this wallet has sent assets to,
@@ -2256,6 +2389,51 @@ class PixaWalletDialog extends React.PureComponent {
                 + (pixaBalance + pendingPixa) * pixaUsdPrice
                 + (pxsBalance  + pendingPxs)  * pxsUsdPrice;
 
+            // ── Older history pages (loaded on scroll) ───────────────────────
+            // New wallet → fresh cursor below this first window. Refresh of
+            // the same wallet (after a broadcast) → keep the older pages the
+            // user already scrolled into, plus their cursor and state.
+            let walletHistory = history;
+            let historyStatus = 'ended';
+            try {
+                const firstIdx = [];
+                let lowest = Infinity;
+                for (const r of rawHistory) {
+                    const i = Number(r && r[0]);
+                    if (!Number.isFinite(i)) continue;
+                    firstIdx.push(i);
+                    if (i < lowest) lowest = i;
+                }
+                const prev = this._hist;
+                if (prev && prev.account === account.username) {
+                    for (const i of firstIdx) prev.seen.add(i);
+                    const older = (this.state._walletHistory || []).filter((r) => Number(r.idx) < lowest);
+                    if (older.length > 0) {
+                        walletHistory = history.concat(older);
+                    } else if (prev.status !== 'loading') {
+                        const out = this._history_page_outcome(prev, -1, HISTORY_FIRST_PAGE, rawHistory);
+                        prev.nextStart = out.nextStart;
+                        prev.status = out.ended ? 'ended' : 'idle';
+                    }
+                    historyStatus = prev.status;
+                } else {
+                    const h = {
+                        account: account.username,
+                        source: historySource,
+                        walletFilter,
+                        seen: new Set(firstIdx),
+                        nextStart: -1,
+                        status: 'idle',
+                        matchedCount: false,
+                    };
+                    const out = this._history_page_outcome(h, -1, HISTORY_FIRST_PAGE, rawHistory);
+                    h.nextStart = out.nextStart;
+                    h.status = out.ended ? 'ended' : 'idle';
+                    this._hist = h;
+                    historyStatus = h.status;
+                }
+            } catch (e) { /* paging is best effort; the first window still shows */ }
+
             this.setState({
                 _fullAccount: fullAccount,
                 _globalProps: globalProps,
@@ -2298,7 +2476,8 @@ class PixaWalletDialog extends React.PureComponent {
                 _pendingCollateralizedConversions: pendingCollateralizedConversions,
                 _pendingPixa: pendingPixa,
                 _pendingPxs: pendingPxs,
-                _walletHistory: history,
+                _walletHistory: walletHistory,
+                _historyStatus: historyStatus,
                 _recentRecipients: recentRecipients,
                 _walletLoaded: true,
                 _LIQUID_SYMBOL: LIQUID_SYMBOL,
@@ -3737,6 +3916,7 @@ class PixaWalletDialog extends React.PureComponent {
             _outgoingDelegations,
             _incomingDelegations,
             _walletHistory,
+            _historyStatus,
             _recentRecipients,
             _walletLoaded,
             _confirm_action_open,
@@ -4346,6 +4526,10 @@ class PixaWalletDialog extends React.PureComponent {
                                 locales={locales}
                                 vestToPixa={this.state._vestToPixa}
                                 onOpenAuthor={this._open_author}
+                                hasMore={!!this._hist && _historyStatus !== 'ended'}
+                                loadingMore={_historyStatus === 'loading'}
+                                loadError={_historyStatus === 'error'}
+                                onLoadMore={this._load_more_history}
                             />
                         </div>
                     </div>

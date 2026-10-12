@@ -9,8 +9,6 @@ import ListItem from '@material-ui/core/ListItem';
 import ListItemText from '@material-ui/core/ListItemText';
 import ListItemAvatar from '@material-ui/core/ListItemAvatar';
 import Avatar from '@material-ui/core/Avatar';
-import VirtualizedList from "@pixagram/virtualized/dist/es/List";
-import AutoSizer from "@pixagram/virtualized/dist/es/AutoSizer";
 import { HISTORY } from "../utils/constants";
 import ListItemSecondaryAction from "@material-ui/core/ListItemSecondaryAction";
 import Checkbox from "@material-ui/core/Checkbox";
@@ -21,6 +19,7 @@ import SwipeableViews from "react-swipeable-views";
 import * as actions from "../actions/utils";
 import { PagedLoader } from "../utils/api/paged-list";
 import { getProfiles } from "../utils/api/account-cache";
+import { useScrollParentWindowing, useEndReached } from "../hooks/useScrollParentWindowing";
 
 import { t } from "../utils/text";
 import { FollowHistory } from "./AccountCharts";
@@ -53,17 +52,36 @@ import { withLanguage } from "../utils/withLanguage";
 //      and a generation counter + loader.cancel() guards every async
 //      write against a closed or re-targeted dialog.
 //
+//   5. ONE SCROLLBAR + LOAD ON SCROLL — the fixed 480px react-virtualized
+//      box (its own boxed scrollbar) is gone. Rows window against the
+//      dialog's scroll area exactly like WalletHistory, and each list
+//      fetches its next page only when the user scrolls within ~20 rows
+//      of the end (PagedLoader.loadMore: one request in flight at most,
+//      explicit loading / hasMore / ended state, nothing after the end).
+//      Tab labels show the chain's follow counts (get_follow_count) right
+//      away instead of counting up with the pages.
+//
 // Public props are unchanged:
 //   { open, onClose, api, account, isFollowing, onCountsUpdated }.
 // ───────────────────────────────────────────────────────────────────────
 
 const styles = theme => ({
     dialog: {
+        // A definite paper height gives the swipeable slides a bounded
+        // height, so the slide is the dialog's single scroll area.
         "& .MuiDialog-paperScrollPaper": {
+            height: "calc(100% - 64px)",
+            maxHeight: 760,
             [theme.breakpoints.down("sm")]: {
+                height: "100%",
                 maxHeight: "100%"
             },
         },
+    },
+    swipeRoot: {
+        position: "relative",
+        flex: "1 1 auto",
+        minHeight: 0,
     },
     cardTabs: {
         backgroundColor: "#171717",
@@ -101,7 +119,9 @@ const styles = theme => ({
         transition: "transform 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms"
     },
     dialogContent: {
-        margin: "8px 0px 8px 0px"
+        margin: "8px 0px 8px 0px",
+        // The slide around it scrolls; never let this become a second scroller.
+        overflowY: "visible",
     },
     listItem: {
         "&.MuiListItem-root": {
@@ -145,7 +165,51 @@ const styles = theme => ({
         alignItems: "center",
         height: 480
     },
+    moreRow: {
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        height: 64,
+    },
 });
+
+const ROW_H = 64;
+const ACTION_STYLE = { top: 0, height: ROW_H };
+// Each slide is the dialog's scroll area (one scrollbar, like the wallet).
+const SLIDE_STYLE = { height: "100%", overflowY: "auto", overflowX: "hidden" };
+
+/**
+ * Windowed rows against the dialog's own scrollbar (same technique as
+ * WalletHistory), plus the load-more trigger and its footer:
+ * spinner while a page is in flight, nothing once the list has ended.
+ */
+function WindowedUserList({ users, renderRow, hasMore, loading, onLoadMore, emptyText, classes }) {
+    const { listRef, start, end } = useScrollParentWindowing(users.length, ROW_H);
+    useEndReached({
+        end,
+        count: users.length,
+        enabled: hasMore && !loading,
+        onEndReached: onLoadMore,
+    });
+
+    const slice = users.slice(start, end);
+    return (
+        <div ref={listRef}>
+            {users.length === 0 && !hasMore ? (
+                <ListItem component="div"><ListItemText secondary={emptyText} /></ListItem>
+            ) : (
+                <List component="div" disablePadding>
+                    <div style={{ height: start * ROW_H }} />
+                    {slice.map((u) => (u ? renderRow(u) : null))}
+                    <div style={{ height: Math.max(0, (users.length - end) * ROW_H) }} />
+                </List>
+            )}
+            {hasMore && loading ? (
+                <div className={classes.moreRow}><CircularProgress size={24} color={"secondary"} /></div>
+            ) : null}
+        </div>
+    );
+}
 
 class FollowListModal extends React.PureComponent {
 
@@ -157,8 +221,12 @@ class FollowListModal extends React.PureComponent {
             _following: [],
             _followersFirst: false,   // first page landed
             _followingFirst: false,
-            _followersDone: false,    // all pages landed (or capped)
+            _followersDone: false,    // list ended (or capped / errored)
             _followingDone: false,
+            _followersLoading: false, // a page request is in flight
+            _followingLoading: false,
+            _followerCount: null,     // chain totals (get_follow_count)
+            _followingCount: null,
             _followingSet: new Set(), // logged-in user's follows
             _loggedInUser: null,
             _chartSummary: { followers: "", following: "" }, // shown in the chart sections' headers
@@ -167,7 +235,9 @@ class FollowListModal extends React.PureComponent {
         // Async-staleness guard: bumped on every (re)start and cancel.
         this._gen = 0;
         this._loaders = [];
+        this._listLoaders = {};   // listKey → on-demand PagedLoader
         this._countsReported = false;
+        this._swipeRoot = null;
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────
@@ -197,6 +267,7 @@ class FollowListModal extends React.PureComponent {
         this._gen++;
         for (const l of this._loaders) l.cancel();
         this._loaders = [];
+        this._listLoaders = {};
     };
 
     // ── Data loading ──────────────────────────────────────────────────
@@ -219,6 +290,10 @@ class FollowListModal extends React.PureComponent {
             _followingFirst: false,
             _followersDone: false,
             _followingDone: false,
+            _followersLoading: false,
+            _followingLoading: false,
+            _followerCount: null,
+            _followingCount: null,
             _followingSet: new Set(),
             _chartSummary: { followers: "", following: "" },
         });
@@ -255,6 +330,20 @@ class FollowListModal extends React.PureComponent {
             doneKey: "_followingDone",
         });
 
+        // ── Chain totals for the tab labels + onCountsUpdated ──
+        // The lists now load on scroll, so their lengths are no longer the
+        // totals. getFollowCount swallows errors and returns zeros, so a
+        // 0/0 answer is ignored here; the both-lists-ended path covers it.
+        if (typeof api.follow.getFollowCount === "function") {
+            api.follow.getFollowCount(username).then((c) => {
+                if (gen !== this._gen || !c) return;
+                const fc = Number(c.follower_count) || 0;
+                const gc = Number(c.following_count) || 0;
+                if (fc + gc === 0) return;
+                this.setState({ _followerCount: fc, _followingCount: gc }, this._maybeReportCounts);
+            }).catch(() => {});
+        }
+
         // ── Logged-in user's following set: background, non-blocking ──
         if (loggedInUser && loggedInUser !== "") {
             const set = new Set();
@@ -286,7 +375,8 @@ class FollowListModal extends React.PureComponent {
         const mapped = [];
         const loader = new PagedLoader({
             limit: 100,
-            maxItems: 1000, // same ceiling as the old loops
+            // No 1000 ceiling any more: pages are fetched only as the user
+            // scrolls. maxPages (200) remains the backstop.
             itemKey,
             fetchPage,
             onPage: (_all, { fresh, done }) => {
@@ -315,8 +405,28 @@ class FollowListModal extends React.PureComponent {
             },
         });
         this._loaders.push(loader);
-        loader.start();
+        this._listLoaders[listKey] = loader;
+        this._loadMore(listKey); // first page; the rest come on scroll
     };
+
+    /**
+     * Fetch the next page of one list. Guarded three ways: nothing after
+     * the end (hasMore), one request at a time (loading), and nothing from
+     * a closed or re-targeted dialog (generation).
+     */
+    _loadMore = (listKey) => {
+        const loader = this._listLoaders[listKey];
+        if (!loader || !loader.hasMore || loader.loading) return;
+        const gen = this._gen;
+        const loadingKey = listKey + "Loading";
+        this.setState({ [loadingKey]: true });
+        const settle = () => {
+            if (gen === this._gen) this.setState({ [loadingKey]: false });
+        };
+        loader.loadMore().then(settle, settle);
+    };
+    _loadMoreFollowers = () => this._loadMore("_followers");
+    _loadMoreFollowing = () => this._loadMore("_following");
 
     /**
      * Per-page avatar hydration through the shared account-cache:
@@ -349,15 +459,36 @@ class FollowListModal extends React.PureComponent {
             });
     };
 
-    /** Preserve the old contract: report final counts exactly once. */
+    /**
+     * Report counts exactly once per open: the chain totals as soon as
+     * they arrive, or the list lengths if both lists end first (or the
+     * count call failed).
+     */
     _maybeReportCounts = () => {
-        if (this._countsReported) return;
-        const { _followersDone, _followingDone, _followers, _following } = this.state;
-        if (_followersDone && _followingDone &&
-            typeof this.props.onCountsUpdated === 'function') {
-            this._countsReported = true;
-            this.props.onCountsUpdated(_followers.length, _following.length);
+        if (this._countsReported || typeof this.props.onCountsUpdated !== 'function') return;
+        const {
+            _followerCount, _followingCount,
+            _followersDone, _followingDone, _followers, _following,
+        } = this.state;
+        let followers, following;
+        if (_followerCount != null) {
+            followers = Math.max(_followerCount, _followers.length);
+            following = Math.max(_followingCount, _following.length);
+        } else if (_followersDone && _followingDone) {
+            followers = _followers.length;
+            following = _following.length;
+        } else {
+            return;
         }
+        this._countsReported = true;
+        this.props.onCountsUpdated(followers, following);
+    };
+
+    /** "412 Followers" with the chain total; "200+ Followers" without it. */
+    _tabLabel = (len, total, done, word) => {
+        if (done) return `${len} ${word}`;
+        if (total != null) return `${Math.max(len, total)} ${word}`;
+        return `${len}+ ${word}`;
     };
 
     // ── Actions ───────────────────────────────────────────────────────
@@ -390,24 +521,26 @@ class FollowListModal extends React.PureComponent {
         }
     };
 
+    _setSwipeRoot = (el) => { this._swipeRoot = el; };
+
+    // Scroll this dialog's slides back to the top (scoped to this dialog,
+    // so another open dialog's swipeable views are never touched).
     swipeableViewScrollTop = () => {
-        let views = document.getElementsByClassName("react-swipeable-view-container");
-        if (views.length > 0) {
-            let view = views.item(0);
-            if (view && view.children.item(0)) {
-                let child = view.children.item(0);
-                child.style.scrollBehavior = "smooth";
-                child.scrollTop = 0;
-            }
+        const root = this._swipeRoot;
+        if (!root) return;
+        const container = root.querySelector(".react-swipeable-view-container");
+        if (!container) return;
+        for (const slide of Array.from(container.children)) {
+            slide.style.scrollBehavior = "smooth";
+            slide.scrollTop = 0;
         }
     };
 
     // ── Row renderer (factory bound to the rendered list) ─────────────
 
-    _userRenderer = (users) => ({ index, key, style }) => {
+    _renderUserRow = (user) => {
         const { classes } = this.props;
         const { _followingSet, _loggedInUser } = this.state;
-        const user = users[index];
         if (!user) return null;
         const username = user.username || user.name;
         const image = user.image || '';
@@ -415,7 +548,7 @@ class FollowListModal extends React.PureComponent {
         const isOwnAccount = _loggedInUser && _loggedInUser.toLowerCase() === username.toLowerCase();
 
         return (
-            <ListItem classes={{ root: classes.listItem }} ContainerComponent={"div"} key={key} style={Object.assign({ height: 64 }, style)} component={"div"}>
+            <ListItem classes={{ root: classes.listItem }} ContainerComponent={"div"} key={username} style={{ height: ROW_H }} component={"div"}>
                 <ListItemAvatar>
                     <Avatar onClick={() => this._open_author(username)} src={image} style={{ borderRadius: "14px", cursor: "pointer" }} className={"pixelated"} />
                 </ListItemAvatar>
@@ -424,7 +557,7 @@ class FollowListModal extends React.PureComponent {
                     primary={<span className={classes.listItemTitle} onClick={() => this._open_author(username)}>{`@${username}`}</span>}
                 />
                 {_loggedInUser && !isOwnAccount && (
-                    <ListItemSecondaryAction className={classes.action} style={style}>
+                    <ListItemSecondaryAction className={classes.action} style={ACTION_STYLE}>
                         <Checkbox
                             size="medium"
                             color="primary"
@@ -473,39 +606,33 @@ class FollowListModal extends React.PureComponent {
 
     _get_views = () => {
         const { classes } = this.props;
-        const { _followers, _following, _followersFirst, _followingFirst } = this.state;
+        const {
+            _followers, _following, _followersFirst, _followingFirst,
+            _followersDone, _followingDone, _followersLoading, _followingLoading,
+        } = this.state;
 
-        const renderList = (users, firstPageLanded, emptyText, kind) => (
-            <DialogContent scroll={"paper"} className={classes.dialogContent}>
+        const renderList = (users, firstPageLanded, done, loading, onLoadMore, emptyText, kind) => (
+            <DialogContent scroll={"paper"} className={classes.dialogContent} key={kind}>
                 {this._renderChart(kind)}
                 {!firstPageLanded ? (
                     <div className={classes.loadingContainer}><CircularProgress color={"secondary"} /></div>
                 ) : (
-                    <AutoSizer disableHeight>
-                        {({ width }) => (
-                            <List component="div">
-                                <VirtualizedList
-                                    noRowsRenderer={() => {
-                                        return <ListItem component="div"><ListItemText secondary={emptyText} /></ListItem>;
-                                    }}
-                                    scrollToIndex={() => {}}
-                                    height={480}
-                                    overscanRowCount={5}
-                                    rowCount={users.length}
-                                    rowHeight={64}
-                                    rowRenderer={this._userRenderer(users)}
-                                    width={width}
-                                />
-                            </List>
-                        )}
-                    </AutoSizer>
+                    <WindowedUserList
+                        users={users}
+                        renderRow={this._renderUserRow}
+                        hasMore={!done}
+                        loading={loading}
+                        onLoadMore={onLoadMore}
+                        emptyText={emptyText}
+                        classes={classes}
+                    />
                 )}
             </DialogContent>
         );
 
         return [
-            renderList(_followers, _followersFirst, "No followers yet", "followers"),
-            renderList(_following, _followingFirst, "Not following anyone yet", "following"),
+            renderList(_followers, _followersFirst, _followersDone, _followersLoading, this._loadMoreFollowers, "No followers yet", "followers"),
+            renderList(_following, _followingFirst, _followingDone, _followingLoading, this._loadMoreFollowing, "Not following anyone yet", "following"),
         ];
     };
 
@@ -514,6 +641,7 @@ class FollowListModal extends React.PureComponent {
         const {
             _tab, _followers, _following,
             _followersDone, _followingDone,
+            _followerCount, _followingCount,
         } = this.state;
 
         return (
@@ -532,12 +660,15 @@ class FollowListModal extends React.PureComponent {
                     onChange={this._handleTabChange}
                     fullwidth={true}
                 >
-                    <Tab label={`${_followers.length}${_followersDone ? "" : "+"} Followers`} />
-                    <Tab label={`${_following.length}${_followingDone ? "" : "+"} Following`} />
+                    <Tab label={this._tabLabel(_followers.length, _followerCount, _followersDone, "Followers")} />
+                    <Tab label={this._tabLabel(_following.length, _followingCount, _followingDone, "Following")} />
                 </Tabs>
+                <div className={classes.swipeRoot} ref={this._setSwipeRoot}>
                 <SwipeableViews
                     ignoreNativeScroll={true}
+                    style={{ height: "100%" }}
                     containerStyle={{ height: "100%" }}
+                    slideStyle={SLIDE_STYLE}
                     animateHeight={false}
                     animateTransitions={true}
                     disableLazyLoading={true}
@@ -550,6 +681,7 @@ class FollowListModal extends React.PureComponent {
                 >
                     {this._get_views()}
                 </SwipeableViews>
+                </div>
                 <DialogActions>
                     <Button onClick={this.props.onClose} autoFocus variant="contained" color="primary">
                         {t("words.close")}
