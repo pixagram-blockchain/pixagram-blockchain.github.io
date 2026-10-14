@@ -29,7 +29,7 @@ import { update_meta_title } from "../utils/meta-tags";
 import {
     PAGE_ROUTES, isPostUrl, hostPageForPostUrl,
     splitMetaPath, parseMeta, formatMeta, isHomePath, parseFeedFocusHash,
-    BROWSE_PATH, entryMeta,
+    BROWSE_PATH, entryMeta, HELP_TELEGRAM_URL,
 } from "../utils/constants";
 
 import LogoutModal from "../components/LogoutModal";
@@ -43,6 +43,7 @@ import VoteIcon from "../icons/Vote";
 import SaleIcon from "../icons/Sale";
 import SettingsIcon from "@material-ui/icons/Settings";
 import HelpIcon from "@material-ui/icons/Help";
+import TelegramIcon from "@material-ui/icons/Telegram";
 import Button from "@material-ui/core/Button";
 import ListSubheader from "@material-ui/core/ListSubheader";
 import ListItem from "@material-ui/core/ListItem";
@@ -2164,6 +2165,22 @@ const ToolbarComponent = React.memo(
                     </Button>
                 </Tooltip>
                 <div className={classes.toolbarMenuButtons}>
+                    {/* Ask Help: the community's Telegram group. A real link
+                        (href → MUI renders an <a>) rather than a window.open
+                        handler, so it keeps link behaviour — middle-click,
+                        copy link, and phones handing t.me to the Telegram app. */}
+                    <Fade in timeout={500}>
+                        <Tooltip title={t("components.index.ask_the_community_on_telegram")}>
+                            <Button
+                                className={classes.toolbarSecondaryButton}
+                                href={HELP_TELEGRAM_URL}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
+                                <TelegramIcon /> <span className="text">{t("words.ask_help")}</span>
+                            </Button>
+                        </Tooltip>
+                    </Fade>
                     <Fade in timeout={600}>
                         <Tooltip title={t("components.index.elect_the_blockchain_guardians")}>
                             <Button className={classes.toolbarSecondaryButton} onClick={onWitnesses} data-tour="nav-governance">

@@ -13,6 +13,8 @@ import useMasonryGrid, { GUTTER_SIZE, useCellExit, DELETE_EXIT_DELAY_MS } from "
 import { idle, cancelIdle } from "../utils/idle";
 import viewCache, { postsSignature } from "../utils/viewCache";
 import useVoteSync from "../hooks/useVoteSync";
+import useActiveAccount from "../hooks/useActiveAccount";
+import usePullToRefresh from "../hooks/usePullToRefresh";
 import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto, votesSignature } from "../utils/voteSync";
 import { markFeedSeen, toMs } from "../utils/feedSeen";
 import { EASE } from "../theme/motion";
@@ -498,7 +500,16 @@ const useFeedPersonalData = (api, pathname) => {
     const [isLoading, setIsLoading] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(true);
-    const [loggedInUser, setLoggedInUser] = useState(null);
+    // The account decides WHICH feed this page shows (followed accounts vs.
+    // the anonymous trending fallback), and the vote buttons need it too.
+    // It comes from useActiveAccount (newest read wins, session events,
+    // focus) instead of a read inside loadPage: a session restored after the
+    // page loaded used to leave the trending fallback AND inert vote buttons
+    // on screen until the next navigation. The page now (re)loads whenever
+    // the resolved account changes — see the effect below.
+    const { user: loggedInUser, resolved: accountResolved } = useActiveAccount(api);
+    const userRef = useRef(loggedInUser);
+    userRef.current = loggedInUser;
     const [dataVersion, setDataVersion] = useState(0);
     // Bumped when the first list for a feed identity (the account) is
     // committed: the page re-packs the masonry for it. A refresh of the feed
@@ -530,8 +541,7 @@ const useFeedPersonalData = (api, pathname) => {
         setLoadingMore(false);
         setHasMore(true);
         try {
-            const user = await api.getActiveAccount().catch(() => null);
-            setLoggedInUser(user || null);
+            const user = userRef.current || null;
             if (!user) console.warn('[FeedPersonal] No logged-in user, falling back to trending');
 
             // The cache key needs the account, so the lookup happens after
@@ -571,6 +581,9 @@ const useFeedPersonalData = (api, pathname) => {
             // hivemind lags the head block: a vote cast a moment ago isn't in
             // the fetched rows yet — the pending registry puts it back.
             const enriched = overlayPendingVotes(await fetchAndEnrichPosts(api, user, null, null, null));
+            // The account changed while this was in flight: the load for the
+            // new account owns the screen — don't paint the old feed over it.
+            if (cacheKeyRef.current !== cacheKey) return enriched;
             const replaced = postsSignature(enriched) !== postsSignature(postsRef.current);
             batch(() => {
                 // Keep an already-shown cache-served list of the SAME membership
@@ -640,9 +653,15 @@ const useFeedPersonalData = (api, pathname) => {
         actions.trigger_page_render_complete();
         actions.trigger_loading_update(0);
         const loadingTimer = setTimeout(() => actions.trigger_loading_update(100), 300);
-        loadPage();
         return () => clearTimeout(loadingTimer);
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // (Re)load once the account is known, and again whenever it changes —
+    // login, logout, account switch, a session restored late. Same-account
+    // reloads keep the list on screen (the SWR path in loadPage).
+    useEffect(() => {
+        if (accountResolved) loadPage();
+    }, [accountResolved, loggedInUser]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── Refresh on content lifecycle events ─────────────────────────────
     // Parity with Feed.js: a publish, delete or edit (content_updated, fired
@@ -752,6 +771,9 @@ const useFeedPersonalData = (api, pathname) => {
         posts, isLoading, loadingMore, hasMore, loggedInUser, dataVersion, layoutEpoch,
         handleVoteChange, loadMorePosts, markPostDeleted,
         consumePendingScrollRestore, hasPendingScrollRestore, saveScrollPosition,
+        // Pull-to-refresh: revalidate the feed on screen. Same account → same
+        // cache key, so the list stays up and re-flows in place.
+        refresh: loadPage,
     };
 };
 
@@ -1352,7 +1374,7 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
     const {
         posts, isLoading, loadingMore, hasMore, loggedInUser, dataVersion, layoutEpoch,
         handleVoteChange, loadMorePosts, markPostDeleted,
-        consumePendingScrollRestore, hasPendingScrollRestore, saveScrollPosition,
+        consumePendingScrollRestore, hasPendingScrollRestore, saveScrollPosition, refresh,
     } = useFeedPersonalData(api, pathname);
     const grid = useFeedPersonalGrid({ windowWidth, windowHeight, isMobile, overscanByPixels, artworkAheadPx, loadMoreThreshold, loadMorePosts, loadingMore });
 
@@ -1447,8 +1469,22 @@ const FeedPersonal = ({ classes, settings, pathname, api }) => {
         return () => cancelIdle(id);
     }, [postDialogMounted]);
 
-    // Force masonry update when posts change
-    useEffect(() => { const m = grid.masonryRef.current; if (m) m.forceUpdate(); }, [posts]);
+    // Force masonry update when posts change — and when the account resolves
+    // or changes, so every mounted card gets the new `voter`.
+    useEffect(() => { const m = grid.masonryRef.current; if (m) m.forceUpdate(); }, [posts, loggedInUser]);
+
+    // Pull-to-refresh at the top of the feed (touch drag / wheel past top).
+    // Not while a focus seek is walking the viewport (see useFeedFocus).
+    const getScrollContainer = useCallback(() => {
+        if (feedFocus.pendingRef.current) return null;
+        const m = grid.masonryRef.current;
+        return (m && m._scrollingContainer) || null;
+    }, [grid.masonryRef, feedFocus.pendingRef]);
+    usePullToRefresh({
+        getContainer: getScrollContainer,
+        onRefresh: refresh,
+        enabled: !postNav.artworkOpen && !postNav.createDialogOpen,
+    });
 
     // ── Seen tracking: the cards the reader rested on ───────────────────
     // (See the SEEN_* constants for the model.) The collector is a ref the

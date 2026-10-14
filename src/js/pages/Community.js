@@ -12,6 +12,8 @@ import MasonryExtended from "../components/MasonryExtended";
 import useWindowDimensions from "../hooks/useWindowDimensions";
 import useMasonryGrid, { useCellExit, DELETE_EXIT_DELAY_MS } from "../hooks/useMasonryGrid";
 import useVoteSync from "../hooks/useVoteSync";
+import useActiveAccount from "../hooks/useActiveAccount";
+import usePullToRefresh from "../hooks/usePullToRefresh";
 import { usePictureDialog } from "../hooks/usePictureDialog";
 import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto } from "../utils/voteSync";
 import { idle, cancelIdle } from "../utils/idle";
@@ -426,6 +428,35 @@ const styles = (theme) => ({
 // ╚══════════════════════════════════════════════════════════════════════╝
 
 const SORT_METHODS = ['created', 'hot', 'trending', 'votes'];
+
+// ── API readiness ──────────────────────────────────────────────────────
+// On a cold entry (fresh tab straight onto /portal-N) Community mounts
+// before PixaProxyAPI has finished initialize(): the instance exists, its
+// `initialized` flag is still false, and the reads the first load fires
+// come back empty — getCommunity → null (stub header, no picture),
+// getRankedPosts → [] (empty grid). The api object is mutated in place, so
+// no prop change ever re-runs the load, and since the session-event refresh
+// was narrowed to the viewer slice nothing else did either. Every
+// community / post load now waits here first (same polling contract as the
+// orphan-post fetch in usePostNavigation).
+const API_READY_POLL_MS = 250;
+const API_READY_MAX_TRIES = 80; // ~20 s, then proceed with whatever is there
+
+const isApiReady = (a) => !!(a && a.initialized && a.communities && a.accounts);
+
+// Resolves with the api once ready, null if `isCurrent()` turns false
+// (a newer load superseded this one) — never rejects.
+const waitForApi = (getApi, isCurrent) => new Promise((resolve) => {
+    let tries = 0;
+    const check = () => {
+        if (!isCurrent()) { resolve(null); return; }
+        const a = getApi();
+        if (isApiReady(a)) { resolve(a); return; }
+        if (++tries > API_READY_MAX_TRIES) { resolve(a || null); return; }
+        setTimeout(check, API_READY_POLL_MS);
+    };
+    check();
+});
 
 const parseCommunityPathname = (pathname) => {
     // A community URL may end at the community itself (`/portal-1`,
@@ -1023,6 +1054,10 @@ const usePostNavigation = ({ api, posts, scrollToIndex, setSelectedPostIndex, fa
 
 // ── useCommunityData ───────────────────────────────────────────────────
 const useCommunityData = (api, pathname) => {
+    // The live api for async paths: the mount effect captures the FIRST
+    // render's loadCommunity, so it must not close over a stale `api`.
+    const apiRef = useRef(api);
+    apiRef.current = api;
     // Lazy initializers: the old `const parsed = parseCommunityPathname(...)`
     // at hook top ran both regexes on EVERY render (scroll ticks included)
     // only to seed two states once. Later URL changes are handled by the
@@ -1036,7 +1071,15 @@ const useCommunityData = (api, pathname) => {
     const [rules, setRules] = useState([]);
     const [isAdmin, setIsAdmin] = useState(false);
     const [isJoined, setIsJoined] = useState(false);
-    const [loggedInUser, setLoggedInUser] = useState(null);
+    // Logged-in account: one source (useActiveAccount — newest read wins,
+    // session events, focus). `includeLocked` keeps this page's behaviour of
+    // knowing the account while the vault is locked (key manager fallback).
+    const { user: loggedInUser, refresh: refreshActiveAccount } = useActiveAccount(api, { includeLocked: true });
+    const loggedInUserRef = useRef(loggedInUser);
+    loggedInUserRef.current = loggedInUser;
+    // Newest viewer derivation wins (two can overlap: the load's own branch
+    // and an account change landing while getCommunityContext is out).
+    const viewerTokenRef = useRef(0);
     const [userRole, setUserRole] = useState(null);
     // Bumped when the posts of a different list replace the ones on screen —
     // another community, another sort, or the first list. The main component
@@ -1148,11 +1191,13 @@ const useCommunityData = (api, pathname) => {
     // locked) so a `pin_unlocked` event can't null out loggedInUser.
     const refreshViewerState = useCallback(async (name) => {
         if (!name) return;
-        let user = null;
-        if (api?.sessionManager) { try { user = await api.sessionManager.getActiveAccount(); } catch {} }
-        if (!user && api?.keyManager?.getActiveAccount) user = api.keyManager.getActiveAccount();
-        setLoggedInUser(user || null);
-        if (!user) { setIsAdmin(false); setIsJoined(false); setUserRole(null); return; }
+        const token = ++viewerTokenRef.current;
+        const api = apiRef.current;
+        const user = loggedInUserRef.current;
+        if (!user) {
+            batch(() => { setIsAdmin(false); setIsJoined(false); setUserRole(null); });
+            return;
+        }
 
         const { team = [], admins = [] } = communityMetaRef.current || {};
         const admin = admins.includes(user) || team.some(t => t[0] === user && (t[1] === 'admin' || t[1] === 'owner'));
@@ -1161,9 +1206,12 @@ const useCommunityData = (api, pathname) => {
         if (api?.communities?.getCommunityContext) {
             try { const ctx = await api.communities.getCommunityContext(name, user); if (ctx?.subscribed) joined = true; } catch {}
         }
-        setIsAdmin(admin);
-        setUserRole(userEntry ? userEntry[1] : null);
-        setIsJoined(joined);
+        if (token !== viewerTokenRef.current) return; // a newer derivation owns it
+        batch(() => {
+            setIsAdmin(admin);
+            setUserRole(userEntry ? userEntry[1] : null);
+            setIsJoined(joined);
+        });
     }, [api]);
 
     // Two-phase post commit, shared by loadCommunity and refetchPosts: the
@@ -1183,7 +1231,7 @@ const useCommunityData = (api, pathname) => {
     // that arrives early is held and committed in place of the text-ready one.
     const commitPostsTwoPhase = useCallback(async (rawPosts, token, listId) => {
         let early = null, painted = false;
-        const textReady = await enrichPostsList(rawPosts, api, (withAvatars) => {
+        const textReady = await enrichPostsList(rawPosts, apiRef.current, (withAvatars) => {
             if (postsTokenRef.current !== token) return;
             if (!painted) { early = withAvatars; return; }
             setPosts(overlayPendingVotes(withAvatars));
@@ -1199,42 +1247,24 @@ const useCommunityData = (api, pathname) => {
         });
     }, [api]);
 
+    // Account resolved or changed (login, unlock, account switch, late
+    // session restore): re-derive the viewer slice only — admin / joined /
+    // role. Posts and members are identity-independent, so no refetch and no
+    // masonry reset. The cards pick up the new `voter` through the cell
+    // renderer (and the forceUpdate on loggedInUser in the page).
     useEffect(() => {
-        if (!api?.on || !api?.off) return;
-
-        let cancelled = false;
-        const refresh = async () => {
-            try {
-                // Session-only change (login, unlock, account switch): the
-                // community's posts and member list are identity-independent,
-                // so re-derive just the viewer slice instead of a full
-                // loadCommunity. This drops a 20-post refetch, a full member
-                // re-enrichment AND the masonry reset that used to flash the
-                // grid on every unlock.
-                if (cancelled) return;
-                await refreshViewerState(communityName);
-            } catch (e) {
-                if (!cancelled) console.warn('[Community] session refresh failed:', e);
-            }
-        };
-
-        const events = [
-            'session_created', 'session_restored', 'session_resumed', 'session_ended',
-            'account_switched', 'pin_unlocked', 'pin_locked',
-        ];
-        events.forEach(ev => api.on(ev, refresh));
-
-        return () => {
-            cancelled = true;
-            events.forEach(ev => api.off(ev, refresh));
-        };
-    }, [api, communityName]); // eslint-disable-line react-hooks/exhaustive-deps
+        if (communityName) refreshViewerState(communityName);
+    }, [loggedInUser, communityName]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const loadCommunity = useCallback(async (name, sortIndex) => {
         if (!name) { console.warn('[Community] No community name'); setLoading(false); return; }
         const myToken = ++loadTokenRef.current; // claim this load
         const myPostsToken = ++postsTokenRef.current; // …and its post list
         setLoading(true);
+        // Cold entry: hold the reads until the api has initialized, or they
+        // all come back empty and the page stays blank (see waitForApi).
+        const api = await waitForApi(() => apiRef.current, () => loadTokenRef.current === myToken);
+        if (loadTokenRef.current !== myToken) return; // superseded while waiting
         try {
             const sort = SORT_METHODS[sortIndex] || 'trending';
             // Three independent reads in parallel: community metadata, the
@@ -1328,10 +1358,12 @@ const useCommunityData = (api, pathname) => {
     }, [api, refreshViewerState, commitPostsTwoPhase]);
 
     const refetchPosts = useCallback(async (name, sortIndex) => {
-        if (!api?.communities || !name) return;
+        if (!name) return;
         // Claim the post list: an older refetch (or the first load's posts)
         // still in flight can no longer land over this one.
         const myPostsToken = ++postsTokenRef.current;
+        const api = await waitForApi(() => apiRef.current, () => postsTokenRef.current === myPostsToken);
+        if (!api?.communities || postsTokenRef.current !== myPostsToken) return;
         try {
             const rawPosts = await api.communities.getRankedPosts({ sort: SORT_METHODS[sortIndex] || 'trending', tag: name, limit: 20 });
             if (postsTokenRef.current !== myPostsToken) return;
@@ -1439,7 +1471,7 @@ const useCommunityData = (api, pathname) => {
 
         // Lazily sync local state so the rest of the UI (header, role badges)
         // catches up if it was stale.
-        if (activeUser !== loggedInUser) setLoggedInUser(activeUser);
+        if (activeUser !== loggedInUser) refreshActiveAccount();
 
         // Re-derive role from the latest member list — this matters when the
         // user just logged in and joined state hasn't been recomputed yet.
@@ -1462,7 +1494,7 @@ const useCommunityData = (api, pathname) => {
                 e?.code === 'NO_SESSION' ? t("components.community.you_need_to_be_logged_in_to") : t("components.community.could_not_update_membership_please_try_again")
             );
         }
-    }, [api, communityName, loggedInUser, isJoined, userRole, members]);
+    }, [api, communityName, loggedInUser, isJoined, userRole, members, refreshActiveAccount]);
 
     const confirmLeave = useCallback(async () => {
         if (!api?.communities || !communityName) return;
@@ -1473,10 +1505,17 @@ const useCommunityData = (api, pathname) => {
 
     const reload = useCallback(() => loadCommunity(communityName, sorting), [communityName, sorting, loadCommunity]);
 
+    // Pull-to-refresh: the portal's metadata, members, viewer state and the
+    // post list for the current sort. Same list id → re-flowed in place.
+    const refresh = useCallback(() => {
+        refreshActiveAccount();
+        return loadCommunity(communityName, sorting);
+    }, [communityName, sorting, loadCommunity, refreshActiveAccount]);
+
     return {
         communityName, sorting, loading, community, posts, members, rules,
         isAdmin, isJoined, loggedInUser, userRole, layoutEpoch,
-        handleVoteChange, patchPostStats, toggleJoined, confirmLeave, reload,
+        handleVoteChange, patchPostStats, toggleJoined, confirmLeave, reload, refresh,
     };
 };
 
@@ -1638,7 +1677,7 @@ const Community = ({ classes, settings, pathname, api }) => {
     const {
         communityName, sorting, community, posts: loadedPosts, members, rules,
         isAdmin, isJoined, loggedInUser, userRole, layoutEpoch,
-        handleVoteChange, patchPostStats, toggleJoined, confirmLeave, reload,
+        handleVoteChange, patchPostStats, toggleJoined, confirmLeave, reload, refresh,
     } = useCommunityData(api, pathname);
 
     // Delete animation (useCellExit): `exitingKeys` makes the masonry scale
@@ -1745,12 +1784,25 @@ const Community = ({ classes, settings, pathname, api }) => {
         grid.scrollTo(0, 'instant');
     }, [communityName]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Force masonry to re-render when posts arrive or change.
+    // Force masonry to re-render when posts arrive or change — and when the
+    // account resolves or changes, so every mounted card gets the new voter.
     // @pixagram/virtualized's Masonry doesn't auto-update when cellCount changes.
     useEffect(() => {
         const masonry = grid.masonryRef.current;
         if (masonry) masonry.forceUpdate();
-    }, [posts]);
+    }, [posts, loggedInUser]);
+
+    // Pull-to-refresh at the top of the post list (touch drag / wheel past
+    // top). Off while a viewer, the picture or the editor is on top.
+    const getScrollContainer = useCallback(
+        () => (grid.masonryRef.current && grid.masonryRef.current._scrollingContainer) || null,
+        [grid.masonryRef]
+    );
+    usePullToRefresh({
+        getContainer: getScrollContainer,
+        onRefresh: refresh,
+        enabled: !postNav.artworkOpen && !pictureNav.open && !editorOpen,
+    });
 
     const locales = settings._selected_locales_code;
 

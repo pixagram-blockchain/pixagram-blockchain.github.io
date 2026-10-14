@@ -14,6 +14,8 @@ import useMasonryGrid, { useCellExit, DELETE_EXIT_DELAY_MS } from "../hooks/useM
 import { idle, cancelIdle } from "../utils/idle";
 import viewCache, { postsSignature } from "../utils/viewCache";
 import useVoteSync from "../hooks/useVoteSync";
+import useActiveAccount from "../hooks/useActiveAccount";
+import usePullToRefresh from "../hooks/usePullToRefresh";
 import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto, votesSignature } from "../utils/voteSync";
 import { EASE, RAINBOW_RIPPLE } from "../theme/motion";
 import ImageMeasurer from "../components/ImageMeasurer";
@@ -629,7 +631,13 @@ const useFeedData = (api, pathname, gridBridgeRef) => {
     const [isLoading, setIsLoading] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(true);
-    const [loggedInUser, setLoggedInUser] = useState(null);
+    // The logged-in account comes from one place (useActiveAccount) with a
+    // newest-read-wins guard. It used to be written by loadPage AND by a
+    // session listener, unordered: a page fetch that started before the
+    // session was restored committed its stale `null` AFTER the listener had
+    // set the real account, and the vote buttons stayed inert. The view
+    // cache also replayed a stored loggedInUser — gone too.
+    const { user: loggedInUser } = useActiveAccount(api);
     const [dataVersion, setDataVersion] = useState(0);
     // Bumped when a different listing — or the first one — is committed:
     // the page resets the masonry for it. A refresh of the listing on screen
@@ -760,7 +768,6 @@ const useFeedData = (api, pathname, gridBridgeRef) => {
                 // the pending registry — the cached rows predate it.
                 postsKeyRef.current = cacheKey;
                 setPosts(overlayPendingVotes(cached.posts));
-                setLoggedInUser(cached.loggedInUser ?? null);
                 setDataVersion(v => v + 1);
                 if (freshLayout) { setLayoutEpoch(e => e + 1); freshLayout = false; }
             }
@@ -785,17 +792,16 @@ const useFeedData = (api, pathname, gridBridgeRef) => {
             // of a names-only first pass followed by an avatar patch. Cost is
             // one extra round-trip on a COLD load only; viewCache serves return
             // visits instantly.
-            const [user, fetched] = await Promise.all([
-                api.getActiveAccount().catch(() => null),
-                fetchAndEnrichPosts(api, sort, tag, null, null, null),
-            ]);
+            const fetched = await fetchAndEnrichPosts(api, sort, tag, null, null, null);
+            // A newer loadPage for another listing (tab click mid-fetch)
+            // owns the screen now: don't paint this one over it.
+            if (cacheKeyRef.current !== cacheKey) return fetched;
             // hivemind lags the head block by a block or two: a vote cast a
             // moment ago is not in `fetched` yet. The pending registry puts it
             // back (and drops the record once the chain does show it).
             const enriched = overlayPendingVotes(fetched);
             const replaced = postsSignature(enriched) !== postsSignature(postsRef.current);
             batch(() => {
-                setLoggedInUser(user || null);
                 // Only commit when the content is genuinely new. A
                 // cache-served list of the SAME membership is already on
                 // screen with avatars, so keep it rather than repainting an
@@ -806,7 +812,7 @@ const useFeedData = (api, pathname, gridBridgeRef) => {
                 if (!servedFromCache || replaced) {
                     postsKeyRef.current = cacheKey;
                     setPosts(enriched);
-                    viewCache.set(cacheKey, { posts: enriched, loggedInUser: user || null });
+                    viewCache.set(cacheKey, { posts: enriched });
                     setDataVersion(v => v + 1);
                     if (freshLayout) setLayoutEpoch(e => e + 1);
                 } else if (votesSignature(enriched) !== votesSignature(postsRef.current)) {
@@ -818,9 +824,7 @@ const useFeedData = (api, pathname, gridBridgeRef) => {
                     // round-trip and never came back.
                     postsKeyRef.current = cacheKey;
                     setPosts(enriched);
-                    viewCache.patch(cacheKey, { posts: enriched, loggedInUser: user || null });
-                } else {
-                    viewCache.patch(cacheKey, { loggedInUser: user || null });
+                    viewCache.patch(cacheKey, { posts: enriched });
                 }
                 setIsLoading(false);
             });
@@ -953,53 +957,9 @@ const useFeedData = (api, pathname, gridBridgeRef) => {
         };
     }, [api, loadPage]);
 
-    // ── Refresh on session change ──────────────────────────────────────
-    // `loggedInUser` is captured only inside loadPage(), which runs on
-    // mount and on pathname change. If the user logs in (or out, or
-    // switches account, or unlocks the vault) while staying on the same
-    // feed URL, loadPage never fires again, so `loggedInUser` stays null
-    // and the `voter` prop passed to PaperCardBlog stays null — every
-    // vote click then bails out at the `if (!voter) return;` guard,
-    // making the upvote / downvote buttons appear inert until the user
-    // navigates to another view to force a remount.
-    //
-    // Subscribing to the full session-lifecycle event set keeps the
-    // logged-in identity in sync with the API's session state, which is all
-    // the vote buttons need — the post list itself is viewer-independent, so
-    // there's no full refetch here (see the handler below).
-    useEffect(() => {
-        if (!api?.eventEmitter) return;
-
-        let cancelled = false;
-        const refresh = async () => {
-            try {
-                const user = await api.getActiveAccount().catch(() => null);
-                if (cancelled) return;
-                // Just resync the identity. The feed's posts and their on-chain
-                // active_votes are viewer-independent, so the only thing a
-                // login / unlock / account-switch changes here is which vote is
-                // "mine" — derived in the card from loggedInUser. Re-running
-                // loadPage would refetch the whole page and bump dataVersion,
-                // flashing the grid (full Masonry reset) on every unlock for no
-                // content change. The SWR view cache revalidates on the next
-                // navigation if anything did drift.
-                setLoggedInUser(user || null);
-            } catch (e) {
-                console.warn('[Feed] session refresh failed:', e);
-            }
-        };
-
-        const events = [
-            'session_created', 'session_restored', 'session_resumed', 'session_ended',
-            'account_switched', 'pin_unlocked', 'pin_locked',
-        ];
-        events.forEach(ev => api.eventEmitter.on(ev, refresh));
-
-        return () => {
-            cancelled = true;
-            events.forEach(ev => api.eventEmitter.off(ev, refresh));
-        };
-    }, [api]);
+    // (Session changes — login, unlock, account switch — are followed by
+    // useActiveAccount above. The post list is viewer-independent, so they
+    // need no refetch: the cards only re-derive which vote is "mine".)
 
     const loadMorePosts = useCallback(async () => {
         const currentPosts = postsRef.current;
@@ -1075,6 +1035,14 @@ const useFeedData = (api, pathname, gridBridgeRef) => {
         setPosts(prev => prev.map(p => applyVoteToPost(p, permlink, voter, weight)));
     }, []);
 
+    // Pull-to-refresh: revalidate the listing on screen (same feed identity,
+    // so no masonry reset — MasonryExtended re-flows what changed). Resolves
+    // once the fetch has landed, which is what the spinner waits for.
+    const refresh = useCallback(() => {
+        const { sortIndex, path } = feedIdRef.current;
+        return loadPage(sortIndex, path);
+    }, [loadPage]);
+
     // A post deleted from this page, once its exit animation has played:
     // flagged the way a soft delete is, so the visible list drops it and
     // the view cache (mirror effect above) keeps it dropped.
@@ -1092,7 +1060,7 @@ const useFeedData = (api, pathname, gridBridgeRef) => {
 
     return {
         sorting, posts, isLoading, loadingMore, loggedInUser, dataVersion, layoutEpoch,
-        handleSortingChange, handleVoteChange, loadMorePosts, markPostDeleted,
+        handleSortingChange, handleVoteChange, loadMorePosts, markPostDeleted, refresh,
         consumePendingScrollRestore, saveScrollPosition,
     };
 };
@@ -1591,7 +1559,7 @@ const Feed = ({ classes, settings, pathname, api }) => {
     const {
         sorting, posts, loggedInUser, dataVersion, layoutEpoch,
         handleSortingChange, handleVoteChange, loadMorePosts, loadingMore,
-        consumePendingScrollRestore, saveScrollPosition, markPostDeleted,
+        consumePendingScrollRestore, saveScrollPosition, markPostDeleted, refresh,
     } = useFeedData(api, pathname, gridBridgeRef);
 
     // Delete animation (useCellExit): `exitingKeys` makes the masonry scale
@@ -1672,6 +1640,26 @@ const Feed = ({ classes, settings, pathname, api }) => {
     useEffect(() => () => {
         saveScrollPosition(grid.getScrollTop());
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // The account resolved (login / unlock / switch while the feed is up):
+    // re-render the mounted cells so every card gets the new `voter`.
+    // cellRenderer already depends on loggedInUser; this makes sure the
+    // virtualized Masonry actually calls it again for the cells on screen.
+    useEffect(() => {
+        const masonry = grid.masonryRef.current;
+        if (masonry) masonry.forceUpdate();
+    }, [loggedInUser]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Pull-to-refresh at the top of the grid (touch drag / wheel past top).
+    const getScrollContainer = useCallback(
+        () => (grid.masonryRef.current && grid.masonryRef.current._scrollingContainer) || null,
+        [grid.masonryRef]
+    );
+    usePullToRefresh({
+        getContainer: getScrollContainer,
+        onRefresh: refresh,
+        enabled: !postNav.artworkOpen && !postNav.createDialogOpen,
+    });
 
     // Lighter re-render for incremental changes (infinite scroll append, vote update).
     // @pixagram/virtualized's Masonry doesn't auto-update when cellCount changes.

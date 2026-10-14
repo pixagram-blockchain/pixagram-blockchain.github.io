@@ -622,6 +622,13 @@ export const COMMUNITY_PORTALS = Object.freeze([
     Object.freeze({ name: "development", id: "portal-171204" }),
 ]);
 
+// ── Community help ─────────────────────────────────────────────────────
+// The Telegram group the shell links as "Ask Help": left of Governance in the
+// desktop toolbar (Index.js) and above it in the compact ⋮ menu
+// (ToolbarMenuOption). Both read it from here, like the portal ids above, so
+// the two entry points cannot drift apart.
+export const HELP_TELEGRAM_URL = "https://t.me/omnibus_pixagram/1";
+
 // ── Post overlay URL helpers ──────────────────────────────────────────
 // The optional non-capturing tail accepts a "+meta" overlay suffix (see
 // "Meta overlays" below), so a post stays a post while Settings or Info is

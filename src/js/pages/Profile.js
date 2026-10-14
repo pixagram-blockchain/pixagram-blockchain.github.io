@@ -13,6 +13,8 @@ import MasonryExtended, { createMasonryCellPositioner } from "../components/Maso
 import useWindowDimensions from "../hooks/useWindowDimensions";
 import { BAND_REFRESH_FRACTION, useCellExit, DELETE_EXIT_DELAY_MS } from "../hooks/useMasonryGrid";
 import useVoteSync from "../hooks/useVoteSync";
+import useActiveAccount from "../hooks/useActiveAccount";
+import usePullToRefresh from "../hooks/usePullToRefresh";
 import { usePictureDialog } from "../hooks/usePictureDialog";
 import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto } from "../utils/voteSync";
 import { idle, cancelIdle } from "../utils/idle";
@@ -764,11 +766,46 @@ const fetchOrphanPost = async (api, author, permlink) => {
 // ║  4. HOOKS                                                           ║
 // ╚══════════════════════════════════════════════════════════════════════╝
 
+// ── Bounded reads ──────────────────────────────────────────────────────
+// A node call that never answers used to hold the whole page: the profile
+// header waited on a 4-way Promise.all, the post grid waited on the header
+// (readyName), and a tab whose fetch hung kept its in-flight counter up
+// forever, which also blocked its load-more. Every read on the profile's
+// load path is now capped. TIMED_OUT / READ_FAILED are told apart from a
+// genuine empty answer, so a failure is retried instead of being shown as
+// "no posts yet".
+const TIMED_OUT = Symbol('timed_out');
+const READ_FAILED = Symbol('read_failed');
+const PROFILE_READ_TIMEOUT_MS = 10000;
+const TAB_READ_TIMEOUT_MS = 12000;
+const bounded = (promiseOrFn, ms) => new Promise((resolve) => {
+    let settled = false;
+    const t = setTimeout(() => { if (!settled) { settled = true; resolve(TIMED_OUT); } }, ms);
+    let p;
+    try { p = typeof promiseOrFn === 'function' ? promiseOrFn() : promiseOrFn; } catch (e) { p = Promise.reject(e); }
+    Promise.resolve(p).then(
+        (v) => { if (!settled) { settled = true; clearTimeout(t); resolve(v); } },
+        (e) => { if (!settled) { settled = true; clearTimeout(t); console.warn('[Profile] read failed:', e && e.message); resolve(READ_FAILED); } },
+    );
+});
+const isFailure = (v) => v === TIMED_OUT || v === READ_FAILED;
+// Retry schedule for a tab whose fetch failed (or came back empty for an
+// account the chain says has content): 1.5 s, 4 s, 9 s — then it stops and
+// the empty state shows (pull to refresh retries again).
+const TAB_RETRY_DELAYS_MS = [1500, 4000, 9000];
+
 // ── useProfileData ─────────────────────────────────────────────────────
 const useProfileData = (api, pathname) => {
     const [account, setAccount] = useState({});
     const [isOwnProfile, setIsOwnProfile] = useState(false);
-    const [loggedInUser, setLoggedInUser] = useState(null);
+    // Logged-in account: one source (useActiveAccount — newest read wins,
+    // session events, focus). It used to be read INSIDE loadProfile, as the
+    // second of four parallel reads that the profile header — and through
+    // readyName the whole post grid — waited on; a slow session read (vault
+    // restoring) delayed the posts, and a login landing mid-load could be
+    // overwritten by the stale answer. Own-profile / follow state are now
+    // derived from it in an effect below, off the load path.
+    const { user: loggedInUser, refresh: refreshActiveAccount } = useActiveAccount(api);
     const [following, setFollowing] = useState(false);
     const [subscriptions, setSubscriptions] = useState([]);
     const [vpMana, setVpMana] = useState(null);
@@ -835,12 +872,21 @@ const useProfileData = (api, pathname) => {
             // Four reads that depend only on `name` (or nothing), in parallel.
             // getFollowCount joined the batch — it was a serial await after it,
             // needlessly delaying the header's follower/following counts.
-            const [accs, activeUser, subs, fc] = await Promise.all([
-                api.accounts.getAccounts([name], true).catch(() => []),
-                api.getActiveAccount().catch(() => null),
-                api.communities.getSubscriptions(name).catch(() => []),
-                api.follow.getFollowCount(name).catch(() => ({ follower_count: 0, following_count: 0 })),
+            // Every read is capped (bounded): one that never answers can no
+            // longer hold the header — and through readyName, the post grid.
+            const [accsR, subsR, fcR] = await Promise.all([
+                bounded(() => api.accounts.getAccounts([name], true), PROFILE_READ_TIMEOUT_MS),
+                bounded(() => api.communities.getSubscriptions(name), PROFILE_READ_TIMEOUT_MS),
+                bounded(() => api.follow.getFollowCount(name), PROFILE_READ_TIMEOUT_MS),
             ]);
+            const accs = isFailure(accsR) ? [] : accsR;
+            const subs = isFailure(subsR) ? [] : subsR;
+            const fc = isFailure(fcR) ? { follower_count: 0, following_count: 0 } : fcR;
+            // The account read itself failed: the tabs still load (they only
+            // need the name), and the header is fetched again shortly.
+            if (isFailure(accsR)) {
+                setTimeout(() => { if (prevUsernameRef.current === name && !accountRef.current?._profile) refreshAccountRef.current?.(); }, 3000);
+            }
             // Superseded while in flight (A → B navigation, A answering last):
             // committing now would put A's header over B's page. The newer
             // load owns isLoading.
@@ -850,7 +896,6 @@ const useProfileData = (api, pathname) => {
             if (!acc) { batch(() => { setAccount({ name }); setIsLoading(false); setReadyName(name); }); return; }
             acc.follower_count = fc?.follower_count || 0; acc.following_count = fc?.following_count || 0;
             acc.image = acc._profile?.profile_image || ''; acc.cover_image = acc._profile?.cover_image || '';
-            const isOwn = activeUser && activeUser.toLowerCase() === name.toLowerCase();
 
             // ── Commit the profile NOW (single batched render) ─────────────
             // Header (name, counts, avatar/cover) AND the post-grid load (which
@@ -858,29 +903,14 @@ const useProfileData = (api, pathname) => {
             // follow-state scan below. `following` is reset so a previous
             // profile's value can't linger while the real one resolves.
             batch(() => {
-                setLoggedInUser(activeUser || null);
-                setIsOwnProfile(!!isOwn);
-                setFollowing(false);
                 setAccount(acc);
                 setSubscriptions(subs || []);
                 setIsLoading(false);
                 setReadyName(name);
             });
 
-            // ── Backfill: do-I-follow-this-profile (Follow button only) ────
-            // getFollowing pulls up to 1000 entries just to derive one boolean,
-            // so it must NOT gate first paint — resolve it in the background and
-            // flip the button when it lands. Guarded against a profile switch.
-            if (activeUser && !isOwn) {
-                api.follow.getFollowing(activeUser, '', 'blog', 1000)
-                    .then(fl => {
-                        if (prevUsernameRef.current !== name) return;
-                        if (Array.isArray(fl) && fl.some(f => (f.following || '').toLowerCase() === name.toLowerCase())) {
-                            setFollowing(true);
-                        }
-                    })
-                    .catch(() => {});
-            }
+            // (Own-profile / follow state: derived from the active account in
+            // the viewer effect below, not here.)
 
             // Deferred: mana + subscription enrichment
             api.rc.getVPMana(name).then(setVpMana).catch(() => {});
@@ -981,61 +1011,31 @@ const useProfileData = (api, pathname) => {
         return () => api.eventEmitter.off('profile_updated', handler);
     }, [api, pathname]);
 
-    // ── Refresh on session change ──────────────────────────────────────
-    // `loggedInUser` is only assigned inside loadProfile(), which runs on
-    // mount and when the URL username changes. If the user logs in (or
-    // out, or switches account, or unlocks the vault) while staying on
-    // the same @username page, loadProfile never re-runs, so
-    // `loggedInUser` stays null and the `voter` prop forwarded to
-    // PaperCardBlog / PaperCardComment / PaperCardReply / PostDialog
-    // stays null — every vote click then bails out at the
-    // `if (!voter) return;` guard, the Follow button no-ops on its
-    // `!loggedInUser` short-circuit, and "is own profile" stays false.
-    //
-    // Re-running loadProfile on session events keeps the logged-in
-    // identity, the follow/own-profile flags, and the post-card voter
-    // state in step with the API session.
+    // ── Viewer state: own-profile flag + Follow button ──────────────────
+    // Derived from the active account (useActiveAccount) and the profile on
+    // screen, re-run whenever either changes — a login, unlock, account
+    // switch or late session restore while staying on this @page, as well as
+    // a profile switch. Viewer-scoped only: the profile's account, posts,
+    // comments and timeline are identity-independent and are not refetched.
+    // getFollowing pulls up to 1000 entries for one boolean, so it never
+    // gates anything — the button flips when it lands. `readyName` is a dep
+    // so the derivation runs again once the real account has loaded (the
+    // name alone doesn't change between the placeholder and the real one).
     useEffect(() => {
-        if (!api?.eventEmitter) return;
-
+        const name = account?.name || '';
+        if (!name) return undefined;
+        const own = !!(loggedInUser && loggedInUser.toLowerCase() === name.toLowerCase());
+        setIsOwnProfile(own);
+        if (!loggedInUser || own) { setFollowing(false); return undefined; }
+        const a = apiRef.current;
+        if (!a?.initialized || !a.follow?.getFollowing) return undefined;
         let cancelled = false;
-        const refresh = async () => {
-            try {
-                // The profile this page shows — not a parse of the live URL,
-                // which names a post's author while a post dialog is open.
-                const name = prevUsernameRef.current || parseProfilePathname(pathname).username;
-                if (!name) return;
-                const user = await api.getActiveAccount().catch(() => null);
-                if (cancelled) return;
-                setLoggedInUser(user || null);
-                const own = !!(user && user.toLowerCase() === name.toLowerCase());
-                setIsOwnProfile(own);
-                // Re-derive ONLY the viewer-scoped follow state. The viewed
-                // profile's account, posts, comments and timeline are identity-
-                // independent, so a full loadProfile here would refetch all of
-                // them (and the account swap reloads the post grid), flashing
-                // the page on every unlock for no content change. The initial
-                // loadProfile from the URL effects owns the account itself.
-                if (!user || own) { setFollowing(false); return; }
-                const fl = await api.follow.getFollowing(user, '', 'blog', 1000).catch(() => null);
-                if (cancelled || prevUsernameRef.current !== name) return;
-                setFollowing(Array.isArray(fl) && fl.some(f => (f.following || '').toLowerCase() === name.toLowerCase()));
-            } catch (e) {
-                console.warn('[Profile] session refresh failed:', e);
-            }
-        };
-
-        const events = [
-            'session_created', 'session_restored', 'session_resumed', 'session_ended',
-            'account_switched', 'pin_unlocked', 'pin_locked',
-        ];
-        events.forEach(ev => api.eventEmitter.on(ev, refresh));
-
-        return () => {
-            cancelled = true;
-            events.forEach(ev => api.eventEmitter.off(ev, refresh));
-        };
-    }, [api, pathname, loadProfile]);
+        bounded(() => a.follow.getFollowing(loggedInUser, '', 'blog', 1000), PROFILE_READ_TIMEOUT_MS).then((fl) => {
+            if (cancelled || prevUsernameRef.current !== name || isFailure(fl)) return;
+            setFollowing(Array.isArray(fl) && fl.some(f => (f.following || '').toLowerCase() === name.toLowerCase()));
+        });
+        return () => { cancelled = true; };
+    }, [loggedInUser, account?.name, readyName]);
 
     const toggleFollowing = useCallback(() => {
         if (!api || !account?.name || !loggedInUser) return;
@@ -1045,14 +1045,38 @@ const useProfileData = (api, pathname) => {
         (async () => { try { if (nf) await api.broadcast.follow(loggedInUser, account.name); else await api.broadcast.unfollow(loggedInUser, account.name); } catch { setFollowing(!nf); setAccount({ ...account }); } })();
     }, [api, account, following, loggedInUser]);
 
-    const refreshAccount = useCallback(() => {
-        const name = parseProfilePathname(pathname).username; if (!api || !name) return;
+    // Re-read the profile's account (header, counts). Resolves once the first
+    // read has landed (pull-to-refresh waits on it); `again` also re-reads
+    // 3 s later, for the edit dialog — the chain needs a block to show it.
+    // Never commits over a profile the reader has since left.
+    const refreshAccount = useCallback((again = true) => {
+        const name = prevUsernameRef.current || parseProfilePathname(pathname).username;
+        const a = apiRef.current;
+        if (!a?.initialized || !name) return Promise.resolve();
         // Fallback counts via accountRef (not the `account` closure) so this
         // callback — and the memoized profile object it feeds — doesn't
         // re-allocate on every account state change.
-        const doRefresh = () => { api.accounts.getAccounts([name], true).then(async (accs) => { if (!accs?.[0]) return; const a = accs[0]; a.image = a._profile?.profile_image||''; a.cover_image = a._profile?.cover_image||''; try { const fc = await api.follow.getFollowCount(name); a.follower_count = fc.follower_count||0; a.following_count = fc.following_count||0; } catch { a.follower_count = accountRef.current.follower_count||0; a.following_count = accountRef.current.following_count||0; } setAccount(a); }).catch(()=>{}); };
-        doRefresh(); setTimeout(doRefresh, 3000);
-    }, [api, pathname]);
+        const doRefresh = () => bounded(() => a.accounts.getAccounts([name], true), PROFILE_READ_TIMEOUT_MS).then(async (accs) => {
+            if (isFailure(accs) || !accs?.[0] || prevUsernameRef.current !== name) return;
+            const acc = accs[0]; acc.image = acc._profile?.profile_image||''; acc.cover_image = acc._profile?.cover_image||'';
+            const fc = await bounded(() => a.follow.getFollowCount(name), PROFILE_READ_TIMEOUT_MS);
+            if (!isFailure(fc) && fc) { acc.follower_count = fc.follower_count||0; acc.following_count = fc.following_count||0; }
+            else { acc.follower_count = accountRef.current.follower_count||0; acc.following_count = accountRef.current.following_count||0; }
+            if (prevUsernameRef.current !== name) return;
+            setAccount(acc);
+        });
+        const first = doRefresh();
+        if (again !== false) setTimeout(doRefresh, 3000);
+        return first;
+    }, [pathname]);
+    const refreshAccountRef = useRef(refreshAccount);
+    refreshAccountRef.current = refreshAccount;
+
+    // Pull-to-refresh, header half: the viewer and the profile's account.
+    const refreshProfile = useCallback(() => {
+        refreshActiveAccount();
+        return refreshAccount(false);
+    }, [refreshAccount, refreshActiveAccount]);
 
     const onFollowCountsUpdated = useCallback((fc, fgc) => setAccount(a => ({ ...a, follower_count: fc, following_count: fgc })), []);
 
@@ -1064,10 +1088,10 @@ const useProfileData = (api, pathname) => {
     // setAccount is a stable useState setter, so it's intentionally not a dep.
     return useMemo(() => ({
         account, isOwnProfile, loggedInUser, following, subscriptions, vpMana,
-        rcMana, isLoading, readyName, toggleFollowing, refreshAccount, onFollowCountsUpdated,
+        rcMana, isLoading, readyName, toggleFollowing, refreshAccount, refreshProfile, onFollowCountsUpdated,
         setAccount,
     }), [account, isOwnProfile, loggedInUser, following, subscriptions, vpMana,
-        rcMana, isLoading, readyName, toggleFollowing, refreshAccount, onFollowCountsUpdated]);
+        rcMana, isLoading, readyName, toggleFollowing, refreshAccount, refreshProfile, onFollowCountsUpdated]);
 };
 
 // ── useTabData ─────────────────────────────────────────────────────────
@@ -1202,14 +1226,59 @@ const useTabData = (api, account, category, ready) => {
     const currentNameRef = useRef('');
     useEffect(() => { currentNameRef.current = account?.name || ''; }, [account?.name]);
 
-    const loadTabData = useCallback(async (cat) => {
-        if (!api?.initialized || !account?.name) return;
+    // ── Tab loader ─────────────────────────────────────────────────────
+    // Why a profile sometimes showed "no posts yet" on arrival: every read
+    // here used to end in `.catch(() => [])`, so a node error, a timeout or a
+    // request dropped by the proxy was indistinguishable from an account
+    // with nothing in that tab — the tab was marked loaded and the empty
+    // state stuck until a reload. (And a read that never answered left the
+    // tab's in-flight counter up forever, which also blocked its load-more.)
+    //
+    // Now every read is bounded and a FAILED read is told apart from an
+    // EMPTY one. A failure keeps whatever rows are on screen, is not marked
+    // loaded, and is retried (TAB_RETRY_DELAYS_MS). An empty posts/comments
+    // answer for an account whose chain `post_count` says it has content is
+    // treated as suspect and retried the same way. Only once the retries are
+    // spent does the empty state show — and pull-to-refresh tries again.
+    //
+    // Resolves once this attempt has committed (or given up), so
+    // pull-to-refresh can wait on it.
+    const loadTabDataRef = useRef(null);
+    const retryTimersRef = useRef([0, 0, 0, 0]);
+    const loadTabData = useCallback(async (cat, attempt = 0) => {
+        if (!account?.name) return;
+        if (!api?.initialized) {
+            // Shouldn't happen once the profile is ready, but returning
+            // silently here used to leave the tab unloaded for good (its
+            // effect only re-runs on a name / tab change). Try again shortly.
+            const name = account.name;
+            setTimeout(() => {
+                if (currentNameRef.current === name && loadTabDataRef.current) loadTabDataRef.current(cat, attempt);
+            }, 300);
+            return;
+        }
         const name = account.name;
         const gen = ++loadGenRef.current[cat];
+        if (retryTimersRef.current[cat]) { clearTimeout(retryTimersRef.current[cat]); retryTimersRef.current[cat] = 0; }
         // Commit only while this is still the profile on screen AND the
         // newest load of this tab.
         const isLatest = () => currentNameRef.current === name && loadGenRef.current[cat] === gen;
         busyRef.current[cat] += 1;
+        // `failed`: no rows could be read. `suspectEmpty`: read fine but
+        // empty where the chain says there should be rows.
+        let failed = false, suspectEmpty = false;
+        const hasChainContent = (Number(account.post_count) || 0) > 0;
+        // First successful non-empty answer among the sources, in order.
+        // `failed` when none answered with rows and at least one failed.
+        const firstRows = async (...sources) => {
+            let anyFailed = false;
+            for (const src of sources) {
+                const r = await bounded(src, TAB_READ_TIMEOUT_MS);
+                if (isFailure(r)) { anyFailed = true; continue; }
+                if (Array.isArray(r) && r.length) return { rows: r, failed: false };
+            }
+            return { rows: [], failed: anyFailed };
+        };
         try {
             const prev = () => listsRef.current[cat];
             switch (cat) {
@@ -1219,15 +1288,19 @@ const useTabData = (api, account, category, ready) => {
                     // get_account_posts path if the database call fails or returns
                     // empty (e.g. transient node hiccup, or accounts whose blog
                     // index hasn't been backfilled).
-                    let p = await api.content.getDiscussionsByBlog({ tag: name, limit: 20 })
-                        .then(r => Array.isArray(r) ? r : [])
-                        .catch(e => { console.warn('[Profile] database.getDiscussions(blog) failed:', e.message); return []; });
-                    if (!p.length) {
-                        p = await api.communities.getAccountPosts(name, 'blog', { limit: 20 })
-                            .then(r => Array.isArray(r) ? r : [])
-                            .catch(() => []);
-                    }
+                    const res = await firstRows(
+                        () => api.content.getDiscussionsByBlog({ tag: name, limit: 20 }),
+                        () => api.communities.getAccountPosts(name, 'blog', { limit: 20 }),
+                    );
                     if (!isLatest()) return;
+                    const p = res.rows;
+                    if (!p.length) {
+                        failed = res.failed;
+                        suspectEmpty = !failed && hasChainContent;
+                        // Never wipe rows already on screen with a failed or
+                        // suspect empty answer.
+                        if (failed || suspectEmpty) break;
+                    }
                     // Two-phase: every post here is authored by the profile owner,
                     // whose avatar is `account` — already loaded — so the grid is
                     // VISUALLY COMPLETE now, gated on the post fetch alone. Only
@@ -1241,59 +1314,65 @@ const useTabData = (api, account, category, ready) => {
                     const merged = keepLoadedTail(prev(), fresh);
                     if (merged === fresh) setHasMorePosts(true);
                     setPosts(merged);
-                    fetchVoterProfiles(p, account, api)
-                        .then(vp => {
-                            if (!isLatest()) return;
-                            const patched = overlayPendingVotes(p.map(x => enrichPostForCard(x, account, vp)));
-                            setPosts(list => patchRows(list, patched));
-                        })
-                        .catch(() => {});
+                    if (p.length) {
+                        fetchVoterProfiles(p, account, api)
+                            .then(vp => {
+                                if (!isLatest()) return;
+                                const patched = overlayPendingVotes(p.map(x => enrichPostForCard(x, account, vp)));
+                                setPosts(list => patchRows(list, patched));
+                            })
+                            .catch(() => {});
+                    }
                     break;
                 }
                 case 1: {
-                    const c = await api.content.getDiscussionsByComments({tag:name,start_author:name,limit:20}).then(r=>Array.isArray(r)?r:[]).catch(()=>[]);
+                    const res = await firstRows(
+                        () => api.content.getDiscussionsByComments({ tag: name, start_author: name, limit: 20 }),
+                    );
                     if (!isLatest()) return;
+                    const c = res.rows;
+                    if (!c.length) {
+                        failed = res.failed;
+                        suspectEmpty = !failed && hasChainContent;
+                        if (failed || suspectEmpty) break;
+                    }
                     // Two-phase (mirrors case 0): every comment here is authored
                     // by the profile owner, whose avatar is `account` — already
-                    // loaded — so the tab is VISUALLY COMPLETE now, gated on the
-                    // comment fetch alone instead of a serial voter-account
-                    // round-trip. Only voter-list profile images (shown when a
-                    // vote list is opened) need the extra fetch, so defer it and
-                    // patch in place — avatar swaps don't change card height,
-                    // and both phases map/sort the same `c`, so membership and
-                    // order are identical.
+                    // loaded — so the tab is VISUALLY COMPLETE now. Only
+                    // voter-list profile images need the extra fetch, so defer
+                    // it and patch in place — avatar swaps don't change card
+                    // height, and both phases map/sort the same `c`.
                     const ownOnly = {}; if (account?.name) ownOnly[account.name] = account.image;
                     const buildComments = (vp) => overlayPendingVotes(c.map((x,i)=>enrichCommentForCard(x,account,i,vp)).sort((a,b)=>b.date-a.date));
                     const fresh = buildComments(ownOnly);
                     const merged = keepLoadedTail(prev(), fresh);
                     if (merged === fresh) setHasMoreComments(true);
                     setComments(merged);
-                    fetchVoterProfiles(c, account, api)
-                        .then(vp => {
-                            if (!isLatest()) return;
-                            const patched = buildComments(vp);
-                            setComments(list => patchRows(list, patched));
-                        })
-                        .catch(() => {});
+                    if (c.length) {
+                        fetchVoterProfiles(c, account, api)
+                            .then(vp => {
+                                if (!isLatest()) return;
+                                const patched = buildComments(vp);
+                                setComments(list => patchRows(list, patched));
+                            })
+                            .catch(() => {});
+                    }
                     break;
                 }
                 case 2: {
-                    const rr = await api.content.getRepliesByLastUpdate(name,'',20).then(r=>Array.isArray(r)?r:[]).catch(()=>[]);
+                    const r = await bounded(() => api.content.getRepliesByLastUpdate(name, '', 20), TAB_READ_TIMEOUT_MS);
                     if (!isLatest()) return;
+                    if (isFailure(r)) { failed = true; break; }
+                    const rr = Array.isArray(r) ? r : [];
                     // Two-phase (mirrors case 0 and the feeds' onAvatars path):
-                    // commit text-ready reply cards NOW — gated on the replies
-                    // fetch alone, one round-trip sooner — and resolve the
-                    // author/voter accounts in the background. Phase 1 renders
-                    // the same names-only stub transformRepliesToCardFormat
-                    // already falls back to on an account-lookup miss, so both
-                    // phases map/sort the same `rr` and differ only in avatars
-                    // and display names. (No load-more on this tab, so no tail
-                    // to keep: the fresh page is the list.)
+                    // commit text-ready reply cards NOW and resolve the
+                    // author/voter accounts in the background. (No load-more on
+                    // this tab, so no tail to keep: the fresh page is the list.)
                     const ownOnly = {}; if (account.name) ownOnly[account.name] = account.image;
                     const fresh = overlayPendingVotes(transformRepliesToCardFormat(rr, account, ownOnly, []));
                     setReplies(fresh);
-                    const relAccs = rr.flatMap(r=>[r.author,r.parent_author].filter(Boolean));
-                    const allVotes = rr.flatMap(r=>r.active_votes||[]);
+                    const relAccs = rr.flatMap(x=>[x.author,x.parent_author].filter(Boolean));
+                    const allVotes = rr.flatMap(x=>x.active_votes||[]);
                     const allToFetch = [...new Set([...allVotes.map(v=>v?.voter).filter(Boolean),...relAccs])];
                     if (allToFetch.length) {
                         api.accounts.getAccounts(allToFetch).then(a => {
@@ -1307,28 +1386,72 @@ const useTabData = (api, account, category, ready) => {
                     break;
                 }
                 case 3: {
-                    const h = await api.accounts.getAccountHistory(name,-1,100).catch(()=>[]);
+                    const hr = await bounded(() => api.accounts.getAccountHistory(name, -1, 100), TAB_READ_TIMEOUT_MS);
                     if (!isLatest()) return;
+                    if (isFailure(hr)) { failed = true; break; }
+                    const h = Array.isArray(hr) ? hr : [];
                     let floor = Infinity;
-                    for (let i = 0; i < (h||[]).length; i++) { const ix = h[i]?.[0]; if (typeof ix === 'number' && ix < floor) floor = ix; }
-                    const fresh = parseAccountHistoryToTimeline(h||[], name);
+                    for (let i = 0; i < h.length; i++) { const ix = h[i]?.[0]; if (typeof ix === 'number' && ix < floor) floor = ix; }
+                    const fresh = parseAccountHistoryToTimeline(h, name);
                     const merged = keepLoadedTail(prev(), fresh);
                     if (merged === fresh) { setHasMoreTimeline(true); timelineFloorRef.current = floor; }
-                        // Kept the deeper pages: the pagination floor stays where
+                    // Kept the deeper pages: the pagination floor stays where
                     // they reached.
                     else timelineFloorRef.current = Math.min(timelineFloorRef.current, floor);
                     setTimeline(merged);
                     break;
                 }
             }
-        } catch (e) { console.error('[Profile] tab data error:', e); }
+        } catch (e) { console.error('[Profile] tab data error:', e); failed = true; }
         finally {
             // A profile switch already zeroed the counters for the new profile.
             if (currentNameRef.current === name) busyRef.current[cat] = Math.max(0, busyRef.current[cat] - 1);
         }
         if (!isLatest()) return;
+        // A failed read gets the full retry schedule; a suspect-empty answer
+        // (post_count also counts comments, so an account may honestly have
+        // no top-level posts) gets one second look before the empty state.
+        const maxAttempts = failed ? TAB_RETRY_DELAYS_MS.length : 1;
+        if ((failed || suspectEmpty) && attempt < maxAttempts) {
+            // Not loaded yet — retry. Rows already on screen (a refresh) stay.
+            // Rows ON screen also count as loaded: a failed refresh must not
+            // make an already-shown tab look unloaded.
+            if ((listsRef.current[cat] || []).length) setLoadedMask(m => m | tabBit(cat));
+            console.warn(`[Profile] ${TAB_NAMES[cat]} for @${name}: ${failed ? 'read failed' : 'empty but the account has content'} — retry ${attempt + 1}/${maxAttempts}`);
+            retryTimersRef.current[cat] = setTimeout(() => {
+                retryTimersRef.current[cat] = 0;
+                // Superseded meanwhile (another load of this tab, another
+                // profile): that load owns the tab now.
+                if (currentNameRef.current !== name || loadGenRef.current[cat] !== gen) return;
+                if (loadTabDataRef.current) loadTabDataRef.current(cat, attempt + 1);
+            }, TAB_RETRY_DELAYS_MS[attempt]);
+            return;
+        }
         setLoadedMask(m => m | tabBit(cat));
     }, [api, account]);
+    loadTabDataRef.current = loadTabData;
+    // Pending retries die with the page.
+    useEffect(() => () => { retryTimersRef.current.forEach(t => t && clearTimeout(t)); }, []);
+
+    // The profile's own avatar landing AFTER its tabs did (the account read
+    // failed or was slow, so the tabs loaded against the `{ name }`
+    // placeholder): patch it into the owner's cards in place. Avatar swaps
+    // don't change card height, so nothing re-measures.
+    useEffect(() => {
+        const owner = account?.name, img = account?.image || '';
+        if (!owner || !img) return;
+        const fix = (list) => {
+            let hit = false;
+            const next = list.map((x) => {
+                if (!x || !x.author || x.author.username !== owner || x.author.image === img) return x;
+                hit = true;
+                return { ...x, author: { ...x.author, image: img, name: x.author.name || resolveDisplayName(account, owner) } };
+            });
+            return hit ? next : list;
+        };
+        setPosts(fix);
+        setComments(fix);
+    }, [account?.image]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── Reset on profile switch ────────────────────────────────────────
     // When the URL username changes, `account.name` flips before the new
@@ -1594,8 +1717,11 @@ const useTabData = (api, account, category, ready) => {
     return useMemo(() => ({
         posts, comments, replies, timeline, loadedMask, isTabBusy,
         loadMorePosts, loadMoreComments, loadMoreTimeline, handleVoteChange, setPosts, markPostDeleted,
+        // Pull-to-refresh: reload one tab from its first page (keeps any
+        // deeper pages that still line up — keepLoadedTail).
+        reloadTab: loadTabData,
     }), [posts, comments, replies, timeline, loadedMask, isTabBusy,
-        loadMorePosts, loadMoreComments, loadMoreTimeline, handleVoteChange, markPostDeleted]);
+        loadMorePosts, loadMoreComments, loadMoreTimeline, handleVoteChange, markPostDeleted, loadTabData]);
 };
 
 // ── Scroll chrome store ────────────────────────────────────────────────
@@ -2572,7 +2698,32 @@ const Profile = ({ classes, settings, pathname, api }) => {
     // where the old per-tab reset re-measured every visible cell, with a
     // flash, under the reader. Layout changes (column width, tab switch)
     // still start over in the grid hook.
-    useEffect(() => { const m = grid.masonryRefs.current[category]; if (m) m.forceUpdate(); }, [activeData, category]);
+    // …and when the active account resolves or changes (login / unlock /
+    // switch while on this page), so every mounted card gets the new voter.
+    useEffect(() => { const m = grid.masonryRefs.current[category]; if (m) m.forceUpdate(); }, [activeData, category, profile.loggedInUser]);
+
+    // ── Pull-to-refresh ────────────────────────────────────────────────
+    // Drag down at the top of the active tab (or scroll up past the top on
+    // desktop): re-read the header and reload the tab on screen. Works on
+    // the empty state too — that is precisely where a reader lands when a
+    // load failed, so it's the natural place to retry from.
+    const emptyStateRef = useRef(null);
+    const getScrollContainer = useCallback(() => {
+        const m = grid.masonryRefs.current[category];
+        if (m && m._scrollingContainer) return m._scrollingContainer;
+        return emptyStateRef.current;
+    }, [grid.masonryRefs, category]);
+    const reloadTab = tabData.reloadTab;
+    const refreshProfilePage = useCallback(() => Promise.all([
+        profile.refreshProfile(),
+        reloadTab(category),
+    ]), [profile.refreshProfile, reloadTab, category]);
+    usePullToRefresh({
+        getContainer: getScrollContainer,
+        onRefresh: refreshProfilePage,
+        enabled: !postNav.artworkOpen && !pictureNav.open && !walletOpen && !editOpen
+            && !createArtworkOpen && !createCommunityOpen && !followListOpened,
+    });
 
     const locales = settings._selected_locales_code;
     // Username is ALWAYS derived from the pathname — it's the input to the
@@ -2933,7 +3084,7 @@ const Profile = ({ classes, settings, pathname, api }) => {
     // it, fade-in and all, whenever any tab refreshed).
     const tabLoaded = (tabData.loadedMask & tabBit(category)) !== 0;
     const isEmpty = tabLoaded && !profile.isLoading && activeData.length === 0 && accountName;
-    let emptyState = isEmpty ? (<div className={classes.emptyState} key={`empty-${es.key}`}><div className={classes.emptyStateIcon}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{es.icon}</svg></div><div className={classes.emptyStateTitle}>{es.title}</div><div className={classes.emptyStateSubtitle}>{es.sub}</div></div>) : null;
+    let emptyState = isEmpty ? (<div className={classes.emptyState} key={`empty-${es.key}`} ref={emptyStateRef}><div className={classes.emptyStateIcon}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{es.icon}</svg></div><div className={classes.emptyStateTitle}>{es.title}</div><div className={classes.emptyStateSubtitle}>{es.sub}</div></div>) : null;
 
     // The four Masonry instances are rendered UNCONTROLLED — no `scrollTop`
     // prop (see the note in MasonryExtended): they track their own scroll

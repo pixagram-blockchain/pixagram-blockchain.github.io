@@ -59,6 +59,7 @@ import * as actions from "../actions/utils";
 import * as favorites from "../utils/favorites";
 import { sanitizeComment as rawSanitizeComment, safeHTML } from "../utils/api/sanitizer";
 import { cssBackgroundImage } from "../utils/safeUrl";
+import { articleTableStyles } from "./editor/tableStyles";
 
 import { T } from "../utils/T";
 import { t, useLanguage } from "../utils/text";
@@ -663,7 +664,11 @@ const styles = theme => ({
         },
         "& a img": {
             cursor: "pointer",   // linked images navigate, they don't zoom
-        }
+        },
+        // Tables: rounded 16px frame, lighter header, lighter cells, thin
+        // separators, horizontal scroll when too wide. Shared with the
+        // editor's PreviewDialog so the preview matches the post.
+        ...articleTableStyles,
     },
     actions: {
         display: "flex",
@@ -3248,10 +3253,10 @@ class BlogPostDialog extends React.PureComponent {
                                 >
                                     <span className={classes.tocMarkerSlot}>
                                         <span className={
-                                            h.isTitle ? classes.tocCircle
-                                                : h.level === tocMinLevel ? classes.tocBar
-                                                    : classes.tocDot
-                                        } />
+                                                  h.isTitle ? classes.tocCircle
+                                                      : h.level === tocMinLevel ? classes.tocBar
+                                                          : classes.tocDot
+                                              } />
                                     </span>
                                     <span className={`${classes.tocLabel} ${h.isTitle ? classes.tocLabelTitle : ''}`}>{h.text}</span>
                                 </button>

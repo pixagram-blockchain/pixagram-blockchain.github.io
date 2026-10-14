@@ -971,7 +971,8 @@ const stripPrefixFromMask = (mask) => {
 };
 
 // Per-country mask entries, derived once from PHONE_MASKS:
-//   { mask, dial, sub, slots } — the full mask, its dial code (digits, no +),
+//   { mask, dial, head, sub, slots } — the full mask, its dial code (digits,
+//   no +), the literal digits a number must start with (matchHeadFromMask),
 //   the subscriber-only mask and that mask's slot count.
 let _MASK_ENTRIES = null;
 const maskEntries = (country) => {
@@ -980,7 +981,7 @@ const maskEntries = (country) => {
         for (const [iso, mask] of PHONE_MASKS) {
             const sub = stripPrefixFromMask(mask);
             if (!_MASK_ENTRIES[iso]) _MASK_ENTRIES[iso] = [];
-            _MASK_ENTRIES[iso].push({ mask, dial: dialPrefixFromMask(mask), sub, slots: (sub.match(/#/g) || []).length });
+            _MASK_ENTRIES[iso].push({ mask, dial: dialPrefixFromMask(mask), head: matchHeadFromMask(mask), sub, slots: (sub.match(/#/g) || []).length });
         }
     }
     return _MASK_ENTRIES[country] || [];
@@ -1075,9 +1076,49 @@ const sortedHeads = () => {
 // of `digits` to get the subscriber part.
 const matchCountryByPrefix = (digits) => {
     for (const [head, { iso, dial }] of sortedHeads()) {
-        if (digits.startsWith(head)) return { country: iso, prefix: dial };
+        if (digits.startsWith(head)) return { country: iso, prefix: dial, head };
     }
     return null;
+};
+
+// Countries that share a dial code (+1 NANP, +7 Russia/Kazakhstan, +599…)
+// are told apart by the digits that follow it: "+1 268…" is Antigua, "+7 7…"
+// Kazakhstan. Once the dial code has been typed, the country it first picked
+// is only a guess — this re-reads dial code + subscriber digits and returns
+// the more precise country, or null when the current one stands. The current
+// country keeps a tie (Canada typing 416 stays Canada, not the US default).
+// The E.164 number is the same either way; this keeps the flag, the mask
+// and the over-long check right.
+const refineCountry = (country, dialDigits, subscriber) => {
+    if (!dialDigits || !subscriber) return null;
+    const full = dialDigits + subscriber;
+    const m = matchCountryByPrefix(full);
+    if (!m || m.country === country || !m.prefix.startsWith(dialDigits) || !full.startsWith(m.prefix)) return null;
+    let own = -1;
+    for (const e of maskEntries(country)) {
+        if (full.startsWith(e.head) && e.head.length > own) own = e.head.length;
+    }
+    if (m.head.length <= own) return null;
+    return { country: m.country, prefix: m.prefix, subscriber: full.slice(m.prefix.length) };
+};
+
+// The trunk "0" of a nationally-written number ("076 …" in Switzerland) is
+// not part of the international number: it is dropped from `_phoneRaw` and
+// not shown either — "076 429 49 80" reads "76-429-49-80" next to "+41".
+// A lone "0" stays visible only while nothing else has been typed, so a
+// second "0" can still turn it into the "00" international access code.
+const phoneDisplay = (trunk, formatted) => formatted || (trunk ? "0" : "");
+
+// The subscriber digits as they go to the account service — the last word on
+// the number, whatever the field went through: a dial code typed again in
+// front of an over-long number ("41 78 …" under +41) and the trunk "0" are
+// removed here too, so "+41 078 …" can never be sent.
+const normalizeSubscriber = (dialCode, subscriber, country) => {
+    const dial = String(dialCode || "").replace(/\D/g, "");
+    let sub = String(subscriber || "").replace(/\D/g, "");
+    const { max } = slotRange(country);
+    if (dial && max > 0 && sub.length > max && sub.startsWith(dial)) sub = sub.slice(dial.length);
+    return stripTrunkZero(sub, country);
 };
 
 // Normalise whatever lands in the phone field — typed, pasted or autofilled —
@@ -1736,12 +1777,16 @@ const styles = theme => ({
                 backgroundColor: "rgba(0, 0, 0, 0.06)",
             },
         },
-        "& .quitStay": {
-            backgroundColor: "#000000",
-            color: "#ffffff",
+        // Higher specificity + !important: the theme's contained-button
+        // color (applied to .MuiButton-label) otherwise greys the text.
+        "& .MuiButton-root.quitStay, & .MuiButton-root.quitStay .MuiButton-label": {
+            color: "#ffffff !important",
+        },
+        "& .MuiButton-root.quitStay": {
+            backgroundColor: "#000000 !important",
             boxShadow: "none",
             "&:hover": {
-                backgroundColor: "#262626",
+                backgroundColor: "#262626 !important",
                 boxShadow: "none",
             },
         },
@@ -2243,6 +2288,7 @@ const StepVerify = memo(function StepVerify({
                                                 country,
                                                 phoneRaw,
                                                 phoneFormatted,
+                                                phoneRev,              // changes on every edit: redraws the field from state
                                                 phoneMask,
                                                 codeSent,
                                                 sendingCode,
@@ -2681,8 +2727,9 @@ const StepVerify = memo(function StepVerify({
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Memoized Step 3: Confirm
-//   Creation/recovery progress, then the backup PDF — which has to be saved
-//   before the dialog can close. Where the browser offers a real "Save as"
+//   Creation/recovery progress, then the backup PDF — downloaded by itself as
+//   soon as the account is ready, then acknowledged with a checkbox (which
+//   also opens "Save as" for a second copy) before the dialog can close. Where the browser offers a real "Save as"
 //   (File System Access), the save is known to have happened; anywhere else
 //   a plain download is all a page can start, and whether the file was kept
 //   or the download cancelled can't be seen — so the person confirms it.
@@ -2736,24 +2783,38 @@ const StepConfirm = memo(function StepConfirm({
                                 : t("components.create_account_dialog.account_created")}
                         </Typography>
 
+                        {/* The backup PDF has already downloaded by itself
+                            (_autoDownloadPdf). Ticking the box acknowledges it
+                            and opens "Save as" for a copy where the person
+                            chooses (_handlePdfConfirmedToggle); the dialog
+                            closes only once it is ticked (_mayClose). */}
                         {hasPdfBlob && (
-                            <Button
-                                variant={pdfDownloaded ? "outlined" : "contained"}
-                                color="default"
-                                onClick={onDownloadPdf}
-                                disabled={pdfSaving}
-                                startIcon={pdfSaving ? <CircularProgress size={16} color="inherit" /> : null}
-                                style={ST_MT_8}
-                            >
-                                {pdfSaving ? t("components.create_account_dialog.saving") : pdfDownloaded ? t("components.create_account_dialog.download_again") : t("components.create_account_dialog.download_backup_pdf")}
-                            </Button>
+                            <Typography style={ST_PDF_NOTE}>
+                                {pdfDownloaded
+                                    ? t("components.create_account_dialog.check_that_the_download_finished_if_it_was")
+                                    : t("components.create_account_dialog.you_must_download_your_backup_pdf_before")}
+                            </Typography>
                         )}
 
-                        {hasPdfBlob && !pdfDownloaded && (
-                            <Typography style={ST_C_BDBDBD__FS_13__TA_CENTER}>
-                                {t(
-                                    "components.create_account_dialog.you_must_download_your_backup_pdf_before"
-                                )}
+                        {hasPdfBlob && (
+                            <FormControlLabel
+                                key={"ack-" + pdfReminder}
+                                className={pdfReminder > 0 && !pdfConfirmed ? classes.termsRow + " " + classes.shake : classes.termsRow}
+                                control={
+                                    <Checkbox
+                                        checked={pdfConfirmed}
+                                        onChange={onTogglePdfConfirmed}
+                                        disabled={pdfVerified || pdfSaving}
+                                        name="backup-saved"
+                                    />
+                                }
+                                label={t("components.create_account_dialog.i_have_saved_my_backup_pdf")}
+                            />
+                        )}
+
+                        {hasPdfBlob && pdfReminder > 0 && !pdfConfirmed && (
+                            <Typography key={pdfReminder} className={classes.shake} style={ST_PDF_REMINDER}>
+                                {t("components.create_account_dialog.save_your_backup_pdf_before_closing_it_is")}
                             </Typography>
                         )}
 
@@ -2767,29 +2828,18 @@ const StepConfirm = memo(function StepConfirm({
                             </Typography>
                         )}
 
-                        {hasPdfBlob && pdfDownloaded && !pdfVerified && (
-                            <>
-                                <Typography style={ST_PDF_NOTE}>
-                                    {t("components.create_account_dialog.check_that_the_download_finished_if_it_was")}
-                                </Typography>
-                                <FormControlLabel
-                                    className={classes.termsRow}
-                                    control={
-                                        <Checkbox
-                                            checked={pdfConfirmed}
-                                            onChange={onTogglePdfConfirmed}
-                                            name="backup-saved"
-                                        />
-                                    }
-                                    label={t("components.create_account_dialog.i_have_saved_my_backup_pdf")}
-                                />
-                            </>
-                        )}
-
-                        {hasPdfBlob && pdfReminder > 0 && !pdfConfirmed && (
-                            <Typography key={pdfReminder} className={classes.shake} style={ST_PDF_REMINDER}>
-                                {t("components.create_account_dialog.save_your_backup_pdf_before_closing_it_is")}
-                            </Typography>
+                        {/* Another copy at any time — also the way out when
+                            the automatic download was blocked. */}
+                        {hasPdfBlob && (
+                            <Button
+                                variant="outlined"
+                                color="default"
+                                onClick={onDownloadPdf}
+                                disabled={pdfSaving}
+                                startIcon={pdfSaving ? <CircularProgress size={16} color="inherit" /> : null}
+                            >
+                                {pdfSaving ? t("components.create_account_dialog.saving") : pdfDownloaded ? t("components.create_account_dialog.download_again") : t("components.create_account_dialog.download_backup_pdf")}
+                            </Button>
                         )}
 
                         {/* A new account is signed in as the dialog closes
@@ -2916,7 +2966,9 @@ class CreateAccountDialog extends React.PureComponent {
             _country: _country,
             _dialCode: _initialDialCode,
             _phoneRaw: "",                  // subscriber digits only
-            _phoneFormatted: "",            // subscriber formatted under mask
+            _phoneFormatted: "",            // what the field shows: subscriber formatted under mask
+            _phoneTrunk: false,            // a trunk "0" was typed: dropped, not part of the number
+            _phoneRev: 0,                  // bumped on every edit: the field is redrawn from state each time
             _phoneMask: _initialSubscriberMask,
             _codeSent: false,
             _sendingCode: false,
@@ -3159,9 +3211,11 @@ class CreateAccountDialog extends React.PureComponent {
     };
 
     /**
-     * Save the previously-built PDF blob to disk. Called from the step 2
-     * success state via the explicit "Download backup" button; the dialog
-     * cannot close before the backup is saved (see _mayClose).
+     * Save the previously-built PDF blob to disk — from the "Download backup"
+     * button, and from ticking "I have saved my backup PDF" (the second,
+     * deliberate copy: see _handlePdfConfirmedToggle). The first copy is
+     * downloaded by itself when the account is ready (_autoDownloadPdf). The
+     * dialog cannot close before the backup is acknowledged (see _mayClose).
      *
      *  - Where the browser offers a real "Save as" (File System Access API,
      *    Chromium desktop), the file is written through it: a completed write
@@ -3172,10 +3226,13 @@ class CreateAccountDialog extends React.PureComponent {
      *    whether the file was kept or the download cancelled can't be seen:
      *    the person then confirms it (StepConfirm's checkbox).
      */
-    _trigger_pdf_download = async () => {
+    _trigger_pdf_download = async (opts) => {
         const { _pdfBlob, _username, _pdfSaving } = this.state;
         if (!_pdfBlob || _pdfSaving) return;
-        const filename = `KeysOf-${_username}-Pixagram.pdf`;
+        const filename = this._pdfFilename();
+        // From the acknowledgement checkbox, the automatic download already
+        // happened: a dismissed "Save as" only declines the extra copy.
+        const acknowledging = Boolean(opts && opts.acknowledging);
 
         if (typeof window !== "undefined" && typeof window.showSaveFilePicker === "function") {
             let handle = null;
@@ -3186,8 +3243,8 @@ class CreateAccountDialog extends React.PureComponent {
                 });
             } catch (err) {
                 if (err && err.name === "AbortError") {
-                    // The picker was dismissed: nothing saved, and we know it.
-                    this.setState({ _pdfNotice: "cancelled" }, () => this.forceUpdate());
+                    // The picker was dismissed: nothing saved through it.
+                    this.setState({ _pdfNotice: acknowledging ? "" : "cancelled" }, () => this.forceUpdate());
                     return;
                 }
                 handle = null; // not usable here (policy, embedded view…): plain download below
@@ -3213,28 +3270,73 @@ class CreateAccountDialog extends React.PureComponent {
             }
         }
 
+        this._downloadPdfPlain();
+    };
+
+    _pdfFilename = () => `KeysOf-${this.state._username}-Pixagram.pdf`;
+
+    /**
+     * A plain browser download of the backup PDF (Downloads folder, or the
+     * browser's own "where to save" prompt if the person turned that on).
+     * Whether the file was kept can't be seen from the page: the person
+     * acknowledges it with the checkbox. Returns true once started.
+     */
+    _downloadPdfPlain = () => {
+        const { _pdfBlob } = this.state;
+        if (!_pdfBlob) return false;
         try {
             const url = URL.createObjectURL(_pdfBlob);
             const a = document.createElement("a");
-            a.download = filename;
+            a.download = this._pdfFilename();
             a.href = url;
+            a.rel = "noopener";
+            a.style.display = "none";
+            document.body.appendChild(a);
             a.click();
             a.remove();
             // Revoked later rather than right after click(): some browsers
             // still read the URL once the save prompt has been answered.
             setTimeout(() => URL.revokeObjectURL(url), 60000);
-            // Started — not known to be kept: the person confirms it.
             this.setState({ _pdfDownloaded: true, _pdfNotice: "" }, () => this.forceUpdate());
+            return true;
         } catch (err) {
             console.error("[CreateAccountDialog] PDF download failed:", err);
             this.setState({ _pdfNotice: "failed" }, () => this.forceUpdate());
+            return false;
         }
     };
 
-    /** StepConfirm's "I have saved my backup PDF" checkbox. */
-    _handlePdfConfirmedToggle = () => {
-        if (this.state._pdfVerified) return; // known saved: nothing to confirm
-        this.setState({ _pdfConfirmed: !this.state._pdfConfirmed }, () => this.forceUpdate());
+    /**
+     * The account is ready (created, or recovered): download the backup PDF
+     * at once, without waiting for a click — people missed the button and
+     * then couldn't tell why the dialog wouldn't close. No click means no
+     * "Save as" picker here (browsers only open it from a click): this is a
+     * plain download. The acknowledgement checkbox then asks for the copy
+     * saved where the person chooses.
+     */
+    _autoDownloadPdf = () => {
+        const { _pdfBlob, _pdfDownloaded } = this.state;
+        if (!_pdfBlob || _pdfDownloaded) return;
+        this._downloadPdfPlain();
+    };
+
+    /**
+     * StepConfirm's "I have saved my backup PDF" checkbox. Ticking it is the
+     * acknowledgement that lets the dialog close — and, being a click, it
+     * also opens the system's "Save as" (File System Access API, Chromium
+     * desktop) so the backup gets a second copy in a place the person picks.
+     * Where the browser has no such picker (Firefox, Safari, phones), it
+     * starts the download again — on iOS that is also the copy that works
+     * when the automatic one was blocked for lack of a tap. Unticking only
+     * unticks; a copy written through "Save as" can't be unticked.
+     */
+    _handlePdfConfirmedToggle = (e, checked) => {
+        if (this.state._pdfVerified || this.state._pdfSaving) return;
+        const next = typeof checked === "boolean" ? checked : !this.state._pdfConfirmed;
+        this.setState({ _pdfConfirmed: next, _pdfNotice: "" }, () => this.forceUpdate());
+        // Called in the click itself, not after the re-render: the picker
+        // needs the click's user activation.
+        if (next) this._trigger_pdf_download({ acknowledging: true });
     };
 
     _handleMouseDownPassword = (event) => {
@@ -3373,6 +3475,8 @@ class CreateAccountDialog extends React.PureComponent {
             _phoneRaw: raw,
             _phoneMask: pickSubscriberMask(iso, raw.length) || "",
             _phoneFormatted: formatSubscriber(raw, iso),
+            _phoneTrunk: false,
+            _phoneRev: (this.state._phoneRev || 0) + 1,
             _codeSent: false,
             _confirmationCode: "",
             _codeStatus: "idle",
@@ -3436,7 +3540,7 @@ class CreateAccountDialog extends React.PureComponent {
             // Country resolved — switch mask, keep any subscriber digits we had.
             updates._country = match.country;
             updates._phoneMask = pickSubscriberMask(match.country, this.state._phoneRaw.length) || "";
-            updates._phoneFormatted = formatSubscriber(this.state._phoneRaw, match.country);
+            updates._phoneFormatted = phoneDisplay(this.state._phoneTrunk, formatSubscriber(this.state._phoneRaw, match.country));
         }
         this.setState(updates, () => { this.forceUpdate(); this._schedulePhoneCheck(); });
     };
@@ -3474,7 +3578,16 @@ class CreateAccountDialog extends React.PureComponent {
         const { _country, _dialCode } = this.state;
         const parsed = parsePhoneInput(inputVal);
         const prevDigits = String(this.state._phoneRaw || "");
-        const resetFlow = { _codeSent: false, _confirmationCode: "", _codeStatus: "idle", _phoneCheck: null, _sendError: "", _phoneError: "" };
+        const prevTrunk = Boolean(this.state._phoneTrunk);
+        // Every edit bumps _phoneRev, so StepVerify re-renders and the field
+        // is redrawn from state even when the number itself didn't change (a
+        // trunk "0", a letter, a stray separator) — before, the memoised step
+        // skipped those renders and the field kept showing characters the
+        // number didn't contain.
+        const resetFlow = {
+            _codeSent: false, _confirmationCode: "", _codeStatus: "idle", _phoneCheck: null, _sendError: "", _phoneError: "",
+            _phoneRev: (this.state._phoneRev || 0) + 1,
+        };
         const afterUpdate = () => { this.forceUpdate(); this._schedulePhoneCheck(); };
         // Select `country` (dial code `prefix`, digits only) with `subscriber`
         // in the field.
@@ -3484,6 +3597,7 @@ class CreateAccountDialog extends React.PureComponent {
                 _country: country,
                 _dialCode: "+" + prefix,
                 _phoneRaw: subscriber,
+                _phoneTrunk: false,
                 _phoneFormatted: formatSubscriber(subscriber, country),
                 _phoneMask: pickSubscriberMask(country, subscriber.length) || "",
                 ...resetFlow,
@@ -3491,7 +3605,7 @@ class CreateAccountDialog extends React.PureComponent {
         };
 
         // Full international number (paste, autofill or manual "+…" entry):
-        // the country code selects the country.
+        // the country code selects the country, whichever one was detected.
         if (parsed.intl) {
             const match = matchCountryByPrefix(parsed.digits);
             if (match) {
@@ -3503,11 +3617,19 @@ class CreateAccountDialog extends React.PureComponent {
             // typing ("+3" on its way to "+33") or see what they pasted
             // ("+999 …"). Nothing is sendable in this state — `_phoneRaw` is
             // empty — and StepVerify explains an unknown code under the field.
-            this.setState({ _phoneRaw: "", _phoneFormatted: "+" + parsed.digits, ...resetFlow }, afterUpdate);
+            this.setState({ _phoneRaw: "", _phoneTrunk: false, _phoneFormatted: "+" + parsed.digits, ...resetFlow }, afterUpdate);
             return;
         }
 
-        let digits = stripTrunkZero(parsed.digits, _country).slice(0, PHONE_MAX_DIGITS);
+        // "00", "000": the international access code being typed ("0041 …"),
+        // not a trunk "0" — kept as typed until the next digit makes it a
+        // "+…" number (parsePhoneInput reads "00" + digit as international).
+        if (/^0{2,}$/.test(parsed.digits) && !KEEP_TRUNK_ZERO.has(_country)) {
+            this.setState({ _phoneRaw: "", _phoneTrunk: false, _phoneFormatted: parsed.digits, ...resetFlow }, afterUpdate);
+            return;
+        }
+
+        let digits = parsed.digits;
         const { max: maxSlots } = slotRange(_country);
 
         // Tolerate users typing the country code without "+": if digits start
@@ -3517,9 +3639,15 @@ class CreateAccountDialog extends React.PureComponent {
         // the dial-code digits (Kazakh mobiles 7xx under +7, Lucerne 41x
         // under +41).
         const dialDigits = (_dialCode || "").replace(/\D/g, "");
-        if (dialDigits && digits.startsWith(dialDigits) && maxSlots > 0 && digits.length > maxSlots) {
-            digits = stripTrunkZero(digits.slice(dialDigits.length), _country);
+        if (dialDigits && digits.startsWith(dialDigits) && maxSlots > 0 && stripTrunkZero(digits, _country).length > maxSlots) {
+            digits = digits.slice(dialDigits.length);
         }
+
+        // The trunk "0" ("078 …" for +41 78 …): dropped from the number,
+        // not shown in the field either (see phoneDisplay).
+        const stripped = stripTrunkZero(digits, _country);
+        let trunk = stripped.length < digits.length;
+        digits = stripped.slice(0, PHONE_MAX_DIGITS);
 
         // No "+", and the number does not fit the selected country. If it
         // reads as a COMPLETE number of another country — that country's
@@ -3533,7 +3661,7 @@ class CreateAccountDialog extends React.PureComponent {
         // autofill, keyboard clipboard chip) — otherwise a Swiss mobile (7x…)
         // with two extra keystrokes would turn into a Russian number, and a
         // British 1xx… landline with one into an American one.
-        if (maxSlots > 0 && digits.length > maxSlots) {
+        if (!trunk && maxSlots > 0 && digits.length > maxSlots) {
             const match = matchCountryByPrefix(digits);
             if (match && match.country !== _country) {
                 const subscriber = stripTrunkZero(digits.slice(match.prefix.length), match.country);
@@ -3547,24 +3675,39 @@ class CreateAccountDialog extends React.PureComponent {
             }
         }
 
-        // Separator-deletion detection: if the user kept the same number of
-        // digits but shortened the field, they deleted a separator character
-        // — pop a trailing digit so progress visibly happens.
+        // Within a shared dial code (+1, +7…), the digits after it name the
+        // country: "268 …" under +1 is Antigua, "7 …" under +7 Kazakhstan.
+        const refined = refineCountry(_country, dialDigits, digits);
+        if (refined) {
+            selectCountry(refined.country, refined.prefix, refined.subscriber);
+            return;
+        }
+
+        // Separator-deletion detection: if the user kept the same digits but
+        // shortened the field, they deleted a separator character (or the
+        // lone "0") — take back the last digit, or the trunk "0" once no
+        // digit is left, so Backspace always visibly does something.
         const prevFormatted = String(this.state._phoneFormatted || "");
         const sameDigits = digits === prevDigits;
         const shortened = inputVal.length < prevFormatted.length;
-        if (sameDigits && shortened && digits.length > 0) {
-            digits = digits.slice(0, -1);
+        if (sameDigits && shortened) {
+            if (digits.length > 0) digits = digits.slice(0, -1);
+            else if (prevTrunk) trunk = false;
         }
-
-        const formatted = formatSubscriber(digits, _country);
 
         this.setState({
             _phoneRaw: digits,
-            _phoneFormatted: formatted,
+            _phoneTrunk: trunk,
+            _phoneFormatted: phoneDisplay(trunk, formatSubscriber(digits, _country)),
             _phoneMask: pickSubscriberMask(_country, digits.length) || "",
             ...resetFlow,
         }, afterUpdate);
+    };
+
+    /** The number as sent to the account service (E.164), see normalizeSubscriber. */
+    _phoneE164 = (state) => {
+        const st = state || this.state;
+        return composeE164(st._dialCode, normalizeSubscriber(st._dialCode, st._phoneRaw, st._country));
     };
 
     /**
@@ -3665,7 +3808,7 @@ class CreateAccountDialog extends React.PureComponent {
             this.setState({ _phoneChecking: false, _phoneCheck: null }, () => this.forceUpdate());
             return;
         }
-        const phone = composeE164(_dialCode, _phoneRaw);
+        const phone = this._phoneE164();
         this.setState({ _phoneChecking: true }, () => this.forceUpdate());
         try {
             const res = await fetch(`${ACCOUNT_SERVICE_API}/check-phone`, {
@@ -3675,7 +3818,7 @@ class CreateAccountDialog extends React.PureComponent {
             });
             const json = await res.json().catch(() => ({}));
             // Stale-response guard: the user may have kept typing.
-            const nowPhone = composeE164(this.state._dialCode, this.state._phoneRaw);
+            const nowPhone = this._phoneE164();
             if (nowPhone !== phone) { this.setState({ _phoneChecking: false }, () => this.forceUpdate()); return; }
 
             if (res.ok && json.success) {
@@ -3718,7 +3861,7 @@ class CreateAccountDialog extends React.PureComponent {
      */
     _sendCode = async (turnstileToken) => {
         const { _phoneRaw, _dialCode } = this.state;
-        const phone = composeE164(_dialCode, _phoneRaw);
+        const phone = this._phoneE164();
         const payload = { phone, language: toSmsLang(getLanguage()) };
         if (typeof turnstileToken === "string" && turnstileToken) payload.turnstile_token = turnstileToken;
         this.setState({ _sendingCode: true, _codeStatus: "idle", _sendError: "", _phoneError: "", _codeError: "" }, () => this.forceUpdate());
@@ -3846,7 +3989,7 @@ class CreateAccountDialog extends React.PureComponent {
         const { _phoneRaw, _dialCode, _confirmationCode } = this.state;
         const code = String(_confirmationCode || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
         if (code.length < 6) return;
-        const phone = composeE164(_dialCode, _phoneRaw);
+        const phone = this._phoneE164();
         this.setState({ _codeStatus: "pending", _codeError: "" }, () => this.forceUpdate());
         try {
             const res = await fetch(`${ACCOUNT_SERVICE_API}/verify-code`, {
@@ -4188,10 +4331,14 @@ class CreateAccountDialog extends React.PureComponent {
                 //
                 // No auto-close: the dialog stays until the person has saved
                 // the backup PDF and closes it themselves (_mayClose).
+                // The backup PDF downloads by itself (_autoDownloadPdf).
                 this.setState({
                     _creating_account: false,
                     _confirmStatus:    "success",
-                }, () => this.forceUpdate());
+                }, () => {
+                    this.forceUpdate();
+                    this._autoDownloadPdf();
+                });
 
                 if (actions?.trigger_snackbar) {
                     actions.trigger_snackbar(t("components.create_account_dialog.account_created_successfully", {
@@ -4256,7 +4403,10 @@ class CreateAccountDialog extends React.PureComponent {
         if (this._unmounted) return;
         if (ok) {
             // Signed in already: closing has nothing left to do.
-            this.setState({ _confirmStatus: "success", _signInState: "done" }, () => this.forceUpdate());
+            this.setState({ _confirmStatus: "success", _signInState: "done" }, () => {
+                this.forceUpdate();
+                this._autoDownloadPdf();
+            });
             if (actions?.trigger_snackbar) {
                 actions.trigger_snackbar(t("components.create_account_dialog.welcome_back", {
                     _username: this.state._username
@@ -4601,6 +4751,7 @@ class CreateAccountDialog extends React.PureComponent {
             _dialCode,
             _phoneRaw,
             _phoneFormatted,
+            _phoneRev,
             _phoneMask,
             _codeSent,
             _sendingCode,
@@ -4736,6 +4887,7 @@ class CreateAccountDialog extends React.PureComponent {
                                             country={_country}
                                             phoneRaw={_phoneRaw}
                                             phoneFormatted={_phoneFormatted}
+                                            phoneRev={_phoneRev}
                                             phoneMask={_phoneMask}
                                             codeSent={_codeSent}
                                             sendingCode={_sendingCode}
@@ -4823,7 +4975,10 @@ class CreateAccountDialog extends React.PureComponent {
                                                 color="primary"
                                                 autoFocus
                                                 onClick={this._handleFinalConfirm}
-                                                disabled={_confirmStatus !== "success" || (Boolean(_pdfBlob) && !_pdfConfirmed) || signingIn}
+                                                // Not disabled for an unacknowledged backup: a disabled
+                                                // button gave no reason. A click shows the reminder and
+                                                // shakes the checkbox instead (_mayClose → _remindPdf).
+                                                disabled={_confirmStatus !== "success" || signingIn}
                                                 startIcon={signingIn ? <CircularProgress size={16} color="inherit" /> : null}
                                             >
                                                 {signingIn

@@ -10,6 +10,7 @@ import CircularProgress from "@material-ui/core/CircularProgress";
 import CloseIcon from "@material-ui/icons/Close";
 import PublishIcon from "@material-ui/icons/Publish";
 import {safeHTML} from "../../utils/api/sanitizer";
+import { articleTableStyles } from "./tableStyles";
 
 import { t, useLanguage } from "../../utils/text";
 
@@ -151,72 +152,10 @@ export const previewDialogStyles = (theme) => ({
             borderRadius: 12,
             margin: "1.5em 0"
         },
-        // ── Tables ──────────────────────────────────────────────────────
-        // Matches the visual editor (EditorSection) so the preview is not a
-        // surprise. borderCollapse must be `separate` with borderSpacing 0 —
-        // with `collapse` the border-radius is ignored by every browser.
-        "& table": {
-            width: "100%",
-            tableLayout: "fixed",
-            borderCollapse: "separate",
-            borderSpacing: 0,
-            margin: "1.5em 0",
-            backgroundColor: "#000000",
-            border: "1px solid rgba(255,255,255,0.14)",
-            borderRadius: 12,
-            overflow: "hidden",
-            "& th, & td": {
-                backgroundColor: "#000000",
-                color: "#e0e0e0",
-                padding: 12,
-                verticalAlign: "top",
-                textAlign: "left",
-                wordBreak: "break-word",
-                border: "none",
-                borderRight: "1px solid rgba(255,255,255,0.1)",
-                borderBottom: "1px solid rgba(255,255,255,0.1)"
-            },
-            "& th": {
-                backgroundColor: "#0d0d0d",
-                fontWeight: 600,
-                color: "#fff"
-            },
-            // Interior rules only: the table's own border draws the outside.
-            "& tr > *:last-child": {
-                borderRight: "none"
-            },
-            "& tr:last-child > *": {
-                borderBottom: "none"
-            },
-            // REQUIRED, not cosmetic: `align` is a presentational attribute,
-            // so the `textAlign: "left"` above beats it. Both marked and
-            // micromark emit column alignment as align="center"/"right" and
-            // nothing else — without these two rules every aligned column
-            // renders left in the preview and on the published post.
-            "& th[align='center'], & td[align='center']": {
-                textAlign: "center"
-            },
-            "& th[align='right'], & td[align='right']": {
-                textAlign: "right"
-            },
-            // previewContent gives every <p> a 1em bottom margin; inside a
-            // cell that reads as dead space under every row.
-            "& p": {
-                marginBottom: 0
-            }
-        },
-        // Narrow screens: let a wide table scroll horizontally instead of
-        // squeezing every column to a few characters. `width: max-content`
-        // with `max-width: 100%` keeps narrow tables from stretching.
-        [theme.breakpoints.down("xs")]: {
-            "& table": {
-                display: "block",
-                tableLayout: "auto",
-                width: "max-content",
-                maxWidth: "100%",
-                overflow: "auto"
-            }
-        }
+        // Tables: shared with BlogPostDialog so the preview matches the
+        // published post exactly (rounded frame, lighter header, horizontal
+        // scroll for wide tables) — see ./tableStyles.
+        ...articleTableStyles,
     },
     previewDialogActions: {
         padding: theme.spacing(3, 4),

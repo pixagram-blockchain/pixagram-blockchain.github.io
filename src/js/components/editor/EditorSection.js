@@ -158,10 +158,17 @@ export const editorSectionStyles = (theme) => ({
             borderRight: "1px solid rgba(255,255,255,0.1)",
             borderBottom: "1px solid rgba(255,255,255,0.1)"
         },
+        // Header cells: slightly lighter than the body cells, light text.
+        // !important on both: a header cell must never end up with a light
+        // background under its light text, whatever an inline style (pasted
+        // HTML, a cell background carried by Lexical) or another sheet says.
         "& th, & .lexical-table-cell-header": {
-            backgroundColor: "#0d0d0d",
+            backgroundColor: "#161616 !important",
             fontWeight: 600,
-            color: "#ffffff"
+            color: "#ffffff !important"
+        },
+        "& th *, & .lexical-table-cell-header *": {
+            color: "inherit"
         },
         // Interior rules only: the table's own border draws the outside.
         "& tr > *:last-child": {
@@ -358,34 +365,34 @@ const EditorSection = React.memo(({
                                   }) => {
     useLanguage();
     return (
-    <div className={classes.editorSection}>
-        <EditorHeader
-            classes={classes}
-            title={title}
-            description={description}
-            onTitleChange={onTitleChange}
-            onDescriptionChange={onDescriptionChange}
-        />
-        <div className={classes.editorWrapper + " " + editorMode} onClick={onFocus}>
-            <div style={EDITOR_BODY_WRAPPER_STYLE}>
-                <EditorBody
-                    editorMode={editorMode}
-                    initialMarkdown={initialMarkdown}
-                    markdownSource={markdownSource}
-                    editorRef={editorRef}
-                    onChange={onChange}
-                    onMarkdownChange={onMarkdownChange}
-                    onSave={onSave}
-                    onLink={onLink}
-                    onImage={onImage}
-                    onImageFiles={onImageFiles}
-                    onToggleBlockType={onToggleBlockType}
-                    onToolbarStateChange={onToolbarStateChange}
-                />
+        <div className={classes.editorSection}>
+            <EditorHeader
+                classes={classes}
+                title={title}
+                description={description}
+                onTitleChange={onTitleChange}
+                onDescriptionChange={onDescriptionChange}
+            />
+            <div className={classes.editorWrapper + " " + editorMode} onClick={onFocus}>
+                <div style={EDITOR_BODY_WRAPPER_STYLE}>
+                    <EditorBody
+                        editorMode={editorMode}
+                        initialMarkdown={initialMarkdown}
+                        markdownSource={markdownSource}
+                        editorRef={editorRef}
+                        onChange={onChange}
+                        onMarkdownChange={onMarkdownChange}
+                        onSave={onSave}
+                        onLink={onLink}
+                        onImage={onImage}
+                        onImageFiles={onImageFiles}
+                        onToggleBlockType={onToggleBlockType}
+                        onToolbarStateChange={onToolbarStateChange}
+                    />
+                </div>
             </div>
         </div>
-    </div>
-);
+    );
 });
 
 export default EditorSection;

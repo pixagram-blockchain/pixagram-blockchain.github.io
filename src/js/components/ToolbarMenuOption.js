@@ -10,9 +10,11 @@ import SaleIcon from "../icons/Sale";
 import SettingsIcon from "@material-ui/icons/Settings";
 import BallotIcon from "@material-ui/icons/Ballot";
 import HelpIcon from "@material-ui/icons/Help";
+import TelegramIcon from "@material-ui/icons/Telegram";
 import { Divider } from "@material-ui/core";
 
 import { t, useLanguage } from "../utils/text";
+import { HELP_TELEGRAM_URL } from "../utils/constants";
 
 const { useMemo, memo } = React;
 
@@ -20,11 +22,11 @@ const styles = theme => ({});
 
 // Memoized menu items to prevent re-renders
 const MenuItems = React.memo(({
-                            onIcoClick,
-                            onWitnessesClick,
-                            onInfoClick,
-                            onSettingsClick
-                        }) => (
+                                  onIcoClick,
+                                  onWitnessesClick,
+                                  onInfoClick,
+                                  onSettingsClick
+                              }) => (
     <MenuList>
         <MenuItem onClick={onIcoClick}>
             <ListItemIcon>
@@ -33,6 +35,15 @@ const MenuItems = React.memo(({
             <ListItemText primary={t("components.toolbar_menu_option.shop")} secondary={t("components.toolbar_menu_option.buy_now")} />
         </MenuItem>
         <Divider />
+        {/* Ask Help: the community's Telegram group, as a real link
+            (component="a") — the entry the desktop toolbar shows left of
+            Governance. */}
+        <MenuItem component="a" href={HELP_TELEGRAM_URL} target="_blank" rel="noopener noreferrer">
+            <ListItemIcon>
+                <TelegramIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText primary={t("words.ask_help")} />
+        </MenuItem>
         <MenuItem onClick={onWitnessesClick}>
             <ListItemIcon>
                 <VoteIcon fontSize="small" />
