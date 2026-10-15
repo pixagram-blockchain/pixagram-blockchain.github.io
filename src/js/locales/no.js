@@ -3347,6 +3347,29 @@ export default {
             "balance_history": "Saldohistorikk",
             "followers_over_time": "Følgere over tid",
             "following_over_time": "Fulgte kontoer over tid"
+        },
+        "transaction_inspector": {
+            "inspect": "Inspiser transaksjon",
+            "close": "Lukk",
+            "copy": "Kopier",
+            "copied": "Kopiert",
+            "at_todays_price": "til dagens pris",
+            "irreversible": "Irreversibel",
+            "reversible": "Ennå ikke irreversibel",
+            "signed": "Signert transaksjon",
+            "virtual": "Virtuell operasjon",
+            "virtual_hint": "Opprettet av kjeden selv, ikke signert av noen.",
+            "transaction": "Transaksjon",
+            "transaction_id": "Transaksjons-ID",
+            "block": "Blokk",
+            "index_in_block": "Posisjon i blokk",
+            "index_in_transaction": "Posisjon i transaksjon",
+            "history_entry": "Historikkoppføring",
+            "operation": "Operasjon",
+            "open_post": "Åpne innlegg",
+            "encrypted_memo": "Kryptert memo",
+            "shortened": "Forkortet for visning",
+            "raw_data": "Rådata"
         }
     }
 };

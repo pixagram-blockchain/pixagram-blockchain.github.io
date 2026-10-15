@@ -3347,6 +3347,29 @@ export default {
             "balance_history": "Saldohistoria",
             "followers_over_time": "Seuraajien kehitys",
             "following_over_time": "Seurattavien kehitys"
+        },
+        "transaction_inspector": {
+            "inspect": "Tarkastele tapahtumaa",
+            "close": "Sulje",
+            "copy": "Kopioi",
+            "copied": "Kopioitu",
+            "at_todays_price": "tämän päivän hinnalla",
+            "irreversible": "Peruuttamaton",
+            "reversible": "Ei vielä peruuttamaton",
+            "signed": "Allekirjoitettu tapahtuma",
+            "virtual": "Virtuaalinen operaatio",
+            "virtual_hint": "Ketjun itsensä luoma, kukaan ei ole allekirjoittanut sitä.",
+            "transaction": "Tapahtuma",
+            "transaction_id": "Tapahtuman tunnus",
+            "block": "Lohko",
+            "index_in_block": "Sijainti lohkossa",
+            "index_in_transaction": "Sijainti tapahtumassa",
+            "history_entry": "Historiamerkintä",
+            "operation": "Operaatio",
+            "open_post": "Avaa julkaisu",
+            "encrypted_memo": "Salattu viesti",
+            "shortened": "Lyhennetty näyttöä varten",
+            "raw_data": "Raakadata"
         }
     }
 };

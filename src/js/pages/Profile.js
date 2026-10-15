@@ -37,7 +37,7 @@ import CreateCommunityDialog from "../components/CreateCommunityDialog";
 import ProfileTabs from "../components/ProfileTabs";
 import ProfileMobileCard from "../components/ProfileMobileCard";
 import ProfileSidebar from "../components/ProfileSidebar";
-import TimelineEvent, { parseTimestamp } from "../components/TimelineEvent";
+import TimelineEvent, { parseTimestamp, getTimelineEventIcon } from "../components/TimelineEvent";
 import EditProfileDialog from "../components/EditProfileDialog";
 import DeleteCommentModal from "../components/DeleteCommentModal";
 import Timeline from "@material-ui/lab/Timeline";
@@ -45,7 +45,8 @@ import Fab from "@material-ui/core/Fab";
 import PhotoCameraRounded from "@material-ui/icons/PhotoCameraRounded";
 import AddAPhoto from "@material-ui/icons/AddAPhoto";
 
-import { t, useLanguage } from "../utils/text";
+import { t, useLanguage, getLocaleCode } from "../utils/text";
+import { toHistoryRecord, ownString } from "../utils/chainOps";
 
 // ── Deferred wallet import ─────────────────────────────────────────────
 // Single loader shared by React.lazy and the idle prefetch below, so both
@@ -84,6 +85,19 @@ const LazyDeletePostDialog = React.lazy(() => loadOwnPostDialogs().then(m => ({ 
 // usePictureDialog hook, imported statically above.
 const loadPictureDialog = () => import("../components/PictureDialog");
 const LazyPictureDialog = React.lazy(loadPictureDialog);
+
+// ── Deferred transaction inspector ─────────────────────────────────────
+// One dialog for the whole History tab: a row's dot opens it on that
+// event's chain record. Split out like the viewers above and warmed on idle
+// once the History tab is shown, so the first click isn't gated on a fetch.
+const loadTxInspector = () => import("../components/TransactionInspector");
+const LazyTxInspector = React.lazy(loadTxInspector);
+
+// The transaction inspector closed, and the timeline dot's colours (see the
+// timelineDot style): the inspector draws its icon like the dot it opened from.
+const TX_INSPECT_CLOSED = { open: false, record: null, originRect: null, icon: null };
+const TIMELINE_DOT_COLOR = "#999999";
+const TIMELINE_DOT_BACKGROUND = "#000000";
 
 // Suspense fallback for a lazily-loaded dialog — shown only on a cold open
 // (chunk not yet cached, before idle-prefetch ran). A dim backdrop appears
@@ -257,6 +271,11 @@ const styles = theme => ({
         marginTop: 6,
         marginBottom: 6,
         borderRadius: "21px",
+        // The dot opens the transaction inspector (TimelineEvent makes it a
+        // button when Profile passes onInspect).
+        transition: "color 160ms cubic-bezier(0.4, 0, 0.2, 1)",
+        "&[role=button]:hover": { color: "#e8e8e8" },
+        "&:focus-visible": { outline: "2px solid rgba(255,255,255,0.6)", outlineOffset: "2px" },
         // The ::before pseudo-element is the short horizontal "ear" bridging
         // the dot to the card. Its height now matches the connector width (6px)
         // so the joinery looks continuous.
@@ -554,6 +573,29 @@ const transformRepliesToCardFormat = (rawReplies, profileOwnerAccount, voterProf
 // convention is preserved here under the 'pixa-'/'portal-' prefixes.
 const isCommunityPermlink = (s) => typeof s === 'string' && /^(pixa|portal)-\d+$/.test(s);
 
+// ── Fonts the list rows use ────────────────────────────────────────────
+// Families of one mounted row of a list tab (rows of a tab share their
+// component, so one stands for all), lower-cased and unquoted.
+const FONT_EPOCH_DEBOUNCE_MS = 250;
+const normalizeFamily = (f) => String(f || "").trim().replace(/^["']|["']$/g, "").toLowerCase();
+const familiesUsedBy = (masonry) => {
+    const root = masonry && masonry._scrollingContainer;
+    const row = root && root.querySelector(".ReactVirtualized__Masonry__innerScrollContainer > *");
+    if (!row) return null;
+    const out = new Set();
+    const nodes = [row, ...row.querySelectorAll("*")];
+    for (let i = 0; i < nodes.length && i < 60; i++) {
+        const fam = window.getComputedStyle(nodes[i]).fontFamily || "";
+        fam.split(",").forEach((f) => out.add(normalizeFamily(f)));
+    }
+    return out;
+};
+
+// A comment op carries the whole post body (base64 images included) and a
+// deep timeline keeps a record per event: the inspector gets the first few
+// thousand characters of any string field, and says so.
+const TIMELINE_RECORD_CLIP = 4096;
+
 const parseAccountHistoryToTimeline = (historyOps, username) => {
     if (!Array.isArray(historyOps)) return [];
     const events = [];
@@ -612,12 +654,13 @@ const parseAccountHistoryToTimeline = (historyOps, username) => {
                     ev.type = "comment_created";
                     ev.author = d.parent_author||''; ev.postAuthor = d.parent_author||''; ev.postPermlink = d.parent_permlink||'';
                     ev.postTitle = d.parent_permlink||'';
-                    ev.commentPreview = (d.body||'').slice(0,120);
+                    // An owned copy: a bare slice would keep the whole body alive.
+                    ev.commentPreview = ownString((d.body||'').slice(0,120));
                 }
                 break;
             case 'transfer': if (d.from === username) { ev.type = "outgoing_transfer"; ev.to = d.to||''; } else { ev.type = "incoming_transfer"; ev.from = d.from||''; } ev.amount = d.amount||'0'; ev.currency = (d.amount||'').includes('PXS')?'PXS':'PIXA'; ev.memo = d.memo||''; break;
             case 'curation_reward': ev.type = "curation_reward"; ev.pxp = d.reward||'0'; ev.pxs = '0'; ev.usdValue = '0'; ev.postAuthor = d.comment_author||''; ev.postPermlink = d.comment_permlink||''; ev.postTitle = d.comment_permlink||''; break;
-            case 'author_reward': ev.type = "curation_reward"; ev.pxp = d.vesting_payout||'0'; ev.pxs = d.pxs_payout||d.sbd_payout||'0'; ev.usdValue = '0'; ev.postAuthor = d.author||username; ev.postPermlink = d.permlink||''; ev.postTitle = d.permlink||''; break;
+            case 'author_reward': ev.type = "author_reward"; ev.pxp = d.vesting_payout||'0'; ev.pxs = d.pxs_payout||d.sbd_payout||'0'; ev.usdValue = '0'; ev.postAuthor = d.author||username; ev.postPermlink = d.permlink||''; ev.postTitle = d.permlink||''; break;
             case 'limit_order_create': case 'fill_order': ev.type = "market_order"; ev.fromCurrency = (d.amount_to_sell||'').includes('PXS')?'PXS':'PIXA'; ev.toCurrency = ev.fromCurrency==='PIXA'?'PXS':'PIXA'; ev.fromAmount = d.amount_to_sell||d.current_pays||'0'; ev.toAmount = d.min_to_receive||d.open_pays||'0'; break;
             case 'claim_reward_balance': ev.type = "curation_reward"; ev.pxp = d.reward_vests||d.reward_pixa||'0'; ev.pxs = d.reward_pxs||'0'; ev.usdValue = '0'; ev.postTitle = 'Reward claim'; break;
             case 'transfer_to_vesting': ev.type = "outgoing_transfer"; ev.to = d.to||username; ev.amount = d.amount||'0'; ev.currency = 'PIXA'; ev.memo = 'Power Up'; break;
@@ -639,6 +682,10 @@ const parseAccountHistoryToTimeline = (historyOps, username) => {
                 break;
             default: continue;
         }
+        // The chain view of the event — op, payload, transaction and block —
+        // for the transaction inspector. Long strings are clipped (see
+        // TIMELINE_RECORD_CLIP).
+        ev._record = toHistoryRecord(opIndex, trx, { clip: TIMELINE_RECORD_CLIP });
         events.push(ev);
     }
     // Primary key: timestamp (newest first). Secondary key: account-history
@@ -1122,17 +1169,21 @@ const ROW_SHAPES = [
     (r) => `${rowIdentity(r)}|${r.title}|${r.body}|${(r.replyTo && r.replyTo.username) || ''}`,
     (e) => rowIdentity(e),
 ];
-// One string per row object (a render then costs a WeakMap lookup per cell).
+// One string per row object and text epoch (a render then costs a WeakMap
+// lookup per cell). The epoch — see textEpochRef in the page — moves when
+// the rows' copy reflows without the rows changing: a language switch, a
+// web font arriving. It is part of every key, so the tab's MasonryExtended
+// re-measures its rows in place and glides the rest into position.
 const ROW_SHAPE_CACHE = [null, new WeakMap(), new WeakMap(), new WeakMap()];
-const rowLayoutKey = (cat, row) => {
+const rowLayoutKey = (cat, row, epoch = 0) => {
     if (!row) return undefined;
     const cache = ROW_SHAPE_CACHE[cat];
-    let key = cache.get(row);
-    if (key === undefined) {
-        key = ROW_SHAPES[cat](row);
-        cache.set(row, key);
+    let entry = cache.get(row);
+    if (entry === undefined || entry.epoch !== epoch) {
+        entry = { epoch, key: epoch + "|" + ROW_SHAPES[cat](row) };
+        cache.set(row, entry);
     }
-    return key;
+    return entry.key;
 };
 
 // A reload fetches the first page again. When the reader had already paged
@@ -1395,7 +1446,7 @@ const useTabData = (api, account, category, ready) => {
                     const fresh = parseAccountHistoryToTimeline(h, name);
                     const merged = keepLoadedTail(prev(), fresh);
                     if (merged === fresh) { setHasMoreTimeline(true); timelineFloorRef.current = floor; }
-                    // Kept the deeper pages: the pagination floor stays where
+                        // Kept the deeper pages: the pagination floor stays where
                     // they reached.
                     else timelineFloorRef.current = Math.min(timelineFloorRef.current, floor);
                     setTimeline(merged);
@@ -2623,6 +2674,79 @@ const Profile = ({ classes, settings, pathname, api }) => {
 
     const postNav = usePostNavigation({ api, posts: visiblePosts, masonryRefs: grid.masonryRefs, scrollToIndex: grid.scrollToIndex, setSelectedPostIndex: grid.setSelectedPostIndex, profileUsername: parsed.username, nsfwEnabled: settings._nsfw_enabled });
 
+    // ── Text epoch (comments, replies, history) ────────────────────────
+    // A list row is measured once, with the copy it had then. A language
+    // switch rewrites that copy in place (each row subscribes to the language
+    // itself) and a web font arriving late reflows it, so measured heights go
+    // stale: rows overlap or leave gaps. The epoch is part of every list
+    // row's layout key (rowLayoutKey): bump it and re-render the tab's
+    // Masonry, and MasonryExtended re-measures the rows in place, gliding the
+    // ones past a change into position.
+    const textEpochRef = useRef(0);
+    const categoryNowRef = useRef(category);
+    categoryNowRef.current = category;
+    const epochMasonryRefs = grid.masonryRefs;
+    const bumpTextEpoch = useCallback(() => {
+        textEpochRef.current += 1;
+        const cat = categoryNowRef.current;
+        if (cat === 0) return; // the posts grid keys its cards itself
+        const m = epochMasonryRefs.current[cat];
+        if (m) m.forceUpdate();
+    }, [epochMasonryRefs]);
+    const localeCode = getLocaleCode();
+    const localeSeenRef = useRef(localeCode);
+    useEffect(() => {
+        if (localeSeenRef.current === localeCode) return;
+        localeSeenRef.current = localeCode;
+        bumpTextEpoch();
+    }, [localeCode, bumpTextEpoch]);
+    // Fonts load on demand (a face starts loading when text first uses it,
+    // subsets as new characters appear), so only a load of a family the rows
+    // on screen actually use counts, and a burst of them counts once. Any
+    // load at all would re-measure every row of the tab, the ones above the
+    // viewport included.
+    useEffect(() => {
+        const fonts = typeof document !== "undefined" ? document.fonts : null;
+        if (!fonts || typeof fonts.addEventListener !== "function") return undefined;
+        let timer = 0;
+        const onFontsLoaded = (e) => {
+            const faces = (e && e.fontfaces) || [];
+            if (!faces.length || categoryNowRef.current === 0) return;
+            const used = familiesUsedBy(epochMasonryRefs.current[categoryNowRef.current]);
+            if (!used || !faces.some((f) => used.has(normalizeFamily(f.family)))) return;
+            clearTimeout(timer);
+            timer = setTimeout(bumpTextEpoch, FONT_EPOCH_DEBOUNCE_MS);
+        };
+        fonts.addEventListener("loadingdone", onFontsLoaded);
+        return () => {
+            clearTimeout(timer);
+            fonts.removeEventListener("loadingdone", onFontsLoaded);
+        };
+    }, [bumpTextEpoch, epochMasonryRefs]);
+
+    // ── Transaction inspector (History tab) ────────────────────────────
+    // One dialog for the whole timeline. A row's dot hands over its event
+    // and the dot's rect: the dialog shows the chain record the parser kept
+    // on the event (ev._record), drawn with the dot's own glyph flying out
+    // of it. Mounted on first use and kept mounted, like the viewers.
+    const [txInspect, setTxInspect] = useState(TX_INSPECT_CLOSED);
+    const [txInspectorMounted, setTxInspectorMounted] = useState(false);
+    const openTxInspector = useCallback((ev, rect) => {
+        if (!ev || !ev._record) return;
+        setTxInspectorMounted(true);
+        setTxInspect({ open: true, record: ev._record, originRect: rect || null, icon: getTimelineEventIcon(ev) });
+    }, []);
+    const closeTxInspector = useCallback(() => {
+        setTxInspect((s) => (s.open ? { ...s, open: false, originRect: null } : s));
+    }, []);
+    // Another profile or another tab: what the dialog shows belonged to it.
+    useEffect(() => { closeTxInspector(); }, [parsed.username, category, closeTxInspector]);
+    useEffect(() => {
+        if (txInspectorMounted || category !== 3) return undefined;
+        const id = idle(() => { loadTxInspector().catch(() => {}); });
+        return () => cancelIdle(id);
+    }, [txInspectorMounted, category]);
+
     // ── Profile picture viewer ─────────────────────────────────────────
     // Click on the profile picture (ProfileSidebar / ProfileMobileCard call
     // `onOpenPicture` with the click event) → "#picture" is pushed, the
@@ -2722,7 +2846,7 @@ const Profile = ({ classes, settings, pathname, api }) => {
         getContainer: getScrollContainer,
         onRefresh: refreshProfilePage,
         enabled: !postNav.artworkOpen && !pictureNav.open && !walletOpen && !editOpen
-            && !createArtworkOpen && !createCommunityOpen && !followListOpened,
+            && !createArtworkOpen && !createCommunityOpen && !followListOpened && !txInspect.open,
     });
 
     const locales = settings._selected_locales_code;
@@ -3051,9 +3175,10 @@ const Profile = ({ classes, settings, pathname, api }) => {
             <TimelineEvent index={index} key={key} eventId={ev.id} style={style} event={ev} classes={classes} timeAgo={timeAgo} isLast={index>=tabData.timeline.length-1}
                            onOpenProfile={onOpenProfileFromTimeline}
                            onOpenCommunity={onOpenCommunityFromTimeline}
-                           onOpenPost={onOpenPostFromTimeline} />
+                           onOpenPost={onOpenPostFromTimeline}
+                           onInspect={openTxInspector} />
         </CellMeasurer>);
-    }, [tabData.timeline, columnWidth, cellMeasurerCache, classes, onOpenProfileFromTimeline, onOpenCommunityFromTimeline, onOpenPostFromTimeline]);
+    }, [tabData.timeline, columnWidth, cellMeasurerCache, classes, onOpenProfileFromTimeline, onOpenCommunityFromTimeline, onOpenPostFromTimeline, openTxInspector]);
 
     // ── Empty states ───────────────────────────────────────────────────
     // Only the ACTIVE tab's empty-state copy can render, so build just that
@@ -3124,9 +3249,9 @@ const Profile = ({ classes, settings, pathname, api }) => {
     // the posts grid, ROW_SHAPES for the lists): a row whose key changes —
     // an edit — is re-measured in place and the rows past it re-flow.
     const postsLayoutKey = useCallback((i) => paperCardLayoutKey(postsItemsRef.current[i]), []);
-    const commentsLayoutKey = useCallback((i) => rowLayoutKey(1, commentsRef.current?.[i]), []);
-    const repliesLayoutKey = useCallback((i) => rowLayoutKey(2, repliesRef.current?.[i]), []);
-    const timelineLayoutKey = useCallback((i) => rowLayoutKey(3, timelineRef.current?.[i]), []);
+    const commentsLayoutKey = useCallback((i) => rowLayoutKey(1, commentsRef.current?.[i], textEpochRef.current), []);
+    const repliesLayoutKey = useCallback((i) => rowLayoutKey(2, repliesRef.current?.[i], textEpochRef.current), []);
+    const timelineLayoutKey = useCallback((i) => rowLayoutKey(3, timelineRef.current?.[i], textEpochRef.current), []);
 
     // The posts tab's ImageMeasurer render-prop, memoized on what it forwards
     // (it was an inline arrow, failing ImageMeasurer's PureComponent compare
@@ -3252,6 +3377,17 @@ const Profile = ({ classes, settings, pathname, api }) => {
             {postDialogMounted && (
                 <React.Suspense fallback={DIALOG_FALLBACK}>
                     <LazyPostDialog renderer={settings._renderer} mode={settings._mode} nsfw={settings._nsfw_enabled} format={settings._format} data={postNav.currentPost} open={postNav.artworkOpen} locales={locales} api={api} account={profile.loggedInUser} originRect={postNav.originRect} onVoteChange={onVoteChange} onClose={postNav.closePost} getReturnRect={postNav.getReturnRect} onDrawerPush={postNav.onDrawerPush} onDrawerPop={postNav.onDrawerPop} onPrevious={postNav.previousPost} onNext={postNav.nextPost} />
+                </React.Suspense>
+            )}
+
+            {txInspectorMounted && (
+                <React.Suspense fallback={DIALOG_FALLBACK}>
+                    <LazyTxInspector open={txInspect.open} record={txInspect.record} originRect={txInspect.originRect}
+                                     icon={txInspect.icon} iconColor={TIMELINE_DOT_COLOR} iconBackground={TIMELINE_DOT_BACKGROUND}
+                                     account={accountName} api={api}
+                                     onClose={closeTxInspector}
+                                     onOpenAccount={onOpenProfileFromTimeline}
+                                     onOpenPost={onOpenPostFromTimeline} />
                 </React.Suspense>
             )}
 

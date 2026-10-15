@@ -10,18 +10,10 @@ import FormControlLabel from "@material-ui/core/FormControlLabel";
 import Checkbox from "@material-ui/core/Checkbox";
 import Switch from "@material-ui/core/Switch";
 import IconButton from "@material-ui/core/IconButton";
+import ButtonBase from "@material-ui/core/ButtonBase";
 import CircularProgress from "@material-ui/core/CircularProgress";
 
-import CallReceivedRounded from "@material-ui/icons/CallReceivedRounded";
-import CallMadeRounded from "@material-ui/icons/CallMadeRounded";
-import SyncAltRounded from "@material-ui/icons/SyncAltRounded";
-import FlashOnRounded from "@material-ui/icons/FlashOnRounded";
-import SwapHorizRounded from "@material-ui/icons/SwapHorizRounded";
-import RedeemRounded from "@material-ui/icons/RedeemRounded";
-import PeopleAltRounded from "@material-ui/icons/PeopleAltRounded";
 import ReplayRounded from "@material-ui/icons/ReplayRounded";
-import LockRounded from "@material-ui/icons/LockRounded";
-import HelpOutlineRounded from "@material-ui/icons/HelpOutlineRounded";
 import ExpandMoreRounded from "@material-ui/icons/ExpandMoreRounded";
 
 import useLiveTimeAgo from "../hooks/useLiveTimeAgo";
@@ -30,397 +22,14 @@ import { useScrollParentWindowing, useEndReached } from "../hooks/useScrollParen
 // tx is aliased: this file uses `tx` for a blockchain transaction
 // (describeOperation(tx, …), for (const tx of history)), so importing the
 // resolver under its own name would shadow — and read — as the wrong thing.
-import { t, tk, tx as translate, useLanguage } from "../utils/text";
-import { formatAmount, formatDate, resolveLocale } from "../utils/numberFormat";
+import { t, tx as translate, useLanguage } from "../utils/text";
+import { formatDate, resolveLocale } from "../utils/numberFormat";
+import { tr } from "./GDTowerKit";
 
-/* ────────────────────────────────────────────────────────────────────────────
- * Asset helpers (ported from PixaWalletDialog so this component is standalone).
- * The only runtime-dependent helper we still need from the parent is
- * `vestToPixa`, because the VESTS→PXP rate depends on live global props.
- * ──────────────────────────────────────────────────────────────────────────── */
-
-const NAI_TO_CHAIN = {
-    "@@000000021": { symbol: "HIVE", precision: 3 },
-    "@@000000013": { symbol: "HBD", precision: 3 },
-    "@@000000037": { symbol: "VESTS", precision: 6 },
-};
-const CHAIN_TO_DISPLAY = {
-    TESTS: "PXA", HIVE: "PXA", PIXA: "PXA",
-    TBD: "PXS", HBD: "PXS",
-    VESTS: "PXP",
-};
-const DISPLAY_PRECISION = { PXA: 3, PXS: 3, PXP: 3 };
-
-// Parse a raw asset (condenser string or AppBase NAI object) → { value, chainSymbol }.
-function parseAsset(asset) {
-    if (asset == null) return null;
-    if (typeof asset === "string") {
-        const parts = asset.trim().split(/\s+/);
-        if (parts.length !== 2) return null;
-        const v = parseFloat(parts[0]);
-        if (!Number.isFinite(v)) return null;
-        return { value: v, chainSymbol: parts[1] };
-    }
-    if (typeof asset === "object" && asset.nai) {
-        const mapping = NAI_TO_CHAIN[asset.nai];
-        if (!mapping) return null;
-        const precision = typeof asset.precision === "number" ? asset.precision : mapping.precision;
-        const amountStr = typeof asset.amount === "string" ? asset.amount : String(asset.amount ?? "0");
-        const v = parseFloat(amountStr) / Math.pow(10, precision);
-        if (!Number.isFinite(v)) return null;
-        return { value: v, chainSymbol: mapping.symbol };
-    }
-    return null;
-}
-
-// Normalize any asset to display units: { token: 'PXA'|'PXS'|'PXP', value }.
-// VESTS is converted through vestToPixa (raw VESTS are huge — never shown directly).
-function toDisplayUnit(asset, vestToPixa) {
-    const parsed = parseAsset(asset);
-    if (!parsed) return null;
-    const token = CHAIN_TO_DISPLAY[parsed.chainSymbol] || parsed.chainSymbol;
-    if (token === "PXP") {
-        const pxp = typeof vestToPixa === "function" ? vestToPixa(parsed.value) : parsed.value;
-        return { token: "PXP", value: pxp };
-    }
-    return { token, value: parsed.value };
-}
-
-// Display string for a unit — grouping/decimal marks follow the Settings
-// locale. Rows keep the raw units (see `amounts` below) and format at render
-// time, so a language switch re-formats every row; only the two market
-// subtitles bake this string in, and `rows` is rebuilt on a locale change.
-function fmtUnit(unit) {
-    if (!unit) return "";
-    const p = DISPLAY_PRECISION[unit.token] ?? 3;
-    return formatAmount(unit.value, unit.token, p);
-}
-
-const isAssetString = (s) => typeof s === "string" && /^-?\d+(\.\d+)?\s+[A-Za-z]+$/.test(s.trim());
-const isAssetObj = (o) => o && typeof o === "object" && typeof o.nai === "string" && "amount" in o;
-
-// Walk a payload, sum every asset-shaped value by display token. Fork-resilient:
-// reward virtual-ops rename fields between forks (hbd_payout/sbd_payout/…), so we
-// detect by shape rather than by key name. Returns ["1.234 PXA", "0.500 PXS", …].
-function collectAssetParts(payload, vestToPixa) {
-    const byToken = {};
-    for (const k in payload) {
-        const v = payload[k];
-        if (!isAssetString(v) && !isAssetObj(v)) continue;
-        const unit = toDisplayUnit(v, vestToPixa);
-        if (!unit) continue;
-        byToken[unit.token] = (byToken[unit.token] || 0) + unit.value;
-    }
-    return Object.keys(byToken)
-        .filter((t) => Math.abs(byToken[t]) > 1e-9)
-        .map((t) => ({ token: t, value: byToken[t] }));
-}
-
-/* ────────────────────────────────────────────────────────────────────────────
- * Operation → display descriptor.
- * direction: 'in' (credit, green, +) | 'out' (debit, red, −) | 'self' (neutral)
- * kind: drives the icon + tint  (transfer | power | savings | market | convert
- *                                | reward | delegation | other)
- * ──────────────────────────────────────────────────────────────────────────── */
-
-function describeOperation(tx, me, vestToPixa) {
-    const d = tx.data || {};
-    // `amounts` holds raw { token, value } units — never pre-formatted strings —
-    // so the spam filter can compare numbers and the row formats per locale.
-    const A = (asset) => toDisplayUnit(asset, vestToPixa);
-    const out = { kind: "other", direction: "self", title: "", subtitle: "", amounts: [] };
-
-    switch (tx.type) {
-        /* ── Direct transfers ─────────────────────────────────────────── */
-        case "transfer": {
-            const inc = d.to === me;
-            out.kind = "transfer";
-            out.direction = inc ? "in" : "out";
-            out.title = inc ? tk("components.wallet_history.received_from", {
-                from: d.from
-            }) : tk("components.wallet_history.sent_to", {
-                to: d.to
-            });
-            out.subtitle = d.memo || "";
-            out.amounts = [A(d.amount)];
-            break;
-        }
-        case "recurrent_transfer":
-        case "fill_recurrent_transfer": {
-            const inc = d.to === me;
-            out.kind = "transfer";
-            out.direction = inc ? "in" : "out";
-            out.title = inc ? tk("components.wallet_history.recurring_from", {
-                from: d.from
-            }) : tk("components.wallet_history.recurring_to", {
-                to: d.to
-            });
-            out.subtitle = d.memo || "";
-            out.amounts = [A(d.amount)];
-            break;
-        }
-
-        /* ── Power up / down ──────────────────────────────────────────── */
-        case "transfer_to_vesting": {
-            const self = d.to === me && d.from === me;
-            const inc = d.to === me && d.from !== me;
-            out.kind = "power";
-            out.direction = self ? "self" : inc ? "in" : "out";
-            out.title = self ? tk("components.wallet_history.power_up") : inc ? tk("components.wallet_history.power_up_from", {
-                from: d.from
-            }) : tk("components.wallet_history.power_up_to", {
-                to: d.to
-            });
-            out.amounts = [A(d.amount)];
-            break;
-        }
-        case "withdraw_vesting": {
-            out.kind = "power";
-            out.direction = "self";
-            const pxp = toDisplayUnit(d.vesting_shares, vestToPixa);
-            out.title = (pxp && pxp.value > 0) ? tk("components.wallet_history.power_down") : tk("components.wallet_history.power_down_stopped");
-            out.amounts = pxp && pxp.value > 0 ? [pxp] : [];
-            break;
-        }
-        case "fill_vesting_withdraw": {
-            out.kind = "power";
-            out.direction = "in";
-            out.title = tk("components.wallet_history.power_down_payout");
-            out.amounts = [A(d.deposited)];
-            break;
-        }
-        case "set_withdraw_vesting_route": {
-            out.kind = "power";
-            out.direction = "self";
-            out.title = tk("components.wallet_history.power_down_route_set");
-            out.subtitle = d.to_account ? `→ @${d.to_account} · ${(d.percent || 0) / 100}%` : "";
-            break;
-        }
-        case "return_vesting_delegation": {
-            out.kind = "delegation";
-            out.direction = "in";
-            out.title = tk("components.wallet_history.delegation_returned");
-            out.amounts = [A(d.vesting_shares)];
-            break;
-        }
-
-        /* ── Rewards (high-volume virtual ops) ────────────────────────── */
-        case "author_reward": {
-            out.kind = "reward";
-            out.direction = "in";
-            out.title = tk("components.wallet_history.author_reward");
-            out.subtitle = d.permlink ? tk("components.wallet_history.on", {
-                permlink: d.permlink
-            }) : "";
-            out.amounts = collectAssetParts(d, vestToPixa);
-            break;
-        }
-        case "curation_reward": {
-            out.kind = "reward";
-            out.direction = "in";
-            out.title = tk("components.wallet_history.curation_reward");
-            const who = d.author || d.comment_author;
-            out.subtitle = who ? tk("components.wallet_history.vote_on", {
-                who: who
-            }) : "";
-            out.amounts = [A(d.reward)];
-            break;
-        }
-        case "comment_benefactor_reward": {
-            out.kind = "reward";
-            out.direction = "in";
-            out.title = tk("components.wallet_history.beneficiary_reward");
-            out.subtitle = d.author ? tk("components.wallet_history.from", {
-                author: d.author
-            }) : "";
-            out.amounts = collectAssetParts(d, vestToPixa);
-            break;
-        }
-        case "comment_reward": {
-            out.kind = "reward";
-            out.direction = "in";
-            out.title = tk("components.wallet_history.post_payout");
-            out.subtitle = d.permlink ? `${d.permlink}` : "";
-            out.amounts = [A(d.payout)];
-            break;
-        }
-        case "producer_reward": {
-            out.kind = "reward";
-            out.direction = "in";
-            out.title = tk("components.wallet_history.block_reward");
-            out.amounts = [A(d.vesting_shares)];
-            break;
-        }
-        case "claim_reward_balance": {
-            out.kind = "reward";
-            out.direction = "in";
-            out.title = tk("components.wallet_history.rewards_claimed");
-            out.amounts = [
-                d.reward_pixa ? A(d.reward_pixa) : null,
-                d.reward_pxs ? A(d.reward_pxs) : null,
-                d.reward_vests ? toDisplayUnit(d.reward_vests, vestToPixa) : null,
-            ].filter(Boolean);
-            break;
-        }
-
-        /* ── Delegation ───────────────────────────────────────────────── */
-        case "delegate_vesting_shares": {
-            const inc = d.delegatee === me;
-            out.kind = "delegation";
-            out.direction = inc ? "in" : "out";
-            out.title = inc ? tk("components.wallet_history.delegation_from", {
-                delegator: d.delegator
-            }) : tk("components.wallet_history.delegation_to", {
-                delegatee: d.delegatee
-            });
-            out.amounts = [A(d.vesting_shares)];
-            break;
-        }
-
-        /* ── Savings ──────────────────────────────────────────────────── */
-        case "transfer_to_savings": {
-            out.kind = "savings";
-            out.direction = d.from === me && d.to !== me ? "out" : "self";
-            out.title = tk("components.wallet_history.savings_deposit");
-            out.subtitle = d.memo || "";
-            out.amounts = [A(d.amount)];
-            break;
-        }
-        case "transfer_from_savings": {
-            out.kind = "savings";
-            out.direction = "self";
-            out.title = tk("components.wallet_history.savings_withdrawal");
-            out.subtitle = d.memo || "";
-            out.amounts = [A(d.amount)];
-            break;
-        }
-        case "cancel_transfer_from_savings": {
-            out.kind = "savings";
-            out.direction = "self";
-            out.title = tk("words.savings_withdrawal_cancelled");
-            break;
-        }
-        case "fill_transfer_from_savings": {
-            out.kind = "savings";
-            out.direction = "in";
-            out.title = tk("components.wallet_history.savings_payout");
-            out.amounts = [A(d.amount)];
-            break;
-        }
-        case "interest": {
-            out.kind = "savings";
-            out.direction = "in";
-            out.title = tk("components.wallet_history.savings_interest");
-            out.amounts = [A(d.interest)];
-            break;
-        }
-
-        /* ── Internal market ──────────────────────────────────────────── */
-        case "limit_order_create":
-        case "limit_order_create2": {
-            out.kind = "market";
-            out.direction = "self";
-            out.title = tk("components.wallet_history.order_placed");
-            const sell = toDisplayUnit(d.amount_to_sell, vestToPixa);
-            out.subtitle = sell ? tk("components.wallet_history.selling", {
-                fmtUnit: fmtUnit(sell)
-            }) : "";
-            out.amounts = sell ? [sell] : [];
-            break;
-        }
-        case "limit_order_cancel": {
-            out.kind = "market";
-            out.direction = "self";
-            out.title = tk("components.wallet_history.order_cancelled");
-            out.subtitle = d.orderid != null ? `#${d.orderid}` : "";
-            break;
-        }
-        case "fill_order": {
-            out.kind = "market";
-            out.direction = "self";
-            out.title = tk("components.wallet_history.order_filled");
-            const got = toDisplayUnit(d.open_pays, vestToPixa);
-            const paid = toDisplayUnit(d.current_pays, vestToPixa);
-            out.subtitle = paid ? tk("components.wallet_history.paid", {
-                fmtUnit: fmtUnit(paid)
-            }) : "";
-            out.amounts = got ? [got] : [];
-            break;
-        }
-
-        /* ── Conversions ──────────────────────────────────────────────── */
-        case "convert":
-        case "collateralized_convert": {
-            out.kind = "convert";
-            out.direction = "self";
-            out.title = tx.type === "collateralized_convert" ? tk("components.wallet_history.convert_collateralized") : tk("components.wallet_history.convert");
-            out.amounts = [A(d.amount)];
-            break;
-        }
-        case "fill_convert_request":
-        case "fill_collateralized_convert_request": {
-            out.kind = "convert";
-            out.direction = "self";
-            out.title = tk("components.wallet_history.conversion_settled");
-            out.amounts = [A(d.amount_out || d.amount_in)];
-            break;
-        }
-
-        /* ── Escrow ───────────────────────────────────────────────────── */
-        case "escrow_transfer": {
-            out.kind = "transfer";
-            out.direction = d.from === me ? "out" : "self";
-            out.title = tk("components.wallet_history.escrow_funded", {
-                to: d.to
-            });
-            out.amounts = collectAssetParts(d, vestToPixa);
-            break;
-        }
-        case "escrow_release": {
-            out.kind = "transfer";
-            out.direction = d.receiver === me ? "in" : "self";
-            out.title = tk("components.wallet_history.escrow_released");
-            out.amounts = collectAssetParts(d, vestToPixa);
-            break;
-        }
-        case "escrow_approve":
-        case "escrow_dispute": {
-            out.kind = "transfer";
-            out.direction = "self";
-            out.title = tx.type === "escrow_dispute" ? tk("components.wallet_history.escrow_disputed") : tk("components.wallet_history.escrow_approved");
-            break;
-        }
-
-        /* ── Fallback: still surface any asset movement the op carries ── */
-        default: {
-            out.title = tx.type ? tx.type.replace(/_/g, " ") : tk("components.wallet_history.unknown_operation");
-            out.amounts = collectAssetParts(d, vestToPixa);
-        }
-    }
-
-    out.amounts = (out.amounts || []).filter(Boolean);
-    return out;
-}
-
-const KIND_ICON = {
-    transfer: (dir) => (dir === "in" ? CallReceivedRounded : dir === "out" ? CallMadeRounded : SyncAltRounded),
-    power: () => FlashOnRounded,
-    savings: () => LockRounded,
-    market: () => SwapHorizRounded,
-    convert: () => SwapHorizRounded,
-    reward: () => RedeemRounded,
-    delegation: () => PeopleAltRounded,
-    other: () => HelpOutlineRounded,
-};
-
-// Greyscale only — direction is carried by brightness, the +/- sign, and the
-// glyph (received / sent / swap), never by hue. Credits read brightest, debits
-// and internal movements sit a shade back.
-const DIR_STYLE = {
-    in:   { fg: "#f2f2f2", halo: "rgba(255,255,255,0.10)", sign: "+" },
-    out:  { fg: "#8f8f8f", halo: "rgba(255,255,255,0.05)", sign: "\u2212" },
-    self: { fg: "#9a9a9a", halo: "rgba(255,255,255,0.07)", sign: "" },
-};
+// Operation → display data (asset parsing, describeOperation, icons and
+// tints) lives in utils/chainOps, shared with the transaction inspector and
+// the profile's History tab so an operation reads the same everywhere.
+import { describeOperation, fmtUnit, KIND_ICON, DIR_STYLE } from "../utils/chainOps";
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Windowing: rows are fixed-height and windowed against the DIALOG's own
@@ -435,7 +44,7 @@ const OVERSCAN = 8;
 const MAX_BARREN_AUTOLOADS = 5;
 
 /* ── A single ledger row (memoized) ───────────────────────────────────────── */
-const HistoryRow = React.memo(function HistoryRow({ row, classes, locales }) {
+const HistoryRow = React.memo(function HistoryRow({ row, classes, locales, onInspect }) {
     useLanguage();
     const { desc, date } = row;
     const Icon = (KIND_ICON[desc.kind] || KIND_ICON.other)(desc.direction);
@@ -459,11 +68,31 @@ const HistoryRow = React.memo(function HistoryRow({ row, classes, locales }) {
         })
         : "";
 
+    // The round icon opens the transaction inspector. Its rect goes along so
+    // the inspector's icon can fly out of this one.
+    const iconStyle = { color: s.fg, backgroundColor: s.halo };
+    const inspect = onInspect
+        ? (e) => onInspect(row.tx, e.currentTarget.getBoundingClientRect())
+        : undefined;
+
     return (
         <ListItem className={classes.row} style={{ height: ROW_H }}>
-            <div className={classes.iconWrap} style={{ color: s.fg, backgroundColor: s.halo }}>
-                <Icon fontSize="small" />
-            </div>
+            {inspect ? (
+                <ButtonBase
+                    focusRipple
+                    className={`${classes.iconWrap} ${classes.iconButton}`}
+                    style={iconStyle}
+                    onClick={inspect}
+                    aria-haspopup="dialog"
+                    aria-label={tr("components.transaction_inspector.inspect", "Inspect transaction")}
+                >
+                    <Icon fontSize="small" />
+                </ButtonBase>
+            ) : (
+                <div className={classes.iconWrap} style={iconStyle}>
+                    <Icon fontSize="small" />
+                </div>
+            )}
 
             <div className={classes.body}>
                 <span className={classes.title}>{translate(desc.title)}</span>
@@ -485,7 +114,8 @@ const HistoryRow = React.memo(function HistoryRow({ row, classes, locales }) {
 /* ────────────────────────────────────────────────────────────────────────────
  * WalletHistory — owns the filter row + the windowed list.
  * Props:
- *   history     : Array<{ idx, type, data, timestamp }>   (parent's _walletHistory)
+ *   history     : Array<record>  (parent's _walletHistory; see toHistoryRecord
+ *                 in utils/chainOps: { idx, type, data, timestamp, trx_id, … })
  *   username    : string                                  (account.username)
  *   locales     : string | string[]
  *   vestToPixa  : (rawVests:number) => number             (live rate from parent)
@@ -494,12 +124,16 @@ const HistoryRow = React.memo(function HistoryRow({ row, classes, locales }) {
  *   loadError   : boolean   the last page request failed (auto-load stops)
  *   onLoadMore  : () => void  fetch the next older page; the parent guards
  *                             against double calls and calls after the end
+ *   onInspect   : (record, iconRect) => void  a row's round icon was clicked;
+ *                             the parent hosts the one inspector dialog.
+ *                             Without it the icons stay plain.
  *
  * Scrolling belongs to the dialog: the list renders at full virtual height and
  * windows against the nearest scrollable ancestor — no inner scrollbar.
  * ──────────────────────────────────────────────────────────────────────────── */
 function WalletHistory({ history, username, locales, vestToPixa, classes,
-                           hasMore = false, loadingMore = false, loadError = false, onLoadMore }) {
+                           hasMore = false, loadingMore = false, loadError = false, onLoadMore,
+                           onInspect }) {
     // Re-render on a language switch; `locale` also re-keys the rows memo so
     // the few subtitle strings formatted at describe time follow it too.
     useLanguage();
@@ -536,6 +170,7 @@ function WalletHistory({ history, username, locales, vestToPixa, classes,
                 key: tx.idx != null ? tx.idx : out.length,
                 desc,
                 date: tx.timestamp ? new Date(tx.timestamp + "Z") : null,
+                tx,     // the record itself, for the inspector
             });
         }
         return out;
@@ -620,7 +255,7 @@ function WalletHistory({ history, username, locales, vestToPixa, classes,
                     <List dense disablePadding>
                         <div style={{ height: topPad }} />
                         {slice.map((row) => (
-                            <HistoryRow key={row.key} row={row} classes={classes} locales={locales} />
+                            <HistoryRow key={row.key} row={row} classes={classes} locales={locales} onInspect={onInspect} />
                         ))}
                         <div style={{ height: bottomPad }} />
                     </List>
@@ -678,6 +313,26 @@ const styles = (theme) => ({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+    },
+    // The icon as the inspector's trigger: a light lift on hover, a ring on
+    // keyboard focus. The halo colour stays inline (it carries direction), so
+    // the lift is an overlay rather than a second background.
+    iconButton: {
+        "&::after": {
+            content: '""',
+            position: "absolute",
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            borderRadius: "50%",
+            backgroundColor: "#ffffff",
+            opacity: 0,
+            pointerEvents: "none",
+            transition: "opacity 160ms cubic-bezier(0.4,0,0.2,1)",
+        },
+        "&:hover::after": { opacity: 0.08 },
+        "&.Mui-focusVisible": { boxShadow: "0 0 0 2px rgba(255,255,255,0.55)" },
     },
 
     body: {

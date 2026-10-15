@@ -524,6 +524,36 @@ function extractErrorMessage(error) {
     );
 }
 
+/**
+ * Save a Blob as a file. Pure DOM — deliberately independent of the component
+ * lifecycle, so the recipient's key backup is still saved if the dialog was
+ * closed or unmounted while the transaction was in flight (e.g. while the
+ * UnlockKeyDialog was on top). The anchor is attached to the document (Firefox
+ * ignores clicks on detached anchors) and the object URL is revoked later,
+ * not synchronously — revoking right after click() can cancel the download.
+ */
+function downloadBlob(blob, filename) {
+    if (!blob || typeof document === "undefined") return false;
+    try {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.rel = "noopener";
+        a.style.display = "none";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        return true;
+    } catch (err) {
+        console.error("[AddAccountDialog] PDF download failed:", err);
+        return false;
+    }
+}
+
+const backupFileName = (name) => `KeysOf-${name}-Pixagram.pdf`;
+
 // Chain-side rejections specific to the RC path (not_enough_rc_exception
 // "Account: X has N RC, needs M RC", the empty subsidy pool, a spent token).
 const RC_ERROR_RE = /\bRC\b|resource credit|subsidized account|claimed account/i;
@@ -762,6 +792,14 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
     const [pdfDownloaded,  setPdfDownloaded]  = useState(false);
     const lastPdfBlob      = useRef(null);
     const lastUsername     = useRef("");
+
+    // In-flight guards. `awaitingKey` is true while UnlockKeyDialog is stacked
+    // on top; `pinned` keeps this dialog visible from CREATE until the user
+    // dismisses the result, even if the parent flips `open` to false when the
+    // unlock dialog appears. `submittingRef` blocks double submits.
+    const [awaitingKey, setAwaitingKey] = useState(false);
+    const [pinned,      setPinned]      = useState(false);
+    const submittingRef = useRef(false);
 
     // ─────────────────────────────────────────────────────────────────────────
     // Load: current account + balances + creation fee, then Resource Credits
@@ -1080,19 +1118,15 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
         const blob = lastPdfBlob.current;
         const name = lastUsername.current;
         if (!blob || !name) return;
-        try {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.download = `KeysOf-${name}-Pixagram.pdf`;
-            a.href = url;
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(url);
-            setPdfDownloaded(true);
-        } catch (err) {
-            console.error("[AddAccountDialog] PDF download failed:", err);
-        }
+        if (downloadBlob(blob, backupFileName(name)) && isMounted.current) setPdfDownloaded(true);
     }, []);
+
+    // Single close path: releases the pin, then tells the parent.
+    const handleClose = useCallback(() => {
+        if (autoCloseTimer.current) { clearTimeout(autoCloseTimer.current); autoCloseTimer.current = null; }
+        setPinned(false);
+        onClose && onClose();
+    }, [onClose]);
 
     // ─────────────────────────────────────────────────────────────────────────
     // Auto-close countdown after success
@@ -1105,8 +1139,8 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
             if (!isMounted.current) return;
             if (remaining <= 0) {
                 setAutoCloseInSec(0);
-                if (autoCloseTimer.current) { clearTimeout(autoCloseTimer.current); autoCloseTimer.current = null; }
-                onClose && onClose();
+                autoCloseTimer.current = null;
+                handleClose();
                 return;
             }
             setAutoCloseInSec(remaining);
@@ -1114,13 +1148,14 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
         };
         if (autoCloseTimer.current) clearTimeout(autoCloseTimer.current);
         autoCloseTimer.current = setTimeout(tick, 1000);
-    }, [onClose]);
+    }, [handleClose]);
 
     // ─────────────────────────────────────────────────────────────────────────
     // Submit — derives keys, builds ops, broadcasts in one click
     // ─────────────────────────────────────────────────────────────────────────
     const canSubmit = useMemo(() => {
         if (status !== "form")    return false;
+        if (awaitingKey)          return false;
         if (!currentAccount)      return false;
         if (!usernameAvailable)   return false;
         if (usernamePending)      return false;
@@ -1130,16 +1165,49 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
             if (!canAffordFee)    return false;
         }
         return true;
-    }, [status, currentAccount, usernameAvailable, usernamePending, isRc, rcBlocked, canAffordFee]);
+    }, [status, awaitingKey, currentAccount, usernameAvailable, usernamePending, isRc, rcBlocked, canAffordFee]);
 
     const handleSubmit = useCallback(async () => {
-        if (!canSubmit) return;
+        if (!canSubmit || submittingRef.current) return;
+        submittingRef.current = true;
 
-        setStatus("working");
+        // From here on the flow must run to the end even if this dialog is
+        // hidden or unmounted (the UnlockKeyDialog can make the host close
+        // it). The values it uses (account, username, method, amounts) are
+        // frozen in this closure at click time; only setState calls are
+        // guarded by isMounted — the broadcast and the PDF download are not.
+        const creator = currentAccount;
+
         setErrorMessage("");
+        setPinned(true);
 
+        // ── 1. Active key FIRST ─────────────────────────────────────────────
+        // Asked before any key material is generated, so a cancelled or
+        // interrupted unlock leaves nothing behind. claim_account,
+        // create_claimed_account and account_create are all active-authority
+        // operations. UnlockKeyDialog stacks on top if the vault is locked.
+        let key = null;
+        setAwaitingKey(true);
         try {
-            // 1. Derive keys inline so any failure surfaces in the error panel.
+            console.log("[AddAccountDialog] requesting active key for", creator);
+            key = await api.keyManager.requestKey(creator, "active");
+        } catch (err) {
+            console.warn("[AddAccountDialog] active key not provided:", err);
+        } finally {
+            if (isMounted.current) setAwaitingKey(false);
+        }
+        if (!key) {
+            // Unlock cancelled — back to the untouched form, nothing broadcast.
+            submittingRef.current = false;
+            if (isMounted.current) setPinned(false);
+            return;
+        }
+
+        if (isMounted.current) setStatus("working");
+
+        let broadcasted = false;
+        try {
+            // 2. Derive keys inline so any failure surfaces in the error panel.
             console.log("[AddAccountDialog] generating mnemonic…");
             // Seed wordlist follows the active UI language; languages without
             // a BIP-39 wordlist fall back to English inside BackUpWallet2.
@@ -1247,38 +1315,44 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
 
             console.log("[AddAccountDialog] ops:", JSON.stringify(ops, null, 2));
 
-            // 3. Active key (UnlockKeyDialog stacks if the vault is locked).
-            //    claim_account / create_claimed_account / account_create are all
-            //    active-authority operations.
-            console.log("[AddAccountDialog] requesting active key for", currentAccount);
-            const key = await api.keyManager.requestKey(currentAccount, "active");
-
-            // 4. Atomic broadcast.
+            // 3. Atomic broadcast with the key obtained in step 1.
             console.log("[AddAccountDialog] broadcasting…");
             const result = await api.broadcast.sendOperations(ops, key);
             console.log("[AddAccountDialog] broadcast result:", result);
+            broadcasted = true;
 
-            if (!isMounted.current) return;
-
-            // 5. Force-download the recipient's backup PDF and show success.
-            triggerPdfDownload();
+            // 4. The account now exists on-chain and its keys live ONLY in
+            //    pdfBlob. Save it unconditionally — never behind isMounted,
+            //    otherwise a closed dialog silently loses the recipient's keys.
+            const downloaded = downloadBlob(pdfBlob, backupFileName(username));
             if (actions && actions.trigger_snackbar) {
                 actions.trigger_snackbar(t("components.add_account_dialog.account_created", {
                     username: username
                 }));
             }
-            try { await api.accounts.getAccounts([currentAccount], true); } catch (_) {}
+            try { await api.accounts.getAccounts([creator], true); } catch (_) {}
 
+            if (!isMounted.current) return;
+            setPdfDownloaded(downloaded);
             setStatus("success");
             startAutoClose();
         } catch (err) {
             console.error("[AddAccountDialog] account creation failed:", err);
-            if (!isMounted.current) return;
+            const message = extractErrorMessage(err) || t("components.add_account_dialog.the_transaction_was_rejected");
+            if (!isMounted.current) {
+                // Nobody is left to show the error panel — surface it globally.
+                if (!broadcasted && actions && actions.trigger_snackbar) {
+                    actions.trigger_snackbar(`${t("components.add_account_dialog.the_account_could_not_be_created")} ${message}`);
+                }
+                return;
+            }
             setStatus("error");
-            setErrorMessage(extractErrorMessage(err) || t("components.add_account_dialog.the_transaction_was_rejected"));
+            setErrorMessage(message);
+        } finally {
+            submittingRef.current = false;
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [canSubmit, api, currentAccount, username, isRc, pendingClaimed, creationFee, pxaAmount, pxsAmount, pxpAmount, vestRatio, pxpAvailableVests, triggerPdfDownload, startAutoClose]);
+    }, [canSubmit, api, currentAccount, username, isRc, pendingClaimed, creationFee, pxaAmount, pxsAmount, pxpAmount, vestRatio, pxpAvailableVests, startAutoClose]);
 
     const handleRetry = useCallback(() => {
         setStatus("form");
@@ -1620,19 +1694,28 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
         return "";
     }, [canSubmit, currentAccount, accountInfoLoading, username, usernamePending, usernameSyntaxError, usernameTaken, usernameAvailable, isRc, rcBlocked, canAffordFee, creationFee]);
 
+    // Busy = waiting on the UnlockKeyDialog, or signing / broadcasting.
+    const busy = awaitingKey || status === "working";
+
     return (
         <Dialog
-            open={!!open}
+            // Pinned from CREATE until the user dismisses the result, so the
+            // dialog survives the host flipping `open` when UnlockKeyDialog
+            // appears and the user still sees success / error + the PDF button.
+            open={!!open || pinned}
             fullWidth
             maxWidth="sm"
             disablePortal={false}
-            onClose={status === "working" ? undefined : onClose}
-            disableEscapeKeyDown={status === "working"}
-            disableBackdropClick={status === "working"}
+            onClose={busy ? undefined : handleClose}
+            disableEscapeKeyDown={busy}
+            disableBackdropClick={busy}
+            // Let the stacked UnlockKeyDialog own focus; two focus traps
+            // fighting each other is what tears stacked MUI v4 modals down.
+            disableEnforceFocus={awaitingKey}
             keepMounted={false}
             PaperProps={{ classes: { root: classes.darkGreyDialog } }}
         >
-            {status === "working" && <LinearProgress className={classes.progressOverlay} />}
+            {busy && <LinearProgress className={classes.progressOverlay} />}
             <DialogContent>
                 {status === "form"    && renderForm()}
                 {status === "working" && renderWorking()}
@@ -1642,7 +1725,7 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
             <DialogActions style={ACTIONS_STYLE}>
                 {status === "form" && (
                     <>
-                        <Button variant="text" color="primary" onClick={onClose}>{t("words.cancel", {TUC: true})}</Button>
+                        <Button variant="text" color="primary" onClick={handleClose} disabled={awaitingKey}>{t("words.cancel", {TUC: true})}</Button>
                         <Tooltip
                             title={disabledHint}
                             disableHoverListener={canSubmit}
@@ -1665,11 +1748,11 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
                     <Button variant="text" color="primary" disabled>{t("components.add_account_dialog.working")}</Button>
                 )}
                 {status === "success" && (
-                    <Button variant="contained" color="primary" onClick={onClose}>{t("words.done", {TUC: true})}</Button>
+                    <Button variant="contained" color="primary" onClick={handleClose}>{t("words.done", {TUC: true})}</Button>
                 )}
                 {status === "error" && (
                     <>
-                        <Button variant="text" color="primary" onClick={onClose}>{t("words.cancel", {TUC: true})}</Button>
+                        <Button variant="text" color="primary" onClick={handleClose}>{t("words.cancel", {TUC: true})}</Button>
                         <Button variant="contained" color="primary" onClick={handleRetry}>{t("components.add_account_dialog.try_again")}</Button>
                     </>
                 )}

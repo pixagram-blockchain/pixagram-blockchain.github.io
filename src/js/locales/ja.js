@@ -3351,6 +3351,29 @@ export default {
             "balance_history": "残高の推移",
             "followers_over_time": "フォロワー数の推移",
             "following_over_time": "フォロー数の推移"
+        },
+        "transaction_inspector": {
+            "inspect": "トランザクションを確認",
+            "close": "閉じる",
+            "copy": "コピー",
+            "copied": "コピー済み",
+            "at_todays_price": "（本日の価格）",
+            "irreversible": "取り消し不可",
+            "reversible": "未確定",
+            "signed": "署名済みトランザクション",
+            "virtual": "仮想操作",
+            "virtual_hint": "チェーン自体が生成するもので、誰も署名していません。",
+            "transaction": "トランザクション",
+            "transaction_id": "トランザクションID",
+            "block": "ブロック",
+            "index_in_block": "ブロック内の位置",
+            "index_in_transaction": "トランザクション内の位置",
+            "history_entry": "履歴エントリ",
+            "operation": "操作",
+            "open_post": "投稿を開く",
+            "encrypted_memo": "暗号化メモ",
+            "shortened": "表示用に短縮しています",
+            "raw_data": "生データ"
         }
     }
 };

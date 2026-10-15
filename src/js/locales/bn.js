@@ -3349,6 +3349,29 @@ export default {
             "balance_history": "ব্যালান্সের ইতিহাস",
             "followers_over_time": "সময়ের সাথে অনুসারী",
             "following_over_time": "সময়ের সাথে অনুসরণ করা অ্যাকাউন্ট"
+        },
+        "transaction_inspector": {
+            "inspect": "লেনদেন পরীক্ষা করুন",
+            "close": "বন্ধ করুন",
+            "copy": "কপি করুন",
+            "copied": "কপি হয়েছে",
+            "at_todays_price": "আজকের দামে",
+            "irreversible": "ফেরানো যায় না",
+            "reversible": "এখনও চূড়ান্ত নয়",
+            "signed": "স্বাক্ষরিত লেনদেন",
+            "virtual": "ভার্চুয়াল অপারেশন",
+            "virtual_hint": "চেইন নিজেই এটি তৈরি করে, কেউ এতে স্বাক্ষর করে না।",
+            "transaction": "লেনদেন",
+            "transaction_id": "লেনদেন আইডি",
+            "block": "ব্লক",
+            "index_in_block": "ব্লকে অবস্থান",
+            "index_in_transaction": "লেনদেনে অবস্থান",
+            "history_entry": "ইতিহাসের এন্ট্রি",
+            "operation": "অপারেশন",
+            "open_post": "পোস্ট খুলুন",
+            "encrypted_memo": "এনক্রিপ্ট করা মেমো",
+            "shortened": "প্রদর্শনের জন্য ছোট করা হয়েছে",
+            "raw_data": "কাঁচা ডেটা"
         }
     }
 };

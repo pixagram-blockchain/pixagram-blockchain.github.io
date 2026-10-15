@@ -3350,6 +3350,29 @@ export default {
             "balance_history": "Історія балансів",
             "followers_over_time": "Динаміка підписників",
             "following_over_time": "Динаміка підписок"
+        },
+        "transaction_inspector": {
+            "inspect": "Переглянути транзакцію",
+            "close": "Закрити",
+            "copy": "Копіювати",
+            "copied": "Скопійовано",
+            "at_todays_price": "за сьогоднішньою ціною",
+            "irreversible": "Незворотна",
+            "reversible": "Ще не стала незворотною",
+            "signed": "Підписана транзакція",
+            "virtual": "Віртуальна операція",
+            "virtual_hint": "Створена самим ланцюгом, ніким не підписана.",
+            "transaction": "Транзакція",
+            "transaction_id": "Ідентифікатор транзакції",
+            "block": "Блок",
+            "index_in_block": "Позиція в блоці",
+            "index_in_transaction": "Позиція в транзакції",
+            "history_entry": "Запис в історії",
+            "operation": "Операція",
+            "open_post": "Відкрити допис",
+            "encrypted_memo": "Зашифроване мемо",
+            "shortened": "Скорочено для відображення",
+            "raw_data": "Сирі дані"
         }
     }
 };

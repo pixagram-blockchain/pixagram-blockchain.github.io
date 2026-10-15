@@ -3351,6 +3351,29 @@ export default {
             "balance_history": "잔액 추이",
             "followers_over_time": "팔로워 추이",
             "following_over_time": "팔로잉 추이"
+        },
+        "transaction_inspector": {
+            "inspect": "트랜잭션 보기",
+            "close": "닫기",
+            "copy": "복사",
+            "copied": "복사됨",
+            "at_todays_price": "(오늘 가격 기준)",
+            "irreversible": "되돌릴 수 없음",
+            "reversible": "아직 확정되지 않음",
+            "signed": "서명된 트랜잭션",
+            "virtual": "가상 작업",
+            "virtual_hint": "체인 자체가 생성하며, 누구도 서명하지 않습니다.",
+            "transaction": "트랜잭션",
+            "transaction_id": "트랜잭션 ID",
+            "block": "블록",
+            "index_in_block": "블록 내 위치",
+            "index_in_transaction": "트랜잭션 내 위치",
+            "history_entry": "기록 항목",
+            "operation": "작업",
+            "open_post": "게시물 열기",
+            "encrypted_memo": "암호화된 메모",
+            "shortened": "표시용으로 축약됨",
+            "raw_data": "원시 데이터"
         }
     }
 };

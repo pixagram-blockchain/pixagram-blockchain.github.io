@@ -3347,6 +3347,29 @@ export default {
             "balance_history": "Saldohistorik",
             "followers_over_time": "Följare över tid",
             "following_over_time": "Följda konton över tid"
+        },
+        "transaction_inspector": {
+            "inspect": "Inspektera transaktion",
+            "close": "Stäng",
+            "copy": "Kopiera",
+            "copied": "Kopierat",
+            "at_todays_price": "till dagens pris",
+            "irreversible": "Oåterkallelig",
+            "reversible": "Ännu inte oåterkallelig",
+            "signed": "Signerad transaktion",
+            "virtual": "Virtuell operation",
+            "virtual_hint": "Skapad av kedjan själv, inte signerad av någon.",
+            "transaction": "Transaktion",
+            "transaction_id": "Transaktions-ID",
+            "block": "Block",
+            "index_in_block": "Position i block",
+            "index_in_transaction": "Position i transaktion",
+            "history_entry": "Historikpost",
+            "operation": "Operation",
+            "open_post": "Öppna inlägg",
+            "encrypted_memo": "Krypterat memo",
+            "shortened": "Förkortat för visning",
+            "raw_data": "Rådata"
         }
     }
 };

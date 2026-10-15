@@ -3351,6 +3351,29 @@ export default {
             "balance_history": "余额历史",
             "followers_over_time": "粉丝数变化",
             "following_over_time": "关注数变化"
+        },
+        "transaction_inspector": {
+            "inspect": "查看交易",
+            "close": "关闭",
+            "copy": "复制",
+            "copied": "已复制",
+            "at_todays_price": "（按今日价格）",
+            "irreversible": "不可撤销",
+            "reversible": "尚未最终确认",
+            "signed": "已签名交易",
+            "virtual": "虚拟操作",
+            "virtual_hint": "由链本身生成，没有任何人签名。",
+            "transaction": "交易",
+            "transaction_id": "交易 ID",
+            "block": "区块",
+            "index_in_block": "区块内序号",
+            "index_in_transaction": "交易内序号",
+            "history_entry": "历史记录条目",
+            "operation": "操作",
+            "open_post": "打开帖子",
+            "encrypted_memo": "加密备注",
+            "shortened": "已截断以便显示",
+            "raw_data": "原始数据"
         }
     }
 };

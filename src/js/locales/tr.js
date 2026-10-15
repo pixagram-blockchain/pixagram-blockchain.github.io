@@ -3351,6 +3351,29 @@ export default {
             "balance_history": "Bakiye geçmişi",
             "followers_over_time": "Zaman içinde takipçiler",
             "following_over_time": "Zaman içinde takip edilenler"
+        },
+        "transaction_inspector": {
+            "inspect": "İşlemi incele",
+            "close": "Kapat",
+            "copy": "Kopyala",
+            "copied": "Kopyalandı",
+            "at_todays_price": "bugünkü fiyatla",
+            "irreversible": "Geri alınamaz",
+            "reversible": "Henüz kesinleşmedi",
+            "signed": "İmzalı işlem",
+            "virtual": "Sanal operasyon",
+            "virtual_hint": "Zincirin kendisi tarafından oluşturulur, kimse imzalamaz.",
+            "transaction": "İşlem",
+            "transaction_id": "İşlem ID'si",
+            "block": "Blok",
+            "index_in_block": "Bloktaki sıra",
+            "index_in_transaction": "İşlemdeki sıra",
+            "history_entry": "Geçmiş kaydı",
+            "operation": "Operasyon",
+            "open_post": "Gönderiyi aç",
+            "encrypted_memo": "Şifreli memo",
+            "shortened": "Görüntüleme için kısaltıldı",
+            "raw_data": "Ham veri"
         }
     }
 };

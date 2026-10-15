@@ -3350,6 +3350,29 @@ export default {
             "balance_history": "Guthabenverlauf",
             "followers_over_time": "Follower im Zeitverlauf",
             "following_over_time": "Gefolgte Konten im Zeitverlauf"
+        },
+        "transaction_inspector": {
+            "inspect": "Transaktion ansehen",
+            "close": "Schließen",
+            "copy": "Kopieren",
+            "copied": "Kopiert",
+            "at_todays_price": "zum heutigen Preis",
+            "irreversible": "Unumkehrbar",
+            "reversible": "Noch nicht unumkehrbar",
+            "signed": "Signierte Transaktion",
+            "virtual": "Virtuelle Operation",
+            "virtual_hint": "Von der Chain selbst erzeugt, von niemandem signiert.",
+            "transaction": "Transaktion",
+            "transaction_id": "Transaktions-ID",
+            "block": "Block",
+            "index_in_block": "Position im Block",
+            "index_in_transaction": "Position in der Transaktion",
+            "history_entry": "Verlaufseintrag",
+            "operation": "Operation",
+            "open_post": "Beitrag öffnen",
+            "encrypted_memo": "Verschlüsseltes Memo",
+            "shortened": "Für die Anzeige gekürzt",
+            "raw_data": "Rohdaten"
         }
     }
 };

@@ -3347,6 +3347,29 @@ export default {
             "balance_history": "இருப்பு வரலாறு",
             "followers_over_time": "காலப்போக்கில் பின்தொடர்பவர்கள்",
             "following_over_time": "காலப்போக்கில் பின்தொடரப்படுபவர்கள்"
+        },
+        "transaction_inspector": {
+            "inspect": "பரிவர்த்தனையை ஆய்வு செய்",
+            "close": "மூடு",
+            "copy": "நகலெடு",
+            "copied": "நகலெடுக்கப்பட்டது",
+            "at_todays_price": "இன்றைய விலையில்",
+            "irreversible": "திருப்ப முடியாது",
+            "reversible": "இன்னும் இறுதியாகவில்லை",
+            "signed": "கையொப்பமிடப்பட்ட பரிவர்த்தனை",
+            "virtual": "மெய்நிகர் செயல்பாடு",
+            "virtual_hint": "செயினே இதை உருவாக்குகிறது; யாரும் இதில் கையொப்பமிடுவதில்லை.",
+            "transaction": "பரிவர்த்தனை",
+            "transaction_id": "பரிவர்த்தனை ID",
+            "block": "பிளாக்",
+            "index_in_block": "பிளாக்கில் இடம்",
+            "index_in_transaction": "பரிவர்த்தனையில் இடம்",
+            "history_entry": "வரலாற்றுப் பதிவு",
+            "operation": "செயல்பாடு",
+            "open_post": "இடுகையைத் திற",
+            "encrypted_memo": "மறைகுறியாக்கப்பட்ட மெமோ",
+            "shortened": "காட்சிக்காகச் சுருக்கப்பட்டது",
+            "raw_data": "மூலத் தரவு"
         }
     }
 };

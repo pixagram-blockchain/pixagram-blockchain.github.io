@@ -3650,6 +3650,29 @@ export default {
             "balance_history": "Balance history",
             "followers_over_time": "Followers over time",
             "following_over_time": "Following over time"
+        },
+        "transaction_inspector": {
+            "inspect": "Inspect transaction",
+            "close": "Close",
+            "copy": "Copy",
+            "copied": "Copied",
+            "at_todays_price": "at today's price",
+            "irreversible": "Irreversible",
+            "reversible": "Not yet irreversible",
+            "signed": "Signed transaction",
+            "virtual": "Virtual operation",
+            "virtual_hint": "Created by the chain itself, not signed by anyone.",
+            "transaction": "Transaction",
+            "transaction_id": "Transaction ID",
+            "block": "Block",
+            "index_in_block": "Index in block",
+            "index_in_transaction": "Index in transaction",
+            "history_entry": "History entry",
+            "operation": "Operation",
+            "open_post": "Open post",
+            "encrypted_memo": "Encrypted memo",
+            "shortened": "Shortened for display",
+            "raw_data": "Raw data"
         }
     }
 };

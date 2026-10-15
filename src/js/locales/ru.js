@@ -3353,6 +3353,29 @@ export default {
             "balance_history": "История балансов",
             "followers_over_time": "Динамика подписчиков",
             "following_over_time": "Динамика подписок"
+        },
+        "transaction_inspector": {
+            "inspect": "Посмотреть транзакцию",
+            "close": "Закрыть",
+            "copy": "Копировать",
+            "copied": "Скопировано",
+            "at_todays_price": "по сегодняшней цене",
+            "irreversible": "Необратима",
+            "reversible": "Пока не стала необратимой",
+            "signed": "Подписанная транзакция",
+            "virtual": "Виртуальная операция",
+            "virtual_hint": "Создана самой цепочкой, никем не подписана.",
+            "transaction": "Транзакция",
+            "transaction_id": "ID транзакции",
+            "block": "Блок",
+            "index_in_block": "Позиция в блоке",
+            "index_in_transaction": "Позиция в транзакции",
+            "history_entry": "Запись в истории",
+            "operation": "Операция",
+            "open_post": "Открыть пост",
+            "encrypted_memo": "Зашифрованное мемо",
+            "shortened": "Сокращено для отображения",
+            "raw_data": "Сырые данные"
         }
     }
 };

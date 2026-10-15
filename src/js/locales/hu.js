@@ -3347,6 +3347,29 @@ export default {
             "balance_history": "Egyenleg-előzmények",
             "followers_over_time": "Követők számának alakulása",
             "following_over_time": "Követések számának alakulása"
+        },
+        "transaction_inspector": {
+            "inspect": "Tranzakció megtekintése",
+            "close": "Bezárás",
+            "copy": "Másolás",
+            "copied": "Másolva",
+            "at_todays_price": "a mai áron",
+            "irreversible": "Visszafordíthatatlan",
+            "reversible": "Még nem visszafordíthatatlan",
+            "signed": "Aláírt tranzakció",
+            "virtual": "Virtuális művelet",
+            "virtual_hint": "Maga a lánc hozta létre, senki sem írta alá.",
+            "transaction": "Tranzakció",
+            "transaction_id": "Tranzakcióazonosító",
+            "block": "Blokk",
+            "index_in_block": "Pozíció a blokkban",
+            "index_in_transaction": "Pozíció a tranzakcióban",
+            "history_entry": "Sorszám az előzményekben",
+            "operation": "Művelet",
+            "open_post": "Bejegyzés megnyitása",
+            "encrypted_memo": "Titkosított megjegyzés",
+            "shortened": "Megjelenítéshez rövidítve",
+            "raw_data": "Nyers adatok"
         }
     }
 };

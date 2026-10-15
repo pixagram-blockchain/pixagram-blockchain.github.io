@@ -3350,6 +3350,29 @@ export default {
             "balance_history": "Istoricul soldurilor",
             "followers_over_time": "Evoluția urmăritorilor",
             "following_over_time": "Evoluția urmăririlor"
+        },
+        "transaction_inspector": {
+            "inspect": "Inspectează tranzacția",
+            "close": "Închide",
+            "copy": "Copiază",
+            "copied": "Copiat",
+            "at_todays_price": "la prețul de azi",
+            "irreversible": "Ireversibilă",
+            "reversible": "Încă nu este ireversibilă",
+            "signed": "Tranzacție semnată",
+            "virtual": "Operațiune virtuală",
+            "virtual_hint": "Generată de lanțul însuși, nu este semnată de nimeni.",
+            "transaction": "Tranzacție",
+            "transaction_id": "ID tranzacție",
+            "block": "Bloc",
+            "index_in_block": "Poziție în bloc",
+            "index_in_transaction": "Poziție în tranzacție",
+            "history_entry": "Intrare în istoric",
+            "operation": "Operațiune",
+            "open_post": "Deschide postarea",
+            "encrypted_memo": "Memo criptat",
+            "shortened": "Scurtat pentru afișare",
+            "raw_data": "Date brute"
         }
     }
 };

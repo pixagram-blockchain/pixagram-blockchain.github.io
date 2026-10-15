@@ -3351,6 +3351,29 @@ export default {
             "balance_history": "Riwayat saldo",
             "followers_over_time": "Pengikut dari waktu ke waktu",
             "following_over_time": "Mengikuti dari waktu ke waktu"
+        },
+        "transaction_inspector": {
+            "inspect": "Periksa transaksi",
+            "close": "Tutup",
+            "copy": "Salin",
+            "copied": "Disalin",
+            "at_todays_price": "dengan harga hari ini",
+            "irreversible": "Tidak dapat dibatalkan",
+            "reversible": "Belum final",
+            "signed": "Transaksi yang ditandatangani",
+            "virtual": "Operasi virtual",
+            "virtual_hint": "Dibuat oleh chain itu sendiri, tidak ditandatangani siapa pun.",
+            "transaction": "Transaksi",
+            "transaction_id": "ID transaksi",
+            "block": "Blok",
+            "index_in_block": "Posisi dalam blok",
+            "index_in_transaction": "Posisi dalam transaksi",
+            "history_entry": "Entri riwayat",
+            "operation": "Operasi",
+            "open_post": "Buka kiriman",
+            "encrypted_memo": "Memo terenkripsi",
+            "shortened": "Dipersingkat untuk ditampilkan",
+            "raw_data": "Data mentah"
         }
     }
 };

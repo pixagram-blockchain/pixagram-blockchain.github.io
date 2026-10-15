@@ -15,9 +15,20 @@ import * as React from "preact/compat";
  * Intersecting all of them is correct whichever one scrolls, and scroll events
  * are caught with one capturing listener on the document for the same reason.
  * Rects are used throughout, so swipe transforms don't disturb the maths.
+ *
+ * The list also moves without anything scrolling: a slide animating into
+ * place (the wallet's tab change is a transform), or content above it growing
+ * or shrinking (a section opening, a chart loading). Scroll and resize alone
+ * left the window where it was, with blank rows past its edge until the next
+ * scroll. The window is now recomputed at the end of every transition and
+ * animation, and whenever something above the list inside its scroller
+ * changes size; and while every clip is out of view (a slide still off
+ * screen) it covers the rows the nearest clip will show once it lands.
  * ──────────────────────────────────────────────────────────────────────────── */
 
 const CLIPS = /(auto|scroll|overlay|hidden|clip)/;
+// Elements between the list and its scroller watched for size changes.
+const MAX_WATCHED = 24;
 
 function clippingAncestors(node) {
     const out = [];
@@ -45,12 +56,22 @@ export function useScrollParentWindowing(itemCount, rowHeight, overscan = 8) {
             const el = listRef.current;
             if (!el) return;
             const listTop = el.getBoundingClientRect().top;
+            const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
             let viewTop = 0;
-            let viewBottom = window.innerHeight || document.documentElement.clientHeight;
+            let viewBottom = viewportHeight;
             for (const c of clips) {
                 const r = c.getBoundingClientRect();
                 if (r.top > viewTop) viewTop = r.top;
                 if (r.bottom < viewBottom) viewBottom = r.bottom;
+            }
+            if (viewBottom <= viewTop && clips.length) {
+                // Nothing in view: a slide still translated off screen while
+                // it animates in. Rows keep their place relative to the
+                // nearest clip, so window what it will show once it lands
+                // (at most a viewport's worth) rather than the overscan alone.
+                const r = clips[0].getBoundingClientRect();
+                viewTop = r.top;
+                viewBottom = Math.min(r.bottom, r.top + viewportHeight);
             }
             if (viewBottom < viewTop) viewBottom = viewTop; // fully clipped → overscan only
             const localStart = Math.max(0, viewTop - listTop);
@@ -68,14 +89,32 @@ export function useScrollParentWindowing(itemCount, rowHeight, overscan = 8) {
         measure();
         document.addEventListener("scroll", schedule, { capture: true, passive: true });
         window.addEventListener("resize", schedule);
+        // Moves that scroll nothing (see the header).
+        document.addEventListener("transitionend", schedule, true);
+        document.addEventListener("animationend", schedule, true);
         let ro;
-        if (clips.length && typeof ResizeObserver === "function") {
+        if (typeof ResizeObserver === "function") {
             ro = new ResizeObserver(schedule);
             for (const c of clips) ro.observe(c);
+            // What sits above the list inside its scroller: the wrappers on
+            // the way up and everything before each of them. One of those
+            // changing size is what moves the list without a scroll.
+            let watched = 0;
+            const watch = (el) => {
+                if (watched >= MAX_WATCHED) return;
+                ro.observe(el);
+                watched++;
+            };
+            for (let a = node; a && a !== clips[0] && a !== document.body; a = a.parentElement) {
+                if (a !== node) watch(a);
+                for (let s = a.previousElementSibling; s; s = s.previousElementSibling) watch(s);
+            }
         }
         return () => {
             document.removeEventListener("scroll", schedule, { capture: true });
             window.removeEventListener("resize", schedule);
+            document.removeEventListener("transitionend", schedule, true);
+            document.removeEventListener("animationend", schedule, true);
             if (ro) ro.disconnect();
             if (rafRef.current) cancelAnimationFrame(rafRef.current);
             rafRef.current = 0;

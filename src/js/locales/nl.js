@@ -3347,6 +3347,29 @@ export default {
             "balance_history": "Saldogeschiedenis",
             "followers_over_time": "Verloop van volgers",
             "following_over_time": "Verloop van gevolgde accounts"
+        },
+        "transaction_inspector": {
+            "inspect": "Transactie inspecteren",
+            "close": "Sluiten",
+            "copy": "Kopiëren",
+            "copied": "Gekopieerd",
+            "at_todays_price": "tegen de prijs van vandaag",
+            "irreversible": "Onomkeerbaar",
+            "reversible": "Nog niet onomkeerbaar",
+            "signed": "Ondertekende transactie",
+            "virtual": "Virtuele operatie",
+            "virtual_hint": "Door de chain zelf aangemaakt, door niemand ondertekend.",
+            "transaction": "Transactie",
+            "transaction_id": "Transactie-id",
+            "block": "Blok",
+            "index_in_block": "Positie in blok",
+            "index_in_transaction": "Positie in transactie",
+            "history_entry": "Geschiedenisitem",
+            "operation": "Operatie",
+            "open_post": "Post openen",
+            "encrypted_memo": "Versleutelde memo",
+            "shortened": "Ingekort voor weergave",
+            "raw_data": "Ruwe gegevens"
         }
     }
 };

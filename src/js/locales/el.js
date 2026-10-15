@@ -3356,6 +3356,29 @@ export default {
             "balance_history": "Ιστορικό υπολοίπων",
             "followers_over_time": "Εξέλιξη ακολούθων",
             "following_over_time": "Εξέλιξη ακολουθήσεων"
+        },
+        "transaction_inspector": {
+            "inspect": "Επιθεώρηση συναλλαγής",
+            "close": "Κλείσιμο",
+            "copy": "Αντιγραφή",
+            "copied": "Αντιγράφηκε",
+            "at_todays_price": "με τη σημερινή τιμή",
+            "irreversible": "Μη αναστρέψιμη",
+            "reversible": "Δεν έχει οριστικοποιηθεί ακόμη",
+            "signed": "Υπογεγραμμένη συναλλαγή",
+            "virtual": "Εικονική πράξη",
+            "virtual_hint": "Παράγεται από την ίδια την αλυσίδα, δεν την υπογράφει κανείς.",
+            "transaction": "Συναλλαγή",
+            "transaction_id": "Αναγνωριστικό συναλλαγής",
+            "block": "Μπλοκ",
+            "index_in_block": "Θέση στο μπλοκ",
+            "index_in_transaction": "Θέση στη συναλλαγή",
+            "history_entry": "Εγγραφή ιστορικού",
+            "operation": "Πράξη",
+            "open_post": "Άνοιγμα δημοσίευσης",
+            "encrypted_memo": "Κρυπτογραφημένο σημείωμα",
+            "shortened": "Συντομευμένο για προβολή",
+            "raw_data": "Ακατέργαστα δεδομένα"
         }
     }
 };

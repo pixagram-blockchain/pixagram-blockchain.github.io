@@ -3351,6 +3351,29 @@ export default {
             "balance_history": "बैलेंस इतिहास",
             "followers_over_time": "समय के साथ फ़ॉलोअर्स",
             "following_over_time": "समय के साथ फ़ॉलोइंग"
+        },
+        "transaction_inspector": {
+            "inspect": "लेनदेन देखें",
+            "close": "बंद करें",
+            "copy": "कॉपी करें",
+            "copied": "कॉपी हो गया",
+            "at_todays_price": "आज की कीमत पर",
+            "irreversible": "अपरिवर्तनीय",
+            "reversible": "अभी अपरिवर्तनीय नहीं",
+            "signed": "हस्ताक्षरित लेनदेन",
+            "virtual": "आभासी संक्रिया",
+            "virtual_hint": "चेन स्वयं इसे बनाती है, इस पर किसी के हस्ताक्षर नहीं होते।",
+            "transaction": "लेनदेन",
+            "transaction_id": "लेनदेन आईडी",
+            "block": "ब्लॉक",
+            "index_in_block": "ब्लॉक में स्थान",
+            "index_in_transaction": "लेनदेन में स्थान",
+            "history_entry": "इतिहास प्रविष्टि",
+            "operation": "संक्रिया",
+            "open_post": "पोस्ट खोलें",
+            "encrypted_memo": "एन्क्रिप्टेड मेमो",
+            "shortened": "प्रदर्शन के लिए छोटा किया गया",
+            "raw_data": "कच्चा डेटा"
         }
     }
 };

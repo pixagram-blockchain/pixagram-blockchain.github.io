@@ -3350,6 +3350,29 @@ export default {
             "balance_history": "Historique des soldes",
             "followers_over_time": "Abonnés au fil du temps",
             "following_over_time": "Abonnements au fil du temps"
+        },
+        "transaction_inspector": {
+            "inspect": "Inspecter la transaction",
+            "close": "Fermer",
+            "copy": "Copier",
+            "copied": "Copié",
+            "at_todays_price": "au prix du jour",
+            "irreversible": "Irréversible",
+            "reversible": "Pas encore irréversible",
+            "signed": "Transaction signée",
+            "virtual": "Opération virtuelle",
+            "virtual_hint": "Produite par la chaîne elle-même, elle n’est signée par personne.",
+            "transaction": "Transaction",
+            "transaction_id": "ID de transaction",
+            "block": "Bloc",
+            "index_in_block": "Rang dans le bloc",
+            "index_in_transaction": "Rang dans la transaction",
+            "history_entry": "Entrée d’historique",
+            "operation": "Opération",
+            "open_post": "Ouvrir la publication",
+            "encrypted_memo": "Mémo chiffré",
+            "shortened": "Raccourci pour l’affichage",
+            "raw_data": "Données brutes"
         }
     }
 };

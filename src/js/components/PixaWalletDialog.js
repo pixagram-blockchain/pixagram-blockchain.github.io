@@ -78,6 +78,8 @@ const CreateBulkAccountDialog   = lazyDialog(() => import("../components/CreateB
 const PixaWalletBulkPowerDialog = lazyDialog(() => import("../components/PixaWalletBulkPowerDialog"), { name: "WalletBulkPower" });
 const PixaWalletTaxesDialog     = lazyDialog(() => import("../components/PixaWalletTaxesDialog"),     { name: "WalletTaxes" });
 const PixaWalletExchangesDialog = lazyDialog(() => import("../components/PixaWalletExchangesDialog"), { name: "WalletExchanges" });
+// One inspector for every row of the History view (a row's round icon opens it).
+const TransactionInspector      = lazyDialog(() => import("../components/TransactionInspector"),      { name: "WalletTxInspector" });
 
 // ── First-open wallet tour ───────────────────────────────────────────────────
 // Walks the user through the wallet's views (main, PXP, PXA, PXS, history)
@@ -121,6 +123,7 @@ import { BalanceHistory } from "./AccountCharts";
 import { tr } from "./GDTowerKit";
 import RewardClaimAnimation from "./RewardClaimAnimation";
 import { cssBackgroundImage } from "../utils/safeUrl";
+import { normalizeHistoryOp, toHistoryRecord } from "../utils/chainOps";
 
 import { T } from "../utils/T";
 import { t } from "../utils/text";
@@ -1160,29 +1163,18 @@ const HISTORY_PAGE = 500;
 const HISTORY_MAX_EMPTY_PAGES = 3;
 
 /**
- * Normalize a history entry's op to { name, payload }:
- *   - Condenser: entry.op = ["op_name", {payload}]
- *   - AppBase:   entry.op = { type: "op_name_operation", value: {payload} }
+ * Normalize a history entry's op to { name, payload } — Condenser
+ * (["op_name", {payload}]) and AppBase ({ type: "op_name_operation",
+ * value }) alike. Shared with the profile timeline (utils/chainOps).
  */
-const _normalizeHistoryOp = (rawOp) => {
-    if (Array.isArray(rawOp)) {
-        return { name: rawOp[0], payload: rawOp[1] || {} };
-    }
-    if (rawOp && typeof rawOp === 'object') {
-        const rawType = rawOp.type || '';
-        const name = rawType.endsWith('_operation')
-            ? rawType.slice(0, -'_operation'.length)
-            : rawType;
-        return { name, payload: rawOp.value || {} };
-    }
-    return { name: '', payload: {} };
-};
+const _normalizeHistoryOp = normalizeHistoryOp;
 
-/** Raw [idx, entry] rows → WalletHistory rows (same shape for every page). */
-const _historyRow = ([idx, entry]) => {
-    const { name, payload } = _normalizeHistoryOp(entry && entry.op);
-    return { idx, type: name, data: payload, timestamp: entry && entry.timestamp };
-};
+/**
+ * Raw [idx, entry] rows → WalletHistory rows (same shape for every page):
+ * { idx, type, data, timestamp } plus the chain coordinates (trx_id, block,
+ * trx_in_block, op_in_trx, virtual_op) the transaction inspector shows.
+ */
+const _historyRow = ([idx, entry]) => toHistoryRecord(idx, entry);
 
 /** X-axis label granularity for a price range expressed in days. */
 const priceChartDateType = (days) => {
@@ -1416,6 +1408,11 @@ class PixaWalletDialog extends React.PureComponent {
             // RewardClaimAnimation pours into the total (null = not playing).
             _claiming_rewards: false,
             _reward_claim: null,
+            // Transaction inspector (History view): the record shown and the
+            // rect of the row icon it was opened from.
+            _inspect_open: false,
+            _inspect_record: null,
+            _inspect_origin: null,
             _isPoweringDown: false,
             _nextPowerDown: 0,
             _nextWithdrawalDate: null,
@@ -1511,7 +1508,7 @@ class PixaWalletDialog extends React.PureComponent {
         this.setState(merged, () => {
             if(isNewlyClosed || isNewAccount) {
                 if (this.state._tour_steps) this._finish_tour("closed");
-                this.setState({...merged, _tab_value: false, _reward_claim: null}, () => {
+                this.setState({...merged, _tab_value: false, _reward_claim: null, _inspect_open: false, _inspect_origin: null}, () => {
                     this.forceUpdate();
                 })
             } else if (isNewlyOpened) {
@@ -1522,8 +1519,9 @@ class PixaWalletDialog extends React.PureComponent {
                 });
                 this._maybe_start_tour();
             } else if (new_props.open && initialViewChanged) {
-                // Sync view when parent changes it (e.g. browser back/forward)
-                this.setState({_tab_value: new_props.initialView}, () => {
+                // Sync view when parent changes it (e.g. browser back/forward).
+                // An open inspector belongs to the view being left.
+                this.setState({_tab_value: new_props.initialView, _inspect_open: false, _inspect_origin: null}, () => {
                     this.forceUpdate();
                 });
             }
@@ -3167,6 +3165,16 @@ class PixaWalletDialog extends React.PureComponent {
         this.state._history.push("/@"+username);
     }
 
+    // A History row's round icon: open the one inspector on that record. The
+    // icon's rect lets the inspector's own icon fly out of it.
+    _open_inspector = (record, originRect) => {
+        if (!record) return;
+        this.setState({ _inspect_record: record, _inspect_origin: originRect || null, _inspect_open: true }, () => { this.forceUpdate(); });
+    }
+    _close_inspector = () => {
+        this.setState({ _inspect_open: false, _inspect_origin: null }, () => { this.forceUpdate(); });
+    }
+
     _open_power_dialog = (type = "power-down") => {
         this.setState({_power_dialog_opened: type}, () => { this.forceUpdate(); });
     }
@@ -4530,6 +4538,7 @@ class PixaWalletDialog extends React.PureComponent {
                                 loadingMore={_historyStatus === 'loading'}
                                 loadError={_historyStatus === 'error'}
                                 onLoadMore={this._load_more_history}
+                                onInspect={this._open_inspector}
                             />
                         </div>
                     </div>
@@ -4762,6 +4771,7 @@ class PixaWalletDialog extends React.PureComponent {
                 <PixaWalletSavingsDialog type={_savings_dialog_opened} open={_savings_dialog_opened.length} mode={_savings_dialog_mode} onClose={this._close_savings_dialog} api={this.state.api} account={account} maxDeposit={_savings_dialog_opened === "PIXA" ? _pixaBalance : _pxsBalance} maxWithdraw={_savings_dialog_opened === "PIXA" ? _savingsPixa : _savingsPxs} locale={this.state._locale} onConfirm={this._handle_savings_confirm}/>
                 <PixaWalletTaxesDialog open={_taxes_dialog_opened} onClose={this._close_taxes_dialog} api={this.state.api} account={account} fiatRate={fiatRate} fiatCurrency={cur} vestToPixa={this.state._vestToPixa} pixaToVest={this.state._pixaToVest} globalProps={this.state._globalProps}/>
                 <PixaWalletExchangesDialog open={_exchanges_dialog_opened} onClose={this._close_exchanges_dialog}/>
+                <TransactionInspector open={this.state._inspect_open} record={this.state._inspect_record} originRect={this.state._inspect_origin} account={account.username} api={this.state.api} vestToPixa={this.state._vestToPixa} pxaUsd={_pixaUsdPrice} pxsUsd={_pxsUsdPrice} fiatRate={fiatRate} currency={cur} onClose={this._close_inspector} onOpenAccount={this._open_author}/>
             </React.Fragment>
         );
     }

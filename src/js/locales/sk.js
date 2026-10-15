@@ -3351,6 +3351,29 @@ export default {
             "balance_history": "História zostatkov",
             "followers_over_time": "Vývoj počtu sledovateľov",
             "following_over_time": "Vývoj počtu sledovaných účtov"
+        },
+        "transaction_inspector": {
+            "inspect": "Preskúmať transakciu",
+            "close": "Zavrieť",
+            "copy": "Kopírovať",
+            "copied": "Skopírované",
+            "at_todays_price": "pri dnešnej cene",
+            "irreversible": "Nezvratná",
+            "reversible": "Zatiaľ nie je nezvratná",
+            "signed": "Podpísaná transakcia",
+            "virtual": "Virtuálna operácia",
+            "virtual_hint": "Vytvorená samotným reťazcom, nikto ju nepodpísal.",
+            "transaction": "Transakcia",
+            "transaction_id": "ID transakcie",
+            "block": "Blok",
+            "index_in_block": "Pozícia v bloku",
+            "index_in_transaction": "Pozícia v transakcii",
+            "history_entry": "Záznam v histórii",
+            "operation": "Operácia",
+            "open_post": "Otvoriť príspevok",
+            "encrypted_memo": "Šifrované memo",
+            "shortened": "Skrátené na zobrazenie",
+            "raw_data": "Surové dáta"
         }
     }
 };

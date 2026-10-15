@@ -149,9 +149,42 @@ const CommunityLink = ({ name, onOpen, classes }) => {
     );
 };
 
+const DOT_STYLE = { backgroundColor: "#000", boxShadow: "0 0 8px #0000004d" };
+
+// The dot is a button that opens the transaction inspector. Profile hosts the
+// one dialog for the whole timeline and hands every row the same onInspect;
+// the dot passes its event and its own rect (the dialog's icon flies out of
+// it). The aria label's key is new: until the catalogues carry it, the
+// untranslated key falls back to English.
+const INSPECT_KEY = "components.transaction_inspector.inspect";
+const inspectLabel = () => {
+    const s = t(INSPECT_KEY);
+    return typeof s === "string" && s && s !== INSPECT_KEY ? s : "Inspect transaction";
+};
+const inspectProps = (event, onInspect) => {
+    if (typeof onInspect !== "function") return null;
+    const open = (e) => {
+        e.stopPropagation();
+        onInspect(event, e.currentTarget.getBoundingClientRect());
+    };
+    return {
+        role: "button",
+        tabIndex: 0,
+        "aria-haspopup": "dialog",
+        "aria-label": inspectLabel(),
+        onClick: open,
+        onKeyDown: (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                open(e);
+            }
+        },
+    };
+};
+
 const renderTimelineEventContent = (event, classes, style, relLabel, isLast, eventId, handlers) => {
     const { type } = event;
-    const { onOpenProfile, onOpenCommunity, onOpenPost } = handlers || {};
+    const { onOpenProfile, onOpenCommunity, onOpenPost, onInspect } = handlers || {};
     // Title and description are now JSX fragments so they can embed clickable
     // <UserLink/> and <PostLink/> spans. Plain strings fall through unchanged.
     let title = null;
@@ -386,7 +419,8 @@ const renderTimelineEventContent = (event, classes, style, relLabel, isLast, eve
             <TimelineSeparator className={classes.timelineSeparator}>
                 <TimelineDot
                     className={classes.timelineDot}
-                    style={{ backgroundColor: "#000", boxShadow: `0 0 8px #0000004d` }}
+                    style={DOT_STYLE}
+                    {...inspectProps(event, onInspect)}
                 >
                     {getTimelineEventIcon(event)}
                 </TimelineDot>
@@ -402,7 +436,7 @@ const renderTimelineEventContent = (event, classes, style, relLabel, isLast, eve
 const TimelineEvent = React.memo(
     // `timeAgo` stays in the props contract (Profile still passes it), but the
     // live hook below owns the formatting now, so the prop is no longer read.
-    ({ event, classes, style, timeAgo, isLast, eventId, onOpenProfile, onOpenCommunity, onOpenPost }) => {
+    ({ event, classes, style, timeAgo, isLast, eventId, onOpenProfile, onOpenCommunity, onOpenPost, onInspect }) => {
         // The t() calls live in renderTimelineEventContent, a plain function that
         // cannot subscribe to anything. This component subscribes on its behalf.
         useLanguage();
@@ -413,19 +447,32 @@ const TimelineEvent = React.memo(
         // the unknown-date branch below.
         const displayTs = parseTimestamp(event && event.timestamp);
         const relLabel = useLiveTimeAgo(displayTs > 0 ? displayTs : null, { labels: 'long' });
-        return renderTimelineEventContent(event, classes, style, relLabel, isLast, eventId, { onOpenProfile, onOpenCommunity, onOpenPost });
+        return renderTimelineEventContent(event, classes, style, relLabel, isLast, eventId, { onOpenProfile, onOpenCommunity, onOpenPost, onInspect });
     },
-    // Re-render when the event identity, last-flag, or any of the handler
-    // identities change. Handler identities are stable callbacks from Profile.js
-    // (useCallback), so this stays cheap.
+    // Re-render when the event identity, its place, the last-flag, or any of
+    // the handler identities change. Handler identities are stable callbacks
+    // from Profile.js (useCallback), so this stays cheap.
+    //
+    // `style` is the row's place: MasonryExtended positions a cell through
+    // its style alone (a translate3d transform, the measured height, a glide
+    // transition after a relayout) and keeps the object's identity for as
+    // long as the cell stays put, so comparing it costs nothing while
+    // scrolling. Leaving it out kept every row on screen at its old place
+    // and height after each relayout (new events arriving at the top, a
+    // re-measure), and left new rows stuck in their entering style —
+    // transparent — until some other prop changed and they jumped into place.
     (a, b) =>
         a.eventId === b.eventId &&
+        a.style === b.style &&
         a.isLast === b.isLast &&
+        a.classes === b.classes &&
         a.onOpenProfile === b.onOpenProfile &&
         a.onOpenCommunity === b.onOpenCommunity &&
-        a.onOpenPost === b.onOpenPost
+        a.onOpenPost === b.onOpenPost &&
+        a.onInspect === b.onInspect
 );
 
-// Export parseTimestamp so Profile can use it for sorting.
-export { parseTimestamp };
+// parseTimestamp: Profile sorts with it. getTimelineEventIcon: the
+// transaction inspector draws the clicked dot's own glyph.
+export { parseTimestamp, getTimelineEventIcon };
 export default TimelineEvent;
