@@ -157,6 +157,8 @@ export default {
         "vga_style": "Stile VGA",
         "retro_art": "Arte retro",
         "lucasart_style": "Stile LucasArt",
+        "homm_style": "Stile pittorico HoMM",
+        "turbo_mode": "Modalità turbo (4× più veloce)",
         "no_i_don_t_want": "No, non voglio",
         "style": "Stile",
         "transform": "Trasforma",

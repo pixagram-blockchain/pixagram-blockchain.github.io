@@ -158,6 +158,8 @@ export default {
         "vga_style": "VGAスタイル",
         "retro_art": "レトロアート",
         "lucasart_style": "ルーカスアートスタイル",
+        "homm_style": "HoMM絵画スタイル",
+        "turbo_mode": "ターボモード (4× 高速)",
         "no_i_don_t_want": "いいえ、結構です",
         "style": "スタイル",
         "transform": "変換する",

@@ -19,6 +19,7 @@ import Radio from "@material-ui/core/Radio";
 import TextField from "@material-ui/core/TextField";
 import Slider from "@material-ui/core/Slider";
 import Switch from "@material-ui/core/Switch";
+import Checkbox from "@material-ui/core/Checkbox";
 import InputAdornment from "@material-ui/core/InputAdornment";
 import * as actions from "../actions/utils";
 import { ToxicityWatcher } from "./ToxicityHint";
@@ -324,7 +325,7 @@ const styles = theme => ({
         "& .MuiRadio-colorPrimary.Mui-checked, & .MuiCheckbox-colorPrimary.Mui-checked, & .MuiRadio-colorSecondary.Mui-checked": {
             color: "#000 !important"
         },
-        "& .MuiRadio-root, & .MuiFormLabel-root.Mui-focused, .MuiTypography-root": {
+        "& .MuiRadio-root, & .MuiCheckbox-root, & .MuiFormLabel-root.Mui-focused, .MuiTypography-root": {
             color: "#000 !important",
         },
         // Legend of the AI style radio list (theme default is the dark
@@ -343,6 +344,23 @@ const styles = theme => ({
         },
         "& .MuiSlider-markLabel": {
             color: "rgb(0 0 0 / 70%)"
+        }
+    },
+    // Turbo checkbox under the AI style list: a full-width rounded row of its
+    // own. The style fieldset and a bare FormControlLabel are both
+    // inline-flex, so without this block the checkbox wraps up beside the
+    // radio column whenever it fits (short labels: zh, ko…) and otherwise
+    // reads as a fifth style. The whole row toggles the checkbox.
+    aiTurbo: {
+        display: "flex",
+        alignItems: "center",
+        margin: "8px 0",
+        padding: "2px 16px",
+        borderRadius: "21px",
+        backgroundColor: "#efefef",
+        "& .MuiFormControlLabel-root": {
+            flex: 1,
+            marginRight: 0
         }
     },
     tagPopper: {
@@ -976,16 +994,20 @@ const extractClipboardImageFile = (event) => {
 // ============================================================================
 // AI STYLE PRESETS
 // ============================================================================
-// Offered as a radio list in the "Transform your picture with AI?" dialog.
-// `value` is passed verbatim to processImageFile as its `style` argument
-// (selects the LoRA); `labelKey` is resolved with t() at render time. Array
-// order is display order and the first entry is the default selection.
+// Offered as a radio list in the "Transform your picture with AI?" dialog,
+// with the Turbo checkbox under it. `value` is passed verbatim to
+// processImageFile as its `style` argument (selects the LoRA); `labelKey` is
+// resolved with t() at render time. Array order is display order and the
+// first entry is the default selection. "homm" is a painting style:
+// utils/pix2art/AI.js runs it with fewer steps and less guidance, style and
+// image strength (STYLE_OFFSETS there).
 // ImageWizard keeps an identical copy — change both together.
 
 const AI_STYLES = [
     { value: "retroart", labelKey: "words.retro_art" },
     { value: "lucasart", labelKey: "words.lucasart_style" },
-    { value: "vga",      labelKey: "words.vga_style" }
+    { value: "vga",      labelKey: "words.vga_style" },
+    { value: "homm",     labelKey: "words.homm_style" }
 ];
 const DEFAULT_AI_STYLE = AI_STYLES[0].value;
 
@@ -1017,10 +1039,13 @@ const initialState = {
     aspectRatio: "1:1",
     transformationPercent: 50,
     fidelityPercent: 50,
-    // Radio selection in the AI dialog. Like the other image settings it
-    // survives RESET_UPLOAD (back to step 0 keeps the user's last choice)
-    // and goes back to the default on RESET (dialog closed).
+    // Radio selection and Turbo checkbox in the AI dialog. Like the other
+    // image settings they survive RESET_UPLOAD (back to step 0 keeps the
+    // user's last choice) and go back to the defaults on RESET (dialog
+    // closed). Turbo renders one 768 px tile instead of the 1280 px pass,
+    // about 4x faster.
     aiStyle: DEFAULT_AI_STYLE,
+    aiTurbo: false,
 
     // Canvas/preview data
     preview: null,
@@ -2419,7 +2444,7 @@ function NewPost(props) {
         base64, processorData, availableSizes, dropzoneActive, message, inputFileUrl,
         inputFile, uploadOriginal, editParams, editorOpen, isProbing,
         showingOriginal, preloading, preloadProgress, isGenerating,
-        canvasKey, closeConfirmOpen, useAiOpen, aiStyle, quantizeDialogOpen,
+        canvasKey, closeConfirmOpen, useAiOpen, aiStyle, aiTurbo, quantizeDialogOpen,
         licenseCustomizationOpen, quantizeDownscale, quantizeColors,
         licenseBase, licenseCustomization, processName, processStart, processFinish,
         validationErrors, touched, isPublishing
@@ -2960,10 +2985,12 @@ function NewPost(props) {
     }, [processFileUpload]);
 
     // Process image with or without AI
-    // style: one of AI_STYLES[].value ("retroart" | "lucasart" | "vga") —
-    // selects the AI LoRA. Falls back to the default style when omitted (the
-    // text-to-image tab, or the user declined AI — the pipeline then ignores it).
-    const processImage = useCallback(async (useAi, style = DEFAULT_AI_STYLE) => {
+    // style: one of AI_STYLES[].value ("retroart" | "lucasart" | "vga" |
+    // "homm") — selects the AI LoRA. turbo: the AI dialog's Turbo checkbox
+    // (one 768 px tile, ~4x faster). Both fall back to their defaults when
+    // omitted (the text-to-image tab, or the user declined AI — the pipeline
+    // then ignores them).
+    const processImage = useCallback(async (useAi, style = DEFAULT_AI_STYLE, turbo = false) => {
         if (!mountedRef.current) return;
 
         try {
@@ -2991,7 +3018,8 @@ function NewPost(props) {
                 aspectRatio,
                 transformationSteps,
                 fidelity,
-                style
+                style,
+                turbo
             );
 
             if (!mountedRef.current) return;
@@ -3156,9 +3184,9 @@ function NewPost(props) {
     // Handle close AI dialog: the two buttons answer the question and start
     // the conversion; the backdrop / Escape (handleCancelUseAi) only dismiss
     // it, leaving the picture in the zone for the user to come back to.
-    const handleCloseUseAi = useCallback((useAi, style) => {
+    const handleCloseUseAi = useCallback((useAi, style, turbo) => {
         dispatch({ type: actionTypes.SET_FIELD, field: 'useAiOpen', value: false });
-        processImage(useAi, style);
+        processImage(useAi, style, turbo);
     }, [processImage]);
 
     const handleCancelUseAi = useCallback(() => {
@@ -3168,6 +3196,11 @@ function NewPost(props) {
     // Handle AI style radio change (AI dialog)
     const handleAiStyleChange = useCallback((event) => {
         dispatch({ type: actionTypes.SET_FIELD, field: 'aiStyle', value: event.target.value });
+    }, []);
+
+    // Handle Turbo checkbox change (AI dialog)
+    const handleAiTurboChange = useCallback((event) => {
+        dispatch({ type: actionTypes.SET_FIELD, field: 'aiTurbo', value: event.target.checked });
     }, []);
 
     // Handle size change
@@ -3875,12 +3908,24 @@ function NewPost(props) {
                             ))}
                         </RadioGroup>
                     </FormControl>
+                    <div className={classes.aiTurbo}>
+                        <FormControlLabel
+                            control={
+                                <Checkbox
+                                    color="primary"
+                                    checked={aiTurbo}
+                                    onChange={handleAiTurboChange}
+                                />
+                            }
+                            label={t("words.turbo_mode")}
+                        />
+                    </div>
                 </DialogContent>
                 <DialogActions style={{ textAlign: "right" }}>
                     <Button variant="text" color="primary" autoFocus onClick={() => handleCloseUseAi(false)}>
                         {t("words.no_i_don_t_want")}
                     </Button>
-                    <Button variant="contained" color="primary" onClick={() => handleCloseUseAi(true, aiStyle)}>
+                    <Button variant="contained" color="primary" onClick={() => handleCloseUseAi(true, aiStyle, aiTurbo)}>
                         {t("words.transform")}
                     </Button>
                 </DialogActions>

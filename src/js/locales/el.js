@@ -167,6 +167,8 @@ export default {
         "vga_style": "Στυλ VGA",
         "retro_art": "Ρετρό τέχνη",
         "lucasart_style": "Στυλ LucasArt",
+        "homm_style": "Ζωγραφικό στυλ HoMM",
+        "turbo_mode": "Λειτουργία turbo (4× ταχύτερη)",
         "no_i_don_t_want": "Όχι, δεν θέλω",
         "style": "Στυλ",
         "transform": "Μετασχηματισμός",

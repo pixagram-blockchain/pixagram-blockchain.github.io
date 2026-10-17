@@ -160,6 +160,8 @@ export default {
         "vga_style": "VGA-стиль",
         "retro_art": "Ретро-арт",
         "lucasart_style": "LucasArt-стиль",
+        "homm_style": "Живописний стиль HoMM",
+        "turbo_mode": "Турборежим (4× швидше)",
         "no_i_don_t_want": "Ні, не хочу",
         "style": "Стиль",
         "transform": "Перетворити",

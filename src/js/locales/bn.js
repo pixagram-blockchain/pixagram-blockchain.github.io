@@ -159,6 +159,8 @@ export default {
         "vga_style": "VGA স্টাইল",
         "retro_art": "রেট্রো আর্ট",
         "lucasart_style": "লুকাসআর্ট স্টাইল",
+        "homm_style": "HoMM পেইন্টিং স্টাইল",
+        "turbo_mode": "টার্বো মোড (4× দ্রুত)",
         "no_i_don_t_want": "না, আমি চাই না",
         "style": "স্টাইল",
         "transform": "রূপান্তর করুন",

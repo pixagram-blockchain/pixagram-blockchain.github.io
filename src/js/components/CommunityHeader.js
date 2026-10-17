@@ -13,6 +13,7 @@ import Pen from "../icons/Pen";
 import CommunityImage from "./CommunityImage";
 import ActionButtons from "./ActionButtons";
 import MetadataPanel from "./MetadataPanel";
+import useMobileCardFit from "../hooks/useMobileCardFit";
 
 import { t, useLanguage } from "../utils/text";
 
@@ -54,6 +55,15 @@ const isTucked = ({ hidden, y, scrollTop }) => (
 );
 const ST_SHOWN = { transform: "translateY(0px)" };
 const ST_TUCKED = { transform: "translateY(-96px)" };
+
+// ── Keeping the write button on screen ─────────────────────────────────
+// The button hangs below the card's foot (see hooks/useMobileCardFit), and
+// nothing guaranteed the open card fit the screen, so on a short screen it
+// ran past the bottom edge and took the button with it. The body the
+// Collapse opens is now capped to the room left above the button and
+// scrolls when capped. `contain`: a scroll that reaches its end doesn't
+// carry on into the page behind the backdrop.
+const ST_BODY = { overflowX: "hidden", overflowY: "auto", overscrollBehavior: "contain" };
 
 // Every prop by identity, except the raw scroll numbers, which only matter
 // through isTucked. The previous comparator listed eleven props and skipped
@@ -100,6 +110,15 @@ const CommunityHeader = React.memo(({
     useLanguage();
     const slideStyle = isTucked({ hidden, y, scrollTop }) ? ST_TUCKED : ST_SHOWN;
 
+    // Measured through the sliding wrapper and the body the Collapse opens.
+    const wrapperRef = React.useRef(null);
+    const bodyRef = React.useRef(null);
+    const fit = useMobileCardFit({ expanded: mobileCardExpanded, height, wrapperRef, bodyRef });
+    const bodyStyle = React.useMemo(
+        () => (fit ? { ...ST_BODY, maxHeight: fit.bodyMaxHeight } : ST_BODY),
+        [fit]
+    );
+
     // Dismiss on a real CLICK on the backdrop (not a pointer/touch-down), and
     // consume the event so the synthesized click can't fall through to a feed
     // card behind it and open a post. Matches ProfileMobileCard.
@@ -116,7 +135,7 @@ const CommunityHeader = React.memo(({
                 onClick={handleBackdropClick}
                 aria-hidden={!mobileCardExpanded}
             />
-            <div className={classes.viewMobile} style={slideStyle}>
+            <div ref={wrapperRef} className={classes.viewMobile} style={slideStyle}>
                 <Card className={mobileCardExpanded ? classes.viewMobileCardOpened : classes.viewMobileCard}>
                     <CardHeader
                         onClick={onToggleMobileCard}
@@ -147,58 +166,61 @@ const CommunityHeader = React.memo(({
                         subheader={community.about}
                     />
                     <Collapse in={mobileCardExpanded} timeout="auto">
-                        <CardContent>
-                            <div style={ST_D_FLEX}>
-                                <Fade in={mobileCardExpanded} timeout={450}>
-                                    <div style={ST_POS_RELATIVE}>
-                                        <ButtonBase onClick={onOpenPicture} style={ST_PICTURE_BUTTON_BIG}>
-                                            <CommunityImage
-                                                image={community.image}
-                                                name={community.name}
-                                                className={classes.communityImageMobileBig}
-                                                style={ST_M_0PX}
-                                            />
-                                        </ButtonBase>
-                                        {isAdmin && onEditCommunity && (
-                                            <IconButton
-                                                className={classes.menuButtonEdit}
-                                                onClick={onEditCommunity}
-                                                style={ST_TOP_8__RIGHT_8__LEFT_AUTO}
-                                            >
-                                                <EditIcon style={ST_FS_18} />
-                                            </IconButton>
-                                        )}
-                                    </div>
-                                </Fade>
-                                <Fade in={mobileCardExpanded} timeout={450}>
-                                    <ActionButtons
-                                        joined={joined}
-                                        onToggleJoined={onToggleJoined}
-                                        onViewMembers={onViewMembers}
-                                        isMobile={true}
-                                        actionButtonsClass={classes.actionButtons}
-                                        actionButtonsMobileClass={classes.actionButtonsMobile}
-                                    />
-                                </Fade>
-                            </div>
-                        </CardContent>
-                        <MetadataPanel
-                            tabValue={tabValue}
-                            onTabChange={onTabChange}
-                            members={members}
-                            rules={rules}
-                            community={community}
-                            postsCount={postsCount}
-                            timeAgo={timeAgo}
-                            height={height}
-                            cardTabsClass={classes.cardTabs}
-                            metadataSwipeableViewsClass={classes.metadataSwipeableViews}
-                            memberListItemClass={classes.memberListItem}
-                            memberBadgeClass={classes.memberBadge}
-                            roleChipClass={classes.roleChip}
-                            metaListHeaderClass={classes.metaListHeader}
-                            isFullHeight={false}
-                        />
+                        {/* Capped to the room above the write button; scrolls when it has to. */}
+                        <div ref={bodyRef} style={bodyStyle}>
+                            <CardContent>
+                                <div style={ST_D_FLEX}>
+                                    <Fade in={mobileCardExpanded} timeout={450}>
+                                        <div style={ST_POS_RELATIVE}>
+                                            <ButtonBase onClick={onOpenPicture} style={ST_PICTURE_BUTTON_BIG}>
+                                                <CommunityImage
+                                                    image={community.image}
+                                                    name={community.name}
+                                                    className={classes.communityImageMobileBig}
+                                                    style={ST_M_0PX}
+                                                />
+                                            </ButtonBase>
+                                            {isAdmin && onEditCommunity && (
+                                                <IconButton
+                                                    className={classes.menuButtonEdit}
+                                                    onClick={onEditCommunity}
+                                                    style={ST_TOP_8__RIGHT_8__LEFT_AUTO}
+                                                >
+                                                    <EditIcon style={ST_FS_18} />
+                                                </IconButton>
+                                            )}
+                                        </div>
+                                    </Fade>
+                                    <Fade in={mobileCardExpanded} timeout={450}>
+                                        <ActionButtons
+                                            joined={joined}
+                                            onToggleJoined={onToggleJoined}
+                                            onViewMembers={onViewMembers}
+                                            isMobile={true}
+                                            actionButtonsClass={classes.actionButtons}
+                                            actionButtonsMobileClass={classes.actionButtonsMobile}
+                                        />
+                                    </Fade>
+                                </div>
+                            </CardContent>
+                            <MetadataPanel
+                                tabValue={tabValue}
+                                onTabChange={onTabChange}
+                                members={members}
+                                rules={rules}
+                                community={community}
+                                postsCount={postsCount}
+                                timeAgo={timeAgo}
+                                height={height}
+                                cardTabsClass={classes.cardTabs}
+                                metadataSwipeableViewsClass={classes.metadataSwipeableViews}
+                                memberListItemClass={classes.memberListItem}
+                                memberBadgeClass={classes.memberBadge}
+                                roleChipClass={classes.roleChip}
+                                metaListHeaderClass={classes.metaListHeader}
+                                isFullHeight={false}
+                            />
+                        </div>
                     </Collapse>
                     <Grow
                         in={mobileCardExpanded}

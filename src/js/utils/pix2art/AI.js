@@ -76,20 +76,57 @@ const PRESETS_TRANSFORM = {
     tile_overlap: 256,
 };
 
-export const transform = async (file, step_n, fidelity, callback = () => {}, callback2 = () => {}, description = "", style = "retroart") => {
+// Turbo mode — the checkbox under the style list. Renders at 768 px with a
+// 768 px tile, so the whole picture is a single tile: about 4x faster than
+// the default 1280 px pass. The AI output is reduced to pixel art of a few
+// hundred pixels afterwards, so 768 px is still plenty of source. Both keys
+// already exist on /process_image, so the Space needs no change.
+const TURBO_TRANSFORM = {
+    resolution: 768,
+    tile_size: 768,
+};
+
+// Time the progress ring takes to fill; past it, the ring turns into the
+// "finalising" spinner until the Space answers.
+const TRANSFORM_ETA_MS = 40 * 1000;
+const TURBO_TRANSFORM_ETA_MS = TRANSFORM_ETA_MS / 4;
+
+// Per-style shifts applied on top of the values the transformation /
+// fidelity sliders produce. "homm" is a painting style that needs a lighter
+// touch than the pixel-art LoRAs.
+const STYLE_OFFSETS = {
+    homm: {
+        num_inference_steps: -2,
+        guidance_scale: -0.2,
+        lora_intensity: -0.1,   // style strength
+        img2img_strength: -0.1, // image strength
+    },
+};
+
+// style: LoRA preset — "retroart" | "lucasart" | "vga" | "homm".
+// turbo: one 768 px tile instead of the 1280 px pass (TURBO_TRANSFORM).
+export const transform = async (file, step_n, fidelity, callback = () => {}, callback2 = () => {}, description = "", style = "retroart", turbo = false) => {
 
     return new Promise(async function (resolve, reject) {
         callback("AI CONVERT");
-        callback2("COMPUTE", Date.now(), Date.now() + 40 * 1000);
+        callback2("COMPUTE", Date.now(), Date.now() + (turbo ? TURBO_TRANSFORM_ETA_MS : TRANSFORM_ETA_MS));
+
+        // Values come from the sliders first and are shifted afterwards, so a
+        // style's offsets hold at every slider position. Guidance and LoRA
+        // intensity stay derived from the slider's step count — deriving them
+        // from the shifted one would lower them a second time.
+        const offsets = STYLE_OFFSETS[style] || {};
+        const shift = (key, value) => value + (offsets[key] || 0);
 
         var input_image = (file.size > 1000000) ? await resizeImageTo2MP(file) : file;
-        var num_inference_steps = step_n;
-        var img2img_strength = (0.825 - Math.min(0.4, Math.max(0, fidelity)));
-        var guidance_scale = Math.max(1.0, 0.225+(step_n|0)/8);
-        var lora_intensity = PRESETS_TRANSFORM.lora_intensity + (step_n/100);
+        var num_inference_steps = Math.max(1, shift("num_inference_steps", step_n));
+        var img2img_strength = shift("img2img_strength", 0.825 - Math.min(0.4, Math.max(0, fidelity)));
+        var guidance_scale = shift("guidance_scale", Math.max(1.0, 0.225+(step_n|0)/8));
+        var lora_intensity = shift("lora_intensity", PRESETS_TRANSFORM.lora_intensity + (step_n/100));
 
         var dynamic_config = {
             ...PRESETS_TRANSFORM,
+            ...(turbo ? TURBO_TRANSFORM : null),
             lora_style: style,
             num_inference_steps,
             img2img_strength,

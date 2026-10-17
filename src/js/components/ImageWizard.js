@@ -7,9 +7,10 @@
 //
 //   1. "Transform your picture with AI?" — same white dialog as NewPost.
 //      The AI style is a radio list in the BODY (AI_STYLES below: "retroart"
-//      = default, "lucasart", "vga"); the actions bar holds "No, I don't
+//      = default, "lucasart", "vga", "homm") with a Turbo checkbox under it
+//      (one 768 px tile, ~4x faster); the actions bar holds "No, I don't
 //      want" (= convert without AI) and "Transform" (= AI with the selected
-//      style).
+//      style, turbo or not).
 //      (Skipped when the upload is already pixel art: the file is just badly
 //      encoded, so we jump straight to Adjust.)
 //   2. Pixel-art conversion via utils/pix2art (with or without AI), with the
@@ -44,6 +45,7 @@ import FormControlLabel from "@material-ui/core/FormControlLabel";
 import FormLabel from "@material-ui/core/FormLabel";
 import RadioGroup from "@material-ui/core/RadioGroup";
 import Radio from "@material-ui/core/Radio";
+import Checkbox from "@material-ui/core/Checkbox";
 import Slider from "@material-ui/core/Slider";
 import Fade from "@material-ui/core/Fade";
 import { isArtworkPixelart, normalizeUpload, processImageFile, quantizeImageData } from "../utils/pix2art/file2imgd";
@@ -89,16 +91,33 @@ const styles = theme => ({
                 backgroundColor: "#222 !important",
             }
         },
-        "& .MuiRadio-colorPrimary.Mui-checked, & .MuiRadio-colorSecondary.Mui-checked": {
+        "& .MuiRadio-colorPrimary.Mui-checked, & .MuiCheckbox-colorPrimary.Mui-checked, & .MuiRadio-colorSecondary.Mui-checked": {
             color: "#000 !important"
         },
-        "& .MuiRadio-root, & .MuiFormLabel-root.Mui-focused, .MuiTypography-root": {
+        "& .MuiRadio-root, & .MuiCheckbox-root, & .MuiFormLabel-root.Mui-focused, .MuiTypography-root": {
             color: "#000 !important",
         },
         // Legend of the AI style radio list (theme default is the dark
         // theme's light text.secondary — invisible on this white paper).
         "& .MuiFormLabel-root": {
             color: "rgba(0, 0, 0, 0.6) !important",
+        }
+    },
+    // Turbo checkbox under the AI style list: a full-width rounded row of its
+    // own (same as NewPost). The style fieldset and a bare FormControlLabel
+    // are both inline-flex, so without this block the checkbox wraps up
+    // beside the radio column whenever it fits (short labels: zh, ko…) and
+    // otherwise reads as a fifth style. The whole row toggles the checkbox.
+    aiTurbo: {
+        display: "flex",
+        alignItems: "center",
+        margin: "8px 0",
+        padding: "2px 16px",
+        borderRadius: "21px",
+        backgroundColor: "#efefef",
+        "& .MuiFormControlLabel-root": {
+            flex: 1,
+            marginRight: 0
         }
     },
     // Preview stage the input image / loader / result canvas live in.
@@ -355,15 +374,18 @@ const percentToFidelity = (percent) => 0.05 + (percent / 100) * 0.45;
 const DEFAULT_TRANSFORMATION_STEPS = percentToTransformationSteps(50);
 const DEFAULT_FIDELITY = percentToFidelity(50);
 
-// AI style presets offered as a radio list in the AI dialog. `value` is
-// passed verbatim to processImageFile as its `style` argument (selects the
-// LoRA); `labelKey` is resolved with t() at render time. Array order is
-// display order and the first entry is the default selection.
+// AI style presets offered as a radio list in the AI dialog, with the Turbo
+// checkbox under it. `value` is passed verbatim to processImageFile as its
+// `style` argument (selects the LoRA); `labelKey` is resolved with t() at
+// render time. Array order is display order and the first entry is the
+// default selection. "homm" is a painting style: utils/pix2art/AI.js runs it
+// with fewer steps and less guidance, style and image strength.
 // Identical copy of NewPost's AI_STYLES — change both together.
 const AI_STYLES = [
     { value: "retroart", labelKey: "words.retro_art" },
     { value: "lucasart", labelKey: "words.lucasart_style" },
-    { value: "vga",      labelKey: "words.vga_style" }
+    { value: "vga",      labelKey: "words.vga_style" },
+    { value: "homm",     labelKey: "words.homm_style" }
 ];
 const DEFAULT_AI_STYLE = AI_STYLES[0].value;
 
@@ -478,8 +500,9 @@ function ImageWizard(props) {
     const [inputFileUrl, setInputFileUrl] = useState("");
     const [errorMsg, setErrorMsg] = useState("");
 
-    // Radio selection in the AI dialog ("ask" phase)
+    // Radio selection and Turbo checkbox in the AI dialog ("ask" phase)
     const [aiStyle, setAiStyle] = useState(DEFAULT_AI_STYLE);
+    const [aiTurbo, setAiTurbo] = useState(false);
 
     // Conversion progress (same mechanics as NewPost)
     const [processStart, setProcessStart] = useState(0);
@@ -523,6 +546,7 @@ function ImageWizard(props) {
         setInputFileUrl("");
         setErrorMsg("");
         setAiStyle(DEFAULT_AI_STYLE);
+        setAiTurbo(false);
         setProcessStart(0);
         setProcessFinish(0);
         setProcessorData(null);
@@ -616,10 +640,11 @@ function ImageWizard(props) {
     }, [phase]);
 
     // ── AI choice → run the pix2art pipeline ────────────────────────────
-    // style: one of AI_STYLES[].value ("retroart" | "lucasart" | "vga") —
-    // selects the AI LoRA; undefined when the user declined AI (the pipeline
-    // ignores it without AI).
-    const processImage = useCallback(async (useAi, style) => {
+    // style: one of AI_STYLES[].value ("retroart" | "lucasart" | "vga" |
+    // "homm") — selects the AI LoRA; turbo: the Turbo checkbox (one 768 px
+    // tile, ~4x faster). Both are undefined when the user declined AI (the
+    // pipeline ignores them without AI).
+    const processImage = useCallback(async (useAi, style, turbo) => {
         if (!file) return;
         const gen = genRef.current;
         setPhase("processing");
@@ -640,7 +665,8 @@ function ImageWizard(props) {
                 "1:1",
                 DEFAULT_TRANSFORMATION_STEPS,
                 DEFAULT_FIDELITY,
-                style
+                style,
+                turbo
             );
 
             if (genRef.current !== gen) return;
@@ -675,12 +701,16 @@ function ImageWizard(props) {
         }
     }, [file]);
 
-    const handleCloseUseAi = useCallback((useAi, style) => {
-        processImage(useAi, style);
+    const handleCloseUseAi = useCallback((useAi, style, turbo) => {
+        processImage(useAi, style, turbo);
     }, [processImage]);
 
     const handleAiStyleChange = useCallback((event) => {
         setAiStyle(event.target.value);
+    }, []);
+
+    const handleAiTurboChange = useCallback((event) => {
+        setAiTurbo(event.target.checked);
     }, []);
 
     // ── Size selection (identical caching to NewPost) ────────────────────
@@ -1029,12 +1059,24 @@ function ImageWizard(props) {
                             ))}
                         </RadioGroup>
                     </FormControl>
+                    <div className={classes.aiTurbo}>
+                        <FormControlLabel
+                            control={
+                                <Checkbox
+                                    color="primary"
+                                    checked={aiTurbo}
+                                    onChange={handleAiTurboChange}
+                                />
+                            }
+                            label={t("words.turbo_mode")}
+                        />
+                    </div>
                 </DialogContent>
                 <DialogActions style={{ textAlign: "right" }}>
                     <Button variant="text" color="primary" autoFocus onClick={() => handleCloseUseAi(false)}>
                         {t("words.no_i_don_t_want")}
                     </Button>
-                    <Button variant="contained" color="primary" onClick={() => handleCloseUseAi(true, aiStyle)}>
+                    <Button variant="contained" color="primary" onClick={() => handleCloseUseAi(true, aiStyle, aiTurbo)}>
                         {t("words.transform")}
                     </Button>
                 </DialogActions>

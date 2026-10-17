@@ -157,6 +157,8 @@ export default {
         "vga_style": "VGA-stijl",
         "retro_art": "Retro art",
         "lucasart_style": "LucasArt-stijl",
+        "homm_style": "HoMM-schilderstijl",
+        "turbo_mode": "Turbomodus (4× sneller)",
         "no_i_don_t_want": "Nee, dat wil ik niet",
         "style": "Stijl",
         "transform": "Omzetten",

@@ -158,6 +158,8 @@ export default {
         "vga_style": "Gaya VGA",
         "retro_art": "Seni retro",
         "lucasart_style": "Gaya LucasArt",
+        "homm_style": "Gaya lukisan HoMM",
+        "turbo_mode": "Mode turbo (4× lebih cepat)",
         "no_i_don_t_want": "Tidak, saya tidak mau",
         "style": "Gaya",
         "transform": "Ubah",

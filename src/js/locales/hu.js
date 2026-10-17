@@ -157,6 +157,8 @@ export default {
         "vga_style": "VGA stílus",
         "retro_art": "Retró art",
         "lucasart_style": "LucasArt stílus",
+        "homm_style": "HoMM festői stílus",
+        "turbo_mode": "Turbó mód (4× gyorsabb)",
         "no_i_don_t_want": "Nem, nem szeretném",
         "style": "Stílus",
         "transform": "Átalakítás",

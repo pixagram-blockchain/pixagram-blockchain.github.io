@@ -158,6 +158,8 @@ export default {
         "vga_style": "VGA शैली",
         "retro_art": "रेट्रो आर्ट",
         "lucasart_style": "लुकासआर्ट शैली",
+        "homm_style": "HoMM चित्रकला शैली",
+        "turbo_mode": "टर्बो मोड (4× तेज़)",
         "no_i_don_t_want": "नहीं, मुझे नहीं चाहिए",
         "style": "शैली",
         "transform": "रूपांतरित करें",

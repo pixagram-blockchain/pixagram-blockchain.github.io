@@ -157,6 +157,8 @@ export default {
         "vga_style": "VGA-tyyli",
         "retro_art": "Retrotaide",
         "lucasart_style": "LucasArt-tyyli",
+        "homm_style": "HoMM-maalaustyyli",
+        "turbo_mode": "Turbotila (4× nopeampi)",
         "no_i_don_t_want": "Ei, en halua",
         "style": "Tyyli",
         "transform": "Muunna",

@@ -21,6 +21,7 @@ import ProfileDescription from "./ProfileDescription";
 import VotingPowerDisplay from "./VotingPowerDisplay";
 import Edit from "@material-ui/icons/Edit";
 import { cssBackgroundImage } from "../utils/safeUrl";
+import useMobileCardFit from "../hooks/useMobileCardFit";
 
 // The picture ButtonBases carry the SAME corner radii as the picture classes
 // they wrap (profileImageMobile / profileImageMobileOpened /
@@ -39,6 +40,22 @@ const isTucked = ({ hidden, y, scrollTop }) => (
 );
 const SLIDE_SHOWN = { transform: "translateY(0px)" };
 const SLIDE_TUCKED = { transform: "translateY(-96px)" };
+
+// ── Keeping the wallet button on screen ────────────────────────────────
+// The button hangs below the card's foot (see hooks/useMobileCardFit), and
+// the open card was as tall as its content asked — the lists never under
+// 300px — so on a short screen it ran past the bottom edge and took the
+// button with it. The lists now shrink into the room left above the
+// button, down to MIN_LIST_HEIGHT; below that the body is capped and
+// scrolls.
+//
+// The strip above the lists their tabs sit in (16px margin + 48px tabs).
+const LIST_TABS_SPACE = 64;
+const LIST_BLOCK_STYLE = { paddingTop: LIST_TABS_SPACE, position: "relative" };
+const MIN_LIST_HEIGHT = 160;
+// The body the Collapse opens. `contain`: a scroll that reaches its end
+// doesn't carry on into the page behind the backdrop.
+const BODY_STYLE = { overflowX: "hidden", overflowY: "auto", overscrollBehavior: "contain" };
 
 // Shallow, like the default memo compare, except that the raw scroll numbers
 // count only through isTucked. This card renders its whole expanded body
@@ -83,6 +100,24 @@ const ProfileMobileCard = React.memo(({
                                           onEditProfile,
                                           onOpenPicture
                                       }) => {
+    // Measured through the sliding wrapper, the body the Collapse opens and
+    // the block the lists sit in.
+    const wrapperRef = React.useRef(null);
+    const bodyRef = React.useRef(null);
+    const listRef = React.useRef(null);
+    const fit = useMobileCardFit({ expanded, height, wrapperRef, bodyRef, listRef });
+
+    // As tall as the window-height formula asks (300–720px), but no taller
+    // than the room above the wallet button allows.
+    const preferredListHeight = Math.max(300, Math.min(height - 600, 720));
+    const listHeight = fit && fit.listRoom != null
+        ? Math.min(preferredListHeight, Math.max(MIN_LIST_HEIGHT, fit.listRoom - LIST_TABS_SPACE))
+        : preferredListHeight;
+    const bodyStyle = React.useMemo(
+        () => (fit ? { ...BODY_STYLE, maxHeight: fit.bodyMaxHeight } : BODY_STYLE),
+        [fit]
+    );
+
     const handleTabChange = React.useCallback((e, v) => {
         onTabChange(e, v);
     }, [onTabChange]);
@@ -150,7 +185,7 @@ const ProfileMobileCard = React.memo(({
                 onClick={handleBackdropClick}
                 aria-hidden={!expanded}
             />
-            <div className={classes.viewMobile} style={isTucked({ hidden, y, scrollTop }) ? SLIDE_TUCKED : SLIDE_SHOWN}>
+            <div ref={wrapperRef} className={classes.viewMobile} style={isTucked({ hidden, y, scrollTop }) ? SLIDE_TUCKED : SLIDE_SHOWN}>
                 <Card className={(expanded ? classes.viewMobileCardOpened : classes.viewMobileCard)} >
                     <CardHeader
                         onClick={onToggleExpanded}
@@ -174,84 +209,87 @@ const ProfileMobileCard = React.memo(({
                         subheader={description}
                     />
                     <Collapse in={expanded} timeout="auto">
-                        <CardContent>
-                            <div style={{display: "flex"}}>
-                                <Fade in={expanded} timeout={450}>
-                                    <ButtonBase onClick={onOpenPicture} style={PICTURE_BUTTON_BIG}>
-                                        <div className={classes.profileImageMobileBig + " pixelated"}
-                                             style={{backgroundImage: profileBg}}
-                                             alt={displayName + " (@" + username + ")"}>
-                                            {isOwnProfile && (
-                                                <IconButton onClick={handleEditClick} className={classes.menuButtonEdit}><Edit/></IconButton>
-                                            )}
+                        {/* Capped to the room above the wallet button; scrolls when it has to. */}
+                        <div ref={bodyRef} style={bodyStyle}>
+                            <CardContent>
+                                <div style={{display: "flex"}}>
+                                    <Fade in={expanded} timeout={450}>
+                                        <ButtonBase onClick={onOpenPicture} style={PICTURE_BUTTON_BIG}>
+                                            <div className={classes.profileImageMobileBig + " pixelated"}
+                                                 style={{backgroundImage: profileBg}}
+                                                 alt={displayName + " (@" + username + ")"}>
+                                                {isOwnProfile && (
+                                                    <IconButton onClick={handleEditClick} className={classes.menuButtonEdit}><Edit/></IconButton>
+                                                )}
+                                            </div>
+                                        </ButtonBase>
+                                    </Fade>
+                                    <Fade in={expanded} timeout={450}>
+                                        <div style={{width: "100%"}}>
+                                            <FollowButtons
+                                                classes={classes}
+                                                following={following}
+                                                isOwnProfile={isOwnProfile}
+                                                isLoggedOut={isLoggedOut}
+                                                followerCount={account?.follower_count}
+                                                followingCount={account?.following_count}
+                                                onOpenFollowersModal={onOpenFollowersModal}
+                                                onOpenFollowingModal={onOpenFollowingModal}
+                                                onToggleFollowing={onToggleFollowing}
+                                                isMobile={true}
+                                            />
                                         </div>
-                                    </ButtonBase>
-                                </Fade>
-                                <Fade in={expanded} timeout={450}>
-                                    <div style={{width: "100%"}}>
-                                        <FollowButtons
+                                    </Fade>
+                                </div>
+                            </CardContent>
+                            <div ref={listRef} style={LIST_BLOCK_STYLE}>
+                                <Tabs
+                                    className={classes.cardTabs}
+                                    value={tabValue}
+                                    variant="fullWidth"
+                                    indicatorColor="primary"
+                                    textColor="primary"
+                                    onChange={handleTabChange}
+                                    fullwidth={true}
+                                >
+                                    <Tab icon={<Community/>} />
+                                    <Tab icon={<DescriptionRounded/>} />
+                                    <Tab icon={<InfoRounded/>} />
+                                </Tabs>
+                                <SwipeableViews ignoreNativeScroll={true}
+                                                animateHeight={false}
+                                                containerStyle={{height: listHeight}}
+                                                animateTransitions={true}
+                                                disableLazyLoading={true}
+                                                resistance={true}
+                                                springConfig={{tension: 450, friction: 60, duration: '120ms', easeFunction: 'cubic-bezier(0.280, 0.840, 0.420, 1)', delay: '5ms'}}
+                                                index={tabValue}
+                                                onChangeIndex={handleSwipeIndexChange}
+                                                disabled={false}
+                                                key={"swipe-able-view-profile"}>
+                                    <div key={"communities"} className={classes.metadataSwipeableViews}>
+                                        <CommunitiesList
                                             classes={classes}
-                                            following={following}
-                                            isOwnProfile={isOwnProfile}
-                                            isLoggedOut={isLoggedOut}
-                                            followerCount={account?.follower_count}
-                                            followingCount={account?.following_count}
-                                            onOpenFollowersModal={onOpenFollowersModal}
-                                            onOpenFollowingModal={onOpenFollowingModal}
-                                            onToggleFollowing={onToggleFollowing}
-                                            isMobile={true}
+                                            subscriptions={subscriptions}
+                                            onGoToCommunity={onGoToCommunity}
+                                            onCreateCommunity={onCreateCommunity}
                                         />
                                     </div>
-                                </Fade>
+                                    <div key={"know-more-about"} className={classes.metadataSwipeableViews}>
+                                        <ProfileDescription classes={classes} account={account} />
+                                    </div>
+                                    <div key={"meta-information"} className={classes.metadataSwipeableViews}>
+                                        <VotingPowerDisplay
+                                            classes={classes}
+                                            timeAgo={timeAgo}
+                                            postsCount={postsCount}
+                                            account={account}
+                                            vpMana={vpMana}
+                                            rcMana={rcMana}
+                                        />
+                                    </div>
+                                </SwipeableViews>
                             </div>
-                        </CardContent>
-                        <div style={{paddingTop: "64px", position: "relative"}}>
-                            <Tabs
-                                className={classes.cardTabs}
-                                value={tabValue}
-                                variant="fullWidth"
-                                indicatorColor="primary"
-                                textColor="primary"
-                                onChange={handleTabChange}
-                                fullwidth={true}
-                            >
-                                <Tab icon={<Community/>} />
-                                <Tab icon={<DescriptionRounded/>} />
-                                <Tab icon={<InfoRounded/>} />
-                            </Tabs>
-                            <SwipeableViews ignoreNativeScroll={true}
-                                            animateHeight={false}
-                                            containerStyle={{height: Math.max(300, Math.min(height-600, 720))}}
-                                            animateTransitions={true}
-                                            disableLazyLoading={true}
-                                            resistance={true}
-                                            springConfig={{tension: 450, friction: 60, duration: '120ms', easeFunction: 'cubic-bezier(0.280, 0.840, 0.420, 1)', delay: '5ms'}}
-                                            index={tabValue}
-                                            onChangeIndex={handleSwipeIndexChange}
-                                            disabled={false}
-                                            key={"swipe-able-view-profile"}>
-                                <div key={"communities"} className={classes.metadataSwipeableViews}>
-                                    <CommunitiesList
-                                        classes={classes}
-                                        subscriptions={subscriptions}
-                                        onGoToCommunity={onGoToCommunity}
-                                        onCreateCommunity={onCreateCommunity}
-                                    />
-                                </div>
-                                <div key={"know-more-about"} className={classes.metadataSwipeableViews}>
-                                    <ProfileDescription classes={classes} account={account} />
-                                </div>
-                                <div key={"meta-information"} className={classes.metadataSwipeableViews}>
-                                    <VotingPowerDisplay
-                                        classes={classes}
-                                        timeAgo={timeAgo}
-                                        postsCount={postsCount}
-                                        account={account}
-                                        vpMana={vpMana}
-                                        rcMana={rcMana}
-                                    />
-                                </div>
-                            </SwipeableViews>
                         </div>
                     </Collapse>
                     <Grow

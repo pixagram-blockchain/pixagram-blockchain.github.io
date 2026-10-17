@@ -331,19 +331,21 @@ function VoteCount({
 }
 
 // Comments Component
-// Nothing is rendered while the post has no replies: an icon next to a "0"
-// is a dead affordance. Once there is a thread to read, icon and count take
-// the cast-vote colour (`commentsActive`) and open the post on its replies
-// tab through onCommentsClick. The dim/disabled look only survives for a
-// host that renders the card without a handler.
+// Always rendered: a post with no replies yet still offers the way into its
+// thread, which is where the first reply gets written. The count only shows
+// once there is something to count — at 0 the icon stands alone, in the
+// resting `comments` colour; with replies, icon and count take
+// `commentsActive`. Both open the post on its replies tab through
+// onCommentsClick. The dim/disabled look only survives for a host that
+// renders the card without a handler.
 function Comments({ classes, commentsNumber, onCommentsClick }) {
     // Unary plus: the count may arrive as a string from older payloads.
     const count = +commentsNumber || 0;
-    if (count <= 0) return null;
+    const hasReplies = count > 0;
 
     const disabled = typeof onCommentsClick !== 'function';
     const handleClick = disabled ? undefined : onCommentsClick;
-    const colorClass = disabled ? classes.comments : classes.commentsActive;
+    const colorClass = (disabled || !hasReplies) ? classes.comments : classes.commentsActive;
     return (
         <span className={colorClass} style={disabled ? COMMENTS_DISABLED_STYLE : undefined}>
             <IconButton
@@ -354,13 +356,15 @@ function Comments({ classes, commentsNumber, onCommentsClick }) {
             >
                 <CommentRounded />
             </IconButton>
-            <span
-                onClick={handleClick}
-                className={'monospace'}
-                style={disabled ? COMMENTS_COUNT_DISABLED_STYLE : COMMENTS_COUNT_STYLE}
-            >
-                {count}
-            </span>
+            {hasReplies && (
+                <span
+                    onClick={handleClick}
+                    className={'monospace'}
+                    style={disabled ? COMMENTS_COUNT_DISABLED_STYLE : COMMENTS_COUNT_STYLE}
+                >
+                    {count}
+                </span>
+            )}
         </span>
     );
 }

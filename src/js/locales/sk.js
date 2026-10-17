@@ -161,6 +161,8 @@ export default {
         "vga_style": "Štýl VGA",
         "retro_art": "Retro art",
         "lucasart_style": "Štýl LucasArt",
+        "homm_style": "Maliarsky štýl HoMM",
+        "turbo_mode": "Režim turbo (4× rýchlejší)",
         "no_i_don_t_want": "Nie, nechcem",
         "style": "Štýl",
         "transform": "Premeniť",

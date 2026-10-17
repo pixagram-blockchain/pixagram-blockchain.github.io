@@ -194,6 +194,9 @@ export const normalizeUpload = async function(file) {
 };
 
 // Main function to process the image file
+// style: the AI LoRA ("retroart" | "lucasart" | "vga" | "homm"); turbo: one
+// 768 px tile instead of the 1280 px pass (~4x faster). Both only matter when
+// use_ai is set.
 export const processImageFile = async function ({file, description},
                                                 maxWidth,
                                                 maxHeight,
@@ -204,7 +207,8 @@ export const processImageFile = async function ({file, description},
                                                 ratio = "1:1",
                                                 steps = 8,
                                                 fidelity=0.8,
-                                                style = "retroart") {
+                                                style = "retroart",
+                                                turbo = false) {
 
     const outputSizes = [
         { name: "S", size: 160, colors: 48 },
@@ -302,7 +306,7 @@ export const processImageFile = async function ({file, description},
 
     }else if(use_ai){
         try {
-            return transform(file, steps, fidelity, callback, callback2, description, style).then((blob, title) => continue_it(blob, title));
+            return transform(file, steps, fidelity, callback, callback2, description, style, turbo).then((blob, title) => continue_it(blob, title));
         } catch (e) {
             return continue_it(file, "");
         }

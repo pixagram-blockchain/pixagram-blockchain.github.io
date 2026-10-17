@@ -161,6 +161,8 @@ export default {
         "vga_style": "VGA stili",
         "retro_art": "Retro sanat",
         "lucasart_style": "LucasArt stili",
+        "homm_style": "HoMM resim stili",
+        "turbo_mode": "Turbo modu (4× daha hızlı)",
         "no_i_don_t_want": "Hayır, istemiyorum",
         "style": "Stil",
         "transform": "Dönüştür",

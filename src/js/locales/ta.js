@@ -157,6 +157,8 @@ export default {
         "vga_style": "VGA பாணி",
         "retro_art": "ரெட்ரோ ஆர்ட்",
         "lucasart_style": "லூகாஸ்ஆர்ட் பாணி",
+        "homm_style": "HoMM ஓவியப் பாணி",
+        "turbo_mode": "டர்போ பயன்முறை (4× வேகம்)",
         "no_i_don_t_want": "இல்லை, எனக்கு வேண்டாம்",
         "style": "பாணி",
         "transform": "மாற்று",

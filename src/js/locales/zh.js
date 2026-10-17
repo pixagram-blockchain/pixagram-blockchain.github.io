@@ -158,6 +158,8 @@ export default {
         "vga_style": "VGA 风格",
         "retro_art": "复古像素",
         "lucasart_style": "LucasArt 风格",
+        "homm_style": "HoMM 绘画风格",
+        "turbo_mode": "极速模式 (4× 速度)",
         "no_i_don_t_want": "不，我不需要",
         "style": "风格",
         "transform": "转换",
