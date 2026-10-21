@@ -67,13 +67,13 @@ const PRESETS_TRANSFORM = {
     seed: -1,
     identity_preserve: true,
     lora_style: "retroart",
-    identitynet_strength: 0.9,
-    ip_adapter_scale: 0.9,
-    resolution: 1280,
+    identitynet_strength: 0.85,
+    ip_adapter_scale: 0.85,
+    resolution: 1408,
     aspect_ratio: "1:1",
     use_tiled: false,
     tile_size: 768,
-    tile_overlap: 256,
+    tile_overlap: 192,
 };
 
 // Turbo mode — the checkbox under the style list. Renders at 768 px with a

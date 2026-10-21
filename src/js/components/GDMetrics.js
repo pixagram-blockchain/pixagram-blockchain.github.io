@@ -13,7 +13,20 @@ import { CartesianGrid } from "recharts/lib/cartesian/CartesianGrid";
 import { ReferenceLine } from "recharts/lib/cartesian/ReferenceLine";
 import { Tooltip } from "recharts/lib/component/Tooltip";
 import { Cell } from "recharts/lib/component/Cell";
-import { LabelList } from "recharts/lib/component/LabelList";
+// Section and recipient icons: filled glyphs, cut out of their tiles.
+import SpeedRoundedIcon from "@material-ui/icons/SpeedRounded";
+import PeopleAltRoundedIcon from "@material-ui/icons/PeopleAltRounded";
+import ThumbsUpDownRoundedIcon from "@material-ui/icons/ThumbsUpDownRounded";
+import AccountBalanceRoundedIcon from "@material-ui/icons/AccountBalanceRounded";
+import AccountBalanceWalletRoundedIcon from "@material-ui/icons/AccountBalanceWalletRounded";
+import DeviceHubRoundedIcon from "@material-ui/icons/DeviceHubRounded";
+import PaletteRoundedIcon from "@material-ui/icons/PaletteRounded";
+import LinkRoundedIcon from "@material-ui/icons/LinkRounded";
+import DescriptionRoundedIcon from "@material-ui/icons/DescriptionRounded";
+import BrushRoundedIcon from "@material-ui/icons/BrushRounded";
+import ThumbUpRoundedIcon from "@material-ui/icons/ThumbUpRounded";
+import CallSplitRoundedIcon from "@material-ui/icons/CallSplitRounded";
+import DnsRoundedIcon from "@material-ui/icons/DnsRounded";
 
 import { withLanguage } from "../utils/withLanguage";
 import {
@@ -21,8 +34,8 @@ import {
 } from "../utils/tower";
 import {
     tr, trf, Card, Tile, ChartTip, Legend, Pill, Switch, Empty, Skeleton, Meter, Visible,
-    SERIES, AXIS, GRID, CURSOR, BAR_CURSOR, ACTIVE_DOT, INK, BAR, HBAR, stackShape, niceScale, tickFormat, axisTick, bucketLabel, fillBuckets, newestOnly,
-    AccordionSection, ACCORDION_MS
+    SERIES, AXIS, GRID, CURSOR, BAR_CURSOR, ACTIVE_DOT, INK, BAR, stackShape, niceScale, tickFormat, axisTick, bucketLabel, fillBuckets, newestOnly,
+    fmtDate, timeTicks, AccordionSection, ACCORDION_MS, Funnel, Flow, PatternPie, Heatmap
 } from "./GDTowerKit";
 import GDReports from "./GDReports";
 
@@ -82,14 +95,19 @@ const styles = theme => ({
         textOverflow: "ellipsis"
     },
     rowSub: { fontSize: "12px", color: "#666", fontFamily: "'Normative Pro'", marginTop: "2px" },
-    rowValue: { fontSize: "13px", color: "#fff", fontFamily: "'Geist Mono', monospace", textAlign: "right", whiteSpace: "nowrap" },
-    rowMeter: { marginTop: "6px" },
+    // a minimum width keeps the meters of a list the same length whatever the figures
+    rowValue: { fontSize: "13px", color: "#fff", fontFamily: "'Geist Mono', monospace", textAlign: "right", whiteSpace: "nowrap", minWidth: "44px" },
+    rowMeter: { marginTop: "8px" },
     link: { color: "inherit", textDecoration: "none", "&:hover": { color: "#fff" } },
-    funnelRow: { display: "grid", gridTemplateColumns: "110px minmax(0, 1fr) 72px", alignItems: "center", gap: "12px", padding: "5px 0" },
-    funnelLabel: { fontSize: "13px", color: "#aaa", fontFamily: "'Normative Pro'" },
-    funnelBarTrack: { height: "18px", borderRadius: "4px", backgroundColor: "#171717", position: "relative", overflow: "hidden" },
-    funnelBar: { position: "absolute", left: 0, top: 0, bottom: 0, borderRadius: "4px", backgroundColor: "#8a8a8a" },
-    funnelValue: { fontSize: "12px", color: "#fff", fontFamily: "'Geist Mono', monospace", textAlign: "right" },
+    // a card across both columns of a grid
+    wide: { gridColumn: "1 / -1" },
+    // the figure a card leads with, a second one on the right
+    headline: { display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: "12px 24px", flexWrap: "wrap", marginBottom: "18px" },
+    headlineValue: { fontSize: "28px", fontWeight: 700, color: "#fff", fontFamily: "'Geist Mono', monospace", lineHeight: 1.1 },
+    headlineSide: { textAlign: "right", marginLeft: "auto" },
+    headlineSideValue: { fontSize: "18px", fontWeight: 600, color: "#fff", fontFamily: "'Geist Mono', monospace", lineHeight: 1.2 },
+    headlineSub: { fontSize: "12px", color: "#777", fontFamily: "'Normative Pro'", marginTop: "4px" },
+    headlineUnit: { fontSize: "12px", fontWeight: 400, color: "#777", fontFamily: "'Normative Pro'", marginLeft: "4px" },
     note: { fontSize: "12px", color: "#666", fontFamily: "'Normative Pro'", marginTop: "10px", lineHeight: 1.5 },
     chartShort: { width: "100%", height: "160px" },
     // two lists side by side inside one card (top artists by rewards / by voters)
@@ -190,18 +208,33 @@ const byDim = (values) => new Map((values || []).map((v) => [v.dim, v]));
 /** Top `n` dimensions of a Map by value, without the total (dim ""). */
 const topOf = (m, n) => Array.from(m.entries()).filter(([k, v]) => k !== "" && v > 0).sort((a, b) => b[1] - a[1]).slice(0, n);
 
+/** The 7 UTC days of the hourly heatmap, today included, up to the end of the hour now running. */
+function hourWindow() {
+    const now = nowSec();
+    const today = Math.floor(now / 86400) * 86400;
+    return { from: today - 6 * 86400, to: Math.ceil((now + 1) / 3600) * 3600 };
+}
+
+const hourLabel = (h) => `${String(h % 24).padStart(2, "0")}:00`;
+
+/** Width of the longest of `texts` in the value font (monospaced), so every meter of a list ends in the same place. */
+const valueWidth = (texts) => ({ minWidth: `${Math.max(0, ...texts.map((s) => String(s).length))}ch` });
+
+// Reward recipients, in the flow from the votes and the blocks that pay them.
+const REWARD_ICONS = { author: BrushRoundedIcon, curation: ThumbUpRoundedIcon, beneficiary: CallSplitRoundedIcon, producer: DnsRoundedIcon };
+
 // The view's sections, in order. Each is closed until opened and only one is open at a time; the open one is
 // named in the address (+governance-metrics-<id>, ids without "-"). A section loads its data when it opens.
 const SECTIONS = [
-    { id: "pulse", title: () => tr(K + "pulse", "Pulse"), description: () => tr(K + "pulse_description", "Activity on the Pixa chain over the selected period, against the period before.") },
-    { id: "activity", title: () => tr(K + "activity", "Activity"), description: () => tr(K + "activity_description", "Who is active, and what they publish.") },
-    { id: "controversy", title: () => tr(K + "controversy", "Controversy"), description: () => tr(K + "controversy_description", "Where stake disagrees: the topics that divide voters, by portal and by post.") },
-    { id: "economy", title: () => tr(K + "economy", "Economy"), description: () => tr(K + "economy_description", "Supply, the PXS debt ratio, the price feed, how stake is spread and where rewards go.") },
-    { id: "finance", title: () => tr(K + "finance", "Finance"), description: () => tr(K + "finance_description", "Who holds the supply, how much is created, and how PIXA and PXS move: conversions, savings, staking and transfers.") },
-    { id: "network", title: () => tr(K + "network", "Network"), description: () => tr(K + "network_description", "Who joins and takes part, the apps and tags they use, how stake is spread and what posts earn.") },
-    { id: "artwork", title: () => tr(K + "artwork", "Artwork"), description: () => tr(K + "artwork_description", "How artworks are received, their formats, and who leads among artists and curators.") },
-    { id: "chain", title: () => tr(K + "chain_and_onboarding", "Chain and onboarding"), description: () => tr(K + "chain_description", "Throughput, and how new accounts become active members.") },
-    { id: "reports", title: () => tr(K + "reports", "Reports"), description: () => tr(K + "reports_description", "Finance and statistics reports for each day, week and month, compared with the period before, ready to post.") }
+    { id: "pulse", icon: SpeedRoundedIcon, title: () => tr(K + "pulse", "Pulse"), description: () => tr(K + "pulse_description", "Activity on the Pixa chain over the selected period, against the period before.") },
+    { id: "activity", icon: PeopleAltRoundedIcon, title: () => tr(K + "activity", "Activity"), description: () => tr(K + "activity_description", "Who is active, and what they publish.") },
+    { id: "controversy", icon: ThumbsUpDownRoundedIcon, title: () => tr(K + "controversy", "Controversy"), description: () => tr(K + "controversy_description", "Where stake disagrees: the topics that divide voters, by portal and by post.") },
+    { id: "economy", icon: AccountBalanceRoundedIcon, title: () => tr(K + "economy", "Economy"), description: () => tr(K + "economy_description", "Supply, the PXS debt ratio, the price feed, how stake is spread and where rewards go.") },
+    { id: "finance", icon: AccountBalanceWalletRoundedIcon, title: () => tr(K + "finance", "Finance"), description: () => tr(K + "finance_description", "Who holds the supply, how much is created, and how PIXA and PXS move: conversions, savings, staking and transfers.") },
+    { id: "network", icon: DeviceHubRoundedIcon, title: () => tr(K + "network", "Network"), description: () => tr(K + "network_description", "Who joins and takes part, the apps and tags they use, how stake is spread and what posts earn.") },
+    { id: "artwork", icon: PaletteRoundedIcon, title: () => tr(K + "artwork", "Artwork"), description: () => tr(K + "artwork_description", "How artworks are received, their formats, and who leads among artists and curators.") },
+    { id: "chain", icon: LinkRoundedIcon, title: () => tr(K + "chain_and_onboarding", "Chain and onboarding"), description: () => tr(K + "chain_description", "Throughput, and how new accounts become active members.") },
+    { id: "reports", icon: DescriptionRoundedIcon, title: () => tr(K + "reports", "Reports"), description: () => tr(K + "reports_description", "Finance and statistics reports for each day, week and month, compared with the period before, ready to post.") }
 ];
 const SECTION_IDS = SECTIONS.map((x) => x.id);
 
@@ -209,7 +242,7 @@ const SECTION_IDS = SECTIONS.map((x) => x.id);
 // onboarding funnel loads on its own (loadFunnel) and the reports card loads itself.
 const SECTION_DATA = {
     pulse: ["overview", "created", "artworks", "blogs", "votes", "tx", "rewardsV", "dauTotal"],
-    activity: ["activity", "activityTotal", "artworks", "blogs", "votesDim", "artists"],
+    activity: ["activity", "activityTotal", "artworks", "blogs", "votesDim", "artists", "byHour"],
     controversy: ["portals", "controversial"],
     economy: ["overview", "debt", "feed", "pxp", "rewards"],
     finance: ["split", "inflation", "burns", "conv", "collateral", "savings", "savFlows", "interest", "power", "pdStarted", "delegFlows", "delegated", "transfers", "market", "marketVol"],
@@ -351,6 +384,8 @@ class GDMetrics extends React.PureComponent {
             rewards: get(`/rewards?window=${period}`, 120000),
             portals: get("/portals", 300000),
             controversial: get(`/posts/controversial?window=${period === "24h" ? "7d" : period}&limit=8`, 300000),
+            // Hour by hour over the last 7 days, whatever the period: the heatmap of the Activity section.
+            byHour: () => soft(towerSeries("active_accounts", { grain: "hour", ...hourWindow(), dim: "" }, 300000)),
             // Finance, network and artwork sections. Daily metrics show at least the last 7 days.
             ...this._extraJobs(soft, period, from, to)
         };
@@ -498,13 +533,13 @@ class GDMetrics extends React.PureComponent {
                                 <ResponsiveContainer>
                                     <LineChart data={act} margin={{ top: 8, right: 16, bottom: 0, left: -16 }}>
                                         <CartesianGrid {...GRID} />
-                                        <XAxis dataKey="bucket" tickFormatter={xTick} {...AXIS} minTickGap={24} />
+                                        <XAxis dataKey="bucket" tickFormatter={xTick} ticks={timeTicks(act, g)} {...AXIS} minTickGap={24} />
                                         <YAxis {...AXIS} allowDecimals={false} width={48} />
                                         <Tooltip cursor={CURSOR} content={<ChartTip labelFormatter={xFmt} names={names} />} />
                                         {["total", "voters", "creators"].map((k, i) => (
                                             <Line key={k} type="monotone" dataKey={k} name={names[k]} stroke={SERIES[i].stroke}
-                                                strokeDasharray={SERIES[i].dash} strokeWidth={2} dot={false} activeDot={ACTIVE_DOT}
-                                                isAnimationActive={false} connectNulls />
+                                                  strokeDasharray={SERIES[i].dash} strokeWidth={2} dot={false} activeDot={ACTIVE_DOT}
+                                                  isAnimationActive={false} connectNulls />
                                         ))}
                                     </LineChart>
                                 </ResponsiveContainer>
@@ -524,7 +559,7 @@ class GDMetrics extends React.PureComponent {
                                 <ResponsiveContainer>
                                     <BarChart data={content} margin={{ top: 8, right: 16, bottom: 0, left: -16 }} barGap={2} barCategoryGap="24%">
                                         <CartesianGrid {...GRID} />
-                                        <XAxis dataKey="bucket" tickFormatter={xTick} {...AXIS} minTickGap={24} />
+                                        <XAxis dataKey="bucket" tickFormatter={xTick} ticks={timeTicks(content, g)} {...AXIS} minTickGap={24} />
                                         <YAxis {...AXIS} allowDecimals={false} width={48} />
                                         <Tooltip cursor={BAR_CURSOR} content={<ChartTip labelFormatter={xFmt} names={names} />} />
                                         <Bar dataKey="artworks" name={names.artworks} fill={SERIES[0].fill} {...BAR} />
@@ -623,6 +658,7 @@ class GDMetrics extends React.PureComponent {
         const feedScale = niceScale(feed.length ? Math.min(...feed.map((p) => p.v)) : null, feed.length ? Math.max(...feed.map((p) => p.v)) : null, 4);
         const short = (label) => (label === "<1" ? "<1" : label.endsWith("+") ? label : label.split("-")[0] + "+");
         const pxp = d.pxp ? d.pxp.buckets.filter((b) => b.bucket !== "0").map((b) => ({ bucket: b.bucket, tick: short(b.bucket), accounts: b.own.accounts, pxp: b.own.pxp })) : [];
+        const pxpScale = niceScale(0, Math.max(1, ...pxp.map((r) => r.accounts || 0)), 5, true, true);
         const zero = d.pxp ? d.pxp.buckets.find((b) => b.bucket === "0") : null;
         return (
             <>
@@ -636,6 +672,7 @@ class GDMetrics extends React.PureComponent {
                 </div>
                 <div className={classes.grid2} style={{ marginTop: "16px" }}>
                     <Card
+                        className={classes.wide}
                         title={tr(K + "debt_ratio", "PXS debt ratio")}
                         subtitle={s ? fmtPct(s.pxs_debt_ratio, 2) + " " + tr(K + "now", "now") : ""}
                         info={tr(K + "debt_ratio_info", "PXS supply at the median feed over virtual supply. PXS printing stops above 20%; the haircut applies above 30%.")}
@@ -684,10 +721,10 @@ class GDMetrics extends React.PureComponent {
                             <>
                                 <div className={classes.chart}>
                                     <ResponsiveContainer>
-                                        <BarChart data={pxp} margin={{ top: 8, right: 16, bottom: 0, left: -16 }} barCategoryGap="18%">
+                                        <BarChart data={pxp} margin={{ top: 8, right: 16, bottom: 0, left: 0 }} barCategoryGap="18%">
                                             <CartesianGrid {...GRID} />
                                             <XAxis dataKey="tick" {...AXIS} interval={0} />
-                                            <YAxis {...AXIS} allowDecimals={false} width={48} />
+                                            <YAxis {...AXIS} width={56} domain={pxpScale.domain} ticks={pxpScale.ticks} interval={0} tickFormatter={tickFormat(pxpScale.step)} />
                                             <Tooltip
                                                 cursor={BAR_CURSOR}
                                                 content={<ChartTip labelFormatter={(l, payload) => `${payload && payload[0] ? payload[0].payload.bucket : l} PXP`} valueFormatter={(v, p) => `${fmtInt(v)} · ${fmtCompact(p.payload.pxp)} PXP`} />}
@@ -712,30 +749,30 @@ class GDMetrics extends React.PureComponent {
         const { classes } = this.props;
         const { d, period } = this.state;
         const r = d.rewards;
-        const rows = r ? REWARD_TYPES.map((t) => ({ ...t, row: r.by_type.find((x) => x.type === t.type) })).filter((x) => x.row) : [];
-        const max = Math.max(1, ...rows.map((x) => x.row.pixa_equivalent));
+        const rows = r ? REWARD_TYPES.map((t) => ({ ...t, row: r.by_type.find((x) => x.type === t.type) })).filter((x) => x.row && x.row.pixa_equivalent > 0) : [];
         return (
             <Card
+                className={classes.wide}
                 title={tr(K + "rewards_by_type", "Rewards paid")}
                 subtitle={trf(K + "last_n_pixa_equivalent", "last {n} · PIXA equivalent", { n: period })}
-                info={tr(K + "rewards_info", "Stake (VESTS) at the current ratio, PXS at the median feed, liquid PIXA as is. Payments by the Decentralized Pixa Fund are in the Control Tower.")}
+                info={tr(K + "rewards_flow_info", "Content rewards come from the reward pool and are shared by votes; producer rewards are paid for each block produced. The block on the left is each source's share of all rewards. Stake (VESTS) at the current ratio, PXS at the median feed, liquid PIXA as is. Payments by the Decentralized Pixa Fund are in the Control Tower.")}
             >
                 {!r ? this._placeholder(r) : rows.length === 0 ? (
                     <Empty>{tr(K + "no_rewards", "No rewards paid in this period.")}</Empty>
                 ) : (
                     <>
-                        <div className={classes.rows}>
-                            {rows.map((x) => (
-                                <div key={x.type} className={classes.row}>
-                                    <div className={classes.rowMain}>
-                                        <div className={classes.rowTitle}>{x.label()}</div>
-                                        <div className={classes.rowSub}>{fmtInt(x.row.payments)} {tr(K + "payments", "payments")}</div>
-                                        <div className={classes.rowMeter}><Meter value={x.row.pixa_equivalent / max} /></div>
-                                    </div>
-                                    <div className={classes.rowValue}>{fmtCompact(x.row.pixa_equivalent)}</div>
-                                </div>
-                            ))}
-                        </div>
+                        <Flow
+                            sources={[{ key: "votes", caption: tr(K + "paid_by_votes", "by votes") }, { key: "blocks", caption: tr(K + "paid_by_blocks", "by blocks") }]}
+                            targets={rows.map((x) => ({
+                                key: x.type,
+                                icon: REWARD_ICONS[x.type],
+                                sub: trf(K + "payments_n", "{n} payments", { n: fmtInt(x.row.payments) }),
+                                title: `${x.label()}: ${fmtCompact(x.row.pixa_equivalent)} PIXA`
+                            }))}
+                            links={rows.map((x) => ({ source: x.type === "producer" ? "blocks" : "votes", target: x.type, value: x.row.pixa_equivalent, label: x.label() }))}
+                            valueFormatter={(v) => fmtCompact(v)}
+                            label={tr(K + "rewards_by_type", "Rewards paid")}
+                        />
                         <div className={classes.note}>
                             {tr(K + "pending_payout", "Pending payout")}: {fmtCompact(r.pending_payout_pxs)} PXS · {fmtInt(r.pending_posts)} {tr(K + "posts", "posts")}
                         </div>
@@ -754,13 +791,21 @@ class GDMetrics extends React.PureComponent {
         const xFmt = (b) => bucketLabel(b, g);
         const xTick = (b) => axisTick(b, g);
         const tps = pivot(d.tps || [], ["avg", "peak"]);
+        const tpsScale = niceScale(0, Math.max(0, ...tps.map((r) => Math.max(r.peak || 0, r.avg || 0))) || 1, 5);
         const f = d.funnel;
-        const stages = f ? FUNNEL_STAGES.map(([k, label]) => ({ k, label, s: f.stages.find((x) => x.stage === k) })) : [];
-        const created = stages.length && stages[0].s ? stages[0].s.accounts : 0;
+        const stages = f
+            ? FUNNEL_STAGES.map(([k, label]) => {
+                const s = f.stages.find((x) => x.stage === k);
+                return { key: k, label: label(), value: s ? s.accounts : 0 };
+            })
+            : [];
+        const created = stages.length ? stages[0].value : 0;
+        const last = stages.length ? stages[stages.length - 1] : null;
         const names = { avg: tr(K + "average", "Average"), peak: tr(K + "busiest_block", "Busiest block") };
         return (
             <div className={classes.grid2}>
                 <Card
+                    className={classes.wide}
                     title={tr(K + "tps", "Transactions per second")}
                     subtitle={tr(K + "tps_sub", "average and busiest block (3 s)")}
                 >
@@ -770,8 +815,8 @@ class GDMetrics extends React.PureComponent {
                                 <ResponsiveContainer>
                                     <LineChart data={tps} margin={{ top: 8, right: 16, bottom: 0, left: -8 }}>
                                         <CartesianGrid {...GRID} />
-                                        <XAxis dataKey="bucket" tickFormatter={xTick} {...AXIS} minTickGap={24} />
-                                        <YAxis {...AXIS} width={48} tickFormatter={(v) => (v >= 1 ? v.toFixed(0) : v.toFixed(2))} />
+                                        <XAxis dataKey="bucket" tickFormatter={xTick} ticks={timeTicks(tps, g)} {...AXIS} minTickGap={24} />
+                                        <YAxis {...AXIS} width={48} domain={tpsScale.domain} ticks={tpsScale.ticks} interval={0} tickFormatter={tickFormat(tpsScale.step)} />
                                         <Tooltip cursor={CURSOR} content={<ChartTip labelFormatter={xFmt} names={names} valueFormatter={(v) => (v == null ? "–" : v.toFixed(3))} />} />
                                         <Line type="monotone" dataKey="peak" name={names.peak} stroke={SERIES[1].stroke} strokeDasharray={SERIES[1].dash} strokeWidth={2} dot={false} activeDot={ACTIVE_DOT} isAnimationActive={false} />
                                         <Line type="monotone" dataKey="avg" name={names.avg} stroke={SERIES[0].stroke} strokeWidth={2} dot={false} activeDot={ACTIVE_DOT} isAnimationActive={false} />
@@ -783,6 +828,7 @@ class GDMetrics extends React.PureComponent {
                     ) : this._placeholder(d.tps)}
                 </Card>
                 <Card
+                    className={classes.wide}
                     title={tr(K + "onboarding", "Onboarding funnel")}
                     subtitle={f ? trf(K + "accounts_created_week_of_n", "accounts created the week of {n}", { n: f.cohort_week }) : ""}
                     info={tr(K + "funnel_info", "How far the accounts created in one week have gone so far. A recent cohort keeps moving as its accounts reach new stages.")}
@@ -799,23 +845,23 @@ class GDMetrics extends React.PureComponent {
                         <Empty>{tr(K + "no_cohort", "No account was created that week.")}</Empty>
                     ) : (
                         <>
-                            {stages.map(({ k, label, s }) => {
-                                const n = s ? s.accounts : 0;
-                                return (
-                                    <div key={k} className={classes.funnelRow}>
-                                        <span className={classes.funnelLabel}>{label()}</span>
-                                        <div className={classes.funnelBarTrack}>
-                                            <div className={classes.funnelBar} style={{ width: `${(n / created) * 100}%`, backgroundColor: k === "created" ? "#d6d6d6" : "#8a8a8a" }} />
-                                        </div>
-                                        <span className={classes.funnelValue}>{fmtInt(n)} · {fmtPct(n / created, 0)}</span>
+                            <div className={classes.headline}>
+                                <div>
+                                    <div className={classes.headlineValue}>{fmtPct(last.value / created, 1)}</div>
+                                    <div className={classes.headlineSub}>
+                                        {trf(K + "funnel_through_n", "went through every stage · {a} of {b} accounts", { a: fmtInt(last.value), b: fmtInt(created) })}
                                     </div>
-                                );
-                            })}
-                            {f.median_days_to_first_reward != null ? (
-                                <div className={classes.note}>
-                                    {tr(K + "median_first_reward", "Median time from first post to first reward")}: {f.median_days_to_first_reward.toFixed(1)} {tr(K + "days", "days")}
                                 </div>
-                            ) : null}
+                                {f.median_days_to_first_reward != null ? (
+                                    <div className={classes.headlineSide}>
+                                        <div className={classes.headlineSideValue}>
+                                            {f.median_days_to_first_reward.toFixed(1)}<span className={classes.headlineUnit}>{tr(K + "days", "days")}</span>
+                                        </div>
+                                        <div className={classes.headlineSub}>{tr(K + "median_first_reward_short", "median, first post to first reward")}</div>
+                                    </div>
+                                ) : null}
+                            </div>
+                            <Funnel stages={stages} valueFormatter={fmtInt} pctFormatter={(v) => fmtPct(v, 0)} height={176} label={tr(K + "onboarding", "Onboarding funnel")} />
                         </>
                     )}
                 </Card>
@@ -855,7 +901,7 @@ class GDMetrics extends React.PureComponent {
                                 <ResponsiveContainer>
                                     <BarChart data={votes} margin={{ top: 8, right: 16, bottom: 0, left: -16 }} barCategoryGap="24%">
                                         <CartesianGrid {...GRID} />
-                                        <XAxis dataKey="bucket" tickFormatter={xTick} {...AXIS} minTickGap={24} />
+                                        <XAxis dataKey="bucket" tickFormatter={xTick} ticks={timeTicks(votes, g)} {...AXIS} minTickGap={24} />
                                         <YAxis {...AXIS} allowDecimals={false} width={48} />
                                         <Tooltip cursor={BAR_CURSOR} content={<ChartTip labelFormatter={xFmt} names={vNames} valueFormatter={(v) => fmtInt(v)} />} />
                                         <Bar dataKey="up" name={vNames.up} stackId="v" fill={SERIES[0].fill} {...BAR} shape={VOTE_STACK} />
@@ -888,7 +934,7 @@ class GDMetrics extends React.PureComponent {
                                         <Tooltip cursor={CURSOR} content={<ChartTip labelFormatter={dFmt} names={aNames} valueFormatter={(v) => fmtInt(v)} />} />
                                         {["total", "new"].map((k, i) => (
                                             <Line key={k} type="monotone" dataKey={k} name={aNames[k]} stroke={SERIES[i].stroke} strokeDasharray={SERIES[i].dash}
-                                                strokeWidth={2} dot={false} activeDot={ACTIVE_DOT} isAnimationActive={false} connectNulls />
+                                                  strokeWidth={2} dot={false} activeDot={ACTIVE_DOT} isAnimationActive={false} connectNulls />
                                         ))}
                                     </LineChart>
                                 </ResponsiveContainer>
@@ -898,6 +944,81 @@ class GDMetrics extends React.PureComponent {
                     ) : this._placeholder(d.artists)}
                 </Card>
             </div>
+        );
+    }
+
+    /** Active accounts in each hour of the last 7 days: a row per day, a cell per hour (UTC). */
+    _renderActivityByHour() {
+        const { classes } = this.props;
+        const pts = this.state.d.byHour;
+        const { from } = hourWindow();
+        const now = nowSec();
+        const byBucket = new Map((pts || []).filter((p) => p.dim === "").map((p) => [p.bucket, p.value || 0]));
+        const rows = [];
+        let peak = null;
+        let sum = 0;
+        let hours = 0;
+        for (let day = 0; day < 7; day++) {
+            const d0 = from + day * 86400;
+            const cells = [];
+            for (let h = 0; h < 24; h++) {
+                const b = d0 + h * 3600;
+                if (b > now) {
+                    cells.push({ v: null, b }); // still to come
+                    continue;
+                }
+                const v = byBucket.get(b) || 0;
+                cells.push({ v, b });
+                if (b + 3600 <= now) {
+                    sum += v; // the average counts closed hours only
+                    hours++;
+                }
+                if (!peak || v > peak.v) peak = { v, b };
+            }
+            rows.push({ key: d0, label: fmtDate(d0, { weekday: "short", day: "numeric" }), title: fmtDate(d0, { weekday: "long", day: "numeric", month: "long" }), cells });
+        }
+        const when = (b) => {
+            const h = Math.floor(b / 3600) % 24;
+            return `${fmtDate(b, { weekday: "short", day: "numeric", month: "short" })}, ${hourLabel(h)}–${hourLabel(h + 1)}`;
+        };
+        return (
+            <Card
+                style={{ marginTop: "16px" }}
+                title={tr(K + "active_by_hour", "Active accounts by hour")}
+                subtitle={tr(K + "active_by_hour_sub", "last 7 days, hours in UTC")}
+                info={tr(K + "active_by_hour_info", "Distinct accounts that signed an operation in each hour, one row per day. Lighter is busier; the hour now running is still counting.")}
+            >
+                {!pts ? this._placeholder(pts) : !peak || !peak.v ? (
+                    <Empty>{tr(K + "no_active_hours", "No account was active in the last 7 days.")}</Empty>
+                ) : (
+                    <>
+                        <div className={classes.headline}>
+                            <div>
+                                <div className={classes.headlineValue}>
+                                    {fmtInt(peak.v)}
+                                    <span className={classes.headlineUnit}>{tr(K + "accounts_unit", "accounts")}</span>
+                                </div>
+                                <div className={classes.headlineSub}>{trf(K + "peak_n", "Peak · {n}", { n: when(peak.b) })}</div>
+                            </div>
+                            <div className={classes.headlineSide}>
+                                <div className={classes.headlineSideValue}>{hours ? fmtCompact(sum / hours) : "–"}</div>
+                                <div className={classes.headlineSub}>{tr(K + "average_per_hour", "average per hour")}</div>
+                            </div>
+                        </div>
+                        <Heatmap
+                            rows={rows}
+                            columns={24}
+                            cellHeight={18}
+                            ticks={[0, 6, 12, 18, 24].map((h) => ({ at: h, label: h === 24 ? "24:00" : hourLabel(h) }))}
+                            readout={(row, col, cell) => trf(K + "hour_readout_n", "{when} · {n} active", { when: when(cell.b), n: fmtInt(cell.v) })}
+                            idle={tr(K + "hour_hint", "One cell per hour. Point at one to read it.")}
+                            low={tr(K + "fewer", "Fewer")}
+                            high={tr(K + "more", "More")}
+                            label={tr(K + "active_by_hour", "Active accounts by hour")}
+                        />
+                    </>
+                )}
+            </Card>
         );
     }
 
@@ -921,10 +1042,12 @@ class GDMetrics extends React.PureComponent {
             .filter((v) => v.value > 0)
             .map((v) => ({ dim: v.dim, name: SPLIT_NAMES[v.dim] ? SPLIT_NAMES[v.dim]() : v.dim, value: v.value, share: v.extra ? v.extra.share : null }))
             .sort((a, b) => b.value - a.value);
+        const splitTotal = split.reduce((t, x) => t + x.value, 0);
 
         const infl = (d.inflation || []).filter((p) => p.dim === "" && p.value != null).map((p) => ({ bucket: p.bucket, v: p.value, rate: p.extra ? p.extra.yearly_rate : null }));
         const lastRate = infl.length ? infl[infl.length - 1].rate : null;
         const paidTo = sumByDim(d.inflation, dFrom, to);
+        const paidAll = ["authors", "curators", "beneficiaries", "witnesses", "dpf"].reduce((t, k) => t + (paidTo.get(k) || 0), 0);
         const RECIPIENTS = [
             ["authors", tr(K + "to_authors", "Authors")],
             ["curators", tr(K + "to_curators", "Curators")],
@@ -966,18 +1089,11 @@ class GDMetrics extends React.PureComponent {
                     info={tr(K + "supply_by_holder_info", "Who holds the supply now, PXS at the median feed and Pixa Power at the current ratio. Users are every account that is not a system, DPF or exchange account.")}
                 >
                     {split.length ? (
-                        <div style={{ width: "100%", height: `${Math.max(150, split.length * 34)}px` }}>
-                            <ResponsiveContainer>
-                                <BarChart data={split} layout="vertical" margin={{ top: 0, right: 56, bottom: 0, left: 0 }} barCategoryGap="24%">
-                                    <XAxis type="number" hide domain={[0, "dataMax"]} />
-                                    <YAxis type="category" dataKey="name" {...AXIS} width={170} tick={{ ...AXIS.tick, fontFamily: "'Normative Pro'", fontSize: 12, fill: "#aaa" }} />
-                                    <Tooltip cursor={BAR_CURSOR} content={<ChartTip valueFormatter={(v, p) => `${fmtCompact(v)} PIXA · ${fmtPct(p.payload.share, 1)}`} />} />
-                                    <Bar dataKey="value" name={tr(K + "pixa_equivalent", "PIXA equivalent")} fill={SERIES[1].fill} {...HBAR}>
-                                        <LabelList dataKey="share" position="right" formatter={(v) => fmtPct(v, 1)} style={{ fill: "#aaa", fontSize: 11, fontFamily: "'Geist Mono', monospace" }} />
-                                    </Bar>
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </div>
+                        <PatternPie
+                            data={split.map((x) => ({ key: x.dim, label: x.name, value: x.value, center: { value: fmtCompact(x.value), caption: x.name } }))}
+                            center={{ value: fmtCompact(splitTotal), caption: tr(K + "virtual_supply", "virtual supply") }}
+                            label={tr(K + "supply_by_holder", "Supply by holder")}
+                        />
                     ) : this._placeholder(d.split, tr(K + "history_builds", "The history builds up from the Tower's first snapshot, every 5 minutes."))}
                 </Card>
 
@@ -1003,17 +1119,24 @@ class GDMetrics extends React.PureComponent {
                         </div>
                     ) : this._placeholder(d.inflation, tr(K + "new_supply_builds", "Needs two of the Tower's snapshots around midnight: the first day appears the day after it starts."))}
                     {d.inflation ? (
-                        <div className={classes.stats}>
-                            <span className={classes.listTitle} style={{ gridColumn: "1 / -1", margin: 0 }}>
+                        <>
+                            <div className={classes.listTitle} style={{ marginTop: "16px" }}>
                                 {trf(K + "paid_in_period_n", "Paid in the last {n}", { n: period === "24h" ? "7d" : period })}
-                            </span>
-                            {RECIPIENTS.map(([k, label]) => (
-                                <React.Fragment key={k}>
-                                    <span className={classes.statLabel}>{label}</span>
-                                    <span className={classes.statValue}>{fmtCompact(paidTo.get(k) || 0)} PIXA</span>
-                                </React.Fragment>
-                            ))}
-                        </div>
+                            </div>
+                            <div className={classes.rows}>
+                                {RECIPIENTS.map(([k, label]) => (
+                                    <div key={k} className={classes.row}>
+                                        <div className={classes.rowMain}>
+                                            <div className={classes.rowTitle}>{label}</div>
+                                            <div className={classes.rowMeter}><Meter value={paidAll ? (paidTo.get(k) || 0) / paidAll : 0} /></div>
+                                        </div>
+                                        <div className={classes.rowValue} style={valueWidth(RECIPIENTS.map(([x]) => `${fmtCompact(paidTo.get(x) || 0)} PIXA`))}>
+                                            {fmtCompact(paidTo.get(k) || 0)} PIXA
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </>
                     ) : null}
                 </Card>
 
@@ -1101,7 +1224,7 @@ class GDMetrics extends React.PureComponent {
                                         <ResponsiveContainer>
                                             <BarChart data={power} margin={{ top: 8, right: 16, bottom: 0, left: -8 }} stackOffset="sign" barCategoryGap="24%">
                                                 <CartesianGrid {...GRID} />
-                                                <XAxis dataKey="bucket" tickFormatter={xTick} {...AXIS} minTickGap={24} />
+                                                <XAxis dataKey="bucket" tickFormatter={xTick} ticks={timeTicks(power, g)} {...AXIS} minTickGap={24} />
                                                 <YAxis {...AXIS} width={56} domain={powerScale.domain} ticks={powerScale.ticks} interval={0} tickFormatter={tickFormat(powerScale.step)} />
                                                 <ReferenceLine y={0} stroke="rgba(255,255,255,0.18)" />
                                                 <Tooltip cursor={BAR_CURSOR} content={<ChartTip labelFormatter={xFmt} names={pNames} valueFormatter={(v) => `${fmtCompact(Math.abs(v))} PIXA`} />} />
@@ -1137,7 +1260,7 @@ class GDMetrics extends React.PureComponent {
                                     <ResponsiveContainer>
                                         <BarChart data={tx} margin={{ top: 8, right: 16, bottom: 0, left: -16 }} barCategoryGap="24%">
                                             <CartesianGrid {...GRID} />
-                                            <XAxis dataKey="bucket" tickFormatter={xTick} {...AXIS} minTickGap={24} />
+                                            <XAxis dataKey="bucket" tickFormatter={xTick} ticks={timeTicks(tx, g)} {...AXIS} minTickGap={24} />
                                             <YAxis {...AXIS} allowDecimals={false} width={48} />
                                             <Tooltip
                                                 cursor={BAR_CURSOR}
@@ -1318,22 +1441,24 @@ class GDMetrics extends React.PureComponent {
                     info={tr(K + "stake_by_band_info", "Share of user Pixa Power held by accounts in each band of own stake. Idle: no post, comment or vote in 30 days.")}
                 >
                     {bands.length ? (
-                        <div className={classes.chartShort}>
-                            <ResponsiveContainer>
-                                <BarChart data={bands} margin={{ top: 20, right: 16, bottom: 0, left: -8 }} barCategoryGap="24%">
-                                    <CartesianGrid {...GRID} />
-                                    <XAxis dataKey="band" {...AXIS} interval={0} tickFormatter={(b) => (b.startsWith("<") || b.endsWith("+") ? b : b.split("-")[0] + "+")} />
-                                    <YAxis {...AXIS} width={48} domain={[0, 1]} tickFormatter={(v) => fmtPct(v, 0)} />
-                                    <Tooltip
-                                        cursor={BAR_CURSOR}
-                                        content={<ChartTip labelFormatter={(l) => `${l} PXP`} valueFormatter={(v, p) => `${fmtPct(v, 1)} · ${fmtCompact(p.payload.pxp)} PXP · ${trf(K + "accounts_n", "accounts: {n}", { n: fmtInt(p.payload.accounts) })}${p.payload.inactive != null ? " · " + trf(K + "idle_n", "{n} idle", { n: fmtPct(p.payload.inactive, 0) }) : ""}`} />}
-                                    />
-                                    <Bar dataKey="share" name={tr(K + "share_of_stake", "Share of user stake")} fill={SERIES[1].fill} {...BAR}>
-                                        <LabelList dataKey="share" position="top" formatter={(v) => fmtPct(v, 0)} style={{ fill: "#aaa", fontSize: 11, fontFamily: "'Geist Mono', monospace" }} />
-                                    </Bar>
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </div>
+                        <PatternPie
+                            data={bands.map((b) => {
+                                const name = `${b.band.replace("-", "–")} PXP`;
+                                const accounts = b.accounts == null ? null : trf(K + "accounts_count_n", "{n} accounts", { n: fmtInt(b.accounts) });
+                                const idle = b.inactive == null ? null : trf(K + "idle_n", "{n} idle", { n: fmtPct(b.inactive, 0) });
+                                return {
+                                    key: b.band,
+                                    label: name,
+                                    value: b.share,
+                                    sub: [accounts, idle].filter(Boolean).join(" · "),
+                                    center: b.pxp == null
+                                        ? { value: fmtPct(b.share, 1), caption: name }
+                                        : { value: fmtCompact(b.pxp), caption: trf(K + "pxp_in_band_n", "PXP in the {n} band", { n: b.band.replace("-", "–") }) }
+                                };
+                            })}
+                            center={{ value: totalPxp ? fmtCompact(totalPxp) : "–", caption: tr(K + "pxp_held_by_users", "PXP held by users") }}
+                            label={tr(K + "stake_by_band", "Stake by band")}
+                        />
                     ) : this._placeholder(d.bandsS)}
                 </Card>
 
@@ -1393,16 +1518,25 @@ class GDMetrics extends React.PureComponent {
         const anyFormat = canvas.some((x) => x[1]) || bytes.some((x) => x[1]);
         const ta = byDim(d.topArtists).get("");
         const tc = byDim(d.topCurators).get("");
-        const list = (rows, key, fmt) => (
-            <div className={classes.rows}>
-                {rows.length === 0 ? <Empty>{tr(K + "nobody_yet", "Nobody yet.")}</Empty> : rows.slice(0, 5).map((r, i) => (
-                    <div key={r.account} className={classes.row}>
-                        <div className={classes.rowMain}><div className={classes.rowTitle}>{i + 1}. @{r.account}</div></div>
-                        <div className={classes.rowValue}>{fmt(r[key])}</div>
-                    </div>
-                ))}
-            </div>
-        );
+        // a leaderboard: each entry's meter against the first
+        const list = (rows, key, fmt) => {
+            const shown = rows.slice(0, 5);
+            const top = Math.max(0, ...shown.map((r) => r[key] || 0));
+            const texts = shown.map((r) => fmt(r[key]));
+            return (
+                <div className={classes.rows}>
+                    {rows.length === 0 ? <Empty>{tr(K + "nobody_yet", "Nobody yet.")}</Empty> : shown.map((r, i) => (
+                        <div key={r.account} className={classes.row}>
+                            <div className={classes.rowMain}>
+                                <div className={classes.rowTitle}>{i + 1}. @{r.account}</div>
+                                <div className={classes.rowMeter}><Meter value={top ? (r[key] || 0) / top : 0} /></div>
+                            </div>
+                            <div className={classes.rowValue} style={valueWidth(texts)}>{texts[i]}</div>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
         return (
             <div className={classes.grid2}>
                 <Card
@@ -1421,7 +1555,7 @@ class GDMetrics extends React.PureComponent {
                                         <Tooltip cursor={CURSOR} content={<ChartTip labelFormatter={dFmt} names={eNames} valueFormatter={(v) => (v == null ? "–" : v.toFixed(1))} />} />
                                         {["votes", "comments"].map((k, i) => (
                                             <Line key={k} type="monotone" dataKey={k} name={eNames[k]} stroke={SERIES[i].stroke} strokeDasharray={SERIES[i].dash}
-                                                strokeWidth={2} dot={false} activeDot={ACTIVE_DOT} isAnimationActive={false} connectNulls />
+                                                  strokeWidth={2} dot={false} activeDot={ACTIVE_DOT} isAnimationActive={false} connectNulls />
                                         ))}
                                     </LineChart>
                                 </ResponsiveContainer>
@@ -1513,6 +1647,7 @@ class GDMetrics extends React.PureComponent {
                     <>
                         {this._renderActivity()}
                         {this._renderVotesAndArtists()}
+                        {this._renderActivityByHour()}
                     </>
                 );
             case "controversy":
@@ -1565,6 +1700,7 @@ class GDMetrics extends React.PureComponent {
                                 key={x.id}
                                 scope="metrics"
                                 id={x.id}
+                                icon={x.icon}
                                 title={x.title()}
                                 description={x.description()}
                                 open={open === x.id}

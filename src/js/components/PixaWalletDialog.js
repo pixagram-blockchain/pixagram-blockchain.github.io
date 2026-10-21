@@ -345,7 +345,7 @@ const styles = theme => ({
         "& .MuiTab-labelIcon .MuiTab-wrapper > *:first-child": {
             width: "1.25em",
             height: "1.25em",
-            marginBottom: 0
+            marginBottom: -8
         },
         "& .MuiTab-textColorPrimary.Mui-selected": {
             backgroundColor: "transparent",
@@ -439,7 +439,7 @@ const styles = theme => ({
         "& .MuiTab-labelIcon .MuiTab-wrapper > *:first-child": {
             width: "1.25em",
             height: "1.25em",
-            marginBottom: 0
+            marginBottom: -8
         },
         "& .MuiTab-textColorPrimary.Mui-selected": {
             backgroundColor: "transparent",
@@ -2888,16 +2888,20 @@ class PixaWalletDialog extends React.PureComponent {
     };
 
     /**
-     * Handle confirmed swap from PixaWalletSwapDialog
+     * Handle a confirmed conversion from PixaWalletSwapDialog
      */
     _handle_swap_confirm = async (amount, currency) => {
         const { api, account, _LIQUID_SYMBOL, _DOLLAR_SYMBOL } = this.state;
         if (!api || !account) return;
 
         const otherCurrency = currency === 'PXA' ? 'PXS' : 'PXA';
-        const title = t("components.pixa_wallet_dialog.swap");
-        // PXA → PXS is instant (collateralized_convert); PXS → PXA settles over
-        // a ~3.5 day conversion window (convert). Surface that in the copy.
+        const title = t("components.pixa_wallet_swap_dialog.convert_to", {
+            currency: currency,
+            otherCurrency: otherCurrency
+        });
+        // PXA → PXS credits PXS at once for half the PXA, less a 5% fee, and
+        // returns the rest of the collateral after ~3.5 days (collateralized_convert);
+        // PXS → PXA has no fee and settles after ~3.5 days (convert). Surface that.
         const body = currency === 'PXA'
             ? t("components.pixa_wallet_dialog.are_you_sure_you_want_to_swap", {
                 amount: formatNumber(amount, 3)
@@ -2910,11 +2914,12 @@ class PixaWalletDialog extends React.PureComponent {
         this._open_confirm_action(title, body, async () => {
             try {
                 if (currency === 'PXA') {
-                    // Instant PXA → PXS. collateralized_convert locks PXA as
-                    // collateral and immediately credits PXS at the current feed
-                    // price (excess collateral is returned when the request later
-                    // settles). The `amount` is the PXA collateral, so format with
-                    // the liquid symbol.
+                    // Instant PXA → PXS. collateralized_convert locks the whole
+                    // `amount` as collateral and immediately credits PXS for half
+                    // of it, at the feed price plus a 5% fee. ~3.5 days later the
+                    // chain burns what that PXS cost at the median then (fee
+                    // included) and returns the rest. The `amount` is the PXA
+                    // collateral, so format with the liquid symbol.
                     //
                     // (Previously this path created a limit_order_create — an
                     //  open order that only fills when a counterparty matches it,
@@ -4405,7 +4410,7 @@ class PixaWalletDialog extends React.PureComponent {
                         <div className={classes.currencyActionButtons}>
                             <div>
                                 <Tooltip title={!_itsOwnProfile ? t("components.pixa_wallet_dialog.not_available_on_another_users_wallet") : _pixaBalance <= 0 ? t("components.pixa_wallet_swap_dialog.you_dont_have_any_to_swap", { currency: "PXA" }) : ""} disableHoverListener={_itsOwnProfile && _pixaBalance > 0} disableFocusListener={_itsOwnProfile && _pixaBalance > 0} disableTouchListener={_itsOwnProfile && _pixaBalance > 0}>
-                                    <span><Button onClick={()=>this._open_swap_dialog("PIXA")} color="primary" variant={"contained"} className={classes.greyButton} style={{margin: "8px 0px 16px 0px"}} size={"large"} disabled={!_itsOwnProfile || _pixaBalance <= 0}>{t("words.swap")} <BankTransferOut style={{marginLeft: "8px"}}/></Button></span>
+                                    <span><Button onClick={()=>this._open_swap_dialog("PIXA")} color="primary" variant={"contained"} className={classes.greyButton} style={{margin: "8px 0px 16px 0px"}} size={"large"} disabled={!_itsOwnProfile || _pixaBalance <= 0}>{t("components.pixa_wallet_dialog.swap")} <BankTransferOut style={{marginLeft: "8px"}}/></Button></span>
                                 </Tooltip>
                                 <Tooltip title={!_itsOwnProfile ? t("components.pixa_wallet_dialog.not_available_on_another_users_wallet") : _pixaBalance <= 0 ? t("components.pixa_wallet_dialog.you_dont_have_any_pxa_to") : ""} disableHoverListener={_itsOwnProfile && _pixaBalance > 0} disableFocusListener={_itsOwnProfile && _pixaBalance > 0} disableTouchListener={_itsOwnProfile && _pixaBalance > 0}>
                                     <span><Button color="primary" variant={"contained"} className={classes.greyButton} style={{margin: "8px 0px 16px 0px"}} size={"large"} onClick={() => this._open_power_dialog("power-up")} disabled={!_itsOwnProfile || _pixaBalance <= 0}>{t("components.pixa_wallet_dialog.power_up")} <LightningBoltCIrcle style={{marginLeft: "8px"}}/></Button></span>
@@ -4487,7 +4492,7 @@ class PixaWalletDialog extends React.PureComponent {
                         <div className={classes.currencyActionButtons}>
                             <div>
                                 <Tooltip title={!_itsOwnProfile ? t("components.pixa_wallet_dialog.not_available_on_another_users_wallet") : _pxsBalance <= 0 ? t("components.pixa_wallet_swap_dialog.you_dont_have_any_to_swap", { currency: "PXS" }) : ""} disableHoverListener={_itsOwnProfile && _pxsBalance > 0} disableFocusListener={_itsOwnProfile && _pxsBalance > 0} disableTouchListener={_itsOwnProfile && _pxsBalance > 0}>
-                                    <span><Button onClick={()=>this._open_swap_dialog("SUPRA")} color="primary" variant={"contained"} className={classes.greyButton} style={{margin: "8px 0px 16px 0px"}} size={"large"} disabled={!_itsOwnProfile || _pxsBalance <= 0}>{t("words.swap")} <BankTransferOut style={{marginLeft: "8px"}}/></Button></span>
+                                    <span><Button onClick={()=>this._open_swap_dialog("SUPRA")} color="primary" variant={"contained"} className={classes.greyButton} style={{margin: "8px 0px 16px 0px"}} size={"large"} disabled={!_itsOwnProfile || _pxsBalance <= 0}>{t("components.pixa_wallet_dialog.swap")} <BankTransferOut style={{marginLeft: "8px"}}/></Button></span>
                                 </Tooltip>
                             </div>
                             <div>

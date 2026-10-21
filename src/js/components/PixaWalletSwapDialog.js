@@ -67,6 +67,17 @@ const floorTo = (v, d) => {
 // Chain assets (PXA / PXS) carry 3 decimals.
 const DECIMALS = 3;
 
+// Conversion rules on the Pixa chain (Hive's, unchanged — see
+// pixagram-blockchain/information, 05-pixa-supra/haircut-corridor-and-settlement.md):
+//   PXA → PXS  `collateralized_convert`. The PXA is locked as collateral and half
+//              of it is converted at once, at the feed price plus a 5% fee. About
+//              3.5 days later the chain burns what that PXS cost at the median then
+//              (fee included) and returns the rest of the collateral.
+//   PXS → PXA  `convert`. No fee. The PXS leaves the balance now and the PXA is paid
+//              about 3.5 days later, at the median feed in force at that moment.
+const COLLATERAL_CONVERTED_SHARE = 0.5; // 200% collateral: half is converted at once
+const COLLATERALIZED_FEE = 0.05;        // PXA → PXS only
+
 const NumberFormatCustom = React.memo(
     React.forwardRef(function NumberFormatCustom(props, ref) {
         const { onChange, currency, locale, name, ...other } = props;
@@ -102,7 +113,6 @@ class PixaWalletSwapDialog extends React.PureComponent {
             _isDragging: false,
             _tempPercent: 0,
             _wasOpen: false,
-            _ticker: null,
             type: props.type || "PIXA",
         };
     }
@@ -143,27 +153,6 @@ class PixaWalletSwapDialog extends React.PureComponent {
         return Object.keys(updates).length > 0 ? updates : null;
     }
 
-    componentDidMount() {
-        this._fetch_ticker();
-    }
-
-    componentDidUpdate(prevProps) {
-        if (this.props.open && !prevProps.open) {
-            this._fetch_ticker();
-        }
-    }
-
-    _fetch_ticker = async () => {
-        const { api } = this.props;
-        if (!api) return;
-        try {
-            const ticker = await api.market.getTicker();
-            this.setState({ _ticker: ticker });
-        } catch (e) {
-            /* ignore */
-        }
-    };
-
     _clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
     _currentMax = () => {
@@ -182,16 +171,27 @@ class PixaWalletSwapDialog extends React.PureComponent {
         return t === "SUPRA" ? "PXA" : "PXS";
     };
 
-    _exchangeRate = () => {
-        return this.state._ticker
-            ? parseFloat(this.state._ticker.latest) || 57
-            : 57;
+    // PXA per PXS at the witness median feed. The wallet prices PXS as
+    // PXA × that feed ratio (api.prices), so dividing the two USD prices gives
+    // the rate conversions settle at. (The internal-market ticker used before
+    // is not what conversions use, and it fell back to a hard-coded 57.)
+    _feedRatio = () => {
+        const pxaUsd = Number(this.props.pixaUsdPrice);
+        const pxsUsd = Number(this.props.pxsUsdPrice);
+        return Number.isFinite(pxaUsd) && Number.isFinite(pxsUsd) && pxaUsd > 0 && pxsUsd > 0
+            ? pxsUsd / pxaUsd
+            : 0;
     };
 
+    // Estimate of what the conversion pays: PXS credited at once for PXA → PXS,
+    // PXA paid at settlement for PXS → PXA. 0 while the feed is unknown.
     _computeOtherAmount = (amount) => {
-        const t = (this.state.type || "").toUpperCase();
-        const rate = this._exchangeRate();
-        return t === "SUPRA" ? amount * rate : amount / rate;
+        const ratio = this._feedRatio();
+        if (!(ratio > 0)) return 0;
+        const kind = (this.state.type || "").toUpperCase();
+        return kind === "SUPRA"
+            ? amount * ratio
+            : (amount * COLLATERAL_CONVERTED_SHARE) / (ratio * (1 + COLLATERALIZED_FEE));
     };
 
     _handleAmountFromPercent = (percent) => {
@@ -262,16 +262,19 @@ class PixaWalletSwapDialog extends React.PureComponent {
             : Math.round(_amount_percent);
         const displayAmount = floorTo(_amount, DECIMALS);
         const otherAmount = this._computeOtherAmount(displayAmount);
+        // Rounded down to the chain's 3 decimals, as the chain does.
         const displayOtherAmount = Number.isFinite(otherAmount)
-            ? Number(otherAmount.toFixed(2))
+            ? floorTo(otherAmount, DECIMALS)
             : 0;
-        // Worth of the amount being swapped, in the user's reference currency.
-        // Prices come from the wallet (api.prices) — nothing is hard-coded —
-        // and the line is simply not shown while they are unknown.
+        // Worth of the amount received, in the user's reference currency. It sits
+        // under "Receive", and for PXA → PXS it is about half the worth of the PXA
+        // locked (the other half comes back later). Prices come from the wallet
+        // (api.prices) — nothing is hard-coded — and the line is simply not shown
+        // while they are unknown.
         const { pixaUsdPrice, pxsUsdPrice, fiatRate, fiatCurrency } = this.props;
-        const unitUsd = Number(currency === "PXA" ? pixaUsdPrice : pxsUsdPrice);
-        const fiatValue = Number.isFinite(unitUsd) && unitUsd > 0
-            ? formatFiatFromUsd(displayAmount * unitUsd, fiatRate, fiatCurrency || "USD", 2)
+        const receiveUnitUsd = Number(otherCurrency === "PXA" ? pixaUsdPrice : pxsUsdPrice);
+        const fiatValue = Number.isFinite(receiveUnitUsd) && receiveUnitUsd > 0
+            ? formatFiatFromUsd(displayOtherAmount * receiveUnitUsd, fiatRate, fiatCurrency || "USD", 2)
             : null;
         const locale = resolveLocale();
         const noBalance = max <= 0;
@@ -288,7 +291,10 @@ class PixaWalletSwapDialog extends React.PureComponent {
             >
                 <DialogContent>
                     <Typography component="h2" variant="h6">
-                        {t("words.swap")}
+                        {t("components.pixa_wallet_swap_dialog.convert_to", {
+                            currency: currency,
+                            otherCurrency: otherCurrency
+                        })}
                     </Typography>
 
                     <Slider
@@ -426,6 +432,20 @@ class PixaWalletSwapDialog extends React.PureComponent {
                             >{fiatValue ? t("components.pixa_wallet_dialog.worth_about", { fiat: fiatValue }) : ""}</Typography>
                         </div>
                     </div>
+                    {/* How this direction settles: what arrives now, what later, the fee. */}
+                    <Typography
+                        variant="body2"
+                        color="textSecondary"
+                        component="p"
+                        style={{
+                            margin: "0px 21px 8px 21px",
+                            textAlign: "left",
+                        }}
+                    >
+                        {currency === "PXA"
+                            ? t("components.pixa_wallet_swap_dialog.half_of_the_pxa_is_converted_at")
+                            : t("components.pixa_wallet_swap_dialog.no_fee_the_pxs_leaves_your_balance")}
+                    </Typography>
                 </DialogContent>
                 <DialogActions
                     style={{ textAlign: "right" }}

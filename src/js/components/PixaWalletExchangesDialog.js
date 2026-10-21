@@ -10,7 +10,8 @@ import CloseRounded from "@material-ui/icons/CloseRounded";
 import { t } from "../utils/text";
 import { withLanguage } from "../utils/withLanguage";
 
-// Platforms where the tokens can be traded or converted. One entry per platform:
+// Platforms where the tokens can be traded. (Converting PXA <-> PXS is an on-chain
+// operation, done in the wallet, not on an exchange.) One entry per platform:
 //   id       stable key
 //   name     label shown under the logo
 //   url      opened in a new tab (http(s) only). Leave it out for a platform that
@@ -23,7 +24,7 @@ import { withLanguage } from "../utils/withLanguage";
 export const EXCHANGES = [
     {
         id: "coinstore",
-        name: "COINSTOIRE",
+        name: "COINSTORE",
         url: "https://coinstore.com",
         logo: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHN0eWxlPSJpc29sYXRpb246aXNvbGF0ZSIgdmlld0JveD0iMCAwIDU1NSA1NTQiPjxkZWZzPjxjbGlwUGF0aCBpZD0iYSI+PHBhdGggZD0iTTAgMGg1NTV2NTU0SDB6Ii8+PC9jbGlwUGF0aD48L2RlZnM+PGcgY2xpcC1wYXRoPSJ1cmwoI2EpIj48cGF0aCBmaWxsPSIjZmZmIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0yNzkgM2MyMCAwIDM3IDE3IDM3IDM3djE3MGEzNyAzNyAwIDEgMS03NCAwVjQwYzAtMjAgMTYtMzcgMzctMzdtMTQ5IDE0N2EzNSAzNSAwIDEgMSA0OC01MCAxNjEgMTYxIDAgMCAxIDI5IDM2IDIxNSAyMTUgMCAwIDEgMjggNjcgMjk1IDI5NSAwIDAgMSA2IDEyMyAzMDIgMzAyIDAgMCAxLTI5IDkxIDI0NiAyNDYgMCAwIDEtNjIgNzcgMjI4IDIyOCAwIDAgMS05OSA0NSAyODcgMjg3IDAgMCAxLTYyIDdoLTNhMzUxIDM1MSAwIDAgMS05MC0xMiAyNjYgMjY2IDAgMCAxLTczLTM2IDIzOCAyMzggMCAwIDEtODktMTE2IDI2OCAyNjggMCAwIDEtMTItMTQ2IDI3MSAyNzEgMCAwIDEgMzgtOTVxMTUtMjMgMzQtNDFhMzUgMzUgMCAwIDEgNDggNTAgMTY5IDE2OSAwIDAgMC00MSA2MiAyMDEgMjAxIDAgMCAwLTExIDExMSAxOTkgMTk5IDAgMCAwIDI0IDY2IDE3MiAxNzIgMCAwIDAgMTIzIDgzIDI0NSAyNDUgMCAwIDAgNDkgNGgzYTI1NiAyNTYgMCAwIDAgNjgtMTEgMTcxIDE3MSAwIDAgMCA0OS0yNiAxNTggMTU4IDAgMCAwIDQ0LTU0IDIwNCAyMDQgMCAwIDAgMjItNjkgMjUyIDI1MiAwIDAgMC0xNy0xMjlsLTE2LTI3eiIvPjwvZz48L3N2Zz4=",
         caption: "PXA / USDT"

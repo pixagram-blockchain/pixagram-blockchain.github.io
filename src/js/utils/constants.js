@@ -137,6 +137,13 @@ export const DEFAULT_NODES = [
         location: [25.2048, 55.2708], // Dubai, UAE
         network: "mainnet",
     },
+    {
+        id: "eu-central-2",
+        name: "Whale (Frankfurt)",
+        url: "https://whaleapi.net",
+        location: [50.1109, 8.6821], // Frankfurt, DE
+        network: "mainnet",
+    },
 ];
 
 // Sentinel `api_node` value meaning "use the user-supplied URL in

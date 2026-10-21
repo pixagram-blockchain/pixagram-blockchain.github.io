@@ -3,9 +3,17 @@ import * as React from "preact/compat";
 import withStyles from "@material-ui/core/styles/withStyles";
 import DialogContent from "@material-ui/core/DialogContent";
 import Typography from "@material-ui/core/Typography";
-import LinearProgress from "@material-ui/core/LinearProgress";
 import FlagIcon from "@material-ui/icons/Flag";
 import CheckCircleIcon from "@material-ui/icons/CheckCircle";
+// Section icons: filled glyphs, cut out of their tiles.
+import TrafficRoundedIcon from "@material-ui/icons/TrafficRounded";
+import ExploreRoundedIcon from "@material-ui/icons/ExploreRounded";
+import DnsRoundedIcon from "@material-ui/icons/DnsRounded";
+import TuneRoundedIcon from "@material-ui/icons/TuneRounded";
+import FlagRoundedIcon from "@material-ui/icons/FlagRounded";
+import TollRoundedIcon from "@material-ui/icons/TollRounded";
+import ForumRoundedIcon from "@material-ui/icons/ForumRounded";
+import DescriptionRoundedIcon from "@material-ui/icons/DescriptionRounded";
 // Recharts by module, as the wallet imports it: one copy of the library in the app.
 import { ResponsiveContainer } from "recharts/lib/component/ResponsiveContainer";
 import { BarChart } from "recharts/lib/chart/BarChart";
@@ -20,8 +28,8 @@ import { LabelList } from "recharts/lib/component/LabelList";
 import { withLanguage } from "../utils/withLanguage";
 import { towerGet, towerSeries, nowSec, fmtCompact, fmtInt, fmtPct, fmtAgo } from "../utils/tower";
 import {
-    tr, trf, Card, Tile, Pill, Meter, Empty, Skeleton, Visible, ChartTip, Legend, AccordionSection, ACCORDION_MS,
-    SERIES, AXIS, GRID, BAR_CURSOR, BAR, HBAR, stackShape, axisTick, bucketLabel, fillBuckets, niceScale, tickFormat, newestOnly
+    tr, trf, Card, Tile, Pill, Meter, Empty, Skeleton, Visible, ChartTip, Legend, AccordionSection, ACCORDION_MS, GlyphTile, Heatmap,
+    SERIES, AXIS, GRID, BAR_CURSOR, BAR, HBAR, stackShape, axisTick, bucketLabel, fillBuckets, newestOnly
 } from "./GDTowerKit";
 import GDReports from "./GDReports";
 
@@ -249,43 +257,28 @@ const styles = theme => ({
     },
     goalHeader: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px", marginBottom: "16px" },
     goalInfo: { display: "flex", alignItems: "flex-start", gap: "12px", minWidth: 0 },
-    goalIconWrapper: {
-        width: "40px",
-        height: "40px",
-        borderRadius: "10px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "#fff",
-        flex: "0 0 auto"
-    },
-    goalIconWrapperOpen: { backgroundColor: "#222" },
-    goalIcon: { color: "#000", fontSize: "20px" },
-    goalIconOpen: { color: "#888" },
+    // a goal met lights its tile, as an open section does
+    goalTile: { display: "flex", flex: "0 0 auto", color: "#3a3a3a" },
+    goalTileDone: { color: "#e8e8e8" },
     goalTitle: { fontSize: "16px", fontWeight: 600, color: "#fff", fontFamily: "'Industry Book'", marginBottom: "4px" },
     goalDescription: { fontSize: "13px", fontFamily: "'Normative Pro'", color: "#888" },
-    goalProgressBar: {
-        height: "8px",
-        borderRadius: "4px",
-        backgroundColor: "#222",
-        "& .MuiLinearProgress-bar": { backgroundColor: "#888", borderRadius: "4px" }
-    },
-    goalProgressBarComplete: { "& .MuiLinearProgress-bar": { backgroundColor: "#fff" } },
-    goalProgressText: { display: "flex", justifyContent: "space-between", marginTop: "8px", fontSize: "12px", fontFamily: "'Geist Mono', monospace", color: "#888" }
+    goalProgressText: { display: "flex", justifyContent: "space-between", marginTop: "10px", fontSize: "12px", fontFamily: "'Geist Mono', monospace", color: "#888" },
+    // block production: the heatmap's fill rates, a pill when they fall short
+    fillRate: { display: "inline-flex", justifyContent: "flex-end", minWidth: "64px" }
 });
 
 // The view's sections, in order, under the system state banner. Each is closed until opened and only one is
 // open at a time; the open one is named in the address (+governance-tower-<id>, ids without "-"). A section
 // loads its data when it opens.
 const SECTIONS = [
-    { id: "state", title: () => tr(K + "s_state", "System state"), description: () => tr(K + "s_state_desc", "Alerts raised by the Tower. Red means act now, amber means watch.") },
-    { id: "steering", title: () => tr(K + "s_steering", "System steering"), description: () => tr(K + "s_steering_desc", "Who produces the blocks, how much it would cost to take control, and how much of the stake takes part.") },
-    { id: "witnesses", title: () => tr(K + "s_witness_activity", "Witnesses, last 30 days"), description: () => tr(K + "s_witness_activity_desc", "Block production, the votes that move the schedule, what producers earn, how concentrated the vote is, and what witnesses set and run.") },
-    { id: "attributes", title: () => tr(K + "s_attributes", "System attributes"), description: () => tr(K + "s_attributes_desc", "The parameters the chain runs on now, as voted by witnesses or set by the protocol.") },
-    { id: "goals", title: () => tr(K + "s_goals", "System goals"), description: () => tr(K + "s_goals_desc", "The objectives the network steers towards, measured live.") },
-    { id: "funds", title: () => tr(K + "s_funds", "Funds and price feeds"), description: () => tr(K + "s_funds_desc", "Proposals to the Decentralized Pixa Fund, and the feeds that set PXS conversions.") },
-    { id: "events", title: () => tr(K + "s_events", "System events and actions"), description: () => tr(K + "s_events_desc", "Where the community discusses the system, and what governance did in response to alerts.") },
-    { id: "reports", title: () => tr(K + "s_reports", "Reports"), description: () => tr(K + "s_reports_desc", "Witness reports for each day, week and month, compared with the period before, ready to post.") }
+    { id: "state", icon: TrafficRoundedIcon, title: () => tr(K + "s_state", "System state"), description: () => tr(K + "s_state_desc", "Alerts raised by the Tower. Red means act now, amber means watch.") },
+    { id: "steering", icon: ExploreRoundedIcon, title: () => tr(K + "s_steering", "System steering"), description: () => tr(K + "s_steering_desc", "Who produces the blocks, how much it would cost to take control, and how much of the stake takes part.") },
+    { id: "witnesses", icon: DnsRoundedIcon, title: () => tr(K + "s_witness_activity", "Witnesses, last 30 days"), description: () => tr(K + "s_witness_activity_desc", "Block production, the votes that move the schedule, what producers earn, how concentrated the vote is, and what witnesses set and run.") },
+    { id: "attributes", icon: TuneRoundedIcon, title: () => tr(K + "s_attributes", "System attributes"), description: () => tr(K + "s_attributes_desc", "The parameters the chain runs on now, as voted by witnesses or set by the protocol.") },
+    { id: "goals", icon: FlagRoundedIcon, title: () => tr(K + "s_goals", "System goals"), description: () => tr(K + "s_goals_desc", "The objectives the network steers towards, measured live.") },
+    { id: "funds", icon: TollRoundedIcon, title: () => tr(K + "s_funds", "Funds and price feeds"), description: () => tr(K + "s_funds_desc", "Proposals to the Decentralized Pixa Fund, and the feeds that set PXS conversions.") },
+    { id: "events", icon: ForumRoundedIcon, title: () => tr(K + "s_events", "System events and actions"), description: () => tr(K + "s_events_desc", "Where the community discusses the system, and what governance did in response to alerts.") },
+    { id: "reports", icon: DescriptionRoundedIcon, title: () => tr(K + "s_reports", "Reports"), description: () => tr(K + "s_reports_desc", "Witness reports for each day, week and month, compared with the period before, ready to post.") }
 ];
 const SECTION_IDS = SECTIONS.map((x) => x.id);
 
@@ -635,9 +628,9 @@ class GDControlTower extends React.PureComponent {
                         <div key={goal.id} className={classes.goalCard}>
                             <div className={classes.goalHeader}>
                                 <div className={classes.goalInfo}>
-                                    <div className={`${classes.goalIconWrapper} ${done ? "" : classes.goalIconWrapperOpen}`}>
-                                        {done ? <CheckCircleIcon className={classes.goalIcon} /> : <FlagIcon className={`${classes.goalIcon} ${classes.goalIconOpen}`} />}
-                                    </div>
+                                    <span className={`${classes.goalTile} ${done ? classes.goalTileDone : ""}`}>
+                                        <GlyphTile icon={done ? CheckCircleIcon : FlagIcon} size={40} glyph={22} />
+                                    </span>
                                     <div style={{ minWidth: 0 }}>
                                         <Typography className={classes.goalTitle}>{goal.title()}</Typography>
                                         <Typography className={classes.goalDescription}>{goal.description()}</Typography>
@@ -647,11 +640,7 @@ class GDControlTower extends React.PureComponent {
                                     {!r ? "–" : done ? tr(K + "met", "met") : tr(K + "open", "open")}
                                 </Pill>
                             </div>
-                            <LinearProgress
-                                variant="determinate"
-                                value={progress * 100}
-                                className={`${classes.goalProgressBar} ${done ? classes.goalProgressBarComplete : ""}`}
-                            />
+                            <Meter value={progress} strong={done} />
                             <div className={classes.goalProgressText}>
                                 <span>{r ? r.text : tr(K + "waiting_for_data", "waiting for data")}</span>
                                 <span>{r ? fmtPct(progress, 0) : ""}</span>
@@ -863,55 +852,55 @@ class GDControlTower extends React.PureComponent {
             }
             return "> 99.99%";
         };
-        const scale = niceScale(0, Math.max(1, ...days.map((r) => r.missed)), 6, true, true);
+        // Heatmap: a row per witness that missed blocks, a cell per day; hollow on days it had no slot.
+        const shown = missing.slice(0, 8);
+        const byDay = new Map(shown.map((x) => [x.w, new Map()]));
+        for (const p of pts || []) if (byDay.has(p.dim) && p.extra) byDay.get(p.dim).set(p.bucket, p.extra);
+        const rows = shown.map((x) => ({
+            key: x.w,
+            label: `@${x.w}`,
+            title: `@${x.w} · ${trf(K + "produced_missed_n", "{p} produced · {m} missed", { p: fmtInt(x.produced), m: fmtInt(x.missed) })}`,
+            cells: days.map((dd) => {
+                const e = byDay.get(x.w).get(dd.bucket);
+                const slots = e ? (e.produced || 0) + (e.missed || 0) : 0;
+                return { v: slots ? e.missed || 0 : null, slots, day: dd.bucket };
+            }),
+            right: (
+                <span className={classes.fillRate}>
+                    {x.rate > 0.01 ? <Pill level={x.rate > 0.04 ? "red" : "amber"} icon={false}>{filled(x.produced, x.missed)}</Pill> : filled(x.produced, x.missed)}
+                </span>
+            )
+        }));
+        const n = days.length;
+        const ticks = n ? Array.from(new Set([0, Math.round((n - 1) / 3), Math.round((2 * (n - 1)) / 3), n - 1])).map((i) => ({ at: i + 0.5, label: dayTick(days[i].bucket) })) : [];
         return (
             <Card
                 title={tr(K + "block_production", "Block production")}
                 subtitle={produced + missed ? trf(K + "slots_filled_n", "{n} of slots filled · 30 days", { n: filled(produced, missed) }) : tr(K + "last_30_days", "last 30 days")}
-                info={tr(K + "block_production_info", "Blocks produced over scheduled slots, per day. A missed block is a slot its witness left empty: the chain carries on with the next witness, 3 seconds later.")}
+                info={tr(K + "block_production_heat_info", "Blocks produced over scheduled slots. Each row is a witness that missed blocks, each cell a day: the lighter, the more slots it left empty that day (hollow: no slot that day). A missed slot is not lost: the chain carries on with the next witness, 3 seconds later.")}
             >
                 {!pts ? this._wait(220) : produced + missed === 0 ? (
                     <Empty>{tr(K + "no_production", "No block recorded in these 30 days yet.")}</Empty>
+                ) : missed === 0 || !shown.length ? (
+                    <Empty>{tr(K + "no_missed", "No block missed in 30 days.")}</Empty>
                 ) : (
                     <>
-                        {missed === 0 ? (
-                            <Empty>{tr(K + "no_missed", "No block missed in 30 days.")}</Empty>
-                        ) : (
-                            <div className={classes.chartShort}>
-                                <ResponsiveContainer>
-                                    <BarChart data={days} margin={{ top: 8, right: 16, bottom: 0, left: -16 }} barCategoryGap="24%">
-                                        <CartesianGrid {...GRID} />
-                                        <XAxis dataKey="bucket" tickFormatter={dayTick} {...AXIS} minTickGap={24} />
-                                        <YAxis {...AXIS} width={48} domain={scale.domain} ticks={scale.ticks} interval={0} tickFormatter={tickFormat(scale.step)} />
-                                        <Tooltip
-                                            cursor={BAR_CURSOR}
-                                            content={<ChartTip labelFormatter={dayLabel} valueFormatter={(v, p) => `${fmtInt(v)} · ${trf(K + "of_n_slots", "of {n} slots", { n: fmtInt(p.payload.missed + p.payload.produced) })}`} />}
-                                        />
-                                        <Bar dataKey="missed" name={tr(K + "missed_blocks", "Missed blocks")} fill={SERIES[1].fill} {...BAR} />
-                                    </BarChart>
-                                </ResponsiveContainer>
+                        <Heatmap
+                            rows={rows}
+                            columns={n}
+                            cellHeight={16}
+                            ticks={ticks}
+                            readout={(row, col, cell) => trf(K + "missed_readout_n", "{w} · {day} · {m} missed of {s} slots", { w: row.label, day: dayLabel(cell.day), m: fmtInt(cell.v), s: fmtInt(cell.slots) })}
+                            idle={trf(K + "missed_total_n", "{n} blocks missed in 30 days. Point at a day to read it.", { n: fmtInt(missed) })}
+                            low={tr(K + "fewer", "Fewer")}
+                            high={tr(K + "more_missed", "More missed")}
+                            label={tr(K + "block_production", "Block production")}
+                        />
+                        {all.length > shown.length ? (
+                            <div className={classes.note}>
+                                {missing.length > shown.length ? `${trf(K + "more_missed_n", "{n} more witnesses missed blocks.", { n: fmtInt(missing.length - shown.length) })} ` : ""}
+                                {all.length > missing.length ? trf(K + "others_missed_none_n", "Witnesses with no missed block: {n}.", { n: fmtInt(all.length - missing.length) }) : ""}
                             </div>
-                        )}
-                        {missing.length ? (
-                            <>
-                                <div className={classes.listTitle}>{tr(K + "missed_by_witness", "Missed by witness")}</div>
-                                <div className={classes.rows}>
-                                    {missing.slice(0, 8).map((x) => (
-                                        <div key={x.w} className={classes.row}>
-                                            <div className={classes.rowMain}>
-                                                <div className={classes.rowTitle}>@{x.w}</div>
-                                                <div className={classes.rowSub}>{trf(K + "produced_missed_n", "{p} produced · {m} missed", { p: fmtInt(x.produced), m: fmtInt(x.missed) })}</div>
-                                            </div>
-                                            <div className={classes.rowValue}>
-                                                {x.rate > 0.01 ? <Pill level={x.rate > 0.04 ? "red" : "amber"} icon={false}>{filled(x.produced, x.missed)}</Pill> : filled(x.produced, x.missed)}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                                {all.length > missing.length ? (
-                                    <div className={classes.note}>{trf(K + "others_missed_none_n", "Witnesses with no missed block: {n}.", { n: fmtInt(all.length - missing.length) })}</div>
-                                ) : null}
-                            </>
                         ) : null}
                     </>
                 )}
@@ -1232,6 +1221,7 @@ class GDControlTower extends React.PureComponent {
                             <AccordionSection
                                 key={x.id}
                                 scope="tower"
+                                icon={x.icon}
                                 id={x.id}
                                 title={x.title()}
                                 description={x.description()}

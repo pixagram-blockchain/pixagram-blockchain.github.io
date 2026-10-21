@@ -1,6 +1,7 @@
 // Shared building blocks for the Metrics and Control Tower views.
 // Greyscale only, no solid borders: surfaces are told apart by fill (#101010 / #171717),
-// series by lightness and dash pattern, severity by a pill with an icon and a word.
+// series by lightness and dash pattern, parts of a whole by hatching, severity by a pill with an icon and a word.
+// Icons sit in a rounded tile with the glyph cut out of it, as in the Pixagram mark.
 import * as React from "preact/compat";
 
 import withStyles from "@material-ui/core/styles/withStyles";
@@ -23,7 +24,7 @@ import { Area } from "recharts/lib/cartesian/Area";
 import { Rectangle } from "recharts/lib/shape/Rectangle";
 
 import { t, getLocaleCode } from "../utils/text";
-import { fmtSignedPct } from "../utils/tower";
+import { fmtSignedPct, fmtPct, fmtInt } from "../utils/tower";
 
 /**
  * Translation with an English fallback. utils/text renders a missing key as its last segment,
@@ -72,6 +73,34 @@ export const HBAR = { maxBarSize: 18, radius: [0, 4, 4, 0], isAnimationActive: f
 // A range (low to high within a bucket) behind a line: a wash, never a block.
 export const BAND = { stroke: "none", fill: "#ffffff", fillOpacity: 0.08, isAnimationActive: false };
 
+// Meters: dashes of 4 × 6 px, 3 px apart, drawn by an SVG tile repeated along the row so their corners stay round.
+const DASH = 4;
+const DASH_GAP = 3;
+const DASH_H = 6;
+const METER_TRACK = "#262626";
+const METER_FILL = "#9a9a9a";
+const METER_STRONG = "#f0f0f0";
+
+function dashes(color) {
+    const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${DASH + DASH_GAP}' height='${DASH_H}'><rect width='${DASH}' height='${DASH_H}' rx='1' fill='${color}'/></svg>`;
+    return `url("data:image/svg+xml,${encodeURIComponent(svg)}") left center / ${DASH + DASH_GAP}px ${DASH_H}px repeat-x`;
+}
+
+// Heatmap cells, from nothing to the busiest. A cell without data (not yet, not scheduled) is left hollow.
+const HEAT = ["#1b1b1b", "#2b2b2b", "#424242", "#5e5e5e", "#868686", "#b8b8b8"];
+
+// Parts of a whole, told apart by hatching (lines at four angles, a grid, dots) and by lightness.
+const HATCHES = [
+    { angle: 45, gap: 4, width: 1.3, color: "#d6d6d6" },
+    { angle: 0, gap: 4, width: 1.2, color: "#a3a3a3" },
+    { angle: 90, gap: 4, width: 1.2, color: "#8a8a8a" },
+    { angle: -45, gap: 5, width: 1.2, color: "#bcbcbc" },
+    { grid: true, gap: 6, width: 1, color: "#909090" },
+    { dots: true, gap: 5, r: 1.15, color: "#c4c4c4" },
+    { angle: 45, gap: 8, width: 1, color: "#767676" },
+    { angle: 0, gap: 7, width: 1, color: "#6a6a6a" }
+];
+
 // ---------------------------------------------------------------- dates
 
 /** The app's language for dates (utils/text), en-GB when it cannot say. */
@@ -113,6 +142,16 @@ export function bucketLabel(bucket, grain) {
     if (grain === "month") return fmtDate(bucket, { month: "long", year: "numeric" });
     if (grain === "year") return String(new Date(bucket * 1000).getUTCFullYear());
     return fmtDate(bucket, { day: "numeric", month: "short" });
+}
+
+/**
+ * Ticks for a time axis of `rows` ({ bucket }): over more than two days of hours, one at each midnight,
+ * which axisTick shows as the date; otherwise undefined, and the chart picks its own.
+ */
+export function timeTicks(rows, grain) {
+    if (grain !== "hour" || !rows || rows.length < 49) return undefined;
+    const ticks = rows.map((r) => r.bucket).filter((b) => b % 86400 === 0);
+    return ticks.length >= 2 ? ticks : undefined;
 }
 
 /**
@@ -360,11 +399,12 @@ const styles = () => ({
     pill_amber: { backgroundColor: "#3a3a3a", color: "#e0e0e0" },
     pill_ok: { backgroundColor: "#1d1d1d", color: "#888" },
     pill_muted: { backgroundColor: "#1d1d1d", color: "#666" },
-    // meter
-    meter: { position: "relative", height: "8px", borderRadius: "4px", backgroundColor: "#222", overflow: "visible" },
-    meterFill: { position: "absolute", left: 0, top: 0, bottom: 0, borderRadius: "4px", backgroundColor: "#888" },
-    meterFillStrong: { backgroundColor: "#fff" },
-    meterMark: { position: "absolute", top: "-4px", bottom: "-4px", width: "2px", borderRadius: "1px", backgroundColor: "#555" },
+    // meter: a row of short dashes, lit up to the value
+    meter: { position: "relative", height: `${DASH_H}px`, overflow: "visible" },
+    meterTrack: { position: "absolute", left: 0, top: 0, bottom: 0, width: "100%", background: dashes(METER_TRACK) },
+    meterFill: { position: "absolute", left: 0, top: 0, bottom: 0, background: dashes(METER_FILL), transition: "width 300ms ease" },
+    meterFillStrong: { background: dashes(METER_STRONG) },
+    meterMark: { position: "absolute", top: "-4px", bottom: "-4px", width: "2px", borderRadius: "1px", backgroundColor: "#777" },
     // switch (same language as the dialog's tabs)
     switch: { display: "inline-flex", backgroundColor: "#171717", borderRadius: "21px", padding: "4px", gap: "2px" },
     switchItem: {
@@ -484,14 +524,122 @@ const styles = () => ({
         justifyContent: "space-between",
         gap: "16px",
         transition: "background-color 150ms ease",
-        "&:hover": { backgroundColor: "rgba(255,255,255,0.03)" },
+        "&:hover $accordionIcon": { color: "#5c5c5c" },
         "&:focus-visible": { outline: "none", boxShadow: "inset 0 0 0 2px #555" }
     },
+    // the open section's tile lights up, as the active choice of a switch does
+    accordionHeadOpen: { "& $accordionIcon, &:hover $accordionIcon": { color: "#e8e8e8" } },
+    accordionLead: { display: "flex", alignItems: "flex-start", gap: "14px", minWidth: 0 },
+    accordionIcon: { display: "flex", flex: "0 0 auto", marginTop: "3px", color: "#424242", transition: "color 150ms ease" },
     accordionText: { display: "flex", flexDirection: "column", minWidth: 0 },
     accordionTitle: { fontSize: "18px", fontWeight: 600, color: "#fff", fontFamily: "'Industry Book'", lineHeight: 1.3 },
     accordionDescription: { display: "block", fontSize: "14px", color: "#888", fontFamily: "'Normative Pro'", marginTop: "2px", maxWidth: "640px", lineHeight: 1.45 },
     accordionChevron: { color: "#666", fontSize: "26px", flex: "0 0 auto", transition: "transform 200ms ease" },
-    accordionBody: { padding: "4px 0 28px 0" }
+    accordionBody: { padding: "4px 0 28px 0" },
+    // pie of hatched parts (a ring, the figure under the pointer in its middle) and its legend
+    pie: { display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", alignItems: "center", columnGap: "24px" },
+    pieStacked: { gridTemplateColumns: "minmax(0, 1fr)", justifyItems: "center", rowGap: "16px" },
+    pieFigure: { position: "relative", lineHeight: 0 },
+    pieSlice: { transition: "opacity 150ms ease, transform 150ms ease" },
+    pieCenter: {
+        position: "absolute",
+        left: "50%",
+        top: "50%",
+        transform: "translate(-50%, -50%)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        textAlign: "center",
+        lineHeight: 1.2,
+        pointerEvents: "none"
+    },
+    pieCenterValue: { fontSize: "16px", fontWeight: 600, color: "#fff", fontFamily: "'Geist Mono', monospace", whiteSpace: "nowrap" },
+    pieCenterCaption: {
+        fontSize: "11px",
+        color: "#777",
+        fontFamily: "'Normative Pro'",
+        marginTop: "3px",
+        lineHeight: 1.3,
+        overflow: "hidden",
+        display: "-webkit-box",
+        WebkitLineClamp: 2,
+        WebkitBoxOrient: "vertical"
+    },
+    pieLegend: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, width: "100%" },
+    pieRow: {
+        display: "grid",
+        gridTemplateColumns: "14px minmax(0, 1fr) auto",
+        alignItems: "center",
+        columnGap: "10px",
+        padding: "6px 8px",
+        borderRadius: "10px",
+        transition: "background-color 150ms ease"
+    },
+    pieRowActive: { backgroundColor: "#171717" },
+    pieSwatch: { display: "block" },
+    pieName: { fontSize: "13px", color: "#ddd", fontFamily: "'Normative Pro'", lineHeight: 1.3, minWidth: 0 },
+    pieSub: { display: "block", fontSize: "11px", color: "#666", marginTop: "1px" },
+    pieShare: { fontSize: "13px", color: "#fff", fontFamily: "'Geist Mono', monospace", textAlign: "right", whiteSpace: "nowrap" },
+    // heatmap: rows of cells, lighter where busier
+    heatGrid: { display: "grid", columnGap: "3px", rowGap: "4px", alignItems: "center" },
+    heatLabel: {
+        fontSize: "11px",
+        color: "#888",
+        fontFamily: "'Geist Mono', monospace",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        maxWidth: "128px",
+        paddingRight: "8px"
+    },
+    heatRowHead: { gridColumn: "1 / -1", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginTop: "6px" },
+    heatCell: { borderRadius: "3px", minWidth: 0, transition: "box-shadow 120ms ease" },
+    heatCellHollow: { boxShadow: "inset 0 0 0 1px #1f1f1f" },
+    heatCellOn: { boxShadow: "0 0 0 1.5px #ffffff" },
+    heatRight: { paddingLeft: "10px", textAlign: "right", fontSize: "12px", color: "#ddd", fontFamily: "'Geist Mono', monospace", whiteSpace: "nowrap" },
+    heatTicks: { position: "relative", height: "14px", marginTop: "2px" },
+    heatTick: { position: "absolute", top: 0, fontSize: "11px", color: "#666", fontFamily: "'Geist Mono', monospace", whiteSpace: "nowrap" },
+    heatFoot: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px 16px", marginTop: "12px" },
+    heatReadout: { flex: "1 1 200px", fontSize: "12px", color: "#aaa", fontFamily: "'Normative Pro'", minHeight: "16px" },
+    heatScale: { display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "#666", fontFamily: "'Normative Pro'", marginLeft: "auto" },
+    heatSwatch: { width: "10px", height: "10px", borderRadius: "2px" },
+    // funnel: stages side by side, the flow narrowing from one to the next
+    funnel: { position: "relative" },
+    funnelCols: { display: "grid" },
+    funnelValue: { textAlign: "center", fontSize: "15px", fontWeight: 600, color: "#fff", fontFamily: "'Geist Mono', monospace", padding: "4px 4px 12px" },
+    funnelBody: { position: "relative" },
+    funnelSvg: { position: "absolute", left: 0, top: 0, width: "100%", height: "100%", display: "block", overflow: "visible" },
+    funnelPills: { position: "absolute", left: 0, top: 0, right: 0, bottom: 0, display: "grid", alignItems: "center", justifyItems: "center", pointerEvents: "none" },
+    funnelPill: {
+        backgroundColor: "#ececec",
+        color: "#111",
+        fontFamily: "'Geist Mono', monospace",
+        fontSize: "12px",
+        fontWeight: 600,
+        lineHeight: "18px",
+        padding: "1px 10px",
+        borderRadius: "11px",
+        boxShadow: "0 2px 10px rgba(0,0,0,0.45)",
+        whiteSpace: "nowrap"
+    },
+    funnelLabel: { textAlign: "center", fontSize: "13px", color: "#888", fontFamily: "'Normative Pro'", padding: "12px 6px 2px", lineHeight: 1.3 },
+    funnelDivider: { position: "absolute", top: 0, bottom: 0, width: "1px", backgroundColor: "rgba(255,255,255,0.06)", pointerEvents: "none" },
+    funnelRows: { display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(112px, 1.1fr) auto", columnGap: "14px" },
+    funnelRowLabel: { fontSize: "13px", color: "#aaa", fontFamily: "'Normative Pro'", alignSelf: "center", lineHeight: 1.3 },
+    funnelRowValue: { fontSize: "13px", color: "#fff", fontFamily: "'Geist Mono', monospace", textAlign: "right", alignSelf: "center" },
+    funnelColumn: { position: "relative" },
+    // flow: where an amount goes, as ribbons from its sources to its recipients
+    flow: { position: "relative", width: "100%" },
+    flowSvg: { display: "block", overflow: "visible" },
+    flowRibbon: { transition: "stroke 150ms ease, opacity 150ms ease" },
+    flowPct: { fontSize: "18px", fill: "#fff", fontFamily: "'Geist Mono', monospace" },
+    flowCaption: { fontSize: "11px", fill: "#777", fontFamily: "'Normative Pro'" },
+    flowLabel: { fontSize: "13px", fill: "#9a9a9a", fontFamily: "'Normative Pro'", transition: "fill 150ms ease" },
+    flowLabelOn: { fill: "#fff" },
+    flowValue: { fontSize: "14px", fill: "#ececec", fontFamily: "'Geist Mono', monospace" },
+    flowSub: { fontSize: "11px", fill: "#666", fontFamily: "'Normative Pro'" },
+    flowTile: { color: "#353535", transition: "color 150ms ease" },
+    flowTileOn: { color: "#e8e8e8" }
 });
 
 const withKit = withStyles(styles);
@@ -644,18 +792,37 @@ export const Pill = withKit(({ classes, level = "muted", children, icon = true }
     );
 });
 
-/** Horizontal meter 0..1 with optional marks (thresholds) at positions 0..1. */
-export const Meter = withKit(({ classes, value, marks = [], strong }) => (
-    <div className={classes.meter} role="meter" aria-valuemin={0} aria-valuemax={1} aria-valuenow={value || 0}>
-        <div
-            className={`${classes.meterFill} ${strong ? classes.meterFillStrong : ""}`}
-            style={{ width: `${Math.max(0, Math.min(1, value || 0)) * 100}%` }}
-        />
-        {marks.map((m) => (
-            <div key={m} className={classes.meterMark} style={{ left: `calc(${Math.max(0, Math.min(1, m)) * 100}% - 1px)` }} />
-        ))}
-    </div>
-));
+const clamp01 = (v) => Math.max(0, Math.min(1, v || 0));
+
+/**
+ * Horizontal meter 0..1: a row of dashes, lit up to the value, with optional marks (thresholds) at
+ * positions 0..1. The row holds whole dashes only, so a value never ends on half a dash; any value above
+ * zero lights at least one.
+ */
+export const Meter = withKit(({ classes, value, marks = [], strong }) => {
+    const [ref, width] = useWidth();
+    const v = clamp01(value);
+    const period = DASH + DASH_GAP;
+    const n = width ? Math.max(1, Math.floor((width + DASH_GAP) / period)) : 0;
+    const track = n ? n * period - DASH_GAP : 0;
+    const lit = v > 0 ? Math.max(1, Math.round(v * n)) : 0;
+    return (
+        <div ref={ref} className={classes.meter} role="meter" aria-valuemin={0} aria-valuemax={1} aria-valuenow={v}>
+            <div className={classes.meterTrack} style={track ? { width: `${track}px` } : undefined} />
+            <div
+                className={`${classes.meterFill} ${strong ? classes.meterFillStrong : ""}`}
+                style={{ width: n ? `${lit ? lit * period - DASH_GAP : 0}px` : `${v * 100}%` }}
+            />
+            {marks.map((m) => (
+                <div
+                    key={m}
+                    className={classes.meterMark}
+                    style={{ left: track ? `${Math.round(clamp01(m) * track) - 1}px` : `calc(${clamp01(m) * 100}% - 1px)` }}
+                />
+            ))}
+        </div>
+    );
+});
 
 export const Switch = withKit(({ classes, options, value, onChange, label }) => (
     <div className={classes.switch} role="radiogroup" aria-label={label}>
@@ -755,11 +922,12 @@ export const ACCORDION_MS = 250;
  * asks for it to open or close. The body is only in the page while open, so a closed section draws nothing.
  * `scope` keeps ids unique when several views are mounted at once; `headRef` receives the header button.
  * Give the body as `render` (a function) rather than children when it is costly to build: it is then only
- * called while the section is open or folding.
+ * called while the section is open or folding. `icon` (an icon component) is cut out of a tile before the
+ * title; the open section's tile is lit.
  */
 const Lazy = ({ render }) => render();
 
-export const AccordionSection = withKit(({ classes, scope, id, title, description, open, onToggle, headRef, render, children }) => {
+export const AccordionSection = withKit(({ classes, scope, id, title, description, icon, open, onToggle, headRef, render, children }) => {
     const bodyId = `gd-${scope}-${id}`;
     return (
         <div className={classes.accordion}>
@@ -767,14 +935,21 @@ export const AccordionSection = withKit(({ classes, scope, id, title, descriptio
                 <button
                     type="button"
                     ref={headRef}
-                    className={classes.accordionHead}
+                    className={`${classes.accordionHead} ${open ? classes.accordionHeadOpen : ""}`}
                     onClick={() => onToggle(id)}
                     aria-expanded={open}
                     aria-controls={bodyId}
                 >
-                    <span className={classes.accordionText}>
-                        <span className={classes.accordionTitle}>{title}</span>
-                        {description ? <span className={classes.accordionDescription}>{description}</span> : null}
+                    <span className={classes.accordionLead}>
+                        {icon ? (
+                            <span className={classes.accordionIcon}>
+                                <GlyphTile icon={icon} size={36} glyph={22} />
+                            </span>
+                        ) : null}
+                        <span className={classes.accordionText}>
+                            <span className={classes.accordionTitle}>{title}</span>
+                            {description ? <span className={classes.accordionDescription}>{description}</span> : null}
+                        </span>
                     </span>
                     <ExpandMoreRoundedIcon className={`${classes.accordionChevron} ${open ? classes.collapseChevronOpen : ""}`} />
                 </button>
@@ -788,7 +963,612 @@ export const AccordionSection = withKit(({ classes, scope, id, title, descriptio
     );
 });
 
+// ---------------------------------------------------------------- figures
+
+let figureSeq = 0;
+
+/** An id unique in the page and stable for the component's life, for SVG masks, patterns and gradients. */
+function useUid(prefix) {
+    const ref = React.useRef(null);
+    if (ref.current === null) ref.current = `${prefix}-${++figureSeq}`;
+    return ref.current;
+}
+
+/** `a` and `b` (#rrggbb) mixed, `t` of the way from a to b. */
+function mix(a, b, t) {
+    const pa = parseInt(a.slice(1), 16);
+    const pb = parseInt(b.slice(1), 16);
+    const ch = (p, s) => (p >> s) & 255;
+    const m = (s) => Math.round(ch(pa, s) + (ch(pb, s) - ch(pa, s)) * t);
+    return `#${((1 << 24) | (m(16) << 16) | (m(8) << 8) | m(0)).toString(16).slice(1)}`;
+}
+
+/**
+ * An icon cut out of a rounded tile, as the P is cut out of the Pixagram mark. The tile takes the text
+ * colour (set `color` on it or a parent) and whatever lies behind it shows through the glyph.
+ */
+export function GlyphTile({ icon: Icon, size = 36, glyph = 20, x, y, className, style }) {
+    const id = useUid("gd-tile");
+    const r = Math.round(size * 0.22);
+    const o = (size - glyph) / 2;
+    return (
+        <svg className={className} style={style} x={x} y={y} width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true" focusable="false">
+            <mask id={id} maskUnits="userSpaceOnUse" x="0" y="0" width={size} height={size}>
+                <rect width={size} height={size} rx={r} fill="#fff" />
+                {Icon ? <Icon x={o} y={o} width={glyph} height={glyph} style={{ color: "#000", fontSize: `${glyph}px` }} /> : null}
+            </mask>
+            <rect width={size} height={size} rx={r} fill="currentColor" mask={`url(#${id})`} />
+        </svg>
+    );
+}
+
+/** One hatching of HATCHES as an SVG pattern. */
+function Hatch({ id, spec }) {
+    const g = spec.gap;
+    return (
+        <pattern id={id} patternUnits="userSpaceOnUse" width={g} height={g} patternTransform={spec.angle ? `rotate(${spec.angle})` : undefined}>
+            {spec.dots ? <circle cx={g / 2} cy={g / 2} r={spec.r} fill={spec.color} /> : <rect x="0" y="0" width={g} height={spec.width} fill={spec.color} />}
+            {spec.grid ? <rect x="0" y="0" width={spec.width} height={g} fill={spec.color} /> : null}
+        </pattern>
+    );
+}
+
+let measureCtx = null;
+
+/** Draws the component again once the page's web fonts have loaded, for figures that measure their text. */
+function useFontsReady() {
+    const [, setReady] = React.useState(false);
+    React.useEffect(() => {
+        let live = true;
+        const fonts = typeof document !== "undefined" ? document.fonts : null;
+        if (fonts && fonts.status !== "loaded" && fonts.ready) fonts.ready.then(() => live && setReady(true));
+        return () => {
+            live = false;
+        };
+    }, []);
+}
+
+/** Width in px of `text` set in `font` (a CSS font shorthand), measured on a canvas; estimated without one. */
+function textWidth(text, font) {
+    const s = String(text == null ? "" : text);
+    try {
+        if (!measureCtx) measureCtx = document.createElement("canvas").getContext("2d");
+        measureCtx.font = font;
+        return measureCtx.measureText(s).width;
+    } catch (e) {
+        return s.length * 7;
+    }
+}
+
+/** Path of a ring slice from angle a0 to a1 (radians, clockwise from 3 o'clock), outer radius R, inner r. */
+function ringSlice(cx, cy, R, r, a0, a1) {
+    const p = (rad, a) => `${(cx + rad * Math.cos(a)).toFixed(2)} ${(cy + rad * Math.sin(a)).toFixed(2)}`;
+    if (a1 - a0 >= 2 * Math.PI - 1e-6) {
+        return `M ${cx + R} ${cy} A ${R} ${R} 0 1 1 ${cx - R} ${cy} A ${R} ${R} 0 1 1 ${cx + R} ${cy} Z `
+            + `M ${cx + r} ${cy} A ${r} ${r} 0 1 0 ${cx - r} ${cy} A ${r} ${r} 0 1 0 ${cx + r} ${cy} Z`;
+    }
+    const large = a1 - a0 > Math.PI ? 1 : 0;
+    return `M ${p(R, a0)} A ${R} ${R} 0 ${large} 1 ${p(R, a1)} L ${p(r, a1)} A ${r} ${r} 0 ${large} 0 ${p(r, a0)} Z`;
+}
+
+/**
+ * Parts of a whole as a hatched ring, with its legend beside it (below it where the place is narrow).
+ * `data`: [{ key, label, value, sub, center }], drawn in the order given; `center` ({ value, caption })
+ * is shown in the ring, and a part's own `center` replaces it while the part is under the pointer.
+ */
+export const PatternPie = withKit(({ classes, data, size = 184, center, shareFormatter = (v) => fmtPct(v, 1), label }) => {
+    const uid = useUid("gd-pie");
+    const [ref, width] = useWidth();
+    const [active, setActive] = React.useState(null);
+    const items = (data || []).filter((x) => x && x.value > 0);
+    const total = items.reduce((t, x) => t + x.value, 0);
+    let angle = -Math.PI / 2;
+    const slices = items.map((x, i) => {
+        const share = total ? x.value / total : 0;
+        const a0 = angle;
+        angle += share * 2 * Math.PI;
+        return { ...x, share, a0, a1: angle, fill: `url(#${uid}-${i % HATCHES.length})` };
+    });
+    const c = size / 2;
+    const R = c - 6;
+    const r = Math.round(R * 0.6);
+    const on = slices.find((s) => s.key === active) || null;
+    const shown = on ? on.center || { value: shareFormatter(on.share), caption: on.label } : center;
+    const stacked = width > 0 && width < size + 236;
+    return (
+        <div ref={ref} className={`${classes.pie} ${stacked ? classes.pieStacked : ""}`}>
+            <div className={classes.pieFigure} style={{ width: `${size}px`, height: `${size}px` }}>
+                <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={label} onMouseLeave={() => setActive(null)}>
+                    <defs>{HATCHES.map((h, i) => <Hatch key={i} id={`${uid}-${i}`} spec={h} />)}</defs>
+                    {slices.map((s) => {
+                        const mid = (s.a0 + s.a1) / 2;
+                        const lift = on && on.key === s.key ? 4 : 0;
+                        const path = ringSlice(c, c, R, r, s.a0, s.a1);
+                        return (
+                            <g
+                                key={s.key}
+                                className={classes.pieSlice}
+                                style={{ opacity: on && on.key !== s.key ? 0.3 : 1, transform: `translate(${(lift * Math.cos(mid)).toFixed(2)}px, ${(lift * Math.sin(mid)).toFixed(2)}px)` }}
+                                onMouseEnter={() => setActive(s.key)}
+                            >
+                                <path d={path} fill="rgba(255,255,255,0.03)" />
+                                <path d={path} fill={s.fill} stroke="#101010" strokeWidth="2" strokeLinejoin="round" />
+                            </g>
+                        );
+                    })}
+                </svg>
+                {shown ? (
+                    <div className={classes.pieCenter} style={{ width: `${r * 2 - 18}px` }}>
+                        <span className={classes.pieCenterValue}>{shown.value}</span>
+                        {shown.caption ? <span className={classes.pieCenterCaption}>{shown.caption}</span> : null}
+                    </div>
+                ) : null}
+            </div>
+            <div className={classes.pieLegend}>
+                {slices.map((s) => (
+                    <div
+                        key={s.key}
+                        className={`${classes.pieRow} ${on && on.key === s.key ? classes.pieRowActive : ""}`}
+                        onMouseEnter={() => setActive(s.key)}
+                        onMouseLeave={() => setActive(null)}
+                    >
+                        <svg className={classes.pieSwatch} width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                            <rect x="0.5" y="0.5" width="13" height="13" rx="3.5" fill={s.fill} stroke="rgba(255,255,255,0.2)" />
+                        </svg>
+                        <span className={classes.pieName}>
+                            {s.label}
+                            {s.sub ? <span className={classes.pieSub}>{s.sub}</span> : null}
+                        </span>
+                        <span className={classes.pieShare}>{shareFormatter(s.share)}</span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+});
+
+const TICK_FONT = "11px 'Geist Mono', monospace";
+
+/**
+ * Column labels under a heatmap, kept inside its width, without the ones that would run into a neighbour
+ * (the last one always stays).
+ */
+function HeatTicks({ classes, ticks, columns, style }) {
+    const [ref, width] = useWidth();
+    useFontsReady();
+    if (!width) {
+        return (
+            <div ref={ref} className={classes.heatTicks} style={style}>
+                {ticks.map((tk) => (
+                    <span
+                        key={tk.at}
+                        className={classes.heatTick}
+                        style={{ left: `${(tk.at / columns) * 100}%`, transform: tk.at <= 0 ? "none" : tk.at >= columns ? "translateX(-100%)" : "translateX(-50%)" }}
+                    >
+                        {tk.label}
+                    </span>
+                ))}
+            </div>
+        );
+    }
+    // where each label sits, centred on its place but never past either end
+    const span = (tk) => {
+        const w = textWidth(tk.label, TICK_FONT);
+        const x = (tk.at / columns) * width;
+        const left = Math.max(0, Math.min(width - w, tk.at <= 0 ? x : tk.at >= columns ? x - w : x - w / 2));
+        return [left, left + w];
+    };
+    const last = ticks[ticks.length - 1];
+    const end = span(last);
+    const shown = [];
+    for (const tk of ticks.slice(0, -1)) {
+        const [a, b] = span(tk);
+        const prev = shown.length ? span(shown[shown.length - 1]) : null;
+        if ((prev && a < prev[1] + 10) || b > end[0] - 10) continue;
+        shown.push(tk);
+    }
+    shown.push(last);
+    return (
+        <div ref={ref} className={classes.heatTicks} style={style}>
+            {shown.map((tk) => (
+                <span key={tk.at} className={classes.heatTick} style={{ left: `${span(tk)[0].toFixed(1)}px` }}>
+                    {tk.label}
+                </span>
+            ))}
+        </div>
+    );
+}
+
+/**
+ * Rows of cells, lighter where the value is higher: six shades from nothing to the highest value shown
+ * (or `max`). `rows`: [{ key, label, title, cells: [{ v, ... }], right }]; a cell whose v is null stays
+ * hollow (no data yet, not scheduled). `ticks` label the columns below ({ at, label }, `at` a column
+ * index, `columns` for the right edge, halves for the middle of a column). `readout(row, column, cell)`
+ * describes the cell under the pointer (or the last one tapped); `idle` is shown when there is none. `low`
+ * and `high` name the ends of the scale. Where the cells would be under 7 px wide beside their labels, each
+ * row's label and value move above its cells, which then take the full width.
+ */
+export const Heatmap = withKit(({ classes, rows, columns, ticks = [], cellHeight = 16, max, readout, idle, low, high, label }) => {
+    const [ref, width] = useWidth();
+    const [on, setOn] = React.useState(null);
+    let top = max;
+    if (top == null) {
+        top = 0;
+        for (const row of rows) for (const cell of row.cells) if (cell && cell.v > top) top = cell.v;
+    }
+    const level = (v) => (v == null ? -1 : v <= 0 || !top ? 0 : Math.min(5, 1 + Math.floor((v / top) * 5 - 1e-9)));
+    const hasRight = rows.some((row) => row.right != null);
+    const gap = columns > 24 ? 2 : 3;
+    const labelWidth = Math.min(128, Math.max(0, ...rows.map((row) => (typeof row.label === "string" ? textWidth(row.label, TICK_FONT) : 64))) + 8);
+    const cellWidth = width ? (width - labelWidth - (hasRight ? 80 : 0) - (columns + 1) * gap) / columns : 99;
+    const stacked = cellWidth < 7;
+    const pick = (e) => {
+        const el = e.target;
+        const ri = el && el.getAttribute ? el.getAttribute("data-r") : null;
+        if (ri != null) setOn([+ri, +el.getAttribute("data-c")]);
+    };
+    const cur = on && rows[on[0]] ? rows[on[0]] : null;
+    const cell = cur ? cur.cells[on[1]] : null;
+    const text = cell && cell.v != null && readout ? readout(cur, on[1], cell) : idle;
+    const template = stacked
+        ? `repeat(${columns}, minmax(0, 1fr))`
+        : `max-content repeat(${columns}, minmax(0, 1fr))${hasRight ? " max-content" : ""}`;
+    return (
+        <div ref={ref} role="img" aria-label={label}>
+            <div className={classes.heatGrid} style={{ gridTemplateColumns: template, columnGap: `${gap}px` }} onMouseOver={pick} onClick={pick} onMouseLeave={() => setOn(null)}>
+                {rows.map((row, ri) => {
+                    const name = <div className={classes.heatLabel} title={row.title || (typeof row.label === "string" ? row.label : undefined)}>{row.label}</div>;
+                    const right = hasRight ? <div className={classes.heatRight}>{row.right}</div> : null;
+                    return (
+                        <React.Fragment key={row.key}>
+                            {stacked ? <div className={classes.heatRowHead}>{name}{right}</div> : name}
+                            {row.cells.map((x, ci) => {
+                                const l = level(x ? x.v : null);
+                                const lit = on && on[0] === ri && on[1] === ci && l >= 0;
+                                return (
+                                    <div
+                                        key={ci}
+                                        data-r={ri}
+                                        data-c={ci}
+                                        className={`${classes.heatCell} ${l < 0 ? classes.heatCellHollow : ""} ${lit ? classes.heatCellOn : ""}`}
+                                        style={{ height: `${cellHeight}px`, backgroundColor: l < 0 ? "transparent" : HEAT[l] }}
+                                    />
+                                );
+                            })}
+                            {stacked ? null : right}
+                        </React.Fragment>
+                    );
+                })}
+                {ticks.length ? (
+                    <>
+                        {stacked ? null : <div />}
+                        <HeatTicks classes={classes} ticks={ticks} columns={columns} style={{ gridColumn: `span ${columns}` }} />
+                        {hasRight && !stacked ? <div /> : null}
+                    </>
+                ) : null}
+            </div>
+            <div className={classes.heatFoot}>
+                <span className={classes.heatReadout}>{text || ""}</span>
+                <span className={classes.heatScale}>
+                    {low}
+                    {HEAT.map((s) => <span key={s} className={classes.heatSwatch} style={{ backgroundColor: s }} />)}
+                    {high}
+                </span>
+            </div>
+        </div>
+    );
+});
+
+/**
+ * Outline of a funnel layer in a 100 × (n × 100) box, the stages along x: each stage keeps its height
+ * over the first `a` of its column, then eases into the next stage's height, arriving `e` into the next
+ * column (a layer that arrives later trails the one in front of it). `pad` widens the layer all along.
+ */
+function funnelPath(shares, pad, a, e) {
+    const n = shares.length;
+    const L = n * 100;
+    const height = (s) => pad + 1.2 + (50 - 12 - 1.2) * s; // half-height; the widest layer pads by 12
+    const knots = [];
+    shares.forEach((s, i) => {
+        const h = height(s);
+        knots.push(i === 0 ? [0, h, "M"] : [Math.min(L, i * 100 + e * 100), h, "C"]);
+        knots.push([i === n - 1 ? L : i * 100 + a * 100, h, "L"]);
+    });
+    const y = (h, side) => (50 - side * h).toFixed(2);
+    let d = "";
+    knots.forEach(([x, h, kind], j) => {
+        if (kind === "M") d += `M${x},${y(h, 1)}`;
+        else if (kind === "L") d += `L${x},${y(h, 1)}`;
+        else {
+            const [px, ph] = knots[j - 1];
+            const xm = (px + x) / 2;
+            d += `C${xm},${y(ph, 1)} ${xm},${y(h, 1)} ${x},${y(h, 1)}`;
+        }
+    });
+    for (let j = knots.length - 1; j >= 0; j--) {
+        const [x, h] = knots[j];
+        const next = knots[j + 1];
+        if (next && next[2] === "C") {
+            const xm = (x + next[0]) / 2;
+            d += `C${xm},${y(next[1], -1)} ${xm},${y(h, -1)} ${x},${y(h, -1)}`;
+        } else d += `L${x},${y(h, -1)}`;
+    }
+    return d + "Z";
+}
+
+/**
+ * A funnel: one column per stage, as tall as its share of the first stage, flowing into the next, inside
+ * two darker bands that trail it. Counts above, the share of the first stage in a pill, names below.
+ * Where the columns would be under 84 px wide, the stages stack and the funnel runs down.
+ * `stages`: [{ key, label, value }].
+ */
+export const Funnel = withKit(({ classes, stages, valueFormatter = fmtInt, pctFormatter = (v) => fmtPct(v, 0), height = 168, label }) => {
+    const uid = useUid("gd-funnel");
+    const [ref, width] = useWidth();
+    const n = stages.length;
+    const first = n ? stages[0].value || 0 : 0;
+    const shares = stages.map((s) => (first ? clamp01((s.value || 0) / first) : 0));
+    const across = !width || width >= n * 84;
+    const L = n * 100;
+    const layers = [
+        { pad: 12, a: 0.68, e: 0.12, fill: `url(#${uid}-outer)` },
+        { pad: 6, a: 0.62, e: 0.06, fill: `url(#${uid}-mid)` },
+        { pad: 0, a: 0.56, e: 0, fill: `url(#${uid}-in)` }
+    ];
+    // the first stage lightest, the later ones a step darker each
+    const shade = stages.map((s, i) => (i === 0 ? "#d6d6d6" : mix("#8e8e8e", "#4c4c4c", n > 2 ? (i - 1) / (n - 2) : 0)));
+    const defs = (
+        <defs>
+            <linearGradient id={`${uid}-in`} gradientUnits="userSpaceOnUse" x1="0" y1="0" x2={L} y2="0">
+                {shade.map((col, i) => [
+                    <stop key={`a${i}`} offset={i / n} stopColor={col} />,
+                    <stop key={`b${i}`} offset={(i + 1) / n} stopColor={col} />
+                ])}
+            </linearGradient>
+            <linearGradient id={`${uid}-mid`} gradientUnits="userSpaceOnUse" x1="0" y1="0" x2={L} y2="0">
+                <stop offset="0" stopColor="#5c5c5c" />
+                <stop offset={Math.min(1, 1.4 / n)} stopColor="#383838" />
+                <stop offset="1" stopColor="#2a2a2a" />
+            </linearGradient>
+            <linearGradient id={`${uid}-outer`} gradientUnits="userSpaceOnUse" x1="0" y1="0" x2={L} y2="0">
+                <stop offset="0" stopColor="#2c2c2c" />
+                <stop offset="1" stopColor="#1b1b1b" />
+            </linearGradient>
+        </defs>
+    );
+    const paths = layers.map((ly, i) => <path key={i} d={funnelPath(shares, ly.pad, ly.a, ly.e)} fill={ly.fill} />);
+    const pills = stages.map((s, i) => <span key={s.key} className={classes.funnelPill}>{pctFormatter(shares[i])}</span>);
+    if (across) {
+        const cols = { gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` };
+        return (
+            <div ref={ref} className={classes.funnel} role="img" aria-label={label}>
+                <div className={classes.funnelCols} style={cols}>
+                    {stages.map((s) => <div key={s.key} className={classes.funnelValue}>{valueFormatter(s.value)}</div>)}
+                </div>
+                <div className={classes.funnelBody} style={{ height: `${height}px` }}>
+                    <svg className={classes.funnelSvg} viewBox={`0 0 ${L} 100`} preserveAspectRatio="none" aria-hidden="true">
+                        {defs}
+                        {paths}
+                    </svg>
+                    <div className={classes.funnelPills} style={cols}>{pills}</div>
+                </div>
+                <div className={classes.funnelCols} style={cols}>
+                    {stages.map((s) => <div key={s.key} className={classes.funnelLabel}>{s.label}</div>)}
+                </div>
+                {stages.slice(1).map((s, i) => <div key={s.key} className={classes.funnelDivider} style={{ left: `${((i + 1) / n) * 100}%` }} />)}
+            </div>
+        );
+    }
+    return (
+        <div ref={ref} className={classes.funnelRows} role="img" aria-label={label} style={{ gridTemplateRows: `repeat(${n}, 42px)` }}>
+            {stages.map((s, i) => (
+                <React.Fragment key={s.key}>
+                    <div className={classes.funnelRowLabel} style={{ gridRow: i + 1, gridColumn: 1 }}>{s.label}</div>
+                    <div className={classes.funnelRowValue} style={{ gridRow: i + 1, gridColumn: 3 }}>{valueFormatter(s.value)}</div>
+                </React.Fragment>
+            ))}
+            <div className={classes.funnelColumn} style={{ gridRow: `1 / span ${n}`, gridColumn: 2 }}>
+                <svg className={classes.funnelSvg} viewBox={`0 0 100 ${L}`} preserveAspectRatio="none" aria-hidden="true">
+                    {defs}
+                    <g transform="matrix(0 1 1 0 0 0)">{paths}</g>
+                </svg>
+                <div className={classes.funnelPills} style={{ gridTemplateRows: `repeat(${n}, minmax(0, 1fr))` }}>{pills}</div>
+            </div>
+        </div>
+    );
+});
+
+/**
+ * Heights for a column of blocks sharing `avail` px in proportion to `values`, none under its `mins` px.
+ */
+function layoutColumn(values, mins, avail) {
+    const fixed = values.map(() => false);
+    for (let pass = 0; pass <= values.length; pass++) {
+        const freeValue = values.reduce((t, v, i) => t + (fixed[i] ? 0 : v), 0);
+        const freeSpace = avail - mins.reduce((t, m, i) => t + (fixed[i] ? m : 0), 0);
+        let changed = false;
+        values.forEach((v, i) => {
+            if (!fixed[i] && (freeValue ? (v / freeValue) * freeSpace : 0) < mins[i]) {
+                fixed[i] = true;
+                changed = true;
+            }
+        });
+        if (!changed) {
+            const left = values.filter((v, i) => !fixed[i]).length;
+            return values.map((v, i) => (fixed[i] ? mins[i] : freeValue ? (v / freeValue) * freeSpace : freeSpace / Math.max(1, left)));
+        }
+    }
+    return mins.slice();
+}
+
+/**
+ * Where an amount goes. Each source is a block with its share of the whole; ribbons run from it to the
+ * recipients it paid, each as thick as its part (6 px at least) with a bright thread along it, and each
+ * recipient shows its amount beside its tile. `sources`: [{ key, caption }]; `targets`: [{ key, icon,
+ * sub, title }], ordered by amount; `links`: [{ source, target, value, label }]. A ribbon, its label or
+ * its recipient under the pointer brings that ribbon forward.
+ */
+export const Flow = withKit(({ classes, sources, targets, links, valueFormatter = fmtInt, shareFormatter = (v) => fmtPct(v, 0), label }) => {
+    const uid = useUid("gd-flow");
+    const [ref, W] = useWidth();
+    const [on, setOn] = React.useState(null);
+    useFontsReady();
+    const live = links.filter((l) => l.value > 0 && sources.some((s) => s.key === l.source) && targets.some((x) => x.key === l.target));
+    const total = live.reduce((t, l) => t + l.value, 0);
+    const byTarget = new Map();
+    live.forEach((l) => byTarget.set(l.target, (byTarget.get(l.target) || 0) + l.value));
+    const tList = targets.filter((x) => byTarget.has(x.key)).sort((a, b) => byTarget.get(b.key) - byTarget.get(a.key));
+    const sList = sources.filter((s) => live.some((l) => l.source === s.key));
+    const m = tList.length;
+    const H = Math.max(200, m * 64);
+    if (!W || !total) return <div ref={ref} className={classes.flow} style={{ height: `${H}px` }} />;
+
+    const wide = W >= 440;
+    const LW = wide ? 64 : 54;
+    const RW = wide ? 44 : 0;
+    const x0 = LW;
+    const x3 = W - RW;
+    const x1 = x0 + (wide ? 136 : 104);
+    const x2 = x3 - (wide ? 112 : 88);
+    const xm = (x1 + x2) / 2;
+    const gap = 10;
+    const sOut = sList.map((s) => live.filter((l) => l.source === s.key));
+    const sValue = sOut.map((ls) => ls.reduce((t, l) => t + l.value, 0));
+    const sHeight = layoutColumn(sValue, sOut.map((ls) => Math.max(56, ls.length * 30)), H - gap * Math.max(0, sList.length - 1));
+    const tIndex = new Map(tList.map((x, i) => [x.key, i]));
+    const tY = (key) => (H * (tIndex.get(key) + 0.5)) / m;
+    const maxV = Math.max(...live.map((l) => l.value));
+    const thick = (v) => 6 + 22 * (v / maxV);
+    const ribbons = [];
+    let top = 0;
+    const blocks = sList.map((s, i) => {
+        const b = { ...s, y: top, h: sHeight[i], share: sValue[i] / total };
+        top += sHeight[i] + gap;
+        // a source's ribbons leave from the middle of its block, side by side, and fan out to their recipients
+        const out = sOut[i].slice().sort((p, q) => tIndex.get(p.target) - tIndex.get(q.target));
+        const at = [];
+        out.forEach((l, j) => at.push(j ? at[j - 1] + Math.max(26, (thick(out[j - 1].value) + thick(l.value)) / 2 + 6) : 0));
+        const first = b.y + b.h / 2 - (at.length ? at[at.length - 1] : 0) / 2;
+        out.forEach((l, j) => {
+            const ys = Math.max(b.y + 10, Math.min(b.y + b.h - 10, first + at[j]));
+            ribbons.push({ ...l, id: `${l.source}>${l.target}`, ys, yt: tY(l.target), thick: thick(l.value) });
+        });
+        return b;
+    });
+    const lit = (r) => on === r.id || on === r.target;
+    const anyOn = on != null;
+    // amounts are right-aligned before the tiles; the thread runs from the end of a ribbon's label to the start of its amount
+    const tx = wide ? x3 - 14 : W;
+    const threadEnd = new Map(tList.map((x) => {
+        const w = Math.max(textWidth(valueFormatter(byTarget.get(x.key)), "14px 'Geist Mono', monospace"), x.sub ? textWidth(x.sub, "11px 'Normative Pro'") : 0);
+        return [x.key, Math.max(x2, tx - w - 10)];
+    }));
+    const curve = (r) => `C${xm},${r.ys.toFixed(1)} ${xm},${r.yt.toFixed(1)} ${x2},${r.yt.toFixed(1)}`;
+    const path = (r) => `M${x0},${r.ys.toFixed(1)} L${x1},${r.ys.toFixed(1)} ${curve(r)} L${x3},${r.yt.toFixed(1)}`;
+    const thread = (r) => {
+        const from = Math.min(x1, x0 + 14 + textWidth(r.label, "13px 'Normative Pro'") + 10);
+        return `M${from.toFixed(1)},${r.ys.toFixed(1)} L${x1},${r.ys.toFixed(1)} ${curve(r)} L${threadEnd.get(r.target).toFixed(1)},${r.yt.toFixed(1)}`;
+    };
+    const order = ribbons.slice().sort((p, q) => (lit(p) ? 1 : 0) - (lit(q) ? 1 : 0));
+    return (
+        <div ref={ref} className={classes.flow} style={{ height: `${H}px` }}>
+            <svg className={classes.flowSvg} width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label} onMouseLeave={() => setOn(null)}>
+                <defs>
+                    <linearGradient id={`${uid}-thread`} gradientUnits="userSpaceOnUse" x1={x0} y1="0" x2={x3} y2="0">
+                        <stop offset="0" stopColor="#fff" stopOpacity="0.1" />
+                        <stop offset="0.3" stopColor="#fff" stopOpacity="0.22" />
+                        <stop offset="0.55" stopColor="#fff" stopOpacity="0.62" />
+                        <stop offset="0.82" stopColor="#fff" stopOpacity="0.3" />
+                        <stop offset="1" stopColor="#fff" stopOpacity="0.14" />
+                    </linearGradient>
+                </defs>
+                {order.map((r) => (
+                    <g key={r.id} onMouseEnter={() => setOn(r.id)}>
+                        <path
+                            className={classes.flowRibbon}
+                            d={path(r)}
+                            fill="none"
+                            stroke={lit(r) ? "rgba(255,255,255,0.13)" : anyOn ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.065)"}
+                            strokeWidth={r.thick}
+                        />
+                        <path
+                            className={classes.flowRibbon}
+                            d={thread(r)}
+                            fill="none"
+                            stroke={lit(r) ? "rgba(255,255,255,0.9)" : `url(#${uid}-thread)`}
+                            strokeWidth={lit(r) ? 1.5 : 1.2}
+                            opacity={anyOn && !lit(r) ? 0.35 : 1}
+                            pointerEvents="none"
+                        />
+                    </g>
+                ))}
+                {blocks.map((b) => (
+                    <g key={b.key} pointerEvents="none">
+                        <rect x="0" y={b.y} width={LW} height={b.h} rx="16" fill="#171717" />
+                        <text className={classes.flowPct} x={LW / 2} y={b.y + b.h / 2 + (b.caption ? 0 : 6)} textAnchor="middle">{shareFormatter(b.share)}</text>
+                        {b.caption ? <text className={classes.flowCaption} x={LW / 2} y={b.y + b.h / 2 + 17} textAnchor="middle">{b.caption}</text> : null}
+                    </g>
+                ))}
+                {ribbons.map((r) => (
+                    <text
+                        key={r.id}
+                        className={`${classes.flowLabel} ${lit(r) ? classes.flowLabelOn : ""}`}
+                        x={x0 + 14}
+                        y={r.ys}
+                        dominantBaseline="central"
+                        onMouseEnter={() => setOn(r.id)}
+                    >
+                        {r.label}
+                    </text>
+                ))}
+                {tList.map((x) => {
+                    const yt = tY(x.key);
+                    return (
+                        <g key={x.key} onMouseEnter={() => setOn(x.key)}>
+                            {x.title ? <title>{x.title}</title> : null}
+                            <text className={classes.flowValue} x={tx} y={yt + (x.sub ? -3 : 5)} textAnchor="end">{valueFormatter(byTarget.get(x.key))}</text>
+                            {x.sub ? <text className={classes.flowSub} x={tx} y={yt + 13} textAnchor="end">{x.sub}</text> : null}
+                            {wide && x.icon ? (
+                                <GlyphTile
+                                    icon={x.icon}
+                                    size={44}
+                                    glyph={24}
+                                    x={W - 44}
+                                    y={yt - 22}
+                                    className={`${classes.flowTile} ${on === x.key || ribbons.some((r) => r.target === x.key && on === r.id) ? classes.flowTileOn : ""}`}
+                                />
+                            ) : null}
+                        </g>
+                    );
+                })}
+            </svg>
+        </div>
+    );
+});
+
 // ---------------------------------------------------------------- loading
+
+/**
+ * [ref, width] for function components: the width in px of the element given to `ref`, kept current as it
+ * resizes (0 until measured). For figures that draw at pixel size or choose a layout by the room they have.
+ */
+export function useWidth() {
+    const [el, setEl] = React.useState(null);
+    const [width, setWidth] = React.useState(0);
+    React.useLayoutEffect(() => {
+        if (!el) return undefined;
+        const read = () => setWidth(el.clientWidth);
+        read();
+        if (typeof ResizeObserver === "undefined") {
+            window.addEventListener("resize", read);
+            return () => window.removeEventListener("resize", read);
+        }
+        const observer = new ResizeObserver(read);
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [el]);
+    return [setEl, width];
+}
 
 /**
  * [ref, seen] for function components: `seen` turns true once the element given to `ref` has been on
