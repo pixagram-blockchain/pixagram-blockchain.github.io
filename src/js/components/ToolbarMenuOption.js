@@ -6,7 +6,8 @@ import ListItemIcon from "@material-ui/core/ListItemIcon";
 import ListItemText from "@material-ui/core/ListItemText";
 import Menu from "@material-ui/core/Menu";
 import VoteIcon from "../icons/Vote";
-import SaleIcon from "../icons/Sale";
+// The toolbar's and the wallet's Trade buttons wear the same chart icon.
+import TradeIcon from "@material-ui/icons/ShowChartRounded";
 import SettingsIcon from "@material-ui/icons/Settings";
 import BallotIcon from "@material-ui/icons/Ballot";
 import HelpIcon from "@material-ui/icons/Help";
@@ -18,59 +19,121 @@ import { HELP_TELEGRAM_URL } from "../utils/constants";
 
 const { useMemo, memo } = React;
 
-const styles = theme => ({});
+const styles = theme => ({
+    // Trade, first in the menu: a light grey pill, white on hover or focus —
+    // this entry stands in for the toolbar's Trade button, which compact
+    // layouts hide.
+    tradeItem: {
+        margin: "4px 8px",
+        borderRadius: 12,
+        color: "#000000",
+        backgroundColor: "#d0d0d0",
+        "&:hover, &.Mui-focusVisible": {
+            backgroundColor: "#ffffff",
+        },
+        // MUI clears a list item's hover fill on touch screens, which would
+        // leave the black label on the dark menu after a tap: keep it white.
+        "@media (hover: none)": {
+            "&:hover": { backgroundColor: "#ffffff" },
+        },
+        "& .MuiListItemIcon-root": { color: "#000000" },
+        "& .MuiListItemText-primary": { fontWeight: 700 },
+    },
+    // The wallet Trade button's shine (tradeShine in PixaWalletDialog, where
+    // the geometry and timing are explained): a pure white streak crossing
+    // the entry from the top right corner to the bottom left, bright for
+    // about 0.5 s, then 3 s of rest. Only on while the menu is open, so
+    // every opening restarts it: the -2.7 s delay puts the first sweep 0.3 s
+    // in, right after the menu's 125 ms entrance.
+    "@keyframes tradeShine": {
+        "0%, 82.192%": { transform: "translate(22.667%, -22.667%)" },
+        "100%": { transform: "translate(-22.667%, 22.667%)" },
+    },
+    tradeShine: {
+        overflow: "hidden",
+        isolation: "isolate",
+        "&::after": {
+            content: "''",
+            position: "absolute",
+            top: "-100%",
+            left: "-100%",
+            width: "300%",
+            height: "300%",
+            zIndex: -1,
+            pointerEvents: "none",
+            background: "linear-gradient(225deg, rgba(255, 255, 255, 0) 44%, rgba(255, 255, 255, 0.85) 48.5%, #ffffff 50%, rgba(255, 255, 255, 0.85) 51.5%, rgba(255, 255, 255, 0) 56%)",
+            transform: "translate(22.667%, -22.667%)",
+            animationName: "$tradeShine",
+            animationDuration: "3.65s",
+            animationTimingFunction: "linear",
+            animationIterationCount: "infinite",
+            animationDelay: "-2.7s",
+            "@media (prefers-reduced-motion: reduce)": {
+                animationName: "none",
+            },
+        },
+    },
+});
 
-// Memoized menu items to prevent re-renders
+// Memoized menu items to prevent re-renders. useLanguage() so a language
+// switch still re-renders them: their props don't change when it happens.
 const MenuItems = React.memo(({
-                                  onIcoClick,
+                                  classes,
+                                  shine,
+                                  onTradeClick,
                                   onWitnessesClick,
                                   onInfoClick,
                                   onSettingsClick
-                              }) => (
-    <MenuList>
-        <MenuItem onClick={onIcoClick}>
-            <ListItemIcon>
-                <SaleIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText primary={t("components.toolbar_menu_option.shop")} secondary={t("components.toolbar_menu_option.buy_now")} />
-        </MenuItem>
-        <Divider />
-        {/* Ask Help: the community's Telegram group, as a real link
-            (component="a") — the entry the desktop toolbar shows left of
-            Governance. */}
-        <MenuItem component="a" href={HELP_TELEGRAM_URL} target="_blank" rel="noopener noreferrer">
-            <ListItemIcon>
-                <TelegramIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText primary={t("words.ask_help")} />
-        </MenuItem>
-        <MenuItem onClick={onWitnessesClick}>
-            <ListItemIcon>
-                <VoteIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText primary={t("words.governance")} />
-        </MenuItem>
-        <MenuItem style={{display: "none"}}>
-            <ListItemIcon>
-                <BallotIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText primary={t("components.toolbar_menu_option.proposals")} />
-        </MenuItem>
-        <MenuItem onClick={onInfoClick}>
-            <ListItemIcon>
-                <HelpIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText primary={t("components.toolbar_menu_option.info")} />
-        </MenuItem>
-        <Divider />
-        <MenuItem onClick={onSettingsClick}>
-            <ListItemIcon>
-                <SettingsIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText primary={t("words.settings")} />
-        </MenuItem>
-    </MenuList>
-));
+                              }) => {
+    useLanguage();
+    return (
+        <MenuList>
+            {/* Trade: the exchange picker, with the wallet Trade button's own
+                label — "Trade", never "Buy". Shines while the menu is open. */}
+            <MenuItem onClick={onTradeClick} className={shine ? `${classes.tradeItem} ${classes.tradeShine}` : classes.tradeItem}>
+                <ListItemIcon>
+                    <TradeIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText primary={t("components.pixa_wallet_dialog.trade")} />
+            </MenuItem>
+            <Divider />
+            {/* Ask Help: the community's Telegram group, as a real link
+                (component="a") — the entry the desktop toolbar shows left of
+                Governance. */}
+            <MenuItem component="a" href={HELP_TELEGRAM_URL} target="_blank" rel="noopener noreferrer">
+                <ListItemIcon>
+                    <TelegramIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText primary={t("words.ask_help")} />
+            </MenuItem>
+            <MenuItem onClick={onWitnessesClick}>
+                <ListItemIcon>
+                    <VoteIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText primary={t("words.governance")} />
+            </MenuItem>
+            <MenuItem style={{display: "none"}}>
+                <ListItemIcon>
+                    <BallotIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText primary={t("components.toolbar_menu_option.proposals")} />
+            </MenuItem>
+            <MenuItem onClick={onInfoClick}>
+                <ListItemIcon>
+                    <HelpIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText primary={t("components.toolbar_menu_option.info")} />
+            </MenuItem>
+            <Divider />
+            <MenuItem onClick={onSettingsClick}>
+                <ListItemIcon>
+                    <SettingsIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText primary={t("words.settings")} />
+            </MenuItem>
+        </MenuList>
+    );
+});
 
 MenuItems.displayName = "MenuItems";
 
@@ -78,7 +141,7 @@ const PaperCardMenuOption = ({
                                  classes,
                                  xy = [],
                                  onClose,
-                                 onIcoClick,
+                                 onTradeClick,
                                  onWitnessesClick,
                                  onInfoClick,
                                  onSettingsClick
@@ -137,7 +200,9 @@ const PaperCardMenuOption = ({
             anchorPosition={anchorPosition}
         >
             <MenuItems
-                onIcoClick={onIcoClick}
+                classes={classes}
+                shine={isOpen}
+                onTradeClick={onTradeClick}
                 onWitnessesClick={onWitnessesClick}
                 onInfoClick={onInfoClick}
                 onSettingsClick={onSettingsClick}
@@ -156,7 +221,7 @@ const arePropsEqual = (prevProps, nextProps) => {
 
     // Compare event handlers (reference equality)
     if (prevProps.onClose !== nextProps.onClose ||
-        prevProps.onIcoClick !== nextProps.onIcoClick ||
+        prevProps.onTradeClick !== nextProps.onTradeClick ||
         prevProps.onWitnessesClick !== nextProps.onWitnessesClick ||
         prevProps.onInfoClick !== nextProps.onInfoClick ||
         prevProps.onSettingsClick !== nextProps.onSettingsClick) {

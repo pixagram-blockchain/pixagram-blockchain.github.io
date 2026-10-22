@@ -33,7 +33,7 @@ var INSTALL_FILES_REQUIRED = [
 ];
 
 // Cache names
-var V = "Oct-22-2026";
+var V = "Oct-22b-2026";
 var REQUIRED_CACHE = "unless-update-cache-"+V+"-required";
 var USEFUL_CACHE = "unless-update-cache-"+V+"-useful";
 var STATIC_CACHE = "unless-update-cache-"+V+"-static";

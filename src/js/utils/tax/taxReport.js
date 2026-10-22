@@ -14,6 +14,16 @@
  * Node demo `main()` were removed so this module is browser-bundle-safe (the
  * wallet dialog imports it). The inline LOGO_PNG_B64 was replaced with a small
  * placeholder PNG — paste your original logo base64 back into the constant.
+ *
+ * CORRECTNESS PASS (Oct 2026): Swiss wording (holdings value instead of "net
+ * wealth", exempt gains stated as such, PXP shown and explained as wealth, a CH
+ * annex mapping each figure to the return); outbound "tax treatment" derived
+ * from the disposal lines; the price-basis statement is read off the figures
+ * (or opts.priceMode: "historical" | "snapshot"); WinAnsi-safe text (the Israel
+ * export crashed on Hebrew); long notes and short tables paginate cleanly;
+ * unpriced figures print "n/a" with a warning; CSV cells escape CR and formula
+ * prefixes. CSV schema changes: outbound column "taxable" is now "is_disposal",
+ * and counterparties no longer carry an "@" prefix.
  * ===========================================================================*/
 
 import { PDFDocument, StandardFonts, rgb, PageSizes } from "pdf-lib";
@@ -38,7 +48,9 @@ const [PAGE_W, PAGE_H] = PageSizes.A4; // 595.28 x 841.89, portrait
 const MRG = 46;
 const CONTENT_W = PAGE_W - MRG * 2;
 const FOOT_Y = 34;
-const BOTTOM_LIMIT = FOOT_Y + 26;
+// Body text stops here. The footer's identity line sits at FOOT_Y + 18, so this
+// keeps ~9pt between the last body line and the footer (was ~1pt at FOOT_Y + 26).
+const BOTTOM_LIMIT = FOOT_Y + 34;
 function hexToRgb(hex) {
   const h = hex.replace("#", "");
   return rgb(parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255);
@@ -82,31 +94,80 @@ function b64ToBytes(b64) {
   for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
   return a;
 }
-const fmt = (n, dp = 2) => n.toLocaleString("en-US", {
-  minimumFractionDigits: dp,
-  maximumFractionDigits: dp
-});
+// Non-finite values print "n/a" (a NaN valuation must never pass for a real
+// zero), and amounts that round to zero never print as "-0.00".
+const fmt = (n, dp = 2) => {
+  const v = n == null ? NaN : Number(n);
+  if (!Number.isFinite(v)) return "n/a";
+  const shown = Math.round(v * 10 ** dp) / 10 ** dp === 0 ? 0 : v;
+  return shown.toLocaleString("en-US", {
+    minimumFractionDigits: dp,
+    maximumFractionDigits: dp
+  });
+};
 
-// "1,800.0000 PXA  ·  12.0000 PXS" — full per-asset breakdown for a row sub-line,
+// Display names. PIXA is the ticker; PXA is only the engine's internal alias
+// (kept as-is in the CSV exports, which the Basis section states). PXP is Pixa
+// Power, i.e. staked PIXA.
+const ASSET_LABELS = { PXA: "PIXA" };
+const assetName = (a) => ASSET_LABELS[a] || a;
+
+// "1,800.0000 PIXA  ·  12.0000 PXS" — full per-asset breakdown for a row sub-line,
 // so token amounts are shown in full instead of truncated inside a column.
 const assetBreakdown = (byAsset, dp = 4) =>
-    Object.entries(byAsset || {}).map(([a, q]) => `${fmt(q, dp)} ${a}`).join("   \u00b7   ");
+    Object.entries(byAsset || {}).map(([a, q]) => `${fmt(q, dp)} ${assetName(a)}`).join("   \u00b7   ");
 
-// The standard PDF fonts (Helvetica) use WinAnsi encoding, which throws on any
-// character outside CP1252 (arrows, the Unicode minus, CJK, emoji, …). Report
-// text comes partly from user data and free-text warnings, so we sanitise before
-// drawing: map common typographic glyphs to ASCII, keep the CP1252 specials, and
-// replace anything else with '?' so a stray character can never break the export.
+// The standard PDF fonts (Helvetica) use WinAnsi (CP1252) encoding, and pdf-lib
+// THROWS on any character outside it. The old filter only caught U+2000 and up,
+// so the Hebrew in the Israel note (U+05xx) aborted the whole export, and the
+// CJK terms in the Japan/Korea notes printed as "???". Every string is now
+// normalised before drawing: typographic glyphs map to ASCII, currency signs
+// WinAnsi lacks become ISO codes, the non-Latin terms the jurisdiction notes
+// cite are romanised, accented letters outside CP1252 lose their accent, and
+// anything still unencodable becomes "?" (runs collapsed; a parenthesis holding
+// nothing printable is dropped).
+const WINANSI_HIGH = "\u20AC\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u017D" +
+    "\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u017E\u0178";
+const winAnsi = (c) => {
+  const p = c.codePointAt(0);
+  return (p >= 0x20 && p <= 0x7e) || (p >= 0xa0 && p <= 0xff) || WINANSI_HIGH.includes(c);
+};
+const TRANSLIT = [
+  [/\u2192/g, "->"], [/\u2190/g, "<-"], [/\u2194/g, "<->"], [/\u21D2/g, "=>"], [/\u21D0/g, "<="],
+  [/\u2212/g, "-"], [/[\u2032\u2035]/g, "'"], [/\u2264/g, "<="], [/\u2265/g, ">="], [/\u2248/g, "~"],
+  [/[\u2000-\u200A\u202F\u205F\u3000]/g, " "], [/[\u200B-\u200D\u2060\uFEFF]/g, ""],
+  [/\u20A9\s*/g, "KRW "], [/\u20B9\s*/g, "INR "], [/\u20A6\s*/g, "NGN "],
+  [/\u96D1\u6240\u5F97/g, "zatsu shotoku"],                          // JP: miscellaneous income
+  [/\u7DCF\u5E73\u5747\u6CD5/g, "so-heikin-ho"],                       // JP: total-average method
+  [/\u79FB\u52D5\u5E73\u5747\u6CD5/g, "ido-heikin-ho"],                // JP: moving-average method
+  [/\u56FD\u5916\u8CA1\u7523\u8ABF\u66F8/g, "kokugai zaisan chosho"],  // JP: overseas assets report
+  [/\u7A0E\u7406\u58EB/g, "zeirishi (tax accountant)"],                // JP: licensed tax accountant
+  [/\uC138\uBB34\uC0AC/g, "semusa (tax accountant)"],                  // KR: licensed tax accountant
+  [/\u05E8\u05D5\u05D0\u05D4 \u05D7\u05E9\u05D1\u05D5\u05DF/g, "roeh heshbon (CPA)"] // IL: CPA
+];
 function safe(s) {
   if (s == null) return "";
-  s = String(s)
-      .replace(/\u2192/g, "->").replace(/\u2190/g, "<-").replace(/\u2194/g, "<->")
-      .replace(/\u21D2/g, "=>").replace(/\u21D0/g, "<=")
-      .replace(/\u2212/g, "-")                       // minus sign
-      .replace(/[\u2032\u2035]/g, "'");              // primes
-  // Keep WinAnsi-encodable typographic glyphs; drop anything else >= U+2000.
-  const KEEP = "\u2013\u2014\u2018\u2019\u201C\u201D\u2022\u2026\u2122\u20AC";
-  return s.replace(/[\u2000-\uFFFF]/g, (c) => (KEEP.indexOf(c) >= 0 ? c : "?"));
+  s = String(s).replace(/[\u0000-\u001F\u007F]/g, " ");
+  for (const [re, to] of TRANSLIT) s = s.replace(re, to);
+  s = s.replace(/\s*\(([^()]*)\)/g, (m, inner) => ([...inner].some(c => winAnsi(c) && /\S/.test(c)) ? m : ""));
+  let out = "";
+  for (const c of s) {
+    if (winAnsi(c)) {
+      out += c;
+      continue;
+    }
+    const base = c.normalize("NFD").replace(/[\u0300-\u036F]/g, "");
+    out += base && [...base].every(winAnsi) ? base : "?";
+  }
+  return out.replace(/\?{2,}/g, "?");
+}
+
+// Largest font size <= `size` (down to `min`) at which `s` fits in `maxW`.
+function fitSize(s, font, size, maxW, min = 6) {
+  const t = safe(s);
+  let z = size;
+  while (z > min && font.widthOfTextAtSize(t, z) > maxW) z -= 0.25;
+  return z;
 }
 
 // Report fingerprint: SHA-256 over the COMPACT JSON serialisation of the data
@@ -136,6 +197,121 @@ const TIMING_LABELS = {
   claim: "On claim — rewards become income when collected",
   accrual: "On accrual — rewards become income when credited"
 };
+
+// Human labels for the engine's category codes (the tables used to print the
+// raw codes: "reward_claim", "market_fill", "delegation_out" ...).
+const CATEGORY_LABELS = {
+  reward_author: "Author rewards",
+  reward_curation: "Curation rewards",
+  reward_benefactor: "Beneficiary rewards",
+  reward_claim: "Rewards claimed (author + curation)",
+  proposal_income: "Proposal (DPF) payouts",
+  savings_interest: "Savings interest",
+  transfer_out: "Payments / transfers out",
+  swap: "Conversions (PIXA / PXS)",
+  market_fill: "Internal market trades"
+};
+const catLabel = (c) => CATEGORY_LABELS[c] || c;
+const SOURCE_LABELS = {
+  fta_list: "Official year-end list",
+  platform_price: "Platform price",
+  cost_basis: "Acquisition cost"
+};
+
+// True when the price source could not value something in the report currency
+// (a fiat missing from the provider makes every valuation NaN). The old report
+// printed "NaN" in tables and a silent 0.00 in the per-token totals; now those
+// figures print "n/a" and the summary page and the review section say why.
+function unpricedFigures(b) {
+  const bad = (v) => v == null || !Number.isFinite(Number(v));
+  const ps = b.priceSnapshot;
+  if (ps && (ps.PXA == null || ps.PXS == null)) return true;
+  const sets = [
+    [(b.wealth && b.wealth.lines) || [], ["valueFiat", "fiatPerUnit"]],
+    [(b.transactions && b.transactions.lines) || [], ["proceedsFiat", "basisFiat", "gainFiat"]],
+    [(b.operations && b.operations.lines) || [], ["fmvFiat"]]
+  ];
+  return sets.some(([lines, keys]) => lines.some(l => keys.some(k => bad(l[k]))));
+}
+// The engine sums per-bucket gains with `|| 0`, so an unpriced disposal turns
+// into a taxable gain of exactly 0.00. When any disposal is unpriced, the
+// derived gain totals print "n/a" too.
+const txUnpriced = (b) => ((b.transactions && b.transactions.lines) || [])
+    .some(l => l.proceedsFiat == null || !Number.isFinite(Number(l.proceedsFiat)));
+const unpricedMessage = (b) => `Some figures could not be valued in ${b.fiat}: the price source returned no ${b.fiat} rate for them. They are shown as "n/a" (not zero), and every total that includes them is incomplete. Fix the price source before using this report.`;
+
+// Are this report's gains taxed at all? "exempt" when there are disposals but
+// none carries a taxable lot (Swiss private investor, FR/AT before conversion
+// to fiat, KR before 2027, private SG/AE/HK holders, DE/PT long-term only...).
+function gainsRegime(b) {
+  const lines = (b.transactions && b.transactions.lines) || [];
+  if (!lines.length) return "none";
+  return lines.some(l => l.taxable) ? "taxable" : "exempt";
+}
+
+// Treatment of outbound sends. The engine's outboundByIntent[..].taxable flag
+// only means "is a disposal" — whether the gain is TAXED comes from the
+// transfer_out disposal lines themselves (always "no" for a Swiss private
+// investor, which the report used to print as "Taxable disposal").
+function sendDisposals(b) {
+  const out = ((b.transactions && b.transactions.lines) || []).filter(l => l.category === "transfer_out");
+  const taxed = out.filter(l => l.taxable).length;
+  const label = !out.length ? "Disposal"
+      : taxed === 0 ? "Disposal — gain not taxed here"
+          : taxed === out.length ? "Taxable disposal" : "Disposal — partly taxable";
+  return { count: out.length, taxed, label };
+}
+function outboundTreatment(kind, slot, send) {
+  if (kind === "payment") return send.label;
+  if (kind === "own_exchange") return "Sale is off-platform";
+  if (kind === "own") return "Internal — not a disposal";
+  if (kind === "gift") return slot.taxable ? "Disposal at market value" : "Not a disposal here";
+  if (kind === "charity") return slot.taxable ? "Treated as a disposal" : "Exempt donation";
+  return "";
+}
+
+// What price basis the figures actually used. The report used to state "single
+// snapshot applied to all dates" unconditionally, which is false whenever the
+// provider prices each event at its own date (the engine always asks for the
+// event's timestamp). An explicit opts.priceMode wins; otherwise the unit prices
+// implied by the income and disposal lines tell: one price per token across
+// different days means a snapshot. Lines under 1 unit of fiat are ignored so
+// 2-decimal rounding cannot fake a difference.
+function detectPriceMode(b, opts) {
+  const explicit = opts.priceMode || (b.priceSnapshot && b.priceSnapshot.mode);
+  if (explicit === "historical" || explicit === "snapshot") return explicit;
+  const byAsset = new Map();
+  const add = (asset, qty, value, ts) => {
+    if (!(qty > 0) || !(Math.abs(value) >= 1)) return;
+    const u = Math.abs(value) / qty;
+    const a = byAsset.get(asset) || { min: Infinity, max: -Infinity, days: new Set() };
+    a.min = Math.min(a.min, u);
+    a.max = Math.max(a.max, u);
+    a.days.add(String(ts).slice(0, 10));
+    byAsset.set(asset, a);
+  };
+  for (const l of (b.operations && b.operations.lines) || []) add(l.asset, l.qtyIn, l.fmvFiat, l.ts);
+  for (const l of (b.transactions && b.transactions.lines) || []) add(l.asset, l.qtyOut, l.proceedsFiat, l.ts);
+  let comparable = false;
+  for (const a of byAsset.values()) {
+    if (a.days.size < 2) continue;
+    comparable = true;
+    if (a.max / a.min - 1 > 0.01) return "historical";
+  }
+  return comparable ? "snapshot" : "unknown";
+}
+function priceBasisText(b, mode) {
+  const ps = b.priceSnapshot;
+  const ver = b.priceDataVersion || "n/a";
+  const asOf = ps ? `${ps.asOf} ${ps.timezone}` : String(b.periodEnd || "");
+  if (mode === "snapshot") {
+    return `${ver}. One unit price per token (snapshot ${asOf}) was applied to every date, so receipt-time and disposal-time values are approximations. Income must be valued on the day it is received: regenerate with historical prices before filing.`;
+  }
+  if (mode === "historical") {
+    return `${ver}. Each event is valued at the price for its own date; the unit prices on the summary page are the ${asOf} values used for closing balances.`;
+  }
+  return `${ver}. Each event is valued with the price provider's quote for its own date; the unit prices on the summary page are the ${asOf} values used for closing balances.`;
+}
 
 function text(pg, s, x, y, size, font, color = INK) {
   pg.drawText(safe(s), {
@@ -218,20 +394,40 @@ function drawHeader(ctx) {
   bar(pg, MRG, y, CONTENT_W, 1.8, ACCENT);
   y -= 16;
 
-  // KPI cards
+  // KPI cards. Each card says what its figure IS here: the first is the tax
+  // value of the on-platform holdings (it was labelled "net wealth", but the
+  // report knows no liabilities), and when no gain is taxed (e.g. a Swiss
+  // private investor) the second says so instead of a bare "TAXABLE AMOUNT 0.00".
+  // Labels and values shrink to fit, so JPY/KRW/IDR amounts stay inside.
   const cards = [];
-  if (b.wealth) cards.push(["NET WEALTH @ " + b.wealth.refDate.slice(5), `${fmt(b.wealth.totalFiat)} ${b.fiat}`, INK]);
-  if (b.transactions) cards.push(["TAXABLE AMOUNT", `${fmt(b.transactions.taxableAmountFiat ?? b.transactions.taxableGainFiat)} ${b.fiat}`, INK]);
-  if (b.operations) cards.push(["REWARD & INTEREST INCOME", `${fmt(b.operations.totalIncomeFiat)} ${b.fiat}`, INK]);
+  if (b.wealth) cards.push([`HOLDINGS VALUE @ ${b.wealth.refDate}`, `${fmt(b.wealth.totalFiat)} ${b.fiat}`,
+    b.jurisdiction === "CH" ? "Declare as wealth (securities list)" : "Tax value of on-platform holdings"]);
+  if (b.transactions) {
+    const regime = gainsRegime(b);
+    if (regime === "exempt") {
+      cards.push(["CAPITAL GAINS (RECORD ONLY)", `${fmt(b.transactions.totalGainFiat)} ${b.fiat}`,
+        b.jurisdiction === "CH" ? "Tax-exempt for a private investor" : "Not taxed as a capital gain here"]);
+    } else {
+      cards.push(["TAXABLE AMOUNT", `${txUnpriced(b) ? "n/a" : fmt(b.transactions.taxableAmountFiat ?? b.transactions.taxableGainFiat)} ${b.fiat}`,
+        regime === "none" ? "No disposals this period"
+            : b.transactions.deductionSteps ? "After the deductions shown" : "Gains on disposals"]);
+    }
+  }
+  if (b.operations) cards.push(["INCOME TAXED AT RECEIPT", `${fmt(b.operations.totalIncomeFiat)} ${b.fiat}`,
+    b.operations.deferredIncomeFiat
+        ? `+ ${fmt(b.operations.deferredIncomeFiat)} received at zero cost basis`
+        : "Rewards and interest, value on receipt"]);
   const gap = 10,
-      cw = (CONTENT_W - gap * (cards.length - 1)) / cards.length,
-      ch = 48;
-  cards.forEach(([label, val], i) => {
-    const x = MRG + i * (cw + gap);
+      cw = cards.length ? (CONTENT_W - gap * (cards.length - 1)) / cards.length : CONTENT_W,
+      ch = 56;
+  cards.forEach(([label, val, caption], i) => {
+    const x = MRG + i * (cw + gap),
+        tw = cw - 28;
     drawRR(pg, x, y - ch, cw, ch, 7, ZEBRA);
     bar(pg, x + 9, y - ch + 6, 3, ch - 12, ACCENT); // rounded accent edge, inset off the card corners
-    text(pg, label, x + 20, y - 16, 7, ctx.f.bold, SUB);
-    text(pg, val, x + 20, y - 36, 14, ctx.f.bold, INK);
+    text(pg, label, x + 20, y - 15, fitSize(label, ctx.f.bold, 7, tw, 5.5), ctx.f.bold, SUB);
+    text(pg, val, x + 20, y - 34, fitSize(val, ctx.f.bold, 14, tw, 8), ctx.f.bold, INK);
+    if (caption) text(pg, ellipsize(caption, ctx.f.regular, 7, tw), x + 20, y - 47, 7, ctx.f.regular, SUB);
   });
 
   // Valuation basis — the exact unit prices and vesting ratio every figure was
@@ -240,13 +436,20 @@ function drawHeader(ctx) {
   if (ps) {
     const yy = y - ch - 16;
     const px = (a, v) => `${a} ${v != null ? fmt(v, 4) : "n/a"}`;
-    const parts = [px("PXA", ps.PXA), px("PXS", ps.PXS), `PXP ${ps.PXP != null ? fmt(ps.PXP, 4) : "n/a"} (= PXA)`];
+    const parts = [px("PIXA", ps.PXA), px("PXS", ps.PXS), `PXP ${ps.PXP != null ? fmt(ps.PXP, 4) : "n/a"} (= PIXA)`];
     if (ps.vestingRatio != null) parts.push(`VESTS x ${fmt(ps.vestingRatio, 6)} = PXP`);
     text(pg, `Valuation basis @ ${ps.asOf} ${ps.timezone} — prices in ${ps.fiat}:`, MRG, yy, 7.5, ctx.f.bold, SUB);
     text(pg, parts.join("      "), MRG, yy - 11, 8, ctx.f.regular, INK);
     ctx.y = yy - 24;
   } else {
     ctx.y = y - ch - 22;
+  }
+  if (unpricedFigures(b)) {
+    for (const ln of wrap(unpricedMessage(b), ctx.f.bold, 8, CONTENT_W)) {
+      text(pg, ln, MRG, ctx.y - 2, 8, ctx.f.bold, INK);
+      ctx.y -= 11;
+    }
+    ctx.y -= 6;
   }
 }
 
@@ -257,18 +460,26 @@ function drawHeader(ctx) {
 // Sequential section numbers regardless of which sections a jurisdiction emits
 // (no stray "T", and no gaps when wealth/movements are absent).
 function nextSection(ctx) { return String(ctx.section = (ctx.section || 0) + 1); }
-function sectionTitle(ctx, n, title, note) {
-  ensure(ctx, note ? 54 : 42);
+function sectionTitle(ctx, n, title, note, keepWith = 0) {
+  const lines = note ? wrap(note, ctx.f.oblique, 8, CONTENT_W) : [];
+  // Keep the heading with the start of its note and of the table that follows
+  // (it used to reserve 54pt only, orphaning headings at the foot of a page).
+  // `keepWith` = height of a short table that should move with the heading.
+  const whole = 34 + lines.length * 11 + keepWith;
+  ensure(ctx, keepWith && keepWith <= KEEP_TOGETHER_MAX && whole <= 420
+      ? whole
+      : 30 + Math.min(lines.length, 3) * 11 + TABLE_MIN);
   const pg = ctx.page;
   text(pg, `${n}   ${title}`, MRG, ctx.y - 10, 12.5, ctx.f.bold, INK);
   ctx.y -= 18;
   bar(pg, MRG, ctx.y + 2, CONTENT_W, 1.2, ACCENT); // heavier rule anchors the section
   ctx.y -= 8;
-  if (note) {
-    for (const ln of wrap(note, ctx.f.oblique, 8, CONTENT_W)) {
-      text(pg, ln, MRG, ctx.y - 8, 8, ctx.f.oblique, SUB);
-      ctx.y -= 11;
-    }
+  // Long notes (JP, IN, BR, ZA, AR...) run 10+ lines: paginate line by line
+  // instead of drawing through the footer.
+  for (const ln of lines) {
+    if (ctx.y - 11 < BOTTOM_LIMIT) newPage(ctx, true);
+    text(ctx.page, ln, MRG, ctx.y - 8, 8, ctx.f.oblique, SUB);
+    ctx.y -= 11;
   }
   ctx.y -= 4;
 }
@@ -288,6 +499,15 @@ function wrap(s, font, size, maxW) {
 }
 const ROW_H = 17,
     HEAD_H = 20;
+const TABLE_MIN = 10 + HEAD_H + ROW_H; // a table's top gap + header + first row
+// Full height of a table: top gap, header, rows (taller with a sub-line) and
+// the totals block. Tables up to KEEP_TOGETHER_MAX are kept in one piece — and
+// with their section heading — instead of leaving one row and the total
+// stranded on the next page.
+function tableHeight(rows, hasTotals) {
+  return 10 + HEAD_H + rows.reduce((h, r) => h + (r.sub ? ROW_H + 9 : ROW_H), 0) + (hasTotals ? 33 : 0);
+}
+const KEEP_TOGETHER_MAX = 260;
 function drawTableHeader(ctx, cols) {
   const pg = ctx.page;
   drawRR(pg, MRG, ctx.y - HEAD_H, CONTENT_W, HEAD_H, 4, HEAD);
@@ -302,7 +522,8 @@ function drawTableHeader(ctx, cols) {
 /** Generic table with zebra rows, page-break-aware (re-draws header), + totals row. */
 function drawTable(ctx, cols, rows, totals) {
   // Breathing room above every table, and never orphan a header at a page foot.
-  ensure(ctx, 10 + HEAD_H + ROW_H);
+  const whole = tableHeight(rows, !!totals);
+  ensure(ctx, whole <= KEEP_TOGETHER_MAX ? whole : TABLE_MIN);
   ctx.y -= 10;
   drawTableHeader(ctx, cols);
   let zebra = false;
@@ -385,15 +606,21 @@ function fit(cols) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function csvNote(ctx, msg) {
-  ensure(ctx, 14);
-  for (const ln of wrap(msg, ctx.f.oblique, 8, CONTENT_W)) {
+  const lines = wrap(msg, ctx.f.oblique, 8, CONTENT_W);
+  ensure(ctx, (lines.length <= 4 ? lines.length : 2) * 11 + 8); // short notes stay in one piece
+  for (const ln of lines) {
+    if (ctx.y - 11 < BOTTOM_LIMIT) newPage(ctx, true);
     text(ctx.page, ln, MRG, ctx.y - 8, 8, ctx.f.oblique, SUB);
     ctx.y -= 11;
   }
   ctx.y -= 8;
 }
 function renderWealth(ctx, r) {
-  sectionTitle(ctx, nextSection(ctx), "Wealth statement", r.note);
+  if (!r.lines.length) {
+    sectionTitle(ctx, nextSection(ctx), "Wealth statement", r.note);
+    para(ctx, `No on-platform holdings at ${r.refDate}.`, { size: 9, color: INK, gap: 10 });
+    return;
+  }
   const cols = fit([{
     title: "Asset",
     w: 60,
@@ -416,16 +643,34 @@ function renderWealth(ctx, r) {
     align: "l"
   }]);
   const rows = r.lines.map(l => ({
-    cells: [l.asset, fmt(l.qty, 4), fmt(l.fiatPerUnit, 4), fmt(l.valueFiat), l.source]
+    cells: [assetName(l.asset), fmt(l.qty, 4), fmt(l.fiatPerUnit, 4), fmt(l.valueFiat), SOURCE_LABELS[l.source] || l.source],
+    sub: l.asset === "PXP" ? "Pixa Power: staked PIXA you own (1 PXP = 1 PIXA)" : undefined
   }));
+  sectionTitle(ctx, nextSection(ctx), "Wealth statement", r.note, tableHeight(rows, true));
   drawTable(ctx, cols, rows, {
     cells: ["Total", "", "", `${fmt(r.totalFiat)}`, ""]
   });
+  // Staked PIXA is the line users are most tempted to leave out (or declare at
+  // zero), so the statement says plainly why it is in.
+  if (r.lines.some(l => l.asset === "PXP")) {
+    csvNote(ctx, "PXP (Pixa Power) is PIXA you have staked. You still own it and can convert it back with a power-down (paid out over 13 weeks), so it is part of your wealth at its PIXA value. Neither staking nor delegating it to another account removes it; PXP that others delegated to you is not yours and is not included.");
+  }
   csvNote(ctx, `Per-asset holdings at the reference date. Full balance detail is in ${ctx.csv}.`);
 }
 function renderTransactions(ctx, r) {
-  const note = [r.note, r.safeHarbourCheck ? `Disposals this period: ${r.safeHarbourCheck.disposalCount}. ${r.safeHarbourCheck.note}` : ""].filter(Boolean).join("  ");
-  sectionTitle(ctx, nextSection(ctx), "Transactions — disposals & swaps", note);
+  // A Swiss profile flagged as professional trader gets taxable lines; the
+  // private-investor wording ("tax-free... listed for your records") and the
+  // safe-harbour caveat would then contradict the figures below.
+  const proCH = ctx.bundle.jurisdiction === "CH" && gainsRegime(ctx.bundle) === "taxable";
+  const note = proCH
+      ? "This report treats you as a professional trader (self-employment): the gains below are taxable income and booked losses are deductible. The tax-free treatment for private investors does not apply."
+      : [r.note, r.safeHarbourCheck ? `Disposals this period: ${r.safeHarbourCheck.disposalCount}. ${r.safeHarbourCheck.note}` : ""].filter(Boolean).join("  ");
+  const title = "Transactions — disposals & swaps";
+  if (!r.lines.length) {
+    sectionTitle(ctx, nextSection(ctx), title, note);
+    para(ctx, "No disposals or swaps in this period.", { size: 9, color: INK, gap: 10 });
+    return;
+  }
 
   // sub-details: aggregate by type; every individual disposal goes to the CSV
   const by = new Map();
@@ -470,9 +715,10 @@ function renderTransactions(ctx, r) {
     align: "r"
   }]);
   const rows = [...by.entries()].map(([cat, g]) => ({
-    cells: [cat, String(g.n), fmt(g.proceeds), fmt(g.basis), fmt(g.gain)],
+    cells: [catLabel(cat), String(g.n), fmt(g.proceeds), fmt(g.basis), fmt(g.gain)],
     sub: assetBreakdown(g.byAsset)
   }));
+  sectionTitle(ctx, nextSection(ctx), title, note, tableHeight(rows, true));
   drawTable(ctx, cols, rows, {
     cells: ["Total", String(r.lines.length), fmt(tp), fmt(tb), fmt(r.totalGainFiat)]
   });
@@ -492,9 +738,6 @@ function renderTransactions(ctx, r) {
       a.exempt += l.exemptGainFiat || 0;
       byAsset.set(l.asset, a);
     }
-    ensure(ctx, 16);
-    text(ctx.page, "By asset", MRG, ctx.y - 9, 9, ctx.f.bold, INK);
-    ctx.y -= 12;
     const acols = fit([
       { title: "Asset", w: 64, align: "l" },
       { title: "Disposals", w: 60, align: "r" },
@@ -505,19 +748,39 @@ function renderTransactions(ctx, r) {
       { title: "Exempt", w: 60, align: "r" }
     ]);
     const arows = [...byAsset.entries()].sort((x, y) => x[0].localeCompare(y[0])).map(([asset, a]) => ({
-      cells: [asset, String(a.n), fmt(a.proceeds), fmt(a.basis), fmt(a.gain), fmt(a.taxable), a.exempt ? fmt(a.exempt) : "-"]
+      cells: [assetName(asset), String(a.n), fmt(a.proceeds), fmt(a.basis), fmt(a.gain), fmt(a.taxable), a.exempt ? fmt(a.exempt) : "-"]
     }));
+    const ah = tableHeight(arows, false);
+    ensure(ctx, 12 + (ah <= KEEP_TOGETHER_MAX ? ah : TABLE_MIN)); // keep the label with its table
+    text(ctx.page, "By asset", MRG, ctx.y - 9, 9, ctx.f.bold, INK);
+    ctx.y -= 12;
     drawTable(ctx, acols, arows);
   }
-  ensure(ctx, 16);
-  text(ctx.page, `Taxable gain for ${ctx.bundle.jurisdiction}: ${fmt(r.taxableGainFiat)} ${r.fiat}`, MRG, ctx.y - 4, 9, ctx.f.bold, INK);
-  ctx.y -= 14;
-  if (r.splitByTerm || r.exemptGainFiat) {
+  // What the gains mean here. Where no lot is taxable — a Swiss private
+  // investor above all — the report used to print "Taxable gain: 0.00" and
+  // "Taxable amount: 0.00" as if a computation had run; it now says plainly that
+  // the gains are not taxed and why they are listed. Elsewhere the "Taxable
+  // gain" line only appears when deductions make it differ from the amount.
+  const jur = ctx.bundle.jurisdiction;
+  const regime = gainsRegime(ctx.bundle);
+  const amt = (v) => (txUnpriced(ctx.bundle) ? "n/a" : fmt(v)); // engine totals mask NaN as 0
+  const steps = r.deductionSteps && r.deductionSteps.length ? r.deductionSteps : null;
+  if (regime === "exempt") {
+    para(ctx, jur === "CH"
+            ? `Not taxed: for a private investor in Switzerland these gains (total ${fmt(r.totalGainFiat)} ${r.fiat}) are tax-exempt capital gains, and losses are not deductible. They are not entered on the return; they are listed for your records.`
+            : `None of these gains (total ${fmt(r.totalGainFiat)} ${r.fiat}) is taxed as a capital gain in ${jur} on the basis stated above; the lines are listed for your records.`,
+        { size: 9, color: INK, gap: 6 });
+  } else if ((steps && steps.length > 1) || r.disallowedLossesFiat) {
+    ensure(ctx, 16);
+    text(ctx.page, `Taxable gain for ${jur}: ${amt(r.taxableGainFiat)} ${r.fiat}`, MRG, ctx.y - 4, 9, ctx.f.bold, INK);
+    ctx.y -= 14;
+  }
+  if (r.splitByTerm || (r.exemptGainFiat && regime !== "exempt")) {
     const parts = [];
-    if (r.splitByTerm) parts.push(`short-term ${fmt(r.shortTermGainFiat)}`, `long-term ${fmt(r.longTermGainFiat)}`);
-    if (r.exemptGainFiat) parts.push(`tax-free ${fmt(r.exemptGainFiat)}`);
+    if (r.splitByTerm) parts.push(`short-term ${amt(r.shortTermGainFiat)}`, `long-term ${amt(r.longTermGainFiat)}`);
+    if (r.exemptGainFiat) parts.push(`tax-free ${amt(r.exemptGainFiat)}`);
     ensure(ctx, 12);
-    text(ctx.page, `Of which — ${parts.join("  ·  ")} ${r.fiat}`, MRG, ctx.y - 2, 8.5, ctx.f.regular, SUB);
+    text(ctx.page, `Gain split — ${parts.join("  ·  ")} ${r.fiat}`, MRG, ctx.y - 2, 8.5, ctx.f.regular, SUB);
     ctx.y -= 12;
   }
   // UK share matching (same-day / 30-day / pool): quantities matched per HMRC's
@@ -541,11 +804,7 @@ function renderTransactions(ctx, r) {
   // Computation of taxable amount — a proper schedule instead of a chain string.
   // The informational disallowed-losses row (India: no set-off permitted) leads,
   // then each deduction step, with the final taxable amount as the bold total.
-  const steps = r.deductionSteps && r.deductionSteps.length ? r.deductionSteps : null;
-  if ((steps && steps.length > 1) || r.disallowedLossesFiat) {
-    ensure(ctx, 30);
-    text(ctx.page, "Computation of taxable amount", MRG, ctx.y - 10, 9.5, ctx.f.bold, INK);
-    ctx.y -= 18;
+  if (regime !== "exempt" && ((steps && steps.length > 1) || r.disallowedLossesFiat)) {
     const cols = fit([
       { title: "Step", w: 330, align: "l" },
       { title: `Amount (${r.fiat})`, w: 130, align: "r" }
@@ -557,11 +816,16 @@ function renderTransactions(ctx, r) {
     }
     for (const s of allSteps.slice(0, -1)) rows.push({ cells: [s.label, fmt(s.value)] });
     const last = allSteps[allSteps.length - 1];
+    ensure(ctx, 18 + tableHeight(rows, true)); // keep the heading with its schedule
+    text(ctx.page, "Computation of taxable amount", MRG, ctx.y - 10, 9.5, ctx.f.bold, INK);
+    ctx.y -= 18;
     drawTable(ctx, cols, rows, { cells: [last.label, fmt(last.value)] });
   }
-  ensure(ctx, 14);
-  text(ctx.page, `Taxable amount for ${ctx.bundle.jurisdiction}: ${fmt(r.taxableAmountFiat)} ${r.fiat}`, MRG, ctx.y - 4, 9.5, ctx.f.bold, INK);
-  ctx.y -= 14;
+  if (regime !== "exempt") {
+    ensure(ctx, 14);
+    text(ctx.page, `Taxable amount for ${jur}: ${amt(r.taxableAmountFiat)} ${r.fiat}`, MRG, ctx.y - 4, 9.5, ctx.f.bold, INK);
+    ctx.y -= 14;
+  }
   if (r.lossCarryforwardOutFiat) {
     ensure(ctx, 11);
     text(ctx.page, `Loss to carry forward: ${fmt(r.lossCarryforwardOutFiat)} ${r.fiat}`, MRG, ctx.y - 2, 8.5, ctx.f.regular, SUB);
@@ -570,7 +834,12 @@ function renderTransactions(ctx, r) {
   csvNote(ctx, `Summary by type. All ${r.lines.length} disposals — with the cost-basis lots consumed and holding period — are itemised line-by-line in ${ctx.csv}.`);
 }
 function renderOperations(ctx, r) {
-  sectionTitle(ctx, nextSection(ctx), "Operations — reward & interest income", r.note);
+  const title = "Operations — reward & interest income";
+  if (!r.lines.length) {
+    sectionTitle(ctx, nextSection(ctx), title, r.note);
+    para(ctx, "No reward or interest income in this period.", { size: 9, color: INK, gap: 10 });
+    return;
+  }
 
   // sub-details: aggregate by income type; every individual receipt goes to the
   // CSV. Zero-basis jurisdictions (FR/AT) flag lines taxedAtReceipt=false —
@@ -579,7 +848,7 @@ function renderOperations(ctx, r) {
   const by = new Map();
   for (const l of r.lines) {
     const deferred = l.taxedAtReceipt === false;
-    const key = deferred ? `${l.category} (deferred)` : l.category;
+    const key = deferred ? `${catLabel(l.category)} (not taxed at receipt)` : catLabel(l.category);
     const g = by.get(key) ?? {
       n: 0,
       amt: 0,
@@ -609,6 +878,7 @@ function renderOperations(ctx, r) {
     sub: assetBreakdown(g.byAsset)
   }));
   const taxedCount = r.lines.filter(l => l.taxedAtReceipt !== false).length;
+  sectionTitle(ctx, nextSection(ctx), title, r.note, tableHeight(rows, true));
   drawTable(ctx, cols, rows, {
     cells: ["Total income (taxed at receipt)", String(taxedCount), fmt(r.totalIncomeFiat)]
   });
@@ -617,6 +887,14 @@ function renderOperations(ctx, r) {
     text(ctx.page, `Received but not taxed at receipt (zero acquisition cost — taxed at the later fiat conversion): ${fmt(r.deferredIncomeFiat)} ${r.fiat}`, MRG, ctx.y - 2, 8.5, ctx.f.regular, SUB);
     ctx.y -= 12;
   }
+  // Rewards paid as staked PIXA are still income on receipt — not a later
+  // capital gain — which is exactly the point users get wrong.
+  if (r.lines.some(l => l.asset === "PXP")) {
+    csvNote(ctx, "Rewards paid in PXP (staked) are treated exactly like liquid rewards: their PIXA value on the day received is what counts, not a later capital gain.");
+  }
+  if (ctx.priceMode === "snapshot") {
+    csvNote(ctx, "Caution: these values use one snapshot price for every date, not the price on the day each reward was received. Income must be valued on the day it is received — regenerate with historical prices before filing.");
+  }
   csvNote(ctx, `Summary by type. All ${r.lines.length} income events are itemised line-by-line in ${ctx.csv}.`);
 }
 
@@ -624,8 +902,8 @@ function renderOperations(ctx, r) {
 // power-ups. Listed line-by-line; the table paginates via drawTable.
 function renderMovements(ctx, movements) {
   if (!movements || !movements.length) return;
-  sectionTitle(ctx, nextSection(ctx), "Account movements — fees, savings & power-ups",
-      "Not taxable disposals or income. Proposal fees leave the account and reduce holdings; conversion requests, savings withdrawals and power moves are internal and shown for completeness. Each row's exact time (UTC) and transaction id appear beneath its date.");
+  sectionTitle(ctx, nextSection(ctx), "Account movements — fees, savings, staking & delegations",
+      "Not taxable disposals or income. Proposal fees leave the account and reduce holdings; conversion requests, savings withdrawals and power moves are internal and shown for completeness. Delegations lend voting power only — the PXP stays with its owner. Each row's exact time (UTC) and transaction id appear beneath its date.");
   const labels = {
     fee_payment: "Fee paid",
     savings_fill: "Savings withdrawal",
@@ -637,7 +915,10 @@ function renderMovements(ctx, movements) {
     to_own_exchange: "Sent to your exchange",
     to_own_wallet: "Sent to your own wallet",
     gift_out: "Gift sent",
-    charity_donation: "Charity donation"
+    charity_donation: "Charity donation",
+    delegation_out: "Delegated out (still yours)",
+    delegation_in: "Delegated to you (not yours)",
+    delegation_return: "Delegation returned"
   };
   // A power-up has two legs: PXA out starts the stake, PXP in completes it.
   const labelFor = (m) => m.kind === "power_up"
@@ -659,7 +940,7 @@ function renderMovements(ctx, movements) {
       cells: [
         String(m.ts).slice(0, 10),
         labelFor(m),
-        m.asset,
+        assetName(m.asset),
         (m.direction === "out" ? "-" : "+") + fmt(m.amount, 4)
       ],
       sub: (() => {
@@ -681,24 +962,16 @@ function renderMovements(ctx, movements) {
 function renderOutbound(ctx, outboundByIntent) {
   const present = outboundByIntent && Object.keys(outboundByIntent);
   if (!present || !present.length) return;
-  sectionTitle(ctx, nextSection(ctx), "Transfers out — classified by purpose",
-      "Every send you made over the period, grouped by what it was for, with the total amount and the number of transfers. Payments are taxable disposals; the rest are taxed differently or not at all, as noted. Confirm the treatment for your country with an adviser.");
+  const note = "Every send you made over the period, grouped by what it was for, with the total amount and the number of transfers. Payments to others are disposals: their gain is computed under Transactions and taxed only where your jurisdiction taxes it. The other purposes are treated as noted. Confirm the treatment for your country with an adviser.";
   const ORDER = ["payment", "own_exchange", "own", "gift", "charity"];
   const LABEL = {
-    payment: "Payments / sales",
+    payment: "Payments to others",
     own_exchange: "Sent to your exchange",
     own: "To your own wallet",
     gift: "Gifts",
     charity: "Charity donations"
   };
-  const treat = (k, taxable) => {
-    if (k === "payment") return "Taxable disposal";
-    if (k === "own_exchange") return "Sale is off-platform";
-    if (k === "own") return "Internal — not a disposal";
-    if (k === "gift") return taxable ? "Disposal at market value" : "Not a disposal here";
-    if (k === "charity") return taxable ? "Treated as a disposal" : "Exempt donation";
-    return "";
-  };
+  const send = sendDisposals(ctx.bundle);
   const f = ctx.bundle.fiat;
   const cols = fit([
     { title: "Purpose", w: 110, align: "l" },
@@ -707,26 +980,28 @@ function renderOutbound(ctx, outboundByIntent) {
     { title: `Total (${f})`, w: 90, align: "r" }
   ]);
   const keys = ORDER.filter(k => outboundByIntent[k]).concat(present.filter(k => !ORDER.includes(k)));
-  let taxableCount = 0, taxableValue = 0;
+  let disposalValue = 0;
   const rows = keys.map(k => {
     const s = outboundByIntent[k];
-    if (s.taxable) { taxableCount += s.count; taxableValue += s.valueFiat || 0; }
+    if (s.taxable) disposalValue += s.valueFiat || 0; // engine flag = "is a disposal"
     return {
-      cells: [LABEL[k] || k, treat(k, s.taxable), String(s.count), fmt(s.valueFiat || 0)],
+      cells: [LABEL[k] || k, outboundTreatment(k, s, send), String(s.count), fmt(s.valueFiat || 0)],
       sub: assetBreakdown(s.byAsset)
     };
   });
   const grandValue = keys.reduce((acc, k) => acc + (outboundByIntent[k].valueFiat || 0), 0);
   const grandCount = keys.reduce((acc, k) => acc + outboundByIntent[k].count, 0);
+  sectionTitle(ctx, nextSection(ctx), "Transfers out — classified by purpose", note, tableHeight(rows, true));
   drawTable(ctx, cols, rows, { cells: ["Total sent out", "", String(grandCount), fmt(grandValue)] });
-  csvNote(ctx, `${taxableCount} of these transfers (worth ${fmt(taxableValue)} ${f}) are taxable disposals — their gains are computed in the Disposals section above. Per-transfer detail is in ${ctx.csv}.`);
+  const jur = ctx.bundle.jurisdiction;
+  csvNote(ctx, send.count
+      ? `${send.count} of these transfers (worth ${fmt(disposalValue)} ${f}) ${send.count === 1 ? "is a disposal" : "are disposals"}, with the gain computed under Transactions; ${send.taxed ? `${send.taxed} of them produced a taxable gain in ${jur}` : `none of them produced a taxable gain in ${jur}`}. Per-transfer detail is in ${ctx.csv}.`
+      : `None of these transfers is a disposal. Per-transfer detail is in ${ctx.csv}.`);
 }
 
 // Per-token overview: opening / received / disposed / closing + closing value.
 function renderTokens(ctx, tokenSummary) {
   if (!tokenSummary || !tokenSummary.length) return;
-  sectionTitle(ctx, nextSection(ctx), "Per-token summary",
-      "Opening balance, total received and disposed over the period, and the closing balance for each token. Opening reflects any balances entered under Advanced.");
   const f = ctx.bundle.fiat;
   const cols = fit([
     { title: "Token", w: 48, align: "l" },
@@ -736,11 +1011,22 @@ function renderTokens(ctx, tokenSummary) {
     { title: "Closing", w: 78, align: "r" },
     { title: `Value (${f})`, w: 86, align: "r" }
   ]);
+  // The engine stores an unpriced closing value as 0 (`|| 0`); show it as n/a.
+  const unpriced = unpricedFigures(ctx.bundle);
+  const valueOf = (t) => (unpriced && t.closingQty > 0 && !t.closingValueFiat ? NaN : t.closingValueFiat);
   const rows = tokenSummary.map(t => ({
-    cells: [t.asset, fmt(t.openingQty, 4), fmt(t.receivedQty, 4), fmt(t.disposedQty, 4), fmt(t.closingQty, 4), fmt(t.closingValueFiat)]
+    cells: [assetName(t.asset), fmt(t.openingQty, 4), fmt(t.receivedQty, 4), fmt(t.disposedQty, 4), fmt(t.closingQty, 4), fmt(valueOf(t))]
   }));
-  const totalValue = tokenSummary.reduce((s, t) => s + t.closingValueFiat, 0);
+  const totalValue = tokenSummary.reduce((s, t) => s + valueOf(t), 0);
+  sectionTitle(ctx, nextSection(ctx), "Per-token summary",
+      "Opening balance, total received and disposed over the period, and the closing balance for each token. Opening reflects any balances entered under Advanced.",
+      tableHeight(rows, true));
   drawTable(ctx, cols, rows, { cells: ["Total", "", "", "", "", fmt(totalValue)] });
+  // The engine rebuilds PXP from history (VESTS converted at one ratio), which
+  // drifts from the real stake once the vesting ratio moves. Say so.
+  if (tokenSummary.some(t => t.asset === "PXP")) {
+    csvNote(ctx, "PXP quantities are rebuilt from the account history at the vesting ratio shown in the valuation basis. Check the closing PXP against the account's on-chain vesting balance at the same date before filing — if they differ, the on-chain balance is the one to declare.");
+  }
 }
 
 // Wrapped paragraph that paginates. Bullet optional.
@@ -749,10 +1035,13 @@ function para(ctx, s, opts = {}) {
   const color = opts.color || SUB;
   const gap = opts.gap == null ? 3 : opts.gap;
   const prefix = opts.bullet ? "•  " : "";
-  const lines = wrap(prefix + String(s), ctx.f.regular, size, CONTENT_W - 6);
-  ensure(ctx, lines.length * (size + 2.5) + gap);
+  const font = opts.font || ctx.f.regular;
+  const lines = wrap(prefix + String(s), font, size, CONTENT_W - 6);
+  // Short paragraphs stay together; long ones continue on the next page.
+  ensure(ctx, Math.min(lines.length, 4) * (size + 2.5) + gap);
   for (const ln of lines) {
-    text(ctx.page, ln, MRG, ctx.y - (size + 0.5), size, ctx.f.regular, color);
+    if (ctx.y - (size + 2.5) < BOTTOM_LIMIT) newPage(ctx, true);
+    text(ctx.page, ln, MRG, ctx.y - (size + 0.5), size, font, color);
     ctx.y -= (size + 2.5);
   }
   ctx.y -= gap;
@@ -764,17 +1053,20 @@ function renderReview(ctx) {
   const ingestWarnings = ing.warnings || [];
   const skipped = ing.skipped || {};
   const skippedKeys = Object.keys(skipped).sort((a, b) => skipped[b] - skipped[a]);
-  if (!engineWarnings.length && !ingestWarnings.length && !skippedKeys.length
+  const unpriced = unpricedFigures(ctx.bundle);
+  if (!unpriced && !engineWarnings.length && !ingestWarnings.length && !skippedKeys.length
       && !ctx.pricingNote && !ctx.jurisdictionNote) return;
 
   sectionTitle(ctx, "!", "Review & notes");
 
+  if (unpriced) para(ctx, unpricedMessage(ctx.bundle), { bullet: true, color: INK, font: ctx.f.bold });
   for (const w of engineWarnings) para(ctx, w, { bullet: true });
   for (const w of ingestWarnings) para(ctx, w, { bullet: true });
 
   if (skippedKeys.length) {
     const total = skippedKeys.reduce((s, k) => s + skipped[k], 0);
-    para(ctx, `Operations seen in the account history but not booked into the figures above — ${total} in total. These are social/governance actions with no balance impact, income already counted at claim, or movements settled at a later fill/execution. Counts by type:`, { gap: 2 });
+    const counted = ctx.bundle.incomeTiming === "accrual" ? "when credited" : "at claim";
+    para(ctx, `Operations seen in the account history but not booked into the figures above — ${total} in total. These are social/governance actions with no balance impact, income already counted ${counted}, or movements settled at a later fill/execution. Counts by type:`, { gap: 2 });
     para(ctx, skippedKeys.map(k => `${k} \u00d7${skipped[k]}`).join("   \u00b7   "), { size: 8 });
   }
 
@@ -826,7 +1118,7 @@ function renderCover(ctx) {
   const rows = [
     ["Generated", b.generatedAt],
     ["Ruleset", String(b.rulesVersion || "")],
-    ["Price basis", String(b.priceDataVersion || "")],
+    ["Price data", String(b.priceDataVersion || "")],
     ["Cost basis method", METHOD_LABELS[b.methodUsed] || String(b.methodUsed || "")],
     ["Income recognition", TIMING_LABELS[b.incomeTiming] || String(b.incomeTiming || "")],
     ["Report ID", ctx.reportId],
@@ -834,17 +1126,23 @@ function renderCover(ctx) {
         ? `${ctx.fingerprint.slice(0, 32)}\n${ctx.fingerprint.slice(32)}`
         : "unavailable in this environment"]
   ];
-  const rowH = 17, pad = 12;
-  const panelH = rows.reduce((h, r) => h + (r[1].includes("\n") ? rowH * 2 - 4 : rowH), 0) + pad * 2 - 4;
+  // Values wrap inside the panel (the Japanese total-average label used to run
+  // past its right edge).
+  const rowH = 17, pad = 12, VAL_W = CONTENT_W - 170 - 14;
+  const rowLines = rows.map(([label, value]) => {
+    const v = String(value ?? "");
+    const ls = v.includes("\n") ? v.split("\n") : wrap(v, f.regular, 9, VAL_W);
+    return [label, ls.length ? ls : [""]];
+  });
+  const panelH = rowLines.reduce((h, [, ls]) => h + rowH + (ls.length - 1) * (rowH - 4), 0) + pad * 2 - 4;
   drawRR(pg, MRG, y - panelH, CONTENT_W, panelH, 9, ZEBRA);
   let ry = y - pad - 8;
-  for (const [label, value] of rows) {
+  for (const [label, lines] of rowLines) {
     text(pg, label, MRG + 16, ry, 8, f.bold, SUB);
-    const lines = value.split("\n");
     for (const [i, ln] of lines.entries()) {
       text(pg, ln, MRG + 170, ry - i * (rowH - 4), lines.length > 1 ? 8.5 : 9, f.regular, INK);
     }
-    ry -= lines.length > 1 ? rowH * 2 - 4 : rowH;
+    ry -= rowH + (lines.length - 1) * (rowH - 4);
   }
   y = y - panelH - 18;
   for (const ln of wrap(
@@ -871,7 +1169,8 @@ function renderBasis(ctx) {
     ["Scope", `On-platform activity for @${b.account}, ${period}. Off-platform events (external exchanges, other chains) are out of scope and must be reported separately.`],
     ["Cost basis method", METHOD_LABELS[b.methodUsed] || String(b.methodUsed || "")],
     ["Income recognition", TIMING_LABELS[b.incomeTiming] || String(b.incomeTiming || "")],
-    ["Price basis", `${b.priceDataVersion || "n/a"}.${ps ? ` Single point-in-time snapshot (${ps.asOf} ${ps.timezone}) applied to all dates — historical price series are not used, so receipt-time and disposal-time valuations share unit prices.` : ""}`],
+    ["Tokens", "PIXA (liquid; exported as PXA in the CSV files), PXS (Pixa Supra), PXP (Pixa Power: staked PIXA, 1 PXP = 1 PIXA)."],
+    ["Price basis", priceBasisText(b, ctx.priceMode)],
     ["Deductions supplied", (b.lossCarryforwardInFiat || b.exemptionUsedInFiat)
         ? [b.lossCarryforwardInFiat ? `losses carried forward ${fmt(b.lossCarryforwardInFiat)} ${b.fiat}` : "",
       b.exemptionUsedInFiat ? `exemption already used elsewhere ${fmt(b.exemptionUsedInFiat)} ${b.fiat}` : ""].filter(Boolean).join("; ") + "."
@@ -897,8 +1196,65 @@ function renderBasis(ctx) {
 // Renders nothing for jurisdictions without one.
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Switzerland — where each figure goes on the return of a PRIVATE investor.
+// Rendered even without disposals: the wealth and income lines are the ones a
+// Swiss filer actually needs. Labels follow the usual cantonal securities list;
+// a canton's software may word them differently.
+function renderSwissAnnex(ctx) {
+  const b = ctx.bundle, f = b.fiat;
+  const title = "Jurisdiction annex — Switzerland (where the figures go)";
+  const note = ("How the figures map onto the return of a private investor in Switzerland. Wording follows the usual cantonal securities list (Wertschriftenverzeichnis / état des titres); your canton's form may label the lines differently. No Swiss withholding tax applies to these rewards, so their income goes in the column for income without withholding tax." +
+      (f === "CHF" ? "" : ` These figures are in ${f}, but the Swiss return is filed in CHF: regenerate this report in CHF before using them.`));
+  // (the heading is drawn once the rows are known, so it moves with the table)
+  const cols = fit([
+    { title: "Item", w: 190, align: "l" },
+    { title: `Amount (${f})`, w: 86, align: "r" },
+    { title: "Where it goes", w: 224, align: "l" }
+  ]);
+  const rows = [];
+  if (b.wealth) {
+    rows.push({
+      cells: [`Holdings at ${b.wealth.refDate}`, fmt(b.wealth.totalFiat), "Securities list: tax value (wealth)"],
+      sub: "PIXA, PXS and PXP together; staked and delegated-out PXP included"
+    });
+  }
+  const inc = ((b.operations && b.operations.lines) || []).filter(l => l.taxedAtReceipt !== false);
+  const sum = (cats) => inc.filter(l => cats.includes(l.category)).reduce((s, l) => s + l.fmvFiat, 0);
+  const has = (cats) => inc.some(l => cats.includes(l.category));
+  const STAKE = ["reward_curation", "savings_interest"], WORK = ["reward_author", "reward_benefactor"];
+  if (has(STAKE)) rows.push({ cells: ["Curation rewards, savings interest", fmt(sum(STAKE)), "Securities list: income, no withholding tax"] });
+  if (has(WORK)) rows.push({ cells: ["Author & beneficiary rewards", fmt(sum(WORK)), "Other income (self-employment if regular)"] });
+  if (has(["reward_claim"])) {
+    rows.push({
+      cells: ["Rewards claimed (author + curation)", fmt(sum(["reward_claim"])), "Split: curation vs author (see below)"],
+      sub: "Claim timing merges author and curation rewards; accrual timing would report them separately"
+    });
+  }
+  if (has(["proposal_income"])) rows.push({ cells: ["Proposal (DPF) payouts", fmt(sum(["proposal_income"])), "Other income (self-employment if regular)"] });
+  const known = [...STAKE, ...WORK, "reward_claim", "proposal_income"];
+  const other = inc.filter(l => !known.includes(l.category));
+  if (other.length) rows.push({ cells: ["Other income", fmt(other.reduce((s, l) => s + l.fmvFiat, 0)), "Other income"] });
+  const t = b.transactions;
+  if (t && t.lines && t.lines.length) {
+    rows.push(gainsRegime(b) === "taxable"
+        ? { cells: ["Gains on disposals", fmt(t.taxableAmountFiat), "Self-employment income (professional trader)"] }
+        : {
+          cells: ["Gains on disposals", fmt(t.totalGainFiat), "Not declared (tax-exempt private gain)"],
+          sub: "Kept as a record; losses are not deductible either"
+        });
+  }
+  sectionTitle(ctx, nextSection(ctx), title, note, rows.length ? tableHeight(rows, false) : 0);
+  if (!rows.length) {
+    para(ctx, "Nothing to declare from this account for the period.", { size: 9, color: INK, gap: 10 });
+    return;
+  }
+  drawTable(ctx, cols, rows);
+  csvNote(ctx, "Author and beneficiary rewards and proposal payouts pay for work rather than for holding tokens: if that activity is regular and organised, the canton may treat it as self-employment, which also brings AHV/AVS contributions. Curation rewards and savings interest are a return on your stake, like staking rewards.");
+}
+
 function renderJurisdictionAnnex(ctx) {
   const b = ctx.bundle;
+  if (b.jurisdiction === "CH") return renderSwissAnnex(ctx);
   const t = b.transactions;
   if (!t || !t.lines || !t.lines.length) return;
   const monthly = () => {
@@ -1074,7 +1430,10 @@ export async function generateTaxReportPdf(bundle, opts = {}) {
     csv: opts.csvFilename ?? "the attached CSV file",
     ingest: opts.ingest || null,
     jurisdictionNote: opts.jurisdictionNote || "",
-    pricingNote: opts.pricingNote || ""
+    pricingNote: opts.pricingNote || "",
+    // "historical" | "snapshot" | "unknown". Pass opts.priceMode from the dialog
+    // when the price provider is known; otherwise it is read off the figures.
+    priceMode: detectPriceMode(bundle, opts)
   };
   // Fingerprint the exact data this PDF renders, so the document is verifiably
   // tied to its CSV/JSON exports. Report ID is the fingerprint's first 10 hex.
@@ -1103,9 +1462,14 @@ export async function generateTaxReportPdf(bundle, opts = {}) {
 
 // ---- CSV ------------------------------------------------------------------
 
+// Empty for null/undefined (it used to print "undefined"); quotes CR as well
+// as LF (a memo containing \r split the row); and text a spreadsheet would run
+// as a formula (= + - @ ...) gets a leading apostrophe. Numbers pass through.
 function csvCell(v) {
-  const s = String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  if (v == null) return "";
+  let s = String(v);
+  if (typeof v === "string" && /^[=+\-@\t\r]/.test(s) && !/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(s)) s = "'" + s;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 function toCsv(rows) {
   return rows.map(r => r.map(csvCell).join(",")).join("\r\n");
@@ -1126,7 +1490,7 @@ export function generateTaxReportCsvs(bundle) {
     l.ts, l.block ?? "", l.id || "", l.category, l.asset, l.qtyOut, l.proceedsFiat, l.basisFiat, l.gainFiat,
     l.shortTermGainFiat ?? "", l.longTermGainFiat ?? "", l.exemptGainFiat ?? "",
     l.matchedSameDayQty ?? "", l.matchedThirtyDayQty ?? "", l.pooledQty ?? "",
-    l.taxable ? "yes" : "no", l.isSwap ? "yes" : "no", l.counterparty ? "@" + l.counterparty : "", l.method, fiat]);
+    l.taxable ? "yes" : "no", l.isSwap ? "yes" : "no", l.counterparty || "", l.method, fiat]);
 
   // Lot-level audit trail: one row per cost-basis lot consumed by each disposal.
   // Micro-lot streams (hourly rewards, recurrent fills) can make ONE disposal
@@ -1170,15 +1534,15 @@ export function generateTaxReportCsvs(bundle) {
     }
     for (const g of groups) lRows.push([
       l.ts, l.block ?? "", l.id || "", l.category, l.asset,
-      g.acquiredTs ? (g.count > 1 ? `${g.acquiredTs} → ${g.lastTs}` : g.acquiredTs) : "(pooled/none)",
+      g.acquiredTs ? (g.count > 1 && g.lastTs !== g.acquiredTs ? `${g.acquiredTs} to ${g.lastTs}` : g.acquiredTs) : "(pooled/none)",
       g.count, r4c(g.qty),
       r2c(g.basisFiat), r2c(g.proceedsFiat), r2c(g.gainFiat),
-      g.minHeld == null ? "" : (g.minHeld === g.maxHeld ? g.minHeld : `${g.minHeld}–${g.maxHeld}`),
+      g.minHeld == null ? "" : (g.minHeld === g.maxHeld ? g.minHeld : `${g.minHeld}-${g.maxHeld}`),
       g.term, matchLabel(g), g.taxable ? "yes" : "no", g.missingBasis ? "yes" : "", fiat]);
   }
 
   const oRows = [["date", "block", "txid", "category", "asset", "qty_in", "income", "taxed_at_receipt", "source", "counterparty", "fiat"]];
-  if (bundle.operations) for (const l of bundle.operations.lines) oRows.push([l.ts, l.block ?? "", l.id || "", l.category, l.asset, l.qtyIn, l.fmvFiat, l.taxedAtReceipt === false ? "no" : "yes", l.source, l.counterparty ? "@" + l.counterparty : "", fiat]);
+  if (bundle.operations) for (const l of bundle.operations.lines) oRows.push([l.ts, l.block ?? "", l.id || "", l.category, l.asset, l.qtyIn, l.fmvFiat, l.taxedAtReceipt === false ? "no" : "yes", l.source, l.counterparty || "", fiat]);
 
   const mRows = [["date", "block", "txid", "kind", "asset", "direction", "amount", "note", "fiat"]];
   if (bundle.movements) for (const m of bundle.movements) mRows.push([m.ts, m.block ?? "", m.id || "", m.kind, m.asset, m.direction, m.amount, m.note, fiat]);
@@ -1189,15 +1553,19 @@ export function generateTaxReportCsvs(bundle) {
 
   // Crypto moved to your own exchange — the taxable sale happens off-platform.
   const xRows = [["date", "asset", "qty", "cost_basis_that_left", "counterparty", "fiat"]];
-  if (bundle.offPlatformBasis) for (const o of bundle.offPlatformBasis) xRows.push([o.ts, o.asset, o.qty, o.basisFiat, o.counterparty ? "@" + o.counterparty : "", fiat]);
+  if (bundle.offPlatformBasis) for (const o of bundle.offPlatformBasis) xRows.push([o.ts, o.asset, o.qty, o.basisFiat, o.counterparty || "", fiat]);
 
   // Outbound transfers classified by purpose — total quantity per asset + count.
-  const obRows = [["purpose", "tax_treatment", "asset", "total_sent", "transfers_in_purpose", "taxable"]];
+  // Last column renamed "taxable" -> "is_disposal": the engine flag says whether
+  // the send is a disposal; whether its gain is TAXED is in the transactions file
+  // (for a Swiss private investor it never is — the old "Taxable disposal" label
+  // was wrong there).
+  const obRows = [["purpose", "tax_treatment", "asset", "total_sent", "transfers_in_purpose", "is_disposal"]];
   if (bundle.outboundByIntent) {
-    const TR = { payment: "Taxable disposal", own_exchange: "Sale off-platform", own: "Internal move", gift: "Per jurisdiction", charity: "Per jurisdiction" };
+    const send = sendDisposals(bundle);
     for (const [k, s] of Object.entries(bundle.outboundByIntent))
       for (const [a, q] of Object.entries(s.byAsset))
-        obRows.push([k, TR[k] || "", a, q, s.count, s.taxable ? "yes" : "no"]);
+        obRows.push([k, outboundTreatment(k, s, send).replace(/\s*—\s*/g, " - "), a, q, s.count, s.taxable ? "yes" : "no"]);
   }
 
   // combined long format: one normalised row per detail line across all reports

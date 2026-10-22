@@ -40,7 +40,8 @@ import ToolbarMenuOption from "../components/ToolbarMenuOption";
 // user/community profiles and the artwork leg (pixagram-search Worker).
 import { useSearch, SearchBar, artworkPath, compactFilters } from "../components/search";
 import VoteIcon from "../icons/Vote";
-import SaleIcon from "../icons/Sale";
+// The wallet's Trade button wears the same chart icon.
+import TradeIcon from "@material-ui/icons/ShowChartRounded";
 import SettingsIcon from "@material-ui/icons/Settings";
 import HelpIcon from "@material-ui/icons/Help";
 import TelegramIcon from "@material-ui/icons/Telegram";
@@ -557,6 +558,15 @@ const DIALOG_REGISTRY = {
     favorites: {
         load: () => import("../components/FavoriteManagerDialog"),
         props: (api, close) => ({ open: true, api, onClose: close }),
+        sfxOpen: "state-change_confirm-down",
+        sfxClose: "labactive",
+    },
+    // The exchange picker behind the toolbar's Trade button — the very
+    // dialog the wallet's Trade button opens (PixaWalletDialog), so both
+    // list the same exchanges.
+    exchanges: {
+        load: () => import("../components/PixaWalletExchangesDialog"),
+        props: (api, close) => ({ open: true, onClose: close }),
         sfxOpen: "state-change_confirm-down",
         sfxClose: "labactive",
     },
@@ -2134,7 +2144,7 @@ const ToolbarComponent = React.memo(
          onOpenMenuDrawer, onResetSearch, onSearchChange,
          onGoHome, onGoToUsername, onGoToTag, onGoToCommunity, onGoToArtwork,
          onSetTagNavigation,
-         onIco, onWitnesses, onAppinfo, onSettings, onToolbarMenu,
+         onTrade, onWitnesses, onAppinfo, onSettings, onToolbarMenu,
      }) => {
         useLanguage();
         return (
@@ -2157,13 +2167,16 @@ const ToolbarComponent = React.memo(
                     onSetTagNavigation={onSetTagNavigation}
                     controls={searchControls}
                 />
-                <Tooltip title={t("components.index.exclusive_discount_for_a_limited_time_only")}>
-                    <Button className={classes.toolbarPrimaryButton} onClick={onIco}>
-                        <SaleIcon className={classes.icoSaleHidden} />
-                        <span>{t("words.shop", {TUC: true})} </span>
-                        <span className={classes.icoSaleHidden}>{t("words.now", {TUC: true})}</span>
-                    </Button>
-                </Tooltip>
+                {/* Trade: opens the exchange picker (the wallet's Trade
+                    dialog). Labelled with the wallet button's own key, so the
+                    two read the same in every locale. Deliberately "Trade",
+                    never "Buy", and no price on it: it stands out as the
+                    toolbar's one filled pill, with a white shine crossing it
+                    every few seconds. */}
+                <Button className={classes.toolbarTradeButton} onClick={onTrade}>
+                    <TradeIcon className={classes.toolbarTradeIcon} />
+                    <span>{t("components.pixa_wallet_dialog.trade", {TUC: true})}</span>
+                </Button>
                 <div className={classes.toolbarMenuButtons}>
                     {/* Ask Help: the community's Telegram group. A real link
                         (href → MUI renders an <a>) rather than a window.open
@@ -2693,31 +2706,85 @@ const styles = (theme) => {
             [theme.breakpoints.down("md")]: { "& .text": { display: "none" } },
             [theme.breakpoints.down("sm")]: { display: "none" },
         },
-        toolbarPrimaryButton: {
-            backgroundImage: "linear-gradient(66deg, #222 17%, #7777779e 48%, #222)",
-            transform: "scale(1)",
-            boxShadow: "0px 0px 8px 0px #ffffffaa",
-            transition: `transform ${buttonTransition}, box-shadow ${buttonTransition}`,
-            color: "#ffffff",
-            border: "2px solid #fff",
-            borderRadius: 16,
-            position: "absolute",
-            [theme.breakpoints.down("sm")]: { display: "none" },
-            top: 24,
-            marginLeft: 8,
-            marginTop: 8,
-            "& svg": { marginRight: 8, color: "#ffffff" },
-            "&:hover": { transform: "scale(1.08)", boxShadow: "0px 0px 12px 2px #ffffffaa" },
+        // Trade: a light grey pill, dark bold label, soft halo, white on hover
+        // — the one filled button on the dark toolbar. Placed like the Shop
+        // button it replaces (absolute, right after the search bar, never
+        // pushing the buttons on the right) and just as tall: 8 px padding
+        // instead of the old 2 px border. Narrower padding and no icon below
+        // 1280 px keep the old footprint where the toolbar is tight; hidden
+        // on compact layouts, where the ⋮ menu's first entry stands in for it.
+        // Its shine is the wallet Trade button's (tradeShine in
+        // PixaWalletDialog, where the geometry and timing are explained): a
+        // pure white streak crossing it from the top right corner to the
+        // bottom left, bright for about 0.5 s, then 3 s of rest. It runs on
+        // the ::after below, under the label, clipped to the pill by
+        // overflow (which leaves the button's own halo alone); isolation
+        // keeps that rounded clip working in Safari. The toolbar mounts with
+        // the app shell, so the -2 s delay puts the first pass 1 s in, once
+        // the landing's dissolve and the home→app overlay are over.
+        "@keyframes tradeShine": {
+            "0%, 82.192%": { transform: "translate(22.667%, -22.667%)" },
+            "100%": { transform: "translate(-22.667%, 22.667%)" },
         },
+        toolbarTradeButton: {
+            position: "absolute",
+            top: 24,
+            marginTop: 8,
+            marginLeft: 8,
+            padding: "8px 18px",
+            borderRadius: 16,
+            overflow: "hidden",
+            isolation: "isolate",
+            color: "#222",
+            backgroundColor: "#d0d0d0",
+            fontWeight: 700,
+            boxShadow: "0px 0px 4px 0px #d0d0d0aa",
+            transform: "scale(1)",
+            transition: `transform ${buttonTransition}, box-shadow ${buttonTransition}`,
+            "& svg": { marginRight: 8, color: "#222" },
+            "&::after": {
+                content: "''",
+                position: "absolute",
+                top: "-100%",
+                left: "-100%",
+                width: "300%",
+                height: "300%",
+                zIndex: -1,
+                pointerEvents: "none",
+                background: "linear-gradient(225deg, rgba(255, 255, 255, 0) 44%, rgba(255, 255, 255, 0.85) 48.5%, #ffffff 50%, rgba(255, 255, 255, 0.85) 51.5%, rgba(255, 255, 255, 0) 56%)",
+                transform: "translate(22.667%, -22.667%)",
+                animationName: "$tradeShine",
+                animationDuration: "3.65s",
+                animationTimingFunction: "linear",
+                animationIterationCount: "infinite",
+                animationDelay: "-2s",
+                "@media (prefers-reduced-motion: reduce)": {
+                    animationName: "none",
+                },
+            },
+            "&:hover": {
+                backgroundColor: "#ffffff",
+                transform: "scale(1.1)",
+                boxShadow: "0px 0px 8px 1px #ffffffaa",
+            },
+            // MUI clears a text button's hover fill on touch screens, which
+            // would leave the black label on the dark bar: keep it white.
+            "@media (hover: none)": {
+                "&:hover": { backgroundColor: "#ffffff" },
+            },
+            [theme.breakpoints.down("md")]: { padding: "8px 14px" },
+            [theme.breakpoints.down("sm")]: { display: "none" },
+        },
+        toolbarTradeIcon: { [theme.breakpoints.down("md")]: { display: "none" } },
         toolbarSecondaryButton: {
-            color: "#666",
+            color: "#666 !important",
             marginLeft: 8,
             borderRadius: 16,
             backgroundColor: "transparent",
             transition: `color ${buttonTransition}, background-color ${buttonTransition}`,
-            "&:hover": { color: "#aaa", backgroundColor: "rgba(255, 255, 255, 0.08)" },
-            "& svg": { marginRight: 8, transition: `color ${buttonTransition}`, color: "#b8b8b8" },
-            "&:hover svg": { color: "#fff" },
+            "&:hover": { color: "#aaa !important", backgroundColor: "rgba(255, 255, 255, 0.08) !important" },
+            "& svg": { marginRight: 8, transition: `color ${buttonTransition}`, color: "#b8b8b8 !important" },
+            "&:hover svg": { color: "#fff !important" },
         },
         toolbarSettingsButton: {
             borderRadius: 16,
@@ -2745,7 +2812,6 @@ const styles = (theme) => {
             textTransform: "uppercase",
             fontFamily: '"Normative Pro"',
         },
-        icoSaleHidden: { [theme.breakpoints.down("md")]: { display: "none" } },
         content: {
             position: "absolute",
             overflow: "hidden",
@@ -3257,7 +3323,15 @@ function Index({ classes, history, settings: rawSettings }) {
         history.push("/trending/" + tagname + suffix);
     }, [history, readMeta, flushSearchAddress]);
 
+    // ── Trade ─────────────────────────────────────────────────────────────
+    // The toolbar's Trade button and its compact ⋮-menu entry: the exchange
+    // picker, in the dialog slot. Takes no arguments, so the click event
+    // never lands in openDialog's options.
+    const openTrade = useCallback(() => openDialog("exchanges"), [openDialog]);
+
     // ── ICO link ──────────────────────────────────────────────────────────
+    // Reached only through the ICO dispatcher event now: the toolbar's
+    // former Shop button is the Trade button above.
     const openIco = useCallback(() => {
         window.open("https://pixagram.shop", "_blank", "noopener,noreferrer");
     }, []);
@@ -3424,6 +3498,9 @@ function Index({ classes, history, settings: rawSettings }) {
         let cancelled = false;
         const importers = [
             ...Object.values(PAGE_IMPORTERS),
+            // The exchange picker behind the toolbar's Trade button, so a
+            // click opens it without the dim cold-load backdrop first.
+            DIALOG_REGISTRY.exchanges.load,
             // Not a page, but same reasoning: warm the (now code-split)
             // post-publish overlay so a successful broadcast never waits
             // on its chunk download.
@@ -3548,7 +3625,7 @@ function Index({ classes, history, settings: rawSettings }) {
                             onGoToCommunity={goToCommunity}
                             onGoToArtwork={goToArtwork}
                             onSetTagNavigation={setTagNavigation}
-                            onIco={openIco}
+                            onTrade={openTrade}
                             onWitnesses={openWitnesses}
                             onAppinfo={openAppinfo}
                             onSettings={openSettings}
@@ -3579,7 +3656,7 @@ function Index({ classes, history, settings: rawSettings }) {
                         onInfoClick={openAppinfo}
                         onSettingsClick={openSettings}
                         onWitnessesClick={openWitnesses}
-                        onIcoClick={openIco}
+                        onTradeClick={openTrade}
                     />
 
                     <DrawerSlot

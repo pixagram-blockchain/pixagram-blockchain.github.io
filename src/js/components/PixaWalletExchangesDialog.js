@@ -93,6 +93,13 @@ const styles = theme => ({
     },
     // Two columns on phones, three on small screens, four from medium up.
     grid: {
+        "& > a": {
+            transition: `filter ${TRANSITION}`,
+            filter: "invert(0.875)"
+        },
+        "& > a:hover": {
+            filter: "invert(1.0)"
+        },
         display: "grid",
         gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
         gridAutoRows: "1fr",

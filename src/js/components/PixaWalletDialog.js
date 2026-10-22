@@ -138,15 +138,6 @@ import {
 
 import { withLanguage } from "../utils/withLanguage";
 
-// Home / Index's rainbow at full strength, closed into a loop (orange runs
-// back into violet through red) so it can spin around the claim button.
-// Their outer deep red is left out: opaque, it reads as a gap in the ring.
-// Same `in hsl shorter hue` interpolation, with an sRGB twin for
-// engines that can't parse it (JSS `fallbacks`, as on Home).
-const CLAIM_RAINBOW_STOPS = "#f000ff, #0095ff, #0cffe9, #d8ff00, #f59300, #f000ff";
-const CLAIM_RAINBOW = `conic-gradient(from 0deg in hsl shorter hue, ${CLAIM_RAINBOW_STOPS})`;
-const CLAIM_RAINBOW_FALLBACK = `conic-gradient(${CLAIM_RAINBOW_STOPS})`;
-
 const styles = theme => ({
     backdrop: {
         zIndex: theme.zIndex.drawer + 1,
@@ -558,54 +549,36 @@ const styles = theme => ({
             }
         }
     },
-    // Claim button: black label on a white fill inside a spinning rainbow
-    // border, with the same rainbow blurred into a glow outside it. Both
-    // layers are spans behind the label (the button is its own stacking
-    // context), each a rounded window onto a large conic rainbow that
-    // rotates — on the compositor, so the endless spin costs no main-thread
-    // work. The ring's white fill leaves 2 px of rainbow showing; the glow's
-    // window is blurred. Hover greys the fill a touch and lifts the glow;
-    // disabled (another user's wallet, a claim in flight) greys the ring,
-    // drops the glow and stops the spin.
-    "@keyframes claimRainbowSpin": {
-        from: { transform: "rotate(0deg)" },
-        to: { transform: "rotate(360deg)" },
-    },
+    // Claim button: black label on a plain white fill, pinned to the top
+    // right of the History view. Hover greys the fill a touch; disabled
+    // (another user's wallet, a claim in flight) fades the whole button —
+    // the label stays black (MUI's dark-theme disabled grey is unreadable
+    // on white).
     rewardClaim: {
         position: "absolute",
         top: "0px",
         right: "18px",
         display: "grid",
         borderRadius: "16px",
-        isolation: "isolate",
         // 80 % on desktop, 60 % on mobile (below), shrinking into the
         // top-right corner the button is pinned to.
         transform: "scale(0.8)",
         transformOrigin: "top right",
         color: "#000000 !important",
-        backgroundColor: "transparent",
+        backgroundColor: "#ffffff",
+        transition: "background-color 240ms cubic-bezier(0.4, 0, 0.2, 1) 0ms, opacity 240ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
         "&:hover": {
-            backgroundColor: "transparent",
-        },
-        "&:hover $rewardClaimGlow": {
-            opacity: 1,
-        },
-        "&:hover $rewardClaimRing::after": {
             backgroundColor: "#ececec",
         },
-        // MUI's dark-theme disabled text is light grey: unreadable on white.
+        // MUI clears a text button's hover fill on touch screens, which
+        // would leave the black label on the dark page: keep it white.
+        "@media (hover: none)": {
+            "&:hover": {
+                backgroundColor: "#ffffff",
+            },
+        },
         "&.Mui-disabled": {
-            color: "rgba(0, 0, 0, 0.45)",
-        },
-        "&.Mui-disabled $rewardClaimGlow": {
-            opacity: 0,
-        },
-        "&.Mui-disabled $rewardClaimRing": {
-            filter: "grayscale(1)",
-            opacity: 0.6,
-        },
-        "&.Mui-disabled $rewardClaimSpin": {
-            animationPlayState: "paused",
+            opacity: 0.45,
         },
         [theme.breakpoints.down("sm")]: {
             top: "12px",
@@ -617,64 +590,6 @@ const styles = theme => ({
                 maxWidth: 140
             }
         }
-    },
-    rewardClaimGlow: {
-        position: "absolute",
-        top: -1,
-        right: -1,
-        bottom: -1,
-        left: -1,
-        zIndex: -1,
-        borderRadius: 18,
-        overflow: "hidden",
-        pointerEvents: "none",
-        filter: "blur(16px) contrast(1.6) brightness(.8)",
-        opacity: 0.8,
-        transition: "opacity 360ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
-    },
-    rewardClaimRing: {
-        position: "absolute",
-        top: 0,
-        right: 0,
-        bottom: 0,
-        left: 0,
-        zIndex: -1,
-        borderRadius: 16,
-        overflow: "hidden",
-        pointerEvents: "none",
-        transition: "opacity 240ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
-        // The white fill, leaving a 2 px ring of the rainbow around it.
-        "&::after": {
-            content: "''",
-            position: "absolute",
-            top: 1,
-            right: 1,
-            bottom: 1,
-            left: 1,
-            borderRadius: 14,
-            backgroundColor: "#ffffff",
-            transition: "background-color 240ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
-        },
-    },
-    // Square, centred on the button and far larger than its diagonal, so the
-    // rounded windows above are covered at every angle of the turn.
-    rewardClaimSpin: {
-        position: "absolute",
-        left: "50%",
-        top: "50%",
-        width: 600,
-        height: 600,
-        marginLeft: -300,
-        marginTop: -300,
-        fallbacks: { background: CLAIM_RAINBOW_FALLBACK },
-        background: CLAIM_RAINBOW,
-        animationName: "$claimRainbowSpin",
-        animationDuration: "4s",
-        animationTimingFunction: "linear",
-        animationIterationCount: "infinite",
-        "@media (prefers-reduced-motion: reduce)": {
-            animationName: "none",
-        },
     },
     historyControls: {
         "& > .MuiFormControlLabel-root": {
@@ -961,6 +876,72 @@ const styles = theme => ({
             transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,box-shadow 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,border 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms"
         }
     },
+    // Trade, in the overview's tools row: light grey fill, dark label, white
+    // on hover — the one filled button among the text ones beside it (it
+    // opens the exchanges dialog, like the toolbar's Trade button).
+    tradeButton: {
+        "&.MuiButton-contained": {
+            backgroundColor: "#e6e6e6",
+            color: "#222",
+            borderRadius: "16px",
+            boxShadow: "none",
+            transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
+        },
+        "&.MuiButton-contained:hover": {
+            backgroundColor: "#ffffff",
+            boxShadow: "none",
+        },
+        // MUI greys a contained button's hover fill on touch screens: keep
+        // it white.
+        "@media (hover: none)": {
+            "&.MuiButton-contained:hover": {
+                backgroundColor: "#ffffff",
+            },
+        },
+    },
+    // Shine on the Trade button: a pure white streak crosses it from the top
+    // right corner to the bottom left, then rests 3 s (a 3.65 s cycle, the
+    // sweep at its end). The sweep is a linear 0.65 s, of which the bright
+    // core spends about 0.5 s on the button — the ends are the soft edge
+    // entering and leaving. The streak is the middle band of a 45°
+    // gradient on an ::after three times the button's size, centred on it
+    // and moved by transform alone, so the compositor runs it with no layout
+    // or paint per frame. ±22.667 % of its own size is ±0.68 of the
+    // button's: the band's soft edge just clears the corners at both ends.
+    // It passes under the label (z-index -1 in the button's own stacking
+    // context) and is clipped to the pill; isolation also keeps that rounded
+    // clip working in Safari. The class is only on while the overview is on
+    // screen, so each visit restarts the cycle: the -2 s delay puts the
+    // first sweep 1 s after the overview appears, once its fade-in is done.
+    // The same shine runs on the Trade entry of the toolbar's ⋮ menu.
+    "@keyframes tradeShine": {
+        "0%, 82.192%": { transform: "translate(22.667%, -22.667%)" },
+        "100%": { transform: "translate(-22.667%, 22.667%)" },
+    },
+    tradeShine: {
+        overflow: "hidden",
+        isolation: "isolate",
+        "&::after": {
+            content: "''",
+            position: "absolute",
+            top: "-100%",
+            left: "-100%",
+            width: "300%",
+            height: "300%",
+            zIndex: -1,
+            pointerEvents: "none",
+            background: "linear-gradient(225deg, rgba(255, 255, 255, 0) 44%, rgba(255, 255, 255, 0.85) 48.5%, #ffffff 50%, rgba(255, 255, 255, 0.85) 51.5%, rgba(255, 255, 255, 0) 56%)",
+            transform: "translate(22.667%, -22.667%)",
+            animationName: "$tradeShine",
+            animationDuration: "3.65s",
+            animationTimingFunction: "linear",
+            animationIterationCount: "infinite",
+            animationDelay: "-2s",
+            "@media (prefers-reduced-motion: reduce)": {
+                animationName: "none",
+            },
+        },
+    },
     portfolioCard: {
         cursor: "pointer",
         backgroundColor: "#151515",
@@ -973,82 +954,16 @@ const styles = theme => ({
             transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms"
         }
     },
-    // "Rewards pending" card of the overview, on top of portfolioCard. While
-    // the wallet's owner has rewards to claim it wears the claim button's
-    // look: a 1 px spinning rainbow ring with the same rainbow blurred into a
-    // glow around it (rewardsCardRing / rewardsCardGlow, rendered only then),
-    // the glow lifting on hover.
-    // The card is deliberately NOT a stacking context: ring and glow sit at
-    // z-index -1 in the swipe view's stacking context, behind the card and
-    // its neighbours, so the card's own paint covers all but the 1 px ring
-    // and the glow only shows around it instead of over the next card or the
-    // transfer button. Nothing between the card and that context may paint a
-    // background, or it would hide them.
-    rewardsCard: {
-        position: "relative",
-        "&:hover $rewardsCardGlow": {
-            opacity: 1,
-        },
-    },
-    // Ring and glow: rounded windows 1 px outside the card onto a spinning
-    // conic rainbow, as on the claim button (same rainbow, same spin), the
-    // glow's window blurred. They fade in when rewards arrive.
-    "@keyframes rewardsCardIn": {
-        from: { opacity: 0 },
-    },
-    rewardsCardGlow: {
-        position: "absolute",
-        top: -1,
-        right: -1,
-        bottom: -1,
-        left: -1,
-        zIndex: -1,
-        borderRadius: 19, // portfolioCard's 18 + the 1 px ring
-        overflow: "hidden",
-        pointerEvents: "none",
-        filter: "blur(16px) contrast(1.6) brightness(.8)",
-        opacity: 0.8,
-        transition: "opacity 360ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
-        animationName: "$rewardsCardIn",
-        animationDuration: "360ms",
-        animationTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
-    },
-    rewardsCardRing: {
-        position: "absolute",
-        top: -1,
-        right: -1,
-        bottom: -1,
-        left: -1,
-        zIndex: -1,
-        borderRadius: 19,
-        overflow: "hidden",
-        pointerEvents: "none",
-        animationName: "$rewardsCardIn",
-        animationDuration: "360ms",
-        animationTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
-    },
-    // A centred square 150 % of the card's width: the claim button's fixed
-    // 600 px is too small for a full-width card, and 150 % stays wider than
-    // the diagonal of any card up to about as tall as it is wide, so the
-    // windows are covered at every angle of the turn. Squared with padding
-    // (percentages of the width), not aspect-ratio.
-    rewardsCardSpin: {
-        position: "absolute",
-        left: "50%",
-        top: "50%",
-        width: "150%",
-        height: 0,
-        paddingTop: "150%",
-        marginLeft: "-75%",
-        marginTop: "-75%",
-        fallbacks: { background: CLAIM_RAINBOW_FALLBACK },
-        background: CLAIM_RAINBOW,
-        animationName: "$claimRainbowSpin",
-        animationDuration: "4s",
-        animationTimingFunction: "linear",
-        animationIterationCount: "infinite",
-        "@media (prefers-reduced-motion: reduce)": {
-            animationName: "none",
+    // "Rewards pending" card of the overview, on top of portfolioCard: while
+    // the wallet's owner has rewards to claim it carries a thin white
+    // outline, drawn inside the card (inset shadow) so nothing around it
+    // moves, and brightening on hover.
+    rewardsCardLive: {
+        boxShadow: "inset 0px 0px 0px 1px rgba(255, 255, 255, 0.45)",
+        transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms, box-shadow 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
+        "&:hover": {
+            boxShadow: "inset 0px 0px 0px 1px rgba(255, 255, 255, 0.8)",
+            transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms, box-shadow 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
         },
     },
     // Live power-down schedule under the "Powering down" title of the PXP view.
@@ -3999,9 +3914,9 @@ class PixaWalletDialog extends React.PureComponent {
         const pixaPctDisplay = formatPercent(_tokenTotalUsd > 0 ? (_pixaUsd / _tokenTotalUsd) * 100 : 0, 1);
         const pxsPctDisplay = formatPercent(_tokenTotalUsd > 0 ? (_pxsUsd / _tokenTotalUsd) * 100 : 0, 1);
         const hasRewards = _rewardPixa > 0 || _rewardPxs > 0 || _rewardPxp > 0;
-        // Rainbow ring and glow on the overview's "Rewards pending" card: only
-        // when the viewer can claim them, i.e. their own wallet (on someone
-        // else's the claim button is greyed out, so the card stays plain too).
+        // White outline on the overview's "Rewards pending" card: only when
+        // the viewer can claim them, i.e. their own wallet (on someone else's
+        // the claim button is greyed out, so the card stays plain too).
         const rewardsCardLive = hasRewards && !!_itsOwnProfile;
         const _hasAnyFunds = _totalUsd > 0 || _pxpBalance > 0 || _pixaHoldings > 0 || _pxsHoldings > 0;
 
@@ -4109,11 +4024,7 @@ class PixaWalletDialog extends React.PureComponent {
 
                     {/* Quick Stats */}
                     <div style={{display: "flex", gap: "12px", flexWrap: "wrap"}}>
-                        <div className={`${classes.portfolioCard} ${classes.rewardsCard}`} onClick={() => {this._handle_tab_value_change({}, 3)}} style={{flex: "1 1 calc(50% - 6px)", backgroundImage: "url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MDAgNTAwIj4KICA8cGF0aCBkPSJNIDM3NC4wOTQgMzQzLjQyOSBDIDM2OC4wOTEgMzM3LjI3MiAzNjAuNTQ3IDMzNC4xOTQgMzUxLjc3MiAzMzQuMTk0IEwgMjQ0LjAxMiAzMzQuMTk0IEwgMjExLjk5MiAzMjIuOTU2IEwgMjE3LjA3MSAzMDguNDg2IEwgMjQ0LjAxMiAzMTguNzk5IEwgMjg3LjExNyAzMTguNzk5IEMgMjkyLjUwMyAzMTguNzk5IDI5Ni44MTUgMzE2LjY0MiAzMDAuMzU1IDMxMy4xMDMgQyAzMDMuODk2IDMwOS41NjIgMzA1LjU5IDMwNS4yNTMgMzA1LjU5IDMwMC40OCBDIDMwNS41OSAyOTIuMTY2IDMwMS41ODggMjg2LjQ3IDI5My41ODIgMjgzLjIzNyBMIDE4MS42NjYgMjQxLjgyNyBMIDE1MS42NDcgMjQxLjgyNyBMIDE1MS42NDcgMzgwLjM3NiBMIDI1OS40MDYgNDExLjE2NCBMIDM4My4wMjIgMzY0Ljk4MSBDIDM4My4xNzcgMzU2LjgyMSAzODAuMDk4IDM0OS41ODggMzc0LjA5NCAzNDMuNDI5IE0gMTIwLjg1OSAyNDEuODI3IEwgNTkuMDM0IDI0MS44MjcgTCA1OS4wMzQgNDExLjE2NCBMIDEyMC44NTkgNDExLjE2NCBMIDEyMC44NTkgMjQxLjgyNyBaIiBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAxOyB0cmFuc2Zvcm0tYm94OiBmaWxsLWJveDsgdHJhbnNmb3JtLW9yaWdpbjogNTAlIDUwJTsgZmlsbDogcmdiKDI1NSwgMjU1LCAyNTUpOyBmaWxsLW9wYWNpdHk6IDAuMDU7IiB0cmFuc2Zvcm09Im1hdHJpeCgwLjgzODY3MSwgLTAuNTQ0NjM5LCAwLjU0NDYzOSwgMC44Mzg2NzEsIC0wLjAwMDAwNiwgLTAuMDAwMDA3KSI+PC9wYXRoPgogIDxwYXRoIGQ9Ik0gMzA5LjQyIDIzLjcyNCBDIDI5Mi45MTIgMjMuNjM2IDI3Ni44NDQgMzkuNTMxIDI4NC4xOCA1OS4yNzEgTCAyNTYuNDkzIDU5LjI3MSBDIDI0Ni44NDMgNTkuMjcxIDIzOS4wMjcgNjcuMDg3IDIzOS4wMjcgNzYuNzM5IEwgMjM5LjAyNyA5NC4yMDYgQyAyMzkuMDI3IDk5LjAyNyAyNDIuOTM4IDEwMi45MzkgMjQ3Ljc2IDEwMi45MzkgTCAzMjYuMzY0IDEwMi45MzkgTCAzMjYuMzY0IDc2LjczOSBMIDM0My44MyA3Ni43MzkgTCAzNDMuODMgMTAyLjkzOSBMIDQyMi40MzUgMTAyLjkzOSBDIDQyNy4yNTggMTAyLjkzOSA0MzEuMTcgOTkuMDI3IDQzMS4xNyA5NC4yMDYgTCA0MzEuMTcgNzYuNzM5IEMgNDMxLjE3IDY3LjA4NyA0MjMuMzQ0IDU5LjI3MSA0MTMuNzAzIDU5LjI3MSBMIDM4Ni4wMTYgNTkuMjcxIEMgMzk2LjIzNCAzMC43MTEgMzU3LjgwNiAxMC41MzYgMzQwLjA3NSAzNS4xNjQgTCAzMzUuMDk3IDQxLjgwMiBMIDMzMC4xMTkgMzQuOTkxIEMgMzI0LjYxNSAyNy4yMTggMzE3LjAxOCAyMy44MTIgMzA5LjQyIDIzLjcyNCBNIDMwOC44OTcgNDEuODAyIEMgMzE2LjY2OSA0MS44MDIgMzIwLjYgNTEuMjM1IDMxNS4wOTcgNTYuNzM4IEMgMzA5LjU5NiA2Mi4yNCAzMDAuMTYzIDU4LjMwOSAzMDAuMTYzIDUwLjUzNiBDIDMwMC4xNjMgNDUuNzA3IDMwNC4wNzUgNDEuODAyIDMwOC44OTcgNDEuODAyIE0gMzYxLjMgNDEuODAyIEMgMzY5LjA3MyA0MS44MDIgMzczLjAwNCA1MS4yMzUgMzY3LjUwMiA1Ni43MzggQyAzNjEuOTk4IDYyLjI0IDM1Mi41NjUgNTguMzA5IDM1Mi41NjUgNTAuNTM2IEMgMzUyLjU2NSA0NS43MDcgMzU2LjQ3OCA0MS44MDIgMzYxLjMgNDEuODAyIE0gMjQ3Ljc2IDExMS42NzIgTCAyNDcuNzYgMTgxLjU0NSBDIDI0Ny43NiAxOTEuMTg2IDI1NS41NzUgMTk5LjAxMiAyNjUuMjI3IDE5OS4wMTIgTCA0MDQuOTY5IDE5OS4wMTIgQyA0MTQuNjExIDE5OS4wMTIgNDIyLjQzNSAxOTEuMTg2IDQyMi40MzUgMTgxLjU0NSBMIDQyMi40MzUgMTExLjY3MiBMIDM0My44MyAxMTEuNjcyIEwgMzQzLjgzIDE4MS41NDUgTCAzMjYuMzY0IDE4MS41NDUgTCAzMjYuMzY0IDExMS42NzIgTCAyNDcuNzYgMTExLjY3MiBaIiBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAxOyB0cmFuc2Zvcm0tYm94OiBmaWxsLWJveDsgdHJhbnNmb3JtLW9yaWdpbjogNTAlIDUwJTsgZmlsbDogcmdiKDI1NSwgMjU1LCAyNTUpOyBmaWxsLW9wYWNpdHk6IDAuMDU7IiB0cmFuc2Zvcm09Im1hdHJpeCgwLjgzODY3MSwgLTAuNTQ0NjM5LCAwLjU0NDYzOSwgMC44Mzg2NzEsIC0wLjAwMDAwNCwgLTAuMDAwMDEzKSI+PC9wYXRoPgo8L3N2Zz4K)", backgroundRepeat: "no-repeat", backgroundPosition: "90% 50%", backgroundSize: "30%", minWidth: "140px", padding: "16px"}}>
-                            {rewardsCardLive && <React.Fragment>
-                                <span className={classes.rewardsCardGlow} aria-hidden="true"><span className={classes.rewardsCardSpin}/></span>
-                                <span className={classes.rewardsCardRing} aria-hidden="true"><span className={classes.rewardsCardSpin}/></span>
-                            </React.Fragment>}
+                        <div className={rewardsCardLive ? `${classes.portfolioCard} ${classes.rewardsCardLive}` : classes.portfolioCard} onClick={() => {this._handle_tab_value_change({}, 3)}} style={{flex: "1 1 calc(50% - 6px)", backgroundImage: "url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MDAgNTAwIj4KICA8cGF0aCBkPSJNIDM3NC4wOTQgMzQzLjQyOSBDIDM2OC4wOTEgMzM3LjI3MiAzNjAuNTQ3IDMzNC4xOTQgMzUxLjc3MiAzMzQuMTk0IEwgMjQ0LjAxMiAzMzQuMTk0IEwgMjExLjk5MiAzMjIuOTU2IEwgMjE3LjA3MSAzMDguNDg2IEwgMjQ0LjAxMiAzMTguNzk5IEwgMjg3LjExNyAzMTguNzk5IEMgMjkyLjUwMyAzMTguNzk5IDI5Ni44MTUgMzE2LjY0MiAzMDAuMzU1IDMxMy4xMDMgQyAzMDMuODk2IDMwOS41NjIgMzA1LjU5IDMwNS4yNTMgMzA1LjU5IDMwMC40OCBDIDMwNS41OSAyOTIuMTY2IDMwMS41ODggMjg2LjQ3IDI5My41ODIgMjgzLjIzNyBMIDE4MS42NjYgMjQxLjgyNyBMIDE1MS42NDcgMjQxLjgyNyBMIDE1MS42NDcgMzgwLjM3NiBMIDI1OS40MDYgNDExLjE2NCBMIDM4My4wMjIgMzY0Ljk4MSBDIDM4My4xNzcgMzU2LjgyMSAzODAuMDk4IDM0OS41ODggMzc0LjA5NCAzNDMuNDI5IE0gMTIwLjg1OSAyNDEuODI3IEwgNTkuMDM0IDI0MS44MjcgTCA1OS4wMzQgNDExLjE2NCBMIDEyMC44NTkgNDExLjE2NCBMIDEyMC44NTkgMjQxLjgyNyBaIiBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAxOyB0cmFuc2Zvcm0tYm94OiBmaWxsLWJveDsgdHJhbnNmb3JtLW9yaWdpbjogNTAlIDUwJTsgZmlsbDogcmdiKDI1NSwgMjU1LCAyNTUpOyBmaWxsLW9wYWNpdHk6IDAuMDU7IiB0cmFuc2Zvcm09Im1hdHJpeCgwLjgzODY3MSwgLTAuNTQ0NjM5LCAwLjU0NDYzOSwgMC44Mzg2NzEsIC0wLjAwMDAwNiwgLTAuMDAwMDA3KSI+PC9wYXRoPgogIDxwYXRoIGQ9Ik0gMzA5LjQyIDIzLjcyNCBDIDI5Mi45MTIgMjMuNjM2IDI3Ni44NDQgMzkuNTMxIDI4NC4xOCA1OS4yNzEgTCAyNTYuNDkzIDU5LjI3MSBDIDI0Ni44NDMgNTkuMjcxIDIzOS4wMjcgNjcuMDg3IDIzOS4wMjcgNzYuNzM5IEwgMjM5LjAyNyA5NC4yMDYgQyAyMzkuMDI3IDk5LjAyNyAyNDIuOTM4IDEwMi45MzkgMjQ3Ljc2IDEwMi45MzkgTCAzMjYuMzY0IDEwMi45MzkgTCAzMjYuMzY0IDc2LjczOSBMIDM0My44MyA3Ni43MzkgTCAzNDMuODMgMTAyLjkzOSBMIDQyMi40MzUgMTAyLjkzOSBDIDQyNy4yNTggMTAyLjkzOSA0MzEuMTcgOTkuMDI3IDQzMS4xNyA5NC4yMDYgTCA0MzEuMTcgNzYuNzM5IEMgNDMxLjE3IDY3LjA4NyA0MjMuMzQ0IDU5LjI3MSA0MTMuNzAzIDU5LjI3MSBMIDM4Ni4wMTYgNTkuMjcxIEMgMzk2LjIzNCAzMC43MTEgMzU3LjgwNiAxMC41MzYgMzQwLjA3NSAzNS4xNjQgTCAzMzUuMDk3IDQxLjgwMiBMIDMzMC4xMTkgMzQuOTkxIEMgMzI0LjYxNSAyNy4yMTggMzE3LjAxOCAyMy44MTIgMzA5LjQyIDIzLjcyNCBNIDMwOC44OTcgNDEuODAyIEMgMzE2LjY2OSA0MS44MDIgMzIwLjYgNTEuMjM1IDMxNS4wOTcgNTYuNzM4IEMgMzA5LjU5NiA2Mi4yNCAzMDAuMTYzIDU4LjMwOSAzMDAuMTYzIDUwLjUzNiBDIDMwMC4xNjMgNDUuNzA3IDMwNC4wNzUgNDEuODAyIDMwOC44OTcgNDEuODAyIE0gMzYxLjMgNDEuODAyIEMgMzY5LjA3MyA0MS44MDIgMzczLjAwNCA1MS4yMzUgMzY3LjUwMiA1Ni43MzggQyAzNjEuOTk4IDYyLjI0IDM1Mi41NjUgNTguMzA5IDM1Mi41NjUgNTAuNTM2IEMgMzUyLjU2NSA0NS43MDcgMzU2LjQ3OCA0MS44MDIgMzYxLjMgNDEuODAyIE0gMjQ3Ljc2IDExMS42NzIgTCAyNDcuNzYgMTgxLjU0NSBDIDI0Ny43NiAxOTEuMTg2IDI1NS41NzUgMTk5LjAxMiAyNjUuMjI3IDE5OS4wMTIgTCA0MDQuOTY5IDE5OS4wMTIgQyA0MTQuNjExIDE5OS4wMTIgNDIyLjQzNSAxOTEuMTg2IDQyMi40MzUgMTgxLjU0NSBMIDQyMi40MzUgMTExLjY3MiBMIDM0My44MyAxMTEuNjcyIEwgMzQzLjgzIDE4MS41NDUgTCAzMjYuMzY0IDE4MS41NDUgTCAzMjYuMzY0IDExMS42NzIgTCAyNDcuNzYgMTExLjY3MiBaIiBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAxOyB0cmFuc2Zvcm0tYm94OiBmaWxsLWJveDsgdHJhbnNmb3JtLW9yaWdpbjogNTAlIDUwJTsgZmlsbDogcmdiKDI1NSwgMjU1LCAyNTUpOyBmaWxsLW9wYWNpdHk6IDAuMDU7IiB0cmFuc2Zvcm09Im1hdHJpeCgwLjgzODY3MSwgLTAuNTQ0NjM5LCAwLjU0NDYzOSwgMC44Mzg2NzEsIC0wLjAwMDAwNCwgLTAuMDAwMDEzKSI+PC9wYXRoPgo8L3N2Zz4K)", backgroundRepeat: "no-repeat", backgroundPosition: "90% 50%", backgroundSize: "30%", minWidth: "140px", padding: "16px"}}>
                             <Typography variant="body2" style={{color: "#999", marginBottom: "4px"}}>{t("components.pixa_wallet_dialog.rewards_pending")}</Typography>
                             <Typography variant="h6" className="monospace" style={{color: "#ffffff"}}>{fmtFiat(_rewardPixa * _pixaUsdPrice + _rewardPxs * _pxsUsdPrice + _rewardPxpInPixa * _pixaUsdPrice, 2)}</Typography>
                             <Typography variant="caption" style={{color: "#666"}}>{t("components.pixa_wallet_dialog.pxa_pxs_pxp", {
@@ -4146,7 +4057,7 @@ class PixaWalletDialog extends React.PureComponent {
                                 <Button onClick={this._open_bulk_create_dialog} variant={"text"}>{t("words.create_accounts")} <PersonAddRounded style={{marginLeft: "8px"}}/></Button>
                             )}
                             {_itsOwnProfile && <Button onClick={this._open_taxes_dialog} variant={"text"}>{t("components.pixa_wallet_dialog.taxes")} <DescriptionRounded style={{marginLeft: "8px"}}/></Button>}
-                            {_itsOwnProfile && <Button onClick={this._open_exchanges_dialog} variant={"text"}>{t("components.pixa_wallet_dialog.trade")} <ShowChartRounded style={{marginLeft: "8px"}}/></Button>}
+                            {_itsOwnProfile && <Button onClick={this._open_exchanges_dialog} variant={"contained"} className={open && _tab_value === false ? `${classes.tradeButton} ${classes.tradeShine}` : classes.tradeButton}>{t("components.pixa_wallet_dialog.trade")} <ShowChartRounded style={{marginLeft: "8px"}}/></Button>}
                         </div>
                     </div>
                 </div>
@@ -4517,8 +4428,6 @@ class PixaWalletDialog extends React.PureComponent {
                                 </Tooltip>
                             </Typography>
                             {hasRewards && <Button className={classes.rewardClaim} color="primary" variant="text" onClick={this._claim_rewards} disabled={!_itsOwnProfile || _claiming_rewards}>
-                                <span className={classes.rewardClaimGlow} aria-hidden="true"><span className={classes.rewardClaimSpin}/></span>
-                                <span className={classes.rewardClaimRing} aria-hidden="true"><span className={classes.rewardClaimSpin}/></span>
                                 <span style={{display: "inline", marginTop: 4, fontSize: "1.075rem"}}>{t("components.pixa_wallet_dialog.claim_reward")}</span> <span style={{fontWeight: "550", marginTop: -8}} className={"subtitle"} className={"monospace"} style={{display: "inline", fontWeight: "400"}}>{t("components.pixa_wallet_dialog.pxa_pxs_pxp_2", {
                                 rewardPixa: formatInteger(_rewardPixa),
                                 rewardPxs: formatInteger(_rewardPxs),
