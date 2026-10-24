@@ -121,8 +121,8 @@ export const transform = async (file, step_n, fidelity, callback = () => {}, cal
         var input_image = (file.size > 1000000) ? await resizeImageTo2MP(file) : file;
         var num_inference_steps = Math.max(1, shift("num_inference_steps", step_n));
         var img2img_strength = shift("img2img_strength", 0.825 - Math.min(0.4, Math.max(0, fidelity)));
-        var guidance_scale = shift("guidance_scale", Math.max(1.0, 0.225+(step_n|0)/8));
-        var lora_intensity = shift("lora_intensity", PRESETS_TRANSFORM.lora_intensity + (step_n/100));
+        var guidance_scale = shift("guidance_scale", Math.max(1.0, 0.225+(step_n|0)/12));
+        var lora_intensity = shift("lora_intensity", PRESETS_TRANSFORM.lora_intensity + (step_n/100)/2);
 
         var dynamic_config = {
             ...PRESETS_TRANSFORM,
@@ -132,7 +132,6 @@ export const transform = async (file, step_n, fidelity, callback = () => {}, cal
             img2img_strength,
             input_image,
             guidance_scale,
-            lora_intensity,
             additional_prompt: PRESETS_TRANSFORM.additional_prompt + " " + description,
         };
         try {

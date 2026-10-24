@@ -124,12 +124,12 @@ const config = {
     // wherever onnxruntime-web's .wasm/.mjs assets are served from for the model
     // to load; the rest are optional.
     runtime: {
-        useWorker: "auto",   // "auto" (default) | true | false
+        useWorker: "false",   // "auto" (default) | true | false
         backend: "auto",     // "auto" tries WebGPU then WASM | "webgpu" | "wasm"
         wasmPaths: undefined, // e.g. "/ort/"
         numThreads: 1, // >1 needs cross-origin isolation (COOP/COEP)
-        maxBatch: 4, // images per batched inference (package default 8)
-        batchDelayMs: 20, // coalescing window (package default 12ms)
+        maxBatch: 2, // images per batched inference (package default 8)
+        batchDelayMs: 12, // coalescing window (package default 12ms)
     },
 };
 

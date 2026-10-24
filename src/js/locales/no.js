@@ -1836,6 +1836,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "Prisfeeden balanserer insentivene mellom valutaene. Avledet fra medianen av witness-prisfeedene.",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra veies opp mot Pixa-kapitaliseringen. Trykkingen stopper over 20 %, og «avkortings»-regelen slår inn over 30 %."
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "Del kreasjonen din på nettet",
+            "congratulations_share_your_artwork_with_your_friends": "Gratulerer! Del kunstverket ditt med vennene dine på andre plattformer, og fortell dem at du er på Pixagram!",
+            "download_the_image": "Last ned bildet",
+            "preparing_your_image": "Bildet ditt gjøres klart…",
+            "link_to_your_artwork": "Lenke til kunstverket ditt",
+            "copy_the_link_to_the_clipboard": "Kopier lenken til utklippstavlen",
+            "your_image_could_not_be_prepared": "Bildet ditt kunne ikke gjøres klart.",
+            "try_again": "Prøv igjen"
+        },
         "status_view": {
             "status": "Status",
             "the_system_status": "Systemstatusen.",

@@ -1840,6 +1840,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "Fiyat beslemesi, para birimleri arasındaki teşvikleri dengeler. Medyan witness fiyat beslemesinden türetilir.",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra, Pixa'nın piyasa değerine kıyasla tartılır. Basım %20'nin üzerinde durur; %30'un üzerinde ise \"kesinti\" kuralı uygulanır."
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "Yarattığını internette paylaş",
+            "congratulations_share_your_artwork_with_your_friends": "Tebrikler! Eserini diğer platformlardaki arkadaşlarınla paylaş ve onlara Pixagram'da olduğunu söyle!",
+            "download_the_image": "Görseli indir",
+            "preparing_your_image": "Görselin hazırlanıyor…",
+            "link_to_your_artwork": "Eserinin bağlantısı",
+            "copy_the_link_to_the_clipboard": "Bağlantıyı panoya kopyala",
+            "your_image_could_not_be_prepared": "Görselin hazırlanamadı.",
+            "try_again": "Tekrar dene"
+        },
         "status_view": {
             "status": "Durum",
             "the_system_status": "Sistemin durumu.",

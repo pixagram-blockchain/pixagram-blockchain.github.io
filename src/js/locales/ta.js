@@ -1836,6 +1836,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "விலை ஊட்டம் நாணயங்களுக்கிடையே ஊக்கத்தொகைகளைச் சமன்செய்கிறது. Witness விலை ஊட்டத்தின் இடைநிலையிலிருந்து பெறப்படுகிறது.",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra, Pixa மூலதனத்துடன் ஒப்பிட்டு எடைபோடப்படுகிறது. 20% க்கு மேல் அச்சிடுதல் நிற்கிறது; 30% க்கு மேல் \"மதிப்புக் கழிவு\" விதி பொருந்தும்."
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "உங்கள் படைப்பை இணையத்தில் பகிருங்கள்",
+            "congratulations_share_your_artwork_with_your_friends": "வாழ்த்துகள்! உங்கள் கலைப்படைப்பை மற்ற தளங்களில் உள்ள நண்பர்களுடன் பகிர்ந்து, நீங்கள் Pixagram-இல் இருப்பதை அவர்களுக்குச் சொல்லுங்கள்!",
+            "download_the_image": "படத்தைப் பதிவிறக்கு",
+            "preparing_your_image": "உங்கள் படம் தயாராகிறது…",
+            "link_to_your_artwork": "உங்கள் கலைப்படைப்பின் இணைப்பு",
+            "copy_the_link_to_the_clipboard": "இணைப்பை கிளிப்போர்டுக்கு நகலெடு",
+            "your_image_could_not_be_prepared": "உங்கள் படத்தைத் தயாரிக்க முடியவில்லை.",
+            "try_again": "மீண்டும் முயற்சி"
+        },
         "status_view": {
             "status": "நிலை",
             "the_system_status": "அமைப்பின் நிலை.",

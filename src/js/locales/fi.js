@@ -1836,6 +1836,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "Hintasyöte tasapainottaa kannustimia valuuttojen välillä. Johdettu witnessien mediaanihintasyötteestä.",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra suhteutetaan Pixan markkina-arvoon. Uuden PixaSupran painaminen loppuu yli 20 %:ssa, ja ”arvonleikkaus”-sääntöä sovelletaan yli 30 %:ssa."
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "Jaa luomuksesi verkossa",
+            "congratulations_share_your_artwork_with_your_friends": "Onnittelut! Jaa teoksesi ystävillesi muilla alustoilla ja kerro heille, että olet Pixagramissa!",
+            "download_the_image": "Lataa kuva",
+            "preparing_your_image": "Kuvaasi valmistellaan…",
+            "link_to_your_artwork": "Linkki teokseesi",
+            "copy_the_link_to_the_clipboard": "Kopioi linkki leikepöydälle",
+            "your_image_could_not_be_prepared": "Kuvaasi ei voitu valmistella.",
+            "try_again": "Yritä uudelleen"
+        },
         "status_view": {
             "status": "Tila",
             "the_system_status": "Järjestelmän tila.",

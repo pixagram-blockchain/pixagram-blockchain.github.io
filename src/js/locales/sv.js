@@ -1836,6 +1836,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "Prisflödet balanserar incitamenten mellan valutorna. Härlett ur medianen av witness-prisflödena.",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra vägs mot Pixa-kapitaliseringen. Tryckningen stoppas över 20 %, och över 30 % träder ”värderingsavdrags”-regeln in."
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "Dela din skapelse på webben",
+            "congratulations_share_your_artwork_with_your_friends": "Grattis! Dela ditt konstverk med dina vänner på andra plattformar och berätta för dem att du finns på Pixagram!",
+            "download_the_image": "Ladda ner bilden",
+            "preparing_your_image": "Din bild förbereds…",
+            "link_to_your_artwork": "Länk till ditt konstverk",
+            "copy_the_link_to_the_clipboard": "Kopiera länken till urklipp",
+            "your_image_could_not_be_prepared": "Din bild kunde inte förberedas.",
+            "try_again": "Försök igen"
+        },
         "status_view": {
             "status": "Status",
             "the_system_status": "Systemstatusen.",

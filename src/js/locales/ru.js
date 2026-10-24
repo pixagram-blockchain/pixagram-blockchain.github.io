@@ -1840,6 +1840,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "Ценовой фид балансирует стимулы между валютами. Он выводится из медианы ценовых фидов witnesses.",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra соизмеряется с капитализацией Pixa. Выше 20 % выпуск прекращается, а выше 30 % применяется правило «haircut»."
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "Поделитесь своим творением в интернете",
+            "congratulations_share_your_artwork_with_your_friends": "Поздравляем! Поделитесь своей работой с друзьями на других платформах и расскажите им, что вы теперь на Pixagram!",
+            "download_the_image": "Скачать изображение",
+            "preparing_your_image": "Готовим ваше изображение…",
+            "link_to_your_artwork": "Ссылка на вашу работу",
+            "copy_the_link_to_the_clipboard": "Скопировать ссылку в буфер обмена",
+            "your_image_could_not_be_prepared": "Не удалось подготовить ваше изображение.",
+            "try_again": "Повторить"
+        },
         "status_view": {
             "status": "Состояние",
             "the_system_status": "Состояние системы.",

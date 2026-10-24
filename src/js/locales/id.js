@@ -1838,6 +1838,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "Umpan harga menyeimbangkan insentif antar mata uang. Diturunkan dari median umpan harga para witness.",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra diukur terhadap kapitalisasi Pixa. Pencetakan berhenti di atas 20%, dan aturan \"haircut\" berlaku di atas 30%."
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "Bagikan kreasi Anda di web",
+            "congratulations_share_your_artwork_with_your_friends": "Selamat! Bagikan karya Anda kepada teman-teman di platform lain dan beri tahu mereka bahwa Anda ada di Pixagram!",
+            "download_the_image": "Unduh gambar",
+            "preparing_your_image": "Menyiapkan gambar Anda…",
+            "link_to_your_artwork": "Tautan ke karya Anda",
+            "copy_the_link_to_the_clipboard": "Salin tautan ke papan klip",
+            "your_image_could_not_be_prepared": "Gambar Anda tidak dapat disiapkan.",
+            "try_again": "Coba lagi"
+        },
         "status_view": {
             "status": "Status",
             "the_system_status": "Status sistem.",

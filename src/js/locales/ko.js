@@ -1838,6 +1838,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "가격 피드는 통화 간 인센티브의 균형을 맞춥니다. witness 가격 피드의 중앙값에서 도출됩니다.",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra는 Pixa의 시가총액에 견주어 평가됩니다. 20%를 넘으면 발행이 멈추고, 30%를 넘으면 \"haircut\" 규칙이 적용됩니다."
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "창작물을 웹에 공유하세요",
+            "congratulations_share_your_artwork_with_your_friends": "축하합니다! 다른 플랫폼에서도 친구들에게 작품을 공유하고 Pixagram에서 활동하고 있다고 알려 주세요!",
+            "download_the_image": "이미지 다운로드",
+            "preparing_your_image": "이미지를 준비하는 중…",
+            "link_to_your_artwork": "작품 링크",
+            "copy_the_link_to_the_clipboard": "링크를 클립보드에 복사",
+            "your_image_could_not_be_prepared": "이미지를 준비하지 못했습니다.",
+            "try_again": "다시 시도"
+        },
         "status_view": {
             "status": "상태",
             "the_system_status": "시스템 상태입니다.",

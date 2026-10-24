@@ -1836,6 +1836,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "Cenový feed vyvažuje pobídky mezi měnami. Odvozeno z mediánu cenových feedů witnessů.",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra se poměřuje s kapitalizací Pixa. Nad 20 % se tisk zastaví a nad 30 % se uplatní pravidlo „srážky“."
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "Sdílejte svůj výtvor na webu",
+            "congratulations_share_your_artwork_with_your_friends": "Gratulujeme! Sdílejte své dílo s přáteli na dalších platformách a řekněte jim, že jste na Pixagramu!",
+            "download_the_image": "Stáhnout obrázek",
+            "preparing_your_image": "Připravujeme váš obrázek…",
+            "link_to_your_artwork": "Odkaz na vaše dílo",
+            "copy_the_link_to_the_clipboard": "Zkopírovat odkaz do schránky",
+            "your_image_could_not_be_prepared": "Váš obrázek se nepodařilo připravit.",
+            "try_again": "Zkusit znovu"
+        },
         "status_view": {
             "status": "Stav",
             "the_system_status": "Stav systému.",

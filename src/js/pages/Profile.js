@@ -1627,6 +1627,28 @@ const useTabData = (api, account, category, ready) => {
         };
     }, [api, account?.name, loadTabData]);
 
+    // Drop rows up to and including the pagination cursor — ONLY if the node
+    // actually echoed it. Hive/Steem condenser nodes return the start row
+    // inclusively; the Pixa node returns it exclusively (the page begins at
+    // the row right after the cursor). The old unconditional `slice(1)` was
+    // written for the inclusive case and, against the exclusive node, threw
+    // away the first real row of every page (e.g. @cmpablo22's
+    // "ephemeral-balance-…" post, first row of page 2) and ended the list one
+    // row early whenever a final page held exactly one row. Rows already on
+    // screen are also removed so an inclusive node (or a stale cached page)
+    // can never produce duplicates.
+    // `author` is a string on raw chain rows and `{ username }` on card rows.
+    const rowAuthor = (r) => (typeof r?.author === 'string' ? r.author : (r?.author?.username || ''));
+    const rowKey = (r) => `${rowAuthor(r)}/${r?.permlink || ''}`;
+    const rowsAfterCursor = (rows, cursorAuthor, cursorPermlink, existing) => {
+        if (!Array.isArray(rows) || !rows.length) return [];
+        const at = rows.findIndex(r => rowAuthor(r) === cursorAuthor && r?.permlink === cursorPermlink);
+        const tail = at >= 0 ? rows.slice(at + 1) : rows;
+        if (!existing?.length) return tail;
+        const seen = new Set(existing.map(rowKey));
+        return tail.filter(r => !seen.has(rowKey(r)));
+    };
+
     // Load-more handlers. Each guards on its OWN tab's in-flight count and
     // drops its page if the reader switched profiles while it was out — it
     // used to append the previous profile's rows to the new one.
@@ -1637,22 +1659,32 @@ const useTabData = (api, account, category, ready) => {
         try {
             // Paginate via database.getDiscussions("blog", …) using the last
             // visible post as the cursor. Bridge fallback mirrors the initial
-            // load — same shape, slice(1) to drop the duplicated cursor row.
+            // load. rowsAfterCursor() strips the cursor row only when the
+            // node echoed it (see its comment) — never an unconditional slice.
+            const PAGE = 20;
+            const cursorAuthor = rowAuthor(last) || name;
             let p = await api.content.getDiscussionsByBlog({
                 tag: name,
-                limit: 20,
-                start_author: name,
+                limit: PAGE,
+                start_author: cursorAuthor,
                 start_permlink: last.permlink,
             }).then(r => Array.isArray(r) ? r : []).catch(e => { console.warn('[Profile] database.getDiscussions(blog) page failed:', e.message); return []; });
-            if (!p.length) {
+            let fresh = rowsAfterCursor(p, cursorAuthor, last.permlink, posts);
+            if (!fresh.length) {
+                // Empty OR nothing past the cursor (cursor ignored / cached
+                // first page) — retry via bridge with the same cursor before
+                // concluding "end of list".
                 p = await api.communities.getAccountPosts(name, 'blog', {
-                    limit: 20, start_author: name, start_permlink: last.permlink,
+                    limit: PAGE, start_author: cursorAuthor, start_permlink: last.permlink,
                 }).then(r => Array.isArray(r) ? r : []).catch(() => []);
+                fresh = rowsAfterCursor(p, cursorAuthor, last.permlink, posts);
             }
             if (currentNameRef.current !== name) return;
-            if (p.length > 1) {
-                const np = overlayPendingVotes(p.slice(1).map(x => enrichPostForCard(x, account)));
+            if (fresh.length) {
+                const np = overlayPendingVotes(fresh.map(x => enrichPostForCard(x, account)));
                 setPosts(prev => [...prev, ...np]);
+                // A short raw page means the node has nothing further.
+                if (p.length < PAGE) setHasMorePosts(false);
             } else {
                 // No new rows past the cursor — we've reached the end.
                 setHasMorePosts(false);
@@ -1666,11 +1698,17 @@ const useTabData = (api, account, category, ready) => {
         const name = account.name;
         busyRef.current[1] += 1;
         try {
-            const c = await api.content.getDiscussionsByComments({tag:name,start_author:name,start_permlink:last.permlink,limit:20});
+            const PAGE = 20;
+            const c = await api.content.getDiscussionsByComments({tag:name,start_author:name,start_permlink:last.permlink,limit:PAGE})
+                .then(r => Array.isArray(r) ? r : []).catch(() => []);
             if (currentNameRef.current !== name) return;
-            if (Array.isArray(c) && c.length > 1) {
-                const nc = overlayPendingVotes(c.slice(1).map((x,i)=>enrichCommentForCard(x,account,comments.length+i)));
+            // Same cursor handling as loadMorePosts: strip the cursor row only
+            // if the node echoed it; an exclusive node returns new rows only.
+            const fresh = rowsAfterCursor(c, rowAuthor(last) || name, last.permlink, comments);
+            if (fresh.length) {
+                const nc = overlayPendingVotes(fresh.map((x,i)=>enrichCommentForCard(x,account,comments.length+i)));
                 setComments(prev=>[...prev,...nc]);
+                if (c.length < PAGE) setHasMoreComments(false);
             } else {
                 setHasMoreComments(false);
             }

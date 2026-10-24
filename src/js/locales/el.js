@@ -1846,6 +1846,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "Η ροή τιμής εξισορροπεί τα κίνητρα μεταξύ των νομισμάτων. Προκύπτει από τη διάμεσο ροή τιμής των witnesses.",
             "pixasupra_acts_as_debt_of_the_blockchain": "Το PixaSupra σταθμίζεται έναντι της κεφαλαιοποίησης του Pixa. Το τύπωμα σταματά πάνω από 20 %, και ένας κανόνας «κουρέματος» εφαρμόζεται πάνω από 30 %."
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "Μοιραστείτε τη δημιουργία σας στο διαδίκτυο",
+            "congratulations_share_your_artwork_with_your_friends": "Συγχαρητήρια! Μοιραστείτε το έργο σας με τους φίλους σας σε άλλες πλατφόρμες και πείτε τους ότι είστε στο Pixagram!",
+            "download_the_image": "Λήψη της εικόνας",
+            "preparing_your_image": "Η εικόνα σας ετοιμάζεται…",
+            "link_to_your_artwork": "Σύνδεσμος προς το έργο σας",
+            "copy_the_link_to_the_clipboard": "Αντιγραφή του συνδέσμου στο πρόχειρο",
+            "your_image_could_not_be_prepared": "Δεν ήταν δυνατή η προετοιμασία της εικόνας σας.",
+            "try_again": "Επανάληψη"
+        },
         "status_view": {
             "status": "Κατάσταση",
             "the_system_status": "Η κατάσταση του συστήματος.",

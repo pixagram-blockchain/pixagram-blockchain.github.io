@@ -1838,6 +1838,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "价格喂价用于平衡各币种之间的激励，取自 witness 价格喂价的中位数。",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra 的规模以 Pixa 的市值为基准来衡量。超过 20% 时停止增发，超过 30% 时触发“haircut”规则。"
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "在网络上分享你的作品",
+            "congratulations_share_your_artwork_with_your_friends": "恭喜！把你的作品分享给其他平台上的朋友，告诉他们你在 Pixagram 上！",
+            "download_the_image": "下载图片",
+            "preparing_your_image": "正在准备你的图片…",
+            "link_to_your_artwork": "你的作品链接",
+            "copy_the_link_to_the_clipboard": "复制链接到剪贴板",
+            "your_image_could_not_be_prepared": "无法准备你的图片。",
+            "try_again": "重试"
+        },
         "status_view": {
             "status": "状态",
             "the_system_status": "系统状态。",

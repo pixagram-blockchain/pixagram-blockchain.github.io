@@ -22,6 +22,7 @@ import Switch from "@material-ui/core/Switch";
 import Checkbox from "@material-ui/core/Checkbox";
 import InputAdornment from "@material-ui/core/InputAdornment";
 import * as actions from "../actions/utils";
+import dispatcher from "../dispatcher";
 import { ToxicityWatcher } from "./ToxicityHint";
 import InsertDriveFileIcon from "@material-ui/icons/InsertDriveFileOutlined";
 import CompareIcon from "@material-ui/icons/Compare";
@@ -3460,9 +3461,32 @@ function NewPost(props) {
                 jsonMetadata: jsonMetadata
             });
 
-            // Success — hand off to the full-screen logo loader, then close the
-            // dialog underneath it. The loader owns the post-publish wait and
-            // refreshes the page when its animation completes (~6s).
+            // Success. Index starts the artwork's share image right away (its
+            // "Share your creation" dialog follows the publish animation),
+            // then the full-screen logo loader takes over and this dialog
+            // closes underneath it. The loader ends on its own — no reload.
+            try {
+                const pixels = quantizedData || preview;
+                dispatcher.dispatch({
+                    type: "ARTWORK_PUBLISHED",
+                    data: {
+                        author: activeAccount,
+                        permlink,
+                        category: parentPermlink,
+                        tags,
+                        title,
+                        // The pixels just encoded into the post — nothing to
+                        // decode — or, failing them, the post's image itself.
+                        image: pixels || base64,
+                        width: pixels ? pixels.width : 0,
+                        height: pixels ? pixels.height : 0,
+                        created: Date.now(),
+                    },
+                });
+            } catch (shareError) {
+                // The post is out: nothing past this point may report it failed.
+                console.warn("Share dialog not started:", shareError);
+            }
             actions.trigger_publish_loader();
             resetProps();
             onClose();
@@ -3472,7 +3496,7 @@ function NewPost(props) {
             dispatch({ type: actionTypes.SET_FIELD, field: 'isPublishing', value: false });
             actions.trigger_snackbar(error.message || "Failed to publish post. Please try again.");
         }
-    }, [api, title, description, tags, nsfw, base64, licenseCustomization, resetProps, onClose]);
+    }, [api, title, description, tags, nsfw, base64, preview, quantizedData, licenseCustomization, resetProps, onClose]);
 
     // Handle next/finish
     const handleNextOrFinish = useCallback(() => {

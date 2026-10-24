@@ -1838,6 +1838,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "मूल्य फ़ीड मुद्राओं के बीच प्रोत्साहनों को संतुलित करता है। यह witnesses के मूल्य फ़ीड के माध्यिका से निकाला जाता है।",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra को Pixa के पूंजीकरण के सापेक्ष तौला जाता है। 20% से ऊपर छपाई रुक जाती है, और 30% से ऊपर \"haircut\" नियम लागू होता है।"
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "अपनी रचना वेब पर साझा करें",
+            "congratulations_share_your_artwork_with_your_friends": "बधाई हो! अपनी कलाकृति अन्य प्लेटफ़ॉर्म पर अपने दोस्तों के साथ साझा करें और उन्हें बताएँ कि आप Pixagram पर हैं!",
+            "download_the_image": "छवि डाउनलोड करें",
+            "preparing_your_image": "आपकी छवि तैयार की जा रही है…",
+            "link_to_your_artwork": "आपकी कलाकृति का लिंक",
+            "copy_the_link_to_the_clipboard": "लिंक क्लिपबोर्ड पर कॉपी करें",
+            "your_image_could_not_be_prepared": "आपकी छवि तैयार नहीं की जा सकी।",
+            "try_again": "पुनः प्रयास करें"
+        },
         "status_view": {
             "status": "स्थिति",
             "the_system_status": "तंत्र की स्थिति।",

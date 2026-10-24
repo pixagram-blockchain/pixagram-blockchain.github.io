@@ -1836,6 +1836,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "Az árfeed a devizák közötti ösztönzőket egyensúlyozza. A witnessek medián árfeedjéből származtatva.",
             "pixasupra_acts_as_debt_of_the_blockchain": "A PixaSuprát a Pixa piaci kapitalizációjához mérik. 20% felett leáll a nyomtatás, 30% felett pedig „értékvágás”-szabály lép életbe."
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "Oszd meg az alkotásodat a weben",
+            "congratulations_share_your_artwork_with_your_friends": "Gratulálunk! Oszd meg az alkotásodat a barátaiddal más platformokon is, és mondd el nekik, hogy fent vagy a Pixagramon!",
+            "download_the_image": "A kép letöltése",
+            "preparing_your_image": "A képed készül…",
+            "link_to_your_artwork": "Az alkotásod linkje",
+            "copy_the_link_to_the_clipboard": "Link másolása a vágólapra",
+            "your_image_could_not_be_prepared": "A képedet nem sikerült elkészíteni.",
+            "try_again": "Újra"
+        },
         "status_view": {
             "status": "Állapot",
             "the_system_status": "A rendszer állapota.",

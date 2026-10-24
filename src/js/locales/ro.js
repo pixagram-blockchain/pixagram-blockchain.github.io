@@ -1839,6 +1839,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "Feedul de preț echilibrează stimulentele între monede. Derivat din feedul de preț median al witnesses.",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra este cântărită în raport cu capitalizarea Pixa. Tipărirea se oprește peste 20%, iar peste 30% se aplică o regulă de „haircut”."
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "Distribuie creația ta pe web",
+            "congratulations_share_your_artwork_with_your_friends": "Felicitări! Distribuie opera ta prietenilor de pe alte platforme și spune-le că ești pe Pixagram!",
+            "download_the_image": "Descarcă imaginea",
+            "preparing_your_image": "Imaginea ta se pregătește…",
+            "link_to_your_artwork": "Linkul către opera ta",
+            "copy_the_link_to_the_clipboard": "Copiază linkul în clipboard",
+            "your_image_could_not_be_prepared": "Imaginea ta nu a putut fi pregătită.",
+            "try_again": "Reîncearcă"
+        },
         "status_view": {
             "status": "Stare",
             "the_system_status": "Starea sistemului.",

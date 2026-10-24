@@ -1837,6 +1837,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "Le flux de prix équilibre les incitations entre les monnaies. Il est dérivé de la médiane des flux de prix des witnesses.",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra est rapporté à la capitalisation de Pixa. L’émission s’arrête au-delà de 20 %, et une règle de « haircut » s’applique au-delà de 30 %."
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "Partagez votre création sur le web",
+            "congratulations_share_your_artwork_with_your_friends": "Félicitations ! Partagez votre œuvre avec vos amis sur d’autres plateformes et dites-leur que vous êtes sur Pixagram !",
+            "download_the_image": "Télécharger l’image",
+            "preparing_your_image": "Préparation de votre image…",
+            "link_to_your_artwork": "Lien vers votre œuvre",
+            "copy_the_link_to_the_clipboard": "Copier le lien dans le presse-papiers",
+            "your_image_could_not_be_prepared": "Votre image n’a pas pu être préparée.",
+            "try_again": "Réessayer"
+        },
         "status_view": {
             "status": "État",
             "the_system_status": "L’état du système.",

@@ -1838,6 +1838,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "প্রাইস ফিড মুদ্রাগুলোর মধ্যে প্রণোদনার ভারসাম্য রাখে। Witness-দের প্রাইস ফিডের মধ্যক থেকে নেওয়া।",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra-কে মাপা হয় Pixa-র বাজারমূলধনের নিরিখে। 20%-এর ওপরে ছাপানো থেমে যায়, আর 30%-এর ওপরে “কর্তন” নিয়ম প্রযোজ্য হয়।",
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "আপনার সৃষ্টি ওয়েবে শেয়ার করুন",
+            "congratulations_share_your_artwork_with_your_friends": "অভিনন্দন! অন্যান্য প্ল্যাটফর্মে বন্ধুদের সাথে আপনার শিল্পকর্ম শেয়ার করুন এবং তাদের জানান যে আপনি এখন Pixagram-এ আছেন!",
+            "download_the_image": "ছবিটি ডাউনলোড করুন",
+            "preparing_your_image": "আপনার ছবি প্রস্তুত হচ্ছে…",
+            "link_to_your_artwork": "আপনার শিল্পকর্মের লিংক",
+            "copy_the_link_to_the_clipboard": "লিংক ক্লিপবোর্ডে কপি করুন",
+            "your_image_could_not_be_prepared": "আপনার ছবি প্রস্তুত করা যায়নি।",
+            "try_again": "আবার চেষ্টা করুন"
+        },
         "status_view": {
             "status": "স্ট্যাটাস",
             "the_system_status": "সিস্টেমের অবস্থা।",

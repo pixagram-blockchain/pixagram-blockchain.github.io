@@ -1836,6 +1836,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "De prijsfeed balanceert prikkels tussen valuta’s. Afgeleid van de mediane witness-prijsfeed.",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra wordt afgezet tegen de Pixa-kapitalisatie. Boven 20% stopt het drukken, en boven 30% geldt een ‘haircut’-regel."
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "Deel je creatie op het web",
+            "congratulations_share_your_artwork_with_your_friends": "Gefeliciteerd! Deel je kunstwerk met je vrienden op andere platforms en vertel ze dat je op Pixagram zit!",
+            "download_the_image": "De afbeelding downloaden",
+            "preparing_your_image": "Je afbeelding wordt voorbereid…",
+            "link_to_your_artwork": "Link naar je kunstwerk",
+            "copy_the_link_to_the_clipboard": "Kopieer de link naar het klembord",
+            "your_image_could_not_be_prepared": "Je afbeelding kon niet worden voorbereid.",
+            "try_again": "Opnieuw proberen"
+        },
         "status_view": {
             "status": "Status",
             "the_system_status": "De systeemstatus.",

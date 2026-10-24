@@ -57,6 +57,7 @@ import Fade from "@material-ui/core/Fade";
 import CircularProgress from "@material-ui/core/CircularProgress";
 import shareContent from "../utils/share";
 import { idle, cancelIdle } from "../utils/idle";
+import { createShareFlow } from "../utils/shareArtwork";
 import getIT from "../data/pixaLogoWhite";
 // No static sanitizer import anymore. `safeHTML` was only used to highlight
 // the search-term match in usernames/tags via dangerouslySetInnerHTML, and a
@@ -194,6 +195,14 @@ const LazyTour = React.lazy(() => import("../components/Tour"));
 // the tree; its chunk is warmed in the idle sibling-prefetch chain so the
 // post-publish moment never waits on a download.
 const LazyPublishLogoLoader = React.lazy(() => import("../components/PublishLogoLoader"));
+
+// "Share your creation" — the dialog opened a few seconds after the publish
+// animation, and the render of its watermarked image (§9f). Neither ships
+// before someone publishes: both are fetched the moment the broadcast
+// succeeds, while the animation plays.
+const loadShareArtworkDialog = () => import("../components/ShareArtworkDialog");
+const LazyShareArtworkDialog = React.lazy(loadShareArtworkDialog);
+const loadShareArtworkRender = () => JSLoader(() => import("../utils/shareArtworkRender"));
 
 const TOUR_STORAGE_KEY = "pixagram_tour_v1";
 const TOURABLE_PAGES = { feed: true, community: true, profile: true };
@@ -2066,6 +2075,170 @@ function useSignupNudge({ signedOut, sessionKnown, meta, busy, openMeta }) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// §9f — useShareArtwork: "share your creation" after an artwork is published
+// ═════════════════════════════════════════════════════════════════════════════
+// ARTWORK_PUBLISHED — dispatched by NewPost the moment the post's broadcast
+// succeeds — starts the share image at once: the artwork rendered with the
+// viewer's renderer and stamped with the watermark band, as PostDialog's
+// download makes it (utils/shareArtworkRender, fetched then). The publish
+// animation plays meanwhile; SHARE_DIALOG_DELAY_MS after it has ended, the
+// dialog opens on the image — or, while it is still being made, on a
+// skeleton of its exact shape. The timing is utils/shareArtwork's
+// createShareFlow:
+//
+//   - the render's main-thread half (watermark, encode) waits for the
+//     animation to end, so the two never compete for frames — the render
+//     pool's part runs in its workers right away;
+//   - a publication reported just after an animation ended still pairs
+//     with it (the two events come from different places);
+//   - one whose animation never ends is let go after a minute, image and
+//     all — a later animation doesn't open it;
+//   - once due, the dialog waits for a clear moment rather than open on top
+//     of something: `busy` (Index's own dialogs and overlays, an open post,
+//     the tour…), and any other dialog on screen — the pages own some, the
+//     editor among them (otherDialogShown).
+//
+// The image is held as an object URL until the dialog has closed.
+//
+// The event's data: { author, permlink, category, tags, title, image,
+// width?, height?, created? } — `image` the artwork's ImageData (NewPost
+// sends the pixels it has just encoded into the post) or the image put on
+// chain (a data URL, or bare base64); `category` the post's parent permlink
+// (its first tag).
+const SHARE_DIALOG_DELAY_MS = 3000;
+// Due but held back by a dialog Index doesn't own: how often to look again.
+const SHARE_RECHECK_MS = 400;
+
+// A modal dialog or drawer on screen other than the share dialog. The
+// pages' dialogs (the editor, their confirmations…) are known to the DOM
+// only: MUI's classes, or — whatever the class names — a dialog inside a
+// modal's presentation layer. Closed-but-kept-mounted ones are
+// visibility:hidden; inside a hidden page, they have no box.
+const OTHER_DIALOGS = '.MuiDialog-root, .MuiDrawer-modal, [role="presentation"] [role="dialog"]';
+function otherDialogShown() {
+    if (typeof document === "undefined") return false;
+    const found = document.querySelectorAll(OTHER_DIALOGS);
+    for (let i = 0; i < found.length; i++) {
+        const el = found[i];
+        if (el.closest("[data-share-artwork]")) continue;
+        if (el.getClientRects().length && window.getComputedStyle(el).visibility !== "hidden") return true;
+    }
+    return false;
+}
+
+function useShareArtwork(settingsRef, busy) {
+    const [share, setShare] = useState(null);     // { post, image } — image: a shareArtworkRender snapshot
+    const [due, setDue] = useState(false);        // the delay has run out: open at the first clear moment
+    const [recheck, setRecheck] = useState(0);
+    const [open, setOpen] = useState(false);
+    const [mounted, setMounted] = useState(false);
+    const jobRef = useRef(null);                  // the render in flight: { post, size, cancel }
+    const shownRef = useRef(null);                // the job the dialog opened on
+    const flowRef = useRef(null);
+    if (flowRef.current === null) {
+        flowRef.current = createShareFlow({
+            delayMs: SHARE_DIALOG_DELAY_MS,
+            onDue: () => setDue(true),
+            // No animation came to an end for it: let it go, image and all.
+            onDrop: () => {
+                const job = jobRef.current;
+                jobRef.current = null;
+                if (job && job.cancel) job.cancel();
+                setDue(false);
+                setShare(null);
+            },
+        });
+    }
+
+    // Drop the render — and the object URL it holds.
+    const stop = useCallback(() => {
+        const job = jobRef.current;
+        jobRef.current = null;
+        if (job && job.cancel) job.cancel();
+    }, []);
+
+    // `size`: the artwork's size as far as known, for the skeleton.
+    const render = useCallback((post, holdUntil, size) => {
+        stop();
+        const job = { post, size: size || { width: post.width | 0, height: post.height | 0 }, cancel: null };
+        jobRef.current = job;
+        const settings = settingsRef.current || {};
+        const preparing = { status: "preparing", width: job.size.width, height: job.size.height };
+        setShare({ post, image: preparing });
+        loadShareArtworkRender().then((mod) => {
+            if (jobRef.current !== job) return;
+            job.cancel = mod.startShareImage({ ...post, width: job.size.width, height: job.size.height }, {
+                renderer: settings._renderer,
+                mode: settings._mode,
+                format: settings._format,
+                holdUntil,
+            }, (image) => {
+                if (jobRef.current !== job) return;
+                if (image.width && image.height) job.size = { width: image.width, height: image.height };
+                setShare({ post, image });
+            }).cancel;
+        }).catch(() => {
+            if (jobRef.current === job) setShare({ post, image: { ...preparing, status: "failed" } });
+        });
+        return job;
+    }, [settingsRef, stop]);
+
+    // ARTWORK_PUBLISHED.
+    const begin = useCallback((post) => {
+        if (!post || !post.author || !post.permlink || !post.image) return;
+        setDue(false);
+        setOpen(false); // a share dialog still up makes way for the new artwork
+        render(post, flowRef.current.published());
+        loadShareArtworkDialog().catch(() => {}); // warmed during the animation
+    }, [render]);
+
+    // The publish animation has played to its end (PublishLogoLoader's onDone).
+    const animationEnded = useCallback(() => flowRef.current.animationEnded(), []);
+
+    useEffect(() => {
+        if (!due || busy) return undefined;
+        if (otherDialogShown()) {
+            const timer = setTimeout(() => setRecheck((n) => n + 1), SHARE_RECHECK_MS);
+            return () => clearTimeout(timer);
+        }
+        setDue(false);
+        flowRef.current.settled();
+        if (!jobRef.current) return undefined;
+        shownRef.current = jobRef.current;
+        setMounted(true);
+        setOpen(true);
+        return undefined;
+    }, [due, busy, recheck]);
+
+    const close = useCallback(() => setOpen(false), []);
+    // After the closing transition: the image can go — unless a newer
+    // publication has taken over meanwhile.
+    const exited = useCallback(() => {
+        const shown = shownRef.current;
+        shownRef.current = null;
+        if (shown && jobRef.current === shown) {
+            stop();
+            setShare(null);
+        }
+    }, [stop]);
+    // "Try again" after a failed render — no animation to wait for any more.
+    const retry = useCallback(() => {
+        const job = jobRef.current;
+        if (!job) return;
+        const next = render(job.post, null, job.size);
+        if (shownRef.current === job) shownRef.current = next;
+    }, [render]);
+
+    useEffect(() => () => {
+        flowRef.current.dispose();
+        stop();
+    }, [stop]);
+
+    return useMemo(() => ({ share, open, mounted, begin, animationEnded, close, exited, retry }),
+        [share, open, mounted, begin, animationEnded, close, exited, retry]);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // §10 — Memoized sub-components with comparison functions
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -3266,7 +3439,8 @@ function Index({ classes, history, settings: rawSettings }) {
     // ── Post-publish loader overlay ───────────────────────────────────────
     // Full-screen WebGL logo animation shown after a successful broadcast,
     // once NewPost has closed. It outlives that dialog (mounted here on the
-    // app shell) and refreshes the page when its timeline completes.
+    // app shell) and unmounts when its timeline completes (onDone — no page
+    // reload); the share dialog follows from there (§9f).
     const [publishLoaderOpen, setPublishLoaderOpen] = useState(false);
 
     // ── Logout ────────────────────────────────────────────────────────────
@@ -3279,6 +3453,17 @@ function Index({ classes, history, settings: rawSettings }) {
             showSnackbar(t("components.index.logged_out_successfully"), 2000);
         });
     }, [closeLogout, showSnackbar]);
+
+    // ── "Share your creation" after an artwork is published (§9f) ─────────
+    // Once due, it waits out what the sign-up nudge waits out, plus the
+    // publish animation itself and the logout prompt.
+    const shareArtwork = useShareArtwork(settingsRef, nudgeBusy || publishLoaderOpen || logoutOpen);
+    const { begin: beginShare, animationEnded: shareAnimationEnded } = shareArtwork;
+    // The publish animation has played: the share dialog follows.
+    const onPublishLoaderDone = useCallback(() => {
+        setPublishLoaderOpen(false);
+        shareAnimationEnded();
+    }, [shareAnimationEnded]);
 
     // ── Navigation helpers ────────────────────────────────────────────────
     // These depend ONLY on `search.reset` (stable, [] deps) — NOT the whole
@@ -3416,6 +3601,9 @@ function Index({ classes, history, settings: rawSettings }) {
             case "EDIT_PROFILE": openDialog("edit_profile"); break;
             case "FAVORITES":    openDialog("favorites"); break;
             case "PUBLISH_LOADER": setPublishLoaderOpen(true); break;
+            // NewPost, the moment an artwork's broadcast succeeds: its share
+            // image starts now, its dialog follows the animation (§9f).
+            case "ARTWORK_PUBLISHED": beginShare(event.data); break;
             case "DATA_VIEWER":  openDialog("data_viewer", event.data || {}); break;
             case "TRIGGER_VOICE":
                 if (_voice_enabled) sound.play("voice", event.data.pack, event.data.name, event.data.volume / 2, false);
@@ -3704,7 +3892,21 @@ function Index({ classes, history, settings: rawSettings }) {
                 <Suspense fallback={null}>
                     <LazyPublishLogoLoader
                         open
-                        onDone={() => setPublishLoaderOpen(false)}
+                        onDone={onPublishLoaderDone}
+                    />
+                </Suspense>
+            )}
+
+            {shareArtwork.mounted && (
+                <Suspense fallback={DIALOG_FALLBACK}>
+                    <LazyShareArtworkDialog
+                        open={shareArtwork.open}
+                        post={shareArtwork.share ? shareArtwork.share.post : null}
+                        image={shareArtwork.share ? shareArtwork.share.image : null}
+                        fullScreen={compact}
+                        onClose={shareArtwork.close}
+                        onExited={shareArtwork.exited}
+                        onRetry={shareArtwork.retry}
                     />
                 </Suspense>
             )}

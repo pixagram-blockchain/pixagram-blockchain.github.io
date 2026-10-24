@@ -3193,6 +3193,16 @@ export default {
             "short_description": "short description",
             "currently_pxs_day_can_only_be_lowered": "Currently {{proposalOriginalDailyPay}} PXS/day — can only be lowered"
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "Share your creation on the web",
+            "congratulations_share_your_artwork_with_your_friends": "Congratulations! Share your artwork with your friends on other platforms and tell them you're on Pixagram!",
+            "download_the_image": "Download the image",
+            "preparing_your_image": "Preparing your image…",
+            "link_to_your_artwork": "Link to your artwork",
+            "copy_the_link_to_the_clipboard": "Copy the link to the clipboard",
+            "your_image_could_not_be_prepared": "Your image couldn't be prepared.",
+            "try_again": "Try again"
+        },
         "status_view": {
             "tx": "%n {{{_plurals.transaction}}}",
             "status": "Status",

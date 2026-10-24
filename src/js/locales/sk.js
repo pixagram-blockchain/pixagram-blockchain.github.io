@@ -1840,6 +1840,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "Cenový feed vyvažuje stimuly medzi menami. Odvodený z mediánového cenového feedu witnessov.",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra sa porovnáva s kapitalizáciou Pixa. Nad 20% sa zastaví tlačenie a nad 30% sa uplatní pravidlo „zrážky“."
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "Zdieľajte svoj výtvor na webe",
+            "congratulations_share_your_artwork_with_your_friends": "Gratulujeme! Zdieľajte svoje dielo s priateľmi na iných platformách a povedzte im, že ste na Pixagrame!",
+            "download_the_image": "Stiahnuť obrázok",
+            "preparing_your_image": "Pripravujeme váš obrázok…",
+            "link_to_your_artwork": "Odkaz na vaše dielo",
+            "copy_the_link_to_the_clipboard": "Skopírovať odkaz do schránky",
+            "your_image_could_not_be_prepared": "Váš obrázok sa nepodarilo pripraviť.",
+            "try_again": "Skúsiť znova"
+        },
         "status_view": {
             "status": "Stav",
             "the_system_status": "Stav systému.",

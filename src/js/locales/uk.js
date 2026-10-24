@@ -1839,6 +1839,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "Ціновий фід балансує стимули між валютами. Виводиться з медіанного цінового фіду witnesses.",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra зіставляється з капіталізацією Pixa. Понад 20% карбування припиняється, а понад 30% застосовується правило «дисконту»."
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "Поділіться своїм творінням в інтернеті",
+            "congratulations_share_your_artwork_with_your_friends": "Вітаємо! Поділіться своїм твором із друзями на інших платформах і розкажіть їм, що ви тепер на Pixagram!",
+            "download_the_image": "Завантажити зображення",
+            "preparing_your_image": "Готуємо ваше зображення…",
+            "link_to_your_artwork": "Посилання на ваш твір",
+            "copy_the_link_to_the_clipboard": "Скопіювати посилання в буфер обміну",
+            "your_image_could_not_be_prepared": "Не вдалося підготувати ваше зображення.",
+            "try_again": "Повторити"
+        },
         "status_view": {
             "status": "Стан",
             "the_system_status": "Стан системи.",

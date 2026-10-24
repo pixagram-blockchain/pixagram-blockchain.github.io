@@ -1838,6 +1838,16 @@ export default {
             "the_price_feed_balances_incentives_between_curre": "価格フィードは通貨間のインセンティブを均衡させます。witness の価格フィードの中央値から導かれます。",
             "pixasupra_acts_as_debt_of_the_blockchain": "PixaSupra は Pixa の時価総額に照らして評価されます。20% を超えると発行が止まり、30% を超えると「haircut」ルールが適用されます。"
         },
+        "share_artwork_dialog": {
+            "share_your_creation_on_the_web": "作品をウェブで共有しましょう",
+            "congratulations_share_your_artwork_with_your_friends": "おめでとうございます！ほかのプラットフォームでも友だちに作品を共有して、Pixagram を使っていることを伝えましょう！",
+            "download_the_image": "画像をダウンロード",
+            "preparing_your_image": "画像を準備しています…",
+            "link_to_your_artwork": "作品へのリンク",
+            "copy_the_link_to_the_clipboard": "リンクをクリップボードにコピー",
+            "your_image_could_not_be_prepared": "画像を準備できませんでした。",
+            "try_again": "再試行"
+        },
         "status_view": {
             "status": "ステータス",
             "the_system_status": "システムの状態です。",
