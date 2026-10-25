@@ -2,6 +2,9 @@ import * as React from "preact/compat";
 
 import withStyles from "@material-ui/core/styles/withStyles";
 import DialogContent from "@material-ui/core/DialogContent";
+import Typography from "@material-ui/core/Typography";
+import MuiTooltip from "@material-ui/core/Tooltip";
+import ArrowForwardRoundedIcon from "@material-ui/icons/ArrowForwardRounded";
 import { ResponsiveContainer } from "recharts/lib/component/ResponsiveContainer";
 import { LineChart } from "recharts/lib/chart/LineChart";
 import { BarChart } from "recharts/lib/chart/BarChart";
@@ -35,7 +38,8 @@ import {
 import {
     tr, trf, Card, Tile, ChartTip, Legend, Pill, Switch, Empty, Skeleton, Meter, Visible,
     SERIES, AXIS, GRID, CURSOR, BAR_CURSOR, ACTIVE_DOT, INK, BAR, stackShape, niceScale, tickFormat, axisTick, bucketLabel, fillBuckets, newestOnly,
-    fmtDate, timeTicks, AccordionSection, ACCORDION_MS, Funnel, Flow, PatternPie, Heatmap
+    fmtDate, timeTicks, Funnel, Flow, PatternPie, Heatmap,
+    Masonry, StickyBar, BackButton, GlyphTile, HUB_EASE, hubSnapshot, hubPlay, hubStop, revealTop, releaseScroll
 } from "./GDTowerKit";
 import GDReports from "./GDReports";
 
@@ -46,15 +50,154 @@ const styles = theme => ({
         padding: "24px",
         [theme.breakpoints.down("sm")]: { padding: "16px" }
     },
-    topBar: {
+    // the view: the grid of sections, or the open section under its header (the hub's motion is drawn in it)
+    hub: { position: "relative" },
+    asOf: { fontSize: "12px", color: "#666", fontFamily: "'Geist Mono', monospace", whiteSpace: "nowrap" },
+    gridTop: { display: "flex", alignItems: "center", justifyContent: "flex-end", minHeight: "18px", marginBottom: "12px" },
+    // 3 × 3 sections: icon, title, description; a list on a phone
+    navGrid: {
+        display: "grid",
+        gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+        gap: "16px",
+        [theme.breakpoints.down("xs")]: { gridTemplateColumns: "minmax(0, 1fr)", gap: "8px" }
+    },
+    navCard: {
+        appearance: "none",
+        border: "none",
+        font: "inherit",
+        textAlign: "left",
+        color: "inherit",
+        cursor: "pointer",
+        position: "relative",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "flex-start",
+        minWidth: 0,
+        padding: "20px",
+        borderRadius: "16px",
+        backgroundColor: "#101010",
+        transition: "background-color 200ms cubic-bezier(0.4, 0, 0.2, 1)",
+        "&:hover, &:focus-visible": { backgroundColor: "#171717" },
+        "&:hover $navIcon, &:focus-visible $navIcon": { color: "#e8e8e8" },
+        "&:hover $navArrow, &:focus-visible $navArrow": { color: "#fff", transform: "translateX(3px)" },
+        "&:focus-visible": { outline: "none", boxShadow: "inset 0 0 0 2px #555" },
+        [theme.breakpoints.down("xs")]: { flexDirection: "row", alignItems: "center", gap: "14px", padding: "14px 16px" }
+    },
+    navIcon: {
+        display: "flex",
+        flex: "0 0 auto",
+        width: "44px",
+        height: "44px",
+        color: "#424242",
+        transition: "color 200ms ease",
+        "& > svg": { width: "100%", height: "100%" },
+        [theme.breakpoints.down("xs")]: { width: "40px", height: "40px" }
+    },
+    navText: {
+        display: "flex",
+        flexDirection: "column",
+        minWidth: 0,
+        marginTop: "22px",
+        paddingRight: "8px",
+        [theme.breakpoints.down("xs")]: { marginTop: 0, flex: "1 1 auto" }
+    },
+    navTitle: { fontSize: "17px", fontWeight: 600, color: "#fff", fontFamily: "'Industry Book'", lineHeight: 1.3 },
+    navDescription: {
+        fontSize: "13px",
+        color: "#888",
+        fontFamily: "'Normative Pro'",
+        lineHeight: 1.45,
+        marginTop: "4px",
+        [theme.breakpoints.down("xs")]: {
+            overflow: "hidden",
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical"
+        }
+    },
+    navArrow: {
+        position: "absolute",
+        top: "20px",
+        right: "18px",
+        fontSize: "20px",
+        color: "#4a4a4a",
+        transition: `color 200ms ease, transform 250ms ${HUB_EASE}`,
+        [theme.breakpoints.down("xs")]: { position: "static", flex: "0 0 auto" }
+    },
+    // an open section: back, every section's icon on a rail (as Viability management's tabs are), the
+    // time of the data
+    strip: {
         display: "flex",
         alignItems: "center",
-        justifyContent: "space-between",
-        gap: "12px",
-        flexWrap: "wrap"
+        gap: "2px",
+        minWidth: 0,
+        flex: "0 1 auto",
+        padding: "4px",
+        borderRadius: "16px",
+        backgroundColor: "#101010",
+        [theme.breakpoints.down("xs")]: { flex: "1 1 auto", gap: 0, padding: "2px", justifyContent: "space-between" }
     },
-    asOf: { fontSize: "12px", color: "#666", fontFamily: "'Geist Mono', monospace" },
-    sections: { marginTop: "16px" },
+    stripItem: {
+        appearance: "none",
+        border: "none",
+        background: "transparent",
+        padding: 0,
+        cursor: "pointer",
+        position: "relative",
+        flex: "0 0 auto",
+        width: "42px",
+        height: "40px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: "12px",
+        color: "#383838",
+        transition: "color 200ms ease, background-color 150ms ease",
+        "&:hover": { color: "#6c6c6c", backgroundColor: "rgba(255,255,255,0.04)" },
+        "&:focus-visible": { outline: "none", boxShadow: "inset 0 0 0 2px #555" },
+        [theme.breakpoints.down("xs")]: { flex: "1 1 0", width: "auto", minWidth: 0, maxWidth: "44px", height: "40px" }
+    },
+    stripItemOn: {
+        color: "#e8e8e8",
+        "&:hover": { color: "#e8e8e8", backgroundColor: "transparent" },
+        "& $stripLamp": { opacity: 1, transform: "none" }
+    },
+    // the icon (it flies between the grid and the strip) and, under it, the lamp of the open section
+    stripIcon: {
+        position: "relative",
+        display: "flex",
+        width: "28px",
+        height: "28px",
+        "& > svg": { width: "100%", height: "100%" },
+        [theme.breakpoints.down("xs")]: { width: "100%", maxWidth: "28px", height: "auto", aspectRatio: "1 / 1" }
+    },
+    stripLamp: {
+        position: "absolute",
+        left: "50%",
+        bottom: "-6px",
+        width: "14px",
+        height: "3px",
+        marginLeft: "-7px",
+        borderRadius: "2px",
+        backgroundColor: "#e8e8e8",
+        opacity: 0,
+        transform: "scaleX(0.2)",
+        transition: `opacity 200ms ease, transform 320ms ${HUB_EASE}`
+    },
+    barSide: { marginLeft: "auto", paddingLeft: "12px", [theme.breakpoints.down("xs")]: { display: "none" } },
+    detailHead: {
+        display: "flex",
+        alignItems: "flex-end",
+        justifyContent: "space-between",
+        flexWrap: "wrap",
+        gap: "12px 24px",
+        margin: "18px 0 20px 0"
+    },
+    detailText: { minWidth: 0, flex: "1 1 320px" },
+    detailTitle: { fontSize: "22px", fontWeight: 600, color: "#fff", fontFamily: "'Industry Book'", lineHeight: 1.25 },
+    detailDescription: { fontSize: "14px", color: "#888", fontFamily: "'Normative Pro'", marginTop: "4px", maxWidth: "640px", lineHeight: 1.45 },
+    detailSide: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "8px", [theme.breakpoints.down("xs")]: { alignItems: "flex-start" } },
+    asOfPhone: { display: "none", [theme.breakpoints.down("xs")]: { display: "block" } },
     tiles: {
         display: "grid",
         gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
@@ -62,14 +205,9 @@ const styles = theme => ({
         [theme.breakpoints.down("sm")]: { gridTemplateColumns: "repeat(2, minmax(0, 1fr))" },
         [theme.breakpoints.down("xs")]: { gridTemplateColumns: "minmax(0, 1fr)" }
     },
-    tiles3: { gridTemplateColumns: "repeat(3, minmax(0, 1fr))" },
-    grid2: {
-        display: "grid",
-        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-        gap: "16px",
-        alignItems: "start",
-        [theme.breakpoints.down("sm")]: { gridTemplateColumns: "minmax(0, 1fr)" }
-    },
+    tiles3: { gridTemplateColumns: "repeat(3, minmax(0, 1fr))", [theme.breakpoints.down("xs")]: { gridTemplateColumns: "minmax(0, 1fr)" } },
+    // space between a row of tiles and the cards under it
+    below: { marginTop: "16px" },
     chart: { width: "100%", height: "220px" },
     chartTall: { width: "100%", height: "260px" },
     // list rows: separated by spacing and a hover fill, never by a rule
@@ -99,8 +237,6 @@ const styles = theme => ({
     rowValue: { fontSize: "13px", color: "#fff", fontFamily: "'Geist Mono', monospace", textAlign: "right", whiteSpace: "nowrap", minWidth: "44px" },
     rowMeter: { marginTop: "8px" },
     link: { color: "inherit", textDecoration: "none", "&:hover": { color: "#fff" } },
-    // a card across both columns of a grid
-    wide: { gridColumn: "1 / -1" },
     // the figure a card leads with, a second one on the right
     headline: { display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: "12px 24px", flexWrap: "wrap", marginBottom: "18px" },
     headlineValue: { fontSize: "28px", fontWeight: 700, color: "#fff", fontFamily: "'Geist Mono', monospace", lineHeight: 1.1 },
@@ -145,7 +281,7 @@ const styles = theme => ({
         display: "flex",
         alignItems: "center",
         gap: "12px",
-        marginTop: "16px",
+        marginBottom: "16px",
         fontSize: "13px",
         color: "#aaa",
         fontFamily: "'Normative Pro'"
@@ -223,8 +359,9 @@ const valueWidth = (texts) => ({ minWidth: `${Math.max(0, ...texts.map((s) => St
 // Reward recipients, in the flow from the votes and the blocks that pay them.
 const REWARD_ICONS = { author: BrushRoundedIcon, curation: ThumbUpRoundedIcon, beneficiary: CallSplitRoundedIcon, producer: DnsRoundedIcon };
 
-// The view's sections, in order. Each is closed until opened and only one is open at a time; the open one is
-// named in the address (+governance-metrics-<id>, ids without "-"). A section loads its data when it opens.
+// The view's sections, in order: the 3 × 3 grid the view opens on, then the strip of icons over an open
+// section. The open one is named in the address (+governance-metrics-<id>, ids without "-"); none is open
+// on the grid. A section loads its data when it opens.
 const SECTIONS = [
     { id: "pulse", icon: SpeedRoundedIcon, title: () => tr(K + "pulse", "Pulse"), description: () => tr(K + "pulse_description", "Activity on the Pixa chain over the selected period, against the period before.") },
     { id: "activity", icon: PeopleAltRoundedIcon, title: () => tr(K + "activity", "Activity"), description: () => tr(K + "activity_description", "Who is active, and what they publish.") },
@@ -259,30 +396,36 @@ class GDMetrics extends React.PureComponent {
     state = { period: "7d", pending: null, cohortWeeksAgo: 2, loading: true, error: null, d: {}, meta: null, localSection: null };
     root = React.createRef();
     seq = 0;
-    heads = {}; // section id -> its header button, to bring an opened section into view
-    headRefs = {};
 
     componentDidMount() {
+        releaseScroll(this.root.current && this.root.current.parentElement);
         this.visible = new Visible(() => this.load(), 60000);
         this.visible.attach(this.root.current);
-        if (this._open()) this._reveal(this._open());
     }
 
-    componentDidUpdate(prevProps, prevState) {
+    // The view is about to switch between the grid and a section, or between sections: where its icons
+    // and cards are now, for the switch to start from.
+    getSnapshotBeforeUpdate(prevProps, prevState) {
+        return this._open(prevProps, prevState) !== this._open() ? hubSnapshot(this.root.current) : null;
+    }
+
+    componentDidUpdate(prevProps, prevState, snapshot) {
         const open = this._open();
-        if (open === this._open(prevProps, prevState)) return;
+        const prev = this._open(prevProps, prevState);
+        if (open === prev) return;
+        revealTop(this.root.current);
+        hubPlay(this.root.current, snapshot, { from: prev, to: open, order: SECTION_IDS });
         if (open) {
             // load the section now if the view is on screen, else as soon as it is
             const shown = !!(this.visible && this.visible.visible);
             if (!shown && this.visible) this.visible.last = 0;
             this.setState({ loading: true }, () => shown && this.load());
-            this._reveal(open);
         }
     }
 
     componentWillUnmount() {
         if (this.visible) this.visible.detach();
-        clearTimeout(this.revealTimer);
+        hubStop(this.root.current);
     }
 
     /** The open section: the parent's `section` prop when it drives the view, else the view's own choice. */
@@ -291,26 +434,14 @@ class GDMetrics extends React.PureComponent {
         return SECTION_IDS.indexOf(s) >= 0 ? s : null;
     }
 
-    /** Opens `id`, closing the open one, or closes `id` when it is the open one. */
-    _toggle = (id) => {
-        const next = this._open() === id ? null : id;
-        if (this.props.onSectionChange) this.props.onSectionChange(next);
-        else this.setState({ localSection: next });
+    /** Opens section `id`, or the grid of sections for null. */
+    _select = (id) => {
+        if (id === this._open()) return;
+        if (this.props.onSectionChange) this.props.onSectionChange(id);
+        else this.setState({ localSection: id });
     };
 
-    /** Brings a section's header to the top once the section closing above it has folded. */
-    _reveal(id) {
-        clearTimeout(this.revealTimer);
-        this.revealTimer = setTimeout(() => {
-            const el = this.heads[id];
-            if (el && el.scrollIntoView) el.scrollIntoView({ block: "start", behavior: "smooth" });
-        }, ACCORDION_MS + 30);
-    }
-
-    _headRef(id) {
-        if (!this.headRefs[id]) this.headRefs[id] = (el) => (this.heads[id] = el);
-        return this.headRefs[id];
-    }
+    _back = () => this._select(null);
 
     _setPeriod = (period) => {
         if (period === (this.state.pending || this.state.period)) return;
@@ -520,59 +651,59 @@ class GDMetrics extends React.PureComponent {
         };
         const xFmt = (b) => bucketLabel(b, g);
         const xTick = (b) => axisTick(b, g);
-        return (
-            <div className={classes.grid2}>
-                <Card
-                    title={tr(K + "active_accounts", "Active accounts")}
-                    subtitle={g === "hour" ? tr(K + "per_hour", "per hour") : tr(K + "per_day", "per day")}
-                    info={tr(K + "active_accounts_info", "Distinct accounts that signed at least one operation. Voters voted; creators published an artwork or a blog post. Witness price feeds are not counted.")}
-                >
-                    {act.length ? (
-                        <>
-                            <div className={classes.chart}>
-                                <ResponsiveContainer>
-                                    <LineChart data={act} margin={{ top: 8, right: 16, bottom: 0, left: -16 }}>
-                                        <CartesianGrid {...GRID} />
-                                        <XAxis dataKey="bucket" tickFormatter={xTick} ticks={timeTicks(act, g)} {...AXIS} minTickGap={24} />
-                                        <YAxis {...AXIS} allowDecimals={false} width={48} />
-                                        <Tooltip cursor={CURSOR} content={<ChartTip labelFormatter={xFmt} names={names} />} />
-                                        {["total", "voters", "creators"].map((k, i) => (
-                                            <Line key={k} type="monotone" dataKey={k} name={names[k]} stroke={SERIES[i].stroke}
-                                                  strokeDasharray={SERIES[i].dash} strokeWidth={2} dot={false} activeDot={ACTIVE_DOT}
-                                                  isAnimationActive={false} connectNulls />
-                                        ))}
-                                    </LineChart>
-                                </ResponsiveContainer>
-                            </div>
-                            <Legend items={[{ label: names.total }, { label: names.voters }, { label: names.creators }]} />
-                        </>
-                    ) : this._placeholder(d.activity)}
-                </Card>
-                <Card
-                    title={tr(K + "publications", "Publications")}
-                    subtitle={tr(K + "artworks_and_blog_posts", "Artworks and blog posts")}
-                    info={tr(K + "publications_info", "First versions only: edits are not counted. A blog post is a markdown post or any post in a portal.")}
-                >
-                    {content.length ? (
-                        <>
-                            <div className={classes.chart}>
-                                <ResponsiveContainer>
-                                    <BarChart data={content} margin={{ top: 8, right: 16, bottom: 0, left: -16 }} barGap={2} barCategoryGap="24%">
-                                        <CartesianGrid {...GRID} />
-                                        <XAxis dataKey="bucket" tickFormatter={xTick} ticks={timeTicks(content, g)} {...AXIS} minTickGap={24} />
-                                        <YAxis {...AXIS} allowDecimals={false} width={48} />
-                                        <Tooltip cursor={BAR_CURSOR} content={<ChartTip labelFormatter={xFmt} names={names} />} />
-                                        <Bar dataKey="artworks" name={names.artworks} fill={SERIES[0].fill} {...BAR} />
-                                        <Bar dataKey="blogs" name={names.blogs} fill={SERIES[1].fill} {...BAR} />
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            </div>
-                            <Legend items={[{ label: names.artworks, color: SERIES[0].fill, shape: "block" }, { label: names.blogs, color: SERIES[1].fill, shape: "block" }]} />
-                        </>
-                    ) : this._placeholder(d.artworks)}
-                </Card>
-            </div>
-        );
+        return [
+            <Card
+                key="active"
+                title={tr(K + "active_accounts", "Active accounts")}
+                subtitle={g === "hour" ? tr(K + "per_hour", "per hour") : tr(K + "per_day", "per day")}
+                info={tr(K + "active_accounts_info", "Distinct accounts that signed at least one operation. Voters voted; creators published an artwork or a blog post. Witness price feeds are not counted.")}
+            >
+                {act.length ? (
+                    <>
+                        <div className={classes.chart}>
+                            <ResponsiveContainer>
+                                <LineChart data={act} margin={{ top: 8, right: 16, bottom: 0, left: -16 }}>
+                                    <CartesianGrid {...GRID} />
+                                    <XAxis dataKey="bucket" tickFormatter={xTick} ticks={timeTicks(act, g)} {...AXIS} minTickGap={24} />
+                                    <YAxis {...AXIS} allowDecimals={false} width={48} />
+                                    <Tooltip cursor={CURSOR} content={<ChartTip labelFormatter={xFmt} names={names} />} />
+                                    {["total", "voters", "creators"].map((k, i) => (
+                                        <Line key={k} type="monotone" dataKey={k} name={names[k]} stroke={SERIES[i].stroke}
+                                              strokeDasharray={SERIES[i].dash} strokeWidth={2} dot={false} activeDot={ACTIVE_DOT}
+                                              isAnimationActive={false} connectNulls />
+                                    ))}
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </div>
+                        <Legend items={[{ label: names.total }, { label: names.voters }, { label: names.creators }]} />
+                    </>
+                ) : this._placeholder(d.activity)}
+            </Card>,
+            <Card
+                key="publications"
+                title={tr(K + "publications", "Publications")}
+                subtitle={tr(K + "artworks_and_blog_posts", "Artworks and blog posts")}
+                info={tr(K + "publications_info", "First versions only: edits are not counted. A blog post is a markdown post or any post in a portal.")}
+            >
+                {content.length ? (
+                    <>
+                        <div className={classes.chart}>
+                            <ResponsiveContainer>
+                                <BarChart data={content} margin={{ top: 8, right: 16, bottom: 0, left: -16 }} barGap={2} barCategoryGap="24%">
+                                    <CartesianGrid {...GRID} />
+                                    <XAxis dataKey="bucket" tickFormatter={xTick} ticks={timeTicks(content, g)} {...AXIS} minTickGap={24} />
+                                    <YAxis {...AXIS} allowDecimals={false} width={48} />
+                                    <Tooltip cursor={BAR_CURSOR} content={<ChartTip labelFormatter={xFmt} names={names} />} />
+                                    <Bar dataKey="artworks" name={names.artworks} fill={SERIES[0].fill} {...BAR} />
+                                    <Bar dataKey="blogs" name={names.blogs} fill={SERIES[1].fill} {...BAR} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                        <Legend items={[{ label: names.artworks, color: SERIES[0].fill, shape: "block" }, { label: names.blogs, color: SERIES[1].fill, shape: "block" }]} />
+                    </>
+                ) : this._placeholder(d.artworks)}
+            </Card>
+        ];
     }
 
     // ------------------------------------------------------------ controversy
@@ -584,7 +715,7 @@ class GDMetrics extends React.PureComponent {
         const anyDown = portals.some((p) => p.downvote_share_30d > 0);
         const posts = d.controversial || [];
         return (
-            <div className={classes.grid2}>
+            <Masonry>
                 <Card
                     title={tr(K + "controversy_by_portal", "Controversy by portal")}
                     subtitle={tr(K + "last_30_days", "last 30 days")}
@@ -632,7 +763,7 @@ class GDMetrics extends React.PureComponent {
                         </div>
                     )}
                 </Card>
-            </div>
+            </Masonry>
         );
     }
 
@@ -670,9 +801,9 @@ class GDMetrics extends React.PureComponent {
                     <Tile label={tr(K + "dpf_balance", "DPF balance")} value={s ? fmtCompact(s.dpf_pxs) : "–"} unit="PXS" sub={tr(K + "decentralized_fund", "Decentralized Pixa Fund")} loading={!s && this.state.loading} />
                     <Tile label={tr(K + "reward_pool", "Reward pool")} value={s ? fmtCompact(s.reward_pool_pixa) : "–"} unit="PIXA" sub={tr(K + "to_be_distributed", "to be distributed by votes")} loading={!s && this.state.loading} />
                 </div>
-                <div className={classes.grid2} style={{ marginTop: "16px" }}>
+                <Masonry className={classes.below}>
                     <Card
-                        className={classes.wide}
+                        wide
                         title={tr(K + "debt_ratio", "PXS debt ratio")}
                         subtitle={s ? fmtPct(s.pxs_debt_ratio, 2) + " " + tr(K + "now", "now") : ""}
                         info={tr(K + "debt_ratio_info", "PXS supply at the median feed over virtual supply. PXS printing stops above 20%; the haircut applies above 30%.")}
@@ -740,7 +871,7 @@ class GDMetrics extends React.PureComponent {
                         ) : this._placeholder(d.pxp)}
                     </Card>
                     {this._renderRewards()}
-                </div>
+                </Masonry>
             </>
         );
     }
@@ -752,7 +883,7 @@ class GDMetrics extends React.PureComponent {
         const rows = r ? REWARD_TYPES.map((t) => ({ ...t, row: r.by_type.find((x) => x.type === t.type) })).filter((x) => x.row && x.row.pixa_equivalent > 0) : [];
         return (
             <Card
-                className={classes.wide}
+                wide
                 title={tr(K + "rewards_by_type", "Rewards paid")}
                 subtitle={trf(K + "last_n_pixa_equivalent", "last {n} · PIXA equivalent", { n: period })}
                 info={tr(K + "rewards_flow_info", "Content rewards come from the reward pool and are shared by votes; producer rewards are paid for each block produced. The block on the left is each source's share of all rewards. Stake (VESTS) at the current ratio, PXS at the median feed, liquid PIXA as is. Payments by the Decentralized Pixa Fund are in the Control Tower.")}
@@ -803,9 +934,9 @@ class GDMetrics extends React.PureComponent {
         const last = stages.length ? stages[stages.length - 1] : null;
         const names = { avg: tr(K + "average", "Average"), peak: tr(K + "busiest_block", "Busiest block") };
         return (
-            <div className={classes.grid2}>
+            <Masonry>
                 <Card
-                    className={classes.wide}
+                    wide
                     title={tr(K + "tps", "Transactions per second")}
                     subtitle={tr(K + "tps_sub", "average and busiest block (3 s)")}
                 >
@@ -828,7 +959,7 @@ class GDMetrics extends React.PureComponent {
                     ) : this._placeholder(d.tps)}
                 </Card>
                 <Card
-                    className={classes.wide}
+                    wide
                     title={tr(K + "onboarding", "Onboarding funnel")}
                     subtitle={f ? trf(K + "accounts_created_week_of_n", "accounts created the week of {n}", { n: f.cohort_week }) : ""}
                     info={tr(K + "funnel_info", "How far the accounts created in one week have gone so far. A recent cohort keeps moving as its accounts reach new stages.")}
@@ -865,7 +996,7 @@ class GDMetrics extends React.PureComponent {
                         </>
                     )}
                 </Card>
-            </div>
+            </Masonry>
         );
     }
 
@@ -888,63 +1019,63 @@ class GDMetrics extends React.PureComponent {
         const anyVote = votes.some((r) => r.up || r.down || r.unvote);
         const artists = d.artists ? fillBuckets(pivot(d.artists, ["", "new"]), dFrom, to, "day", ["total", "new"]) : [];
         const aNames = { total: tr(K + "artists_all", "Published an artwork"), new: tr(K + "artists_new", "Their first artwork") };
-        return (
-            <div className={classes.grid2} style={{ marginTop: "16px" }}>
-                <Card
-                    title={tr(K + "votes_title", "Votes")}
-                    subtitle={anyVote ? `▲ ${fmtInt(vSum.get("up") || 0)} · ▼ ${fmtInt(vSum.get("down") || 0)} · ${trf(K + "removals_n", "{n} removed", { n: fmtInt(vSum.get("unvote") || 0) })}` : ""}
-                    info={tr(K + "votes_info", "Vote operations by their weight: upvotes, downvotes, and votes set back to 0 (a vote removed or changed to nothing).")}
-                >
-                    {anyVote ? (
-                        <>
-                            <div className={classes.chart}>
-                                <ResponsiveContainer>
-                                    <BarChart data={votes} margin={{ top: 8, right: 16, bottom: 0, left: -16 }} barCategoryGap="24%">
-                                        <CartesianGrid {...GRID} />
-                                        <XAxis dataKey="bucket" tickFormatter={xTick} ticks={timeTicks(votes, g)} {...AXIS} minTickGap={24} />
-                                        <YAxis {...AXIS} allowDecimals={false} width={48} />
-                                        <Tooltip cursor={BAR_CURSOR} content={<ChartTip labelFormatter={xFmt} names={vNames} valueFormatter={(v) => fmtInt(v)} />} />
-                                        <Bar dataKey="up" name={vNames.up} stackId="v" fill={SERIES[0].fill} {...BAR} shape={VOTE_STACK} />
-                                        <Bar dataKey="down" name={vNames.down} stackId="v" fill={SERIES[1].fill} {...BAR} shape={VOTE_STACK} />
-                                        <Bar dataKey="unvote" name={vNames.unvote} stackId="v" fill={SERIES[2].fill} {...BAR} shape={VOTE_STACK} />
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            </div>
-                            <Legend items={[
-                                { label: vNames.up, color: SERIES[0].fill, shape: "block" },
-                                { label: vNames.down, color: SERIES[1].fill, shape: "block" },
-                                { label: vNames.unvote, color: SERIES[2].fill, shape: "block" }
-                            ]} />
-                        </>
-                    ) : this._placeholder(d.votesDim, tr(K + "no_votes", "No vote in this period."))}
-                </Card>
-                <Card
-                    title={tr(K + "artists_title", "Artists")}
-                    subtitle={tr(K + "per_day", "per day")}
-                    info={tr(K + "artists_info", "Accounts that published at least one artwork that day, and those among them publishing their very first.")}
-                >
-                    {artists.length ? (
-                        <>
-                            <div className={classes.chart}>
-                                <ResponsiveContainer>
-                                    <LineChart data={artists} margin={{ top: 8, right: 16, bottom: 0, left: -16 }}>
-                                        <CartesianGrid {...GRID} />
-                                        <XAxis dataKey="bucket" tickFormatter={dFmt} {...AXIS} minTickGap={24} />
-                                        <YAxis {...AXIS} allowDecimals={false} width={48} />
-                                        <Tooltip cursor={CURSOR} content={<ChartTip labelFormatter={dFmt} names={aNames} valueFormatter={(v) => fmtInt(v)} />} />
-                                        {["total", "new"].map((k, i) => (
-                                            <Line key={k} type="monotone" dataKey={k} name={aNames[k]} stroke={SERIES[i].stroke} strokeDasharray={SERIES[i].dash}
-                                                  strokeWidth={2} dot={false} activeDot={ACTIVE_DOT} isAnimationActive={false} connectNulls />
-                                        ))}
-                                    </LineChart>
-                                </ResponsiveContainer>
-                            </div>
-                            <Legend items={[{ label: aNames.total }, { label: aNames.new }]} />
-                        </>
-                    ) : this._placeholder(d.artists)}
-                </Card>
-            </div>
-        );
+        return [
+            <Card
+                key="votes"
+                title={tr(K + "votes_title", "Votes")}
+                subtitle={anyVote ? `▲ ${fmtInt(vSum.get("up") || 0)} · ▼ ${fmtInt(vSum.get("down") || 0)} · ${trf(K + "removals_n", "{n} removed", { n: fmtInt(vSum.get("unvote") || 0) })}` : ""}
+                info={tr(K + "votes_info", "Vote operations by their weight: upvotes, downvotes, and votes set back to 0 (a vote removed or changed to nothing).")}
+            >
+                {anyVote ? (
+                    <>
+                        <div className={classes.chart}>
+                            <ResponsiveContainer>
+                                <BarChart data={votes} margin={{ top: 8, right: 16, bottom: 0, left: -16 }} barCategoryGap="24%">
+                                    <CartesianGrid {...GRID} />
+                                    <XAxis dataKey="bucket" tickFormatter={xTick} ticks={timeTicks(votes, g)} {...AXIS} minTickGap={24} />
+                                    <YAxis {...AXIS} allowDecimals={false} width={48} />
+                                    <Tooltip cursor={BAR_CURSOR} content={<ChartTip labelFormatter={xFmt} names={vNames} valueFormatter={(v) => fmtInt(v)} />} />
+                                    <Bar dataKey="up" name={vNames.up} stackId="v" fill={SERIES[0].fill} {...BAR} shape={VOTE_STACK} />
+                                    <Bar dataKey="down" name={vNames.down} stackId="v" fill={SERIES[1].fill} {...BAR} shape={VOTE_STACK} />
+                                    <Bar dataKey="unvote" name={vNames.unvote} stackId="v" fill={SERIES[2].fill} {...BAR} shape={VOTE_STACK} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                        <Legend items={[
+                            { label: vNames.up, color: SERIES[0].fill, shape: "block" },
+                            { label: vNames.down, color: SERIES[1].fill, shape: "block" },
+                            { label: vNames.unvote, color: SERIES[2].fill, shape: "block" }
+                        ]} />
+                    </>
+                ) : this._placeholder(d.votesDim, tr(K + "no_votes", "No vote in this period."))}
+            </Card>,
+            <Card
+                key="artists"
+                title={tr(K + "artists_title", "Artists")}
+                subtitle={tr(K + "per_day", "per day")}
+                info={tr(K + "artists_info", "Accounts that published at least one artwork that day, and those among them publishing their very first.")}
+            >
+                {artists.length ? (
+                    <>
+                        <div className={classes.chart}>
+                            <ResponsiveContainer>
+                                <LineChart data={artists} margin={{ top: 8, right: 16, bottom: 0, left: -16 }}>
+                                    <CartesianGrid {...GRID} />
+                                    <XAxis dataKey="bucket" tickFormatter={dFmt} {...AXIS} minTickGap={24} />
+                                    <YAxis {...AXIS} allowDecimals={false} width={48} />
+                                    <Tooltip cursor={CURSOR} content={<ChartTip labelFormatter={dFmt} names={aNames} valueFormatter={(v) => fmtInt(v)} />} />
+                                    {["total", "new"].map((k, i) => (
+                                        <Line key={k} type="monotone" dataKey={k} name={aNames[k]} stroke={SERIES[i].stroke} strokeDasharray={SERIES[i].dash}
+                                              strokeWidth={2} dot={false} activeDot={ACTIVE_DOT} isAnimationActive={false} connectNulls />
+                                    ))}
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </div>
+                        <Legend items={[{ label: aNames.total }, { label: aNames.new }]} />
+                    </>
+                ) : this._placeholder(d.artists)}
+            </Card>
+        ];
     }
 
     /** Active accounts in each hour of the last 7 days: a row per day, a cell per hour (UTC). */
@@ -983,7 +1114,8 @@ class GDMetrics extends React.PureComponent {
         };
         return (
             <Card
-                style={{ marginTop: "16px" }}
+                key="byhour"
+                wide
                 title={tr(K + "active_by_hour", "Active accounts by hour")}
                 subtitle={tr(K + "active_by_hour_sub", "last 7 days, hours in UTC")}
                 info={tr(K + "active_by_hour_info", "Distinct accounts that signed an operation in each hour, one row per day. Lighter is busier; the hour now running is still counting.")}
@@ -1082,7 +1214,7 @@ class GDMetrics extends React.PureComponent {
         const trades = sumByDim(d.marketVol, from, to).get("") || 0;
 
         return (
-            <div className={classes.grid2}>
+            <Masonry>
                 <Card
                     title={tr(K + "supply_by_holder", "Supply by holder")}
                     subtitle={tr(K + "supply_by_holder_sub", "virtual supply, PIXA equivalent")}
@@ -1284,7 +1416,7 @@ class GDMetrics extends React.PureComponent {
                         </>
                     )}
                 </Card>
-            </div>
+            </Masonry>
         );
     }
 
@@ -1336,7 +1468,7 @@ class GDMetrics extends React.PureComponent {
         const paidSum = sumByDim(d.payouts, from, to);
 
         return (
-            <div className={classes.grid2}>
+            <Masonry>
                 <Card
                     title={tr(K + "registrations", "Registrations")}
                     subtitle={created ? trf(K + "activation_n", "{n} became active", { n: fmtPct(activated / created, 0) }) : tr(K + "per_day", "per day")}
@@ -1495,7 +1627,7 @@ class GDMetrics extends React.PureComponent {
                         </div>
                     ) : null}
                 </Card>
-            </div>
+            </Masonry>
         );
     }
 
@@ -1538,7 +1670,7 @@ class GDMetrics extends React.PureComponent {
             );
         };
         return (
-            <div className={classes.grid2}>
+            <Masonry>
                 <Card
                     title={tr(K + "engagement", "Engagement per artwork")}
                     subtitle={tr(K + "engagement_sub", "within 7 days of publication, by publication day")}
@@ -1629,7 +1761,7 @@ class GDMetrics extends React.PureComponent {
                         </div>
                     )}
                 </Card>
-            </div>
+            </Masonry>
         );
     }
 
@@ -1643,13 +1775,7 @@ class GDMetrics extends React.PureComponent {
             case "pulse":
                 return this._renderPulse();
             case "activity":
-                return (
-                    <>
-                        {this._renderActivity()}
-                        {this._renderVotesAndArtists()}
-                        {this._renderActivityByHour()}
-                    </>
-                );
+                return <Masonry>{[...this._renderActivity(), ...this._renderVotesAndArtists(), this._renderActivityByHour()]}</Masonry>;
             case "controversy":
                 return this._renderControversy();
             case "economy":
@@ -1675,41 +1801,117 @@ class GDMetrics extends React.PureComponent {
         }
     }
 
+    /** The block the figures are as of, and how long ago it was produced. */
+    _renderAsOf() {
+        const { classes } = this.props;
+        const { meta } = this.state;
+        if (!meta || !meta.as_of_block) return null;
+        return (
+            <span className={classes.asOf}>
+                {tr(K + "block", "block")} {fmtInt(meta.as_of_block)} · {trf(K + "ago_n", "{n} ago", { n: fmtAgo(meta.as_of_time) })}
+                {meta.ingest_lag_blocks > 1200 ? " · " : ""}
+                {meta.ingest_lag_blocks > 1200 ? <Pill level="amber">{tr(K + "catching_up", "catching up")}</Pill> : null}
+            </span>
+        );
+    }
+
+    _renderError() {
+        const { classes } = this.props;
+        const { error } = this.state;
+        return error ? <div className={classes.error}><Pill level="amber">{tr(K + "offline", "offline")}</Pill>{error}</div> : null;
+    }
+
+    /** The 3 × 3 grid of sections. Each card's icon is the one that flies into the strip when it opens. */
+    _renderGrid() {
+        const { classes } = this.props;
+        return (
+            <React.Fragment key="grid">
+                <div className={classes.gridTop} data-hub-enter="0">{this._renderAsOf()}</div>
+                {this._renderError()}
+                <div className={classes.navGrid} data-hub-grid="">
+                    {SECTIONS.map((x, i) => (
+                        <button
+                            key={x.id}
+                            type="button"
+                            className={classes.navCard}
+                            onClick={() => this._select(x.id)}
+                            data-hub-card={x.id}
+                            data-hub-enter={i + 1}
+                        >
+                            <span className={classes.navIcon} data-hub-icon={x.id}>
+                                <GlyphTile icon={x.icon} size={44} glyph={26} />
+                            </span>
+                            <span className={classes.navText}>
+                                <span className={classes.navTitle}>{x.title()}</span>
+                                <span className={classes.navDescription}>{x.description()}</span>
+                            </span>
+                            <ArrowForwardRoundedIcon className={classes.navArrow} aria-hidden="true" />
+                        </button>
+                    ))}
+                </div>
+            </React.Fragment>
+        );
+    }
+
+    /** An open section: back and the strip of every section's icon on top, then its title and figures. */
+    _renderOpen(open) {
+        const { classes } = this.props;
+        const { period, pending } = this.state;
+        const sec = SECTIONS[SECTION_IDS.indexOf(open)];
+        return (
+            <React.Fragment key="open">
+                <StickyBar>
+                    <BackButton onClick={this._back} label={tr(K + "all_sections", "All sections")} data-hub-enter="0" />
+                    <nav className={classes.strip} aria-label={tr(K + "sections", "Sections")}>
+                        {SECTIONS.map((x) => {
+                            const on = x.id === open;
+                            return (
+                                <MuiTooltip key={x.id} title={x.title()} placement="bottom" enterDelay={300}>
+                                    <button
+                                        type="button"
+                                        className={`${classes.stripItem} ${on ? classes.stripItemOn : ""}`}
+                                        onClick={() => this._select(x.id)}
+                                        aria-label={x.title()}
+                                        aria-current={on ? "true" : undefined}
+                                    >
+                                        <span className={classes.stripIcon} data-hub-icon={x.id}>
+                                            <GlyphTile icon={x.icon} size={28} glyph={17} />
+                                            <span className={classes.stripLamp} />
+                                        </span>
+                                    </button>
+                                </MuiTooltip>
+                            );
+                        })}
+                    </nav>
+                    <div className={classes.barSide}>{this._renderAsOf()}</div>
+                </StickyBar>
+                <div key={open} data-hub-swap="">
+                    <div className={classes.detailHead} data-hub-enter="1">
+                        <div className={classes.detailText}>
+                            <Typography component="h2" className={classes.detailTitle}>{sec.title()}</Typography>
+                            <Typography className={classes.detailDescription}>{sec.description()}</Typography>
+                        </div>
+                        <div className={classes.detailSide}>
+                            {open !== "reports" ? (
+                                <Switch label={tr(K + "period", "Period")} value={pending || period} onChange={this._setPeriod} options={PERIOD_OPTIONS} />
+                            ) : null}
+                            <span className={classes.asOfPhone}>{this._renderAsOf()}</span>
+                        </div>
+                    </div>
+                    {this._renderError()}
+                    <div data-hub-enter="2">{this._renderSection(open)}</div>
+                </div>
+            </React.Fragment>
+        );
+    }
+
     render() {
         const { classes } = this.props;
-        const { period, pending, error, meta } = this.state;
         const open = this._open();
         return (
             <DialogContent className={classes.dialogContent}>
-                <div ref={this.root}>
-                    <div className={classes.topBar}>
-                        <Switch label={tr(K + "period", "Period")} value={pending || period} onChange={this._setPeriod} options={PERIOD_OPTIONS} />
-                        {meta && meta.as_of_block ? (
-                            <span className={classes.asOf}>
-                                {tr(K + "block", "block")} {fmtInt(meta.as_of_block)} · {trf(K + "ago_n", "{n} ago", { n: fmtAgo(meta.as_of_time) })}
-                                {meta.ingest_lag_blocks > 1200 ? " · " : ""}
-                                {meta.ingest_lag_blocks > 1200 ? <Pill level="amber">{tr(K + "catching_up", "catching up")}</Pill> : null}
-                            </span>
-                        ) : null}
-                    </div>
-                    {error ? <div className={classes.error}><Pill level="amber">{tr(K + "offline", "offline")}</Pill>{error}</div> : null}
-
-                    <div className={classes.sections}>
-                        {SECTIONS.map((x) => (
-                            <AccordionSection
-                                key={x.id}
-                                scope="metrics"
-                                id={x.id}
-                                icon={x.icon}
-                                title={x.title()}
-                                description={x.description()}
-                                open={open === x.id}
-                                onToggle={this._toggle}
-                                headRef={this._headRef(x.id)}
-                                render={() => this._renderSection(x.id)}
-                            />
-                        ))}
-                    </div>
+                <div ref={this.root} className={classes.hub}>
+                    {open ? this._renderOpen(open) : this._renderGrid()}
                 </div>
             </DialogContent>
         );

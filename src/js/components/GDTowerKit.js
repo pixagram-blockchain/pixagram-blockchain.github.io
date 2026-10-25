@@ -2,6 +2,8 @@
 // Greyscale only, no solid borders: surfaces are told apart by fill (#101010 / #171717),
 // series by lightness and dash pattern, parts of a whole by hatching, severity by a pill with an icon and a word.
 // Icons sit in a rounded tile with the glyph cut out of it, as in the Pixagram mark.
+// Both views are hubs: a grid of sections that opens into one of them. The icon tiles carry the motion
+// between the two (hubSnapshot / hubPlay), and cards of different heights stack in a Masonry.
 import * as React from "preact/compat";
 
 import withStyles from "@material-ui/core/styles/withStyles";
@@ -15,6 +17,7 @@ import ReportProblemOutlinedIcon from "@material-ui/icons/ReportProblemOutlined"
 import CheckCircleOutlineIcon from "@material-ui/icons/CheckCircleOutline";
 import InfoOutlinedIcon from "@material-ui/icons/InfoOutlined";
 import ExpandMoreRoundedIcon from "@material-ui/icons/ExpandMoreRounded";
+import ArrowBackRoundedIcon from "@material-ui/icons/ArrowBackRounded";
 import Collapse from "@material-ui/core/Collapse";
 // Recharts by module, as the wallet already imports it: one copy of the library in the app, and only
 // the chart types a view uses in its chunk.
@@ -39,6 +42,14 @@ export function tr(key, fallback) {
 export function trf(key, fallback, vars) {
     return tr(key, fallback).replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] != null ? String(vars[k]) : m));
 }
+
+// ---------------------------------------------------------------- motion
+
+// Quick out, long settle: every move of a hub (icons flying, cards rising, masonry cells sliding) uses it.
+export const HUB_EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+
+// Duration of an icon's flight between a hub's grid and a section's header, in ms.
+export const HUB_MS = 520;
 
 // ---------------------------------------------------------------- chart look
 
@@ -639,7 +650,57 @@ const styles = () => ({
     flowValue: { fontSize: "14px", fill: "#ececec", fontFamily: "'Geist Mono', monospace" },
     flowSub: { fontSize: "11px", fill: "#666", fontFamily: "'Normative Pro'" },
     flowTile: { color: "#353535", transition: "color 150ms ease" },
-    flowTileOn: { color: "#e8e8e8" }
+    flowTileOn: { color: "#e8e8e8" },
+    // masonry: cards in columns, each right under the one above, moved (not reflowed) when a height changes
+    masonry: { position: "relative", minWidth: 0 },
+    masonryCell: {
+        position: "absolute",
+        left: 0,
+        top: 0,
+        minWidth: 0,
+        transition: `transform 380ms ${HUB_EASE}`,
+        "@media (prefers-reduced-motion: reduce)": { transition: "none" }
+    },
+    // hub header: a bar that sticks to the top of the view while its content scrolls under it
+    hubBar: {
+        position: "sticky",
+        top: "-1px",
+        zIndex: 4,
+        display: "flex",
+        alignItems: "center",
+        gap: "12px",
+        minWidth: 0,
+        margin: "-8px -12px 0 -12px",
+        padding: "8px 12px",
+        borderRadius: "0 0 20px 20px",
+        transition: "background-color 200ms ease, box-shadow 200ms ease"
+    },
+    hubBarStuck: {
+        backgroundColor: "rgba(8, 8, 8, 0.86)",
+        backdropFilter: "blur(16px) saturate(140%)",
+        boxShadow: "0 14px 32px rgba(0, 0, 0, 0.55)"
+    },
+    // back to the grid: a round tile, as the switch's items are
+    back: {
+        appearance: "none",
+        border: "none",
+        flex: "0 0 auto",
+        width: "40px",
+        height: "40px",
+        borderRadius: "14px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 0,
+        cursor: "pointer",
+        color: "#c7c7c7",
+        backgroundColor: "#171717",
+        transition: "background-color 150ms ease, color 150ms ease",
+        "&:hover": { backgroundColor: "#262626", color: "#fff" },
+        "&:hover $backIcon": { transform: "translateX(-2px)" },
+        "&:focus-visible": { outline: "none", boxShadow: "0 0 0 2px #555" }
+    },
+    backIcon: { fontSize: "22px", transition: `transform 200ms ${HUB_EASE}` }
 });
 
 const withKit = withStyles(styles);
@@ -959,6 +1020,439 @@ export const AccordionSection = withKit(({ classes, scope, id, title, descriptio
                     {render ? <Lazy render={render} /> : children}
                 </div>
             </Collapse>
+        </div>
+    );
+});
+
+// ---------------------------------------------------------------- hub
+
+/** True when the person asked their system for less motion: hubs then switch views without animating. */
+export function lessMotion() {
+    try {
+        return typeof window === "undefined" || !window.matchMedia || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch (e) {
+        return true;
+    }
+}
+
+/**
+ * Back to a hub's grid: a round tile with an arrow. Extra props (data-*) go to the button.
+ */
+export const BackButton = withKit(({ classes, onClick, label, ...rest }) => (
+    <Tooltip title={label || ""} placement="bottom" enterDelay={400}>
+        <button type="button" className={classes.back} onClick={onClick} aria-label={label} {...rest}>
+            <ArrowBackRoundedIcon className={classes.backIcon} />
+        </button>
+    </Tooltip>
+));
+
+/**
+ * The header of a hub's section: sticks to the top of the scrolling view and takes a dark, blurred
+ * surface once the content passes under it (it sits 1 px above the edge then, which is how it knows).
+ */
+export const StickyBar = withKit(({ classes, children, className }) => {
+    const mark = React.useRef(null);
+    const [el, setEl] = React.useState(null);
+    const [stuck, setStuck] = React.useState(false);
+    React.useEffect(() => {
+        if (!el || typeof IntersectionObserver === "undefined") return undefined;
+        // Clipped at its top edge, and moved away from the mark that sits where it would be in the flow:
+        // stuck (a bar that merely scrolls out of sight stays next to its mark).
+        const io = new IntersectionObserver(([e]) => {
+            const m = mark.current;
+            const moved = m ? e.boundingClientRect.top - m.getBoundingClientRect().bottom - parseFloat(window.getComputedStyle(el).marginTop || "0") : 1;
+            // (not isIntersecting: with a threshold of 1, Chrome reports a bar clipped by 1 px as not intersecting)
+            setStuck(e.intersectionRatio > 0 && e.intersectionRect.top - e.boundingClientRect.top > 0.5 && moved > 0.5);
+        }, { threshold: [1] });
+        io.observe(el);
+        return () => io.disconnect();
+    }, [el]);
+    return (
+        <>
+            {/* flow-root: an empty block would let the bar's negative margin collapse through it and sit under it */}
+            <div ref={mark} aria-hidden="true" style={{ display: "flow-root" }} />
+            <div ref={setEl} className={`${classes.hubBar} ${stuck ? classes.hubBarStuck : ""} ${className || ""}`}>{children}</div>
+        </>
+    );
+});
+
+/**
+ * Lets a hub's header bar stick while the page scrolls. A sticky bar holds to its nearest ancestor that
+ * clips overflow; a dialog's content box (overflow auto) that never scrolls itself, because it grows with
+ * its content inside a scrolling slide, would catch the bar and carry it away. Such a box `el` is measured
+ * once (does it grow with a very tall child?) and, when it does, left to overflow visibly: nothing changes
+ * for it, and the bar holds to the element that really scrolls. A box of fixed height keeps scrolling.
+ */
+export function releaseScroll(el) {
+    if (!el || typeof window === "undefined") return;
+    if (!/(auto|scroll|hidden|overlay)/.test(window.getComputedStyle(el).overflowY)) return;
+    const probe = document.createElement("div");
+    probe.style.cssText = "height:100000px;width:1px;visibility:hidden;pointer-events:none";
+    el.appendChild(probe);
+    const grows = el.clientHeight >= 100000;
+    el.removeChild(probe);
+    if (grows) el.style.overflow = "visible";
+}
+
+/**
+ * Scrolls the scrolling ancestor of `el` back up when the person had scrolled past the top of `el`, so a
+ * view that just changed starts in sight. Instant: the change itself is what animates.
+ */
+export function revealTop(el, margin = 24) {
+    if (!el) return;
+    for (let p = el.parentElement; p; p = p.parentElement) {
+        const s = window.getComputedStyle(p);
+        if (/(auto|scroll|overlay)/.test(s.overflowY) && p.scrollHeight > p.clientHeight + 1) {
+            const top = el.getBoundingClientRect().top - p.getBoundingClientRect().top - p.clientTop;
+            if (top < 0) p.scrollTop = Math.max(0, p.scrollTop + top - margin);
+            return;
+        }
+    }
+    const top = el.getBoundingClientRect().top;
+    if (top < 0) window.scrollBy(0, top - margin);
+}
+
+const rectOf = (el) => {
+    const r = el.getBoundingClientRect();
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
+};
+
+/**
+ * What a hub shows just before it switches between its grid and a section, for hubPlay to start from:
+ * where each icon (data-hub-icon) and card (data-hub-card) is on screen, and a copy of the grid
+ * (data-hub-grid) that is about to go. Call it from getSnapshotBeforeUpdate, while the old view is
+ * still in the page.
+ * The copy keeps the grid's class names. A styled component that leaves with the grid takes its style
+ * sheet with it (MUI removes a sheet nothing uses, and makes a new one, with new names, for the next
+ * user), so the grid's cards are styled by their view's own sheet, which stays.
+ */
+export function hubSnapshot(root) {
+    if (!root || lessMotion() || typeof root.animate !== "function") return null;
+    const icons = new Map();
+    root.querySelectorAll("[data-hub-icon]").forEach((el) => {
+        const r = rectOf(el);
+        if (r.width && r.height) icons.set(el.getAttribute("data-hub-icon"), { ...r, color: window.getComputedStyle(el).color });
+    });
+    const cards = new Map();
+    root.querySelectorAll("[data-hub-card]").forEach((el) => {
+        cards.set(el.getAttribute("data-hub-card"), { ...rectOf(el), fill: window.getComputedStyle(el).backgroundColor });
+    });
+    const grid = root.querySelector("[data-hub-grid]");
+    return { icons, cards, grid: grid ? { node: grid.cloneNode(true), ...rectOf(grid) } : null };
+}
+
+/** Ends the animations of a hub's last switch, at once: called before the next one starts. */
+export function hubStop(root) {
+    const run = root && root.__hubRun;
+    if (!run) return;
+    root.__hubRun = null;
+    run.anims.forEach((a) => {
+        try {
+            a.finish();
+        } catch (e) {
+            a.cancel();
+        }
+    });
+    if (run.layer.parentNode) run.layer.parentNode.removeChild(run.layer);
+}
+
+let copySeq = 0;
+
+/** Ids in a copied subtree made unique again, and the references to them (an icon tile's mask). */
+function renameIds(node) {
+    const n = ++copySeq;
+    node.querySelectorAll("[id]").forEach((x) => {
+        const id = `${x.id}-c${n}`;
+        node.querySelectorAll(`[mask="url(#${x.id})"]`).forEach((y) => y.setAttribute("mask", `url(#${id})`));
+        x.id = id;
+    });
+}
+
+/** The copy of a hub's part, taken out of the hub's bookkeeping so no later query finds it. */
+function inert(node) {
+    const attrs = ["data-hub-icon", "data-hub-card", "data-hub-grid", "data-hub-enter", "data-hub-reveal", "data-hub-swap"];
+    [node, ...node.querySelectorAll("*")].forEach((x) => attrs.forEach((a) => x.removeAttribute(a)));
+    node.setAttribute("aria-hidden", "true");
+    return node;
+}
+
+/**
+ * Animates a hub's switch from what `snap` saw (hubSnapshot) to what is in the page now. `from` and `to`
+ * are the open section before and after, null for the grid; `order` lists the section ids.
+ * - grid → section: the grid's copy fades out where it was, the picked card last; each icon of the grid
+ *   that is also in the new view flies to its new place; the element marked data-hub-reveal grows out
+ *   of the picked card; parts marked data-hub-enter rise in, in their order.
+ * - section → grid: the icons fly back down, the cards rise in around them, and the card of the section
+ *   left behind glows for a moment, to show where it went.
+ * - section → section: the part marked data-hub-swap slides in from the side of the section it was on.
+ * Call it from componentDidUpdate, once the new view is in the page. Nothing moves when the person asked
+ * for less motion.
+ */
+export function hubPlay(root, snap, { from = null, to = null, order = [] } = {}) {
+    hubStop(root);
+    if (!root || !snap || lessMotion() || from === to) return;
+    const base = root.getBoundingClientRect();
+    const layer = document.createElement("div");
+    layer.setAttribute("aria-hidden", "true");
+    Object.assign(layer.style, { position: "absolute", left: "0", top: "0", width: "0", height: "0", overflow: "visible", pointerEvents: "none", zIndex: "6" });
+    root.appendChild(layer);
+    const anims = [];
+    const run = { anims, layer };
+    root.__hubRun = run;
+    const at = (r) => ({ left: `${r.left - base.left}px`, top: `${r.top - base.top}px` });
+    const inView = (sel) => Array.from(root.querySelectorAll(sel)).filter((el) => !layer.contains(el));
+    const flying = new Set(inView("[data-hub-icon]").map((el) => el.getAttribute("data-hub-icon")).filter((id) => snap.icons.has(id)));
+
+    // 1. the grid that left: its copy fades out where it was, cards further from the picked one first
+    if (snap.grid && to != null) {
+        const g = snap.grid.node;
+        Object.assign(g.style, { position: "absolute", margin: "0", width: `${snap.grid.width}px`, ...at(snap.grid) });
+        g.querySelectorAll("[data-hub-icon]").forEach((el) => {
+            if (flying.has(el.getAttribute("data-hub-icon"))) el.style.visibility = "hidden";
+        });
+        const cards = Array.from(g.querySelectorAll("[data-hub-card]"));
+        const picked = cards.findIndex((el) => el.getAttribute("data-hub-card") === to);
+        const fades = cards.map((el, i) => {
+            const seen = snap.cards.get(el.getAttribute("data-hub-card"));
+            if (seen && seen.fill) el.style.backgroundColor = seen.fill;
+            const mine = i === picked;
+            const far = picked < 0 ? i : Math.abs(i - picked);
+            return [el, mine
+                ? [[{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(1.03)" }], { duration: 300, delay: 60, easing: "ease-out", fill: "forwards" }]
+                : [[{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateY(6px) scale(0.97)" }], { duration: 220, delay: Math.max(0, 60 - far * 12), easing: "ease-in", fill: "forwards" }]];
+        });
+        renameIds(inert(g));
+        layer.appendChild(g);
+        fades.forEach(([el, [frames, opts]]) => anims.push(el.animate(frames, opts)));
+    }
+
+    // 2. icons: a copy flies from where the icon was to where it is now; the icon shows when it lands
+    let n = 0;
+    inView("[data-hub-icon]").forEach((el) => {
+        const a = snap.icons.get(el.getAttribute("data-hub-icon"));
+        const b = rectOf(el);
+        if (!a || !b.width) return;
+        const dx = a.left - b.left;
+        const dy = a.top - b.top;
+        const s = a.width / b.width;
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(s - 1) < 0.02) return;
+        const color = window.getComputedStyle(el).color;
+        const copy = inert(el.cloneNode(true));
+        renameIds(copy);
+        Object.assign(copy.style, {
+            position: "absolute", margin: "0", width: `${b.width}px`, height: `${b.height}px`,
+            transformOrigin: "0 0", color, visibility: "visible", ...at(b)
+        });
+        layer.appendChild(copy);
+        el.style.visibility = "hidden";
+        const anim = copy.animate(
+            [{ transform: `translate(${dx}px, ${dy}px) scale(${s})`, color: a.color }, { transform: "translate(0px, 0px) scale(1)", color }],
+            { duration: HUB_MS, delay: n++ * 16, easing: HUB_EASE, fill: "both" }
+        );
+        const land = () => {
+            el.style.visibility = "";
+            if (copy.parentNode) copy.parentNode.removeChild(copy);
+        };
+        anim.onfinish = land;
+        anim.oncancel = land;
+        anims.push(anim);
+    });
+
+    if (from == null || to == null) {
+        // 3. the section grows out of the card it was opened from
+        const grow = to != null ? inView("[data-hub-reveal]")[0] : null;
+        const card = grow ? snap.cards.get(to) : null;
+        if (grow && card) {
+            const r = rectOf(grow);
+            const inset = [card.top - r.top, r.left + r.width - card.left - card.width, r.top + r.height - card.top - card.height, card.left - r.left]
+                .map((v) => `${Math.max(0, v)}px`).join(" ");
+            anims.push(grow.animate(
+                [{ clipPath: `inset(${inset} round 16px)` }, { clipPath: "inset(0px 0px 0px 0px round 0px)" }],
+                { duration: HUB_MS, easing: HUB_EASE }
+            ));
+        }
+        // 4. the new view's parts rise in, in their order
+        inView("[data-hub-enter]").forEach((el) => {
+            const k = Number(el.getAttribute("data-hub-enter")) || 0;
+            anims.push(el.animate(
+                [{ opacity: 0, transform: "translateY(14px)" }, { opacity: 1, transform: "none" }],
+                { duration: 420, delay: to == null ? 40 + k * 26 : 140 + k * 70, easing: HUB_EASE, fill: "backwards" }
+            ));
+        });
+        // 5. back on the grid, the card of the section just left glows for a moment
+        const left = to == null && from != null ? inView("[data-hub-card]").find((el) => el.getAttribute("data-hub-card") === from) : null;
+        if (left) {
+            const fill = window.getComputedStyle(left).backgroundColor;
+            anims.push(left.animate([{ backgroundColor: "#262626" }, { backgroundColor: "#262626", offset: 0.35 }, { backgroundColor: fill }], { duration: 1100, easing: "ease-out" }));
+        }
+    } else {
+        // 6. from one section to another: the new one slides in from its side
+        const dir = Math.sign(order.indexOf(to) - order.indexOf(from)) || 1;
+        inView("[data-hub-swap]").forEach((el) => anims.push(el.animate(
+            [{ opacity: 0, transform: `translateX(${dir * 32}px)` }, { opacity: 1, transform: "none" }],
+            { duration: 380, easing: HUB_EASE }
+        )));
+    }
+
+    if (!anims.length) {
+        hubStop(root);
+        return;
+    }
+    let pending = anims.length;
+    const done = () => {
+        if (--pending > 0 || root.__hubRun !== run) return;
+        root.__hubRun = null;
+        if (layer.parentNode) layer.parentNode.removeChild(layer);
+    };
+    anims.forEach((a) => (a.finished ? a.finished.then(done, done) : done()));
+}
+
+/**
+ * Where a masonry's cells go: in turn into each column, right under the cell above, wide ones across all
+ * columns below everything before them (the turn starts again after one). A cell keeps its column when the
+ * heights change, as data loads: it only slides up or down. Returns the height.
+ */
+function placeCells(box, cols, gap) {
+    const cells = [];
+    for (let el = box.firstElementChild; el; el = el.nextElementSibling) if (el.hasAttribute("data-masonry-cell")) cells.push(el);
+    const width = box.clientWidth;
+    const colWidth = (width - gap * (cols - 1)) / cols;
+    const heights = cells.map((el) => el.offsetHeight);
+    const tops = new Array(cols).fill(0);
+    let turn = 0;
+    const spots = cells.map((el, i) => {
+        const h = heights[i];
+        if (cols === 1 || el.getAttribute("data-masonry-cell") === "wide") {
+            const y = Math.max(...tops);
+            if (h) tops.fill(y + h + gap);
+            turn = 0;
+            return [0, y];
+        }
+        const c = turn++ % cols;
+        const y = tops[c];
+        if (h) tops[c] = y + h + gap;
+        return [c * (colWidth + gap), y];
+    });
+    cells.forEach((el, i) => {
+        const t = `translate(${Math.round(spots[i][0])}px, ${Math.round(spots[i][1])}px)`;
+        if (!el.hasAttribute("data-placed")) {
+            // a new cell appears where it belongs; only later moves slide
+            el.setAttribute("data-placed", "");
+            el.style.transition = "none";
+            window.requestAnimationFrame(() => (el.style.transition = ""));
+        }
+        if (el.style.transform !== t) el.style.transform = t;
+    });
+    return Math.max(0, Math.max(...tops) - gap);
+}
+
+let masonryGuess = 0; // columns of the last masonry laid out: the next one starts with them
+
+/**
+ * Cards in columns, each one right under the card above it, so cards of different heights stack without
+ * the holes a grid leaves under the shorter card of a row. Cards take the columns in turn, in their order
+ * (the first two side by side, as in a grid). As many columns as fit at `minColumn` px, at most `columns`;
+ * a child with the `wide` prop spans them all, below everything before it. The cells are measured as
+ * their content changes, and slide to their new place when they have to move.
+ */
+export const Masonry = withKit(({ classes, children, columns = 2, minColumn = 380, gap = 16, className, style }) => {
+    const box = React.useRef(null);
+    const [cols, setCols] = React.useState(() => Math.max(1, Math.min(columns, masonryGuess || 1)));
+    const live = React.useRef({ watched: new Set() });
+    Object.assign(live.current, { cols, setCols, columns, minColumn, gap });
+    const fit = (width) => {
+        const s = live.current;
+        return Math.max(1, Math.min(s.columns, Math.floor((width + s.gap) / (s.minColumn + s.gap))));
+    };
+
+    // Observers, once: the box for its width, each cell for its height.
+    React.useLayoutEffect(() => {
+        const el = box.current;
+        if (!el) return undefined;
+        let frame = 0;
+        // Sizes that change inside the observer's callback could not be reported in this frame: the box's
+        // height, and a new number of columns (it re-renders the cells), wait for the next one.
+        const later = (fn) => {
+            window.cancelAnimationFrame(frame);
+            frame = window.requestAnimationFrame(fn);
+        };
+        const relayout = () => {
+            const s = live.current;
+            const want = fit(el.clientWidth);
+            if (want !== s.cols) {
+                later(() => {
+                    masonryGuess = want;
+                    s.setCols(want);
+                });
+                return;
+            }
+            const h = placeCells(el, s.cols, s.gap);
+            later(() => (el.style.height = `${h}px`));
+        };
+        if (typeof ResizeObserver === "undefined") {
+            window.addEventListener("resize", relayout);
+            return () => {
+                window.removeEventListener("resize", relayout);
+                window.cancelAnimationFrame(frame);
+            };
+        }
+        const ro = new ResizeObserver(relayout);
+        ro.observe(el);
+        live.current.ro = ro;
+        return () => {
+            ro.disconnect();
+            live.current.ro = null;
+            live.current.watched.clear();
+            window.cancelAnimationFrame(frame);
+        };
+    }, []);
+
+    // After every render, before paint: the right number of columns, then every cell in its place.
+    React.useLayoutEffect(() => {
+        const el = box.current;
+        if (!el) return;
+        const want = fit(el.clientWidth);
+        masonryGuess = want;
+        if (want !== cols) {
+            setCols(want);
+            return;
+        }
+        el.style.height = `${placeCells(el, cols, gap)}px`;
+        const { ro, watched } = live.current;
+        if (!ro) return;
+        const cells = new Set();
+        for (let c = el.firstElementChild; c; c = c.nextElementSibling) if (c.hasAttribute("data-masonry-cell")) cells.add(c);
+        watched.forEach((c) => {
+            if (!cells.has(c)) {
+                ro.unobserve(c);
+                watched.delete(c);
+            }
+        });
+        cells.forEach((c) => {
+            if (!watched.has(c)) {
+                ro.observe(c);
+                watched.add(c);
+            }
+        });
+    });
+
+    const items = React.Children.toArray(children).filter((c) => c && typeof c === "object");
+    const part = `calc((100% - ${gap * (cols - 1)}px) / ${cols})`;
+    return (
+        <div ref={box} className={`${classes.masonry} ${className || ""}`} style={style}>
+            {items.map((c, i) => {
+                const wide = !!(c.props && c.props.wide);
+                return (
+                    <div
+                        key={c.key != null ? c.key : i}
+                        className={classes.masonryCell}
+                        data-masonry-cell={wide ? "wide" : ""}
+                        style={{ width: wide || cols === 1 ? "100%" : part }}
+                    >
+                        {c}
+                    </div>
+                );
+            })}
         </div>
     );
 });

@@ -92,7 +92,28 @@
  * CONFIG.TRANSLATE_ENDPOINT / initialize({ translateEndpoint }). The Worker
  * client (./pixa-translate.js) is loaded on first use.
  *
- * @version 4.7.0
+ * v4.7.1: Dead-node detection. `client.call` is wrapped at initialize()
+ * (_installNodeWatch): three consecutive transport failures — no answer at
+ * all, as opposed to a JSON-RPC error, which proves the node is alive — emit
+ * `node_unreachable` { url, reason } once per client. pages/Index.js fails
+ * over to the fastest working DEFAULT_NODES entry in memory (the saved
+ * endpoint is untouched; the Settings dialog shows the fallback and offers
+ * to keep it or retry). No event while navigator.onLine is false: that is the
+ * offline queue's case, not a node switch.
+ *
+ * v4.7.2: Recurring transfers are cancelled with a ZERO AMOUNT, not zero
+ * executions. The chain's recurrent_transfer validation rejects executions 0
+ * ("Executions must be at least 1"; upstream Hive requires 2) before the
+ * schedule is even looked up, so the wallet's cancel button — which re-sent
+ * the schedule with executions: 0, as this file used to document — could
+ * never succeed. With amount 0 the evaluator deletes the (from, to) schedule
+ * and ignores recurrence/executions, which only have to pass validation:
+ * BroadcastAPI#cancelRecurrentTransfer(from, to) sends amount 0 with values
+ * that always do (RECURRENT_TRANSFER_CANCEL). recurrentTransfer() routes
+ * executions 0 (or a zero amount) there, so callers that followed the old
+ * contract now cancel instead of failing.
+ *
+ * @version 4.7.2
  *
  * API Groups and Methods:
  *
@@ -281,7 +302,8 @@
  *   - transferFromSavings(from, requestId, to, amount, memo)
  *   - cancelTransferFromSavings(from, requestId)
  *   - claimRewardBalance(account)
- *   - recurrentTransfer(params)
+ *   - recurrentTransfer(params)               // executions 0 / amount 0 → cancelRecurrentTransfer
+ *   - cancelRecurrentTransfer(from, to, symbol?) // amount-0 recurrent_transfer (executions 0 is rejected by the chain)
  *   - follow(follower, following)
  *   - unfollow(follower, following)
  *   - mute(follower, following)
@@ -1095,6 +1117,23 @@ const OWNER_OPS = new Set([
 // signed with the highest-privilege key any member operation requires.
 const KEY_TYPE_RANK = Object.freeze({ posting: 0, active: 1, owner: 2 });
 
+// ── Node liveness ────────────────────────────────────────────────────────────
+// A transport failure means the node did not answer at all (DNS, TCP, TLS,
+// a dead reverse proxy, a timeout). A JSON-RPC error means it DID answer —
+// with a complaint about the request — and is proof of life, so it resets
+// the failure counter rather than adding to it. dpixa's RPCError carries
+// `jse_info`; fetch() failures are TypeErrors; aborts are AbortErrors.
+const NODE_UNREACHABLE_THRESHOLD = 3;
+
+function isTransportError(e) {
+    if (!e) return false;
+    if (e.jse_info || e.name === 'RPCError') return false;
+    if (e instanceof TypeError) return true;
+    if (e.name === 'AbortError' || e.name === 'TimeoutError') return true;
+    return /failed to fetch|networkerror|network request failed|timed? ?out|econn|unreachable|\b50[234]\b/i
+        .test(e.message || '');
+}
+
 // ============================================
 // Main Pixa Proxy API Class
 // ============================================
@@ -1305,6 +1344,58 @@ export class PixaProxyAPI {
         broadcast.__pixaSynchronousSend = true;
     }
 
+    /**
+     * Watch every RPC for a node that has stopped answering.
+     *
+     * Wraps `client.call` — the one funnel every API group and every
+     * broadcast goes through — and counts CONSECUTIVE transport failures
+     * (see isTransportError). At NODE_UNREACHABLE_THRESHOLD it emits
+     * `node_unreachable` { url, reason } exactly once for this client;
+     * pages/Index.js listens and fails over to the fastest working
+     * DEFAULT_NODES entry — in memory only, the saved setting is untouched —
+     * which tears this instance down and brings a new one up. Any answer
+     * from the node, including a JSON-RPC error, resets the counter.
+     *
+     * Not emitted while the browser itself reports offline: with no network
+     * at all, every node would "fail" and the offline queue is the right
+     * answer, not a node switch. Idempotent per client.
+     *
+     * @param {import('@pixagram/dpixa').Client} client
+     * @param {string} nodeUrl — the endpoint this client was built for
+     * @private
+     */
+    _installNodeWatch(client, nodeUrl) {
+        if (!client || client.__pixaNodeWatch || typeof client.call !== 'function') return;
+
+        const originalCall = client.call.bind(client);
+        let failures = 0;
+        let reported = false;
+
+        client.call = async (...args) => {
+            try {
+                const result = await originalCall(...args);
+                failures = 0;
+                return result;
+            } catch (e) {
+                if (isTransportError(e)) {
+                    failures++;
+                    const browserOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
+                    if (!reported && browserOnline && failures >= NODE_UNREACHABLE_THRESHOLD && !this._released) {
+                        reported = true;
+                        console.warn(`[PixaProxyAPI] Node ${nodeUrl} unreachable (${failures} consecutive transport failures):`, e.message);
+                        try {
+                            this.eventEmitter.emit('node_unreachable', { url: nodeUrl, reason: e.message || 'unreachable' });
+                        } catch (_) { /* listener error — never mask the RPC failure */ }
+                    }
+                } else {
+                    failures = 0;
+                }
+                throw e;
+            }
+        };
+        client.__pixaNodeWatch = true;
+    }
+
     updateConfig(newConfig) {
         this.config = { ...this.config, ...newConfig };
         if (this.keyManager && newConfig.PIN_TIMEOUT !== undefined) {
@@ -1466,6 +1557,8 @@ export class PixaProxyAPI {
             // v4.5.0: every broadcast resolves on inclusion in a block, not on
             // mempool acceptance. See _installSynchronousSend() for the contract.
             this._installSynchronousSend(this.client);
+            // Dead-node detection → `node_unreachable` (see _installNodeWatch).
+            this._installNodeWatch(this.client, Array.isArray(nodes) ? nodes[0] : nodes);
 
             // Initialize all API groups
             this.database = new DatabaseAPI(this);
@@ -5426,6 +5519,23 @@ function makeContentEditPatch(oldText, newText) {
     }
 }
 
+/**
+ * Recurrence and executions sent with the recurrent_transfer that CANCELS a
+ * schedule (see BroadcastAPI#cancelRecurrentTransfer).
+ *
+ * The cancel is the amount 0; the evaluator then deletes the schedule without
+ * reading these two fields. They still have to pass the operation's protocol
+ * validation, which runs first and does read them:
+ *   - executions ≥ 1 on Pixa ("Executions must be at least 1"), ≥ 2 on
+ *     upstream Hive — 2 satisfies both;
+ *   - recurrence ≥ HIVE_MIN_RECURRENT_TRANSFERS_RECURRENCE (24 h on Pixa);
+ *   - executions × recurrence / 24 ≤ HIVE_MAX_RECURRENT_TRANSFER_END_DATE
+ *     (730 days on Pixa) — 2 × 24 h is 2 days.
+ * Fixed values rather than the schedule's own, so they validate whatever the
+ * schedule looked like. (Limits read from the live node's get_config, Oct 2026.)
+ */
+const RECURRENT_TRANSFER_CANCEL = Object.freeze({ recurrence: 24, executions: 2 });
+
 class BroadcastAPI {
     constructor(proxy) {
         this.proxy = proxy;
@@ -6101,8 +6211,22 @@ class BroadcastAPI {
     }
 
     /**
-     * Set up recurring transfer
+     * Create or update a recurring transfer: `amount` every `recurrence`
+     * hours, `executions` times. The chain keeps one schedule per
+     * (from, to): sending again to the same recipient updates it.
+     *
+     * To STOP a schedule use cancelRecurrentTransfer(). A call that asks for a
+     * cancel the old way — executions 0, as this method used to document, or
+     * a zero amount — is routed there, because the chain rejects executions 0
+     * outright ("Executions must be at least 1").
+     *
      * @param {object} params
+     * @param {string} params.from
+     * @param {string} params.to
+     * @param {string} params.amount - e.g. "209.000 PIXA"
+     * @param {string} [params.memo='']
+     * @param {number} params.recurrence - hours between transfers (chain minimum 24)
+     * @param {number} params.executions - number of transfers, at least 1
      */
     async recurrentTransfer(params) {
         const { from, to, amount, memo = '', recurrence, executions } = params;
@@ -6113,16 +6237,121 @@ class BroadcastAPI {
             throw new PixaAPIError('Invalid account parameters', 'INVALID_ACCOUNT');
         }
 
+        const chainAmount = translateAssetToChain(amount);
+        const parsed = parseAsset(chainAmount);
+        const runs = Number(executions);
+
+        if (runs === 0 || (parsed && parsed.amount === 0)) {
+            return this.cancelRecurrentTransfer(normalizedFrom, normalizedTo, parsed ? parsed.symbol : undefined);
+        }
+        if (!Number.isInteger(runs) || runs < 1 || runs > 65535) {
+            throw new PixaAPIError(
+                'executions must be a whole number from 1 to 65535 (to stop a schedule, use cancelRecurrentTransfer)',
+                'INVALID_PARAMS',
+                { executions }
+            );
+        }
+
         const key = await this.proxy.keyManager.requestKeyBuffer(normalizedFrom, 'active');
         return this._send(
             [['recurrent_transfer', {
                 from: normalizedFrom,
                 to: normalizedTo,
-                amount: translateAssetToChain(amount),
+                amount: chainAmount,
                 memo,
                 recurrence, // Hours between transfers
-                executions, // Number of transfers (0 to cancel)
+                executions: runs, // Number of transfers, ≥ 1
                 extensions: []
+            }]],
+            key,
+            { account: normalizedFrom, keyType: 'active' }
+        );
+    }
+
+    /**
+     * Cancel a recurring transfer.
+     *
+     * There is no dedicated cancel operation: a recurrent_transfer for the same
+     * (from, to) with amount 0 deletes the schedule. Only the sender can do it
+     * (active authority of `from`); the recipient has no hold on the schedule.
+     * Recurrence and executions are ignored by the deletion but must pass
+     * validation — see RECURRENT_TRANSFER_CANCEL.
+     *
+     * The sender's live schedules are read first, so that:
+     *   - a schedule that is already gone (cancelled, or its last execution
+     *     ran) resolves `{ notFound: true }` instead of the chain's misleading
+     *     "Cannot create a recurrent transfer with 0 amount";
+     *   - a schedule created with a non-zero pair_id (by another client) fails
+     *     with PAIR_ID_UNSUPPORTED: dpixa serializes this operation's
+     *     extensions as void, so it can only address pair_id 0;
+     *   - the zero amount carries the schedule's own symbol.
+     * The read goes to the node directly rather than through
+     * AccountsAPI#findRecurrentTransfers, which answers [] on failure and would
+     * turn a network error into a false "not found". When the read fails the
+     * cancel is broadcast anyway and the chain decides.
+     *
+     * @param {string} from - Sender of the schedule (signs with active)
+     * @param {string} to - Recipient of the schedule
+     * @param {string} [symbol] - Chain symbol ('PIXA' | 'PXS'), used only when
+     *        the live schedule could not be read. The wallet's 'PXA' label is
+     *        accepted for PIXA.
+     * @returns {Promise<object>} broadcast result, or `{ notFound: true }`
+     */
+    async cancelRecurrentTransfer(from, to, symbol) {
+        const normalizedFrom = normalizeAccount(from);
+        const normalizedTo = normalizeAccount(to);
+
+        if (!normalizedFrom || !normalizedTo) {
+            throw new PixaAPIError('Invalid account parameters', 'INVALID_ACCOUNT');
+        }
+
+        // null = could not read (broadcast anyway); [] = read, nothing to cancel.
+        let schedules = null;
+        try {
+            const rows = await this.proxy.client.call('condenser_api', 'find_recurrent_transfers', [normalizedFrom]);
+            if (Array.isArray(rows)) schedules = rows.filter(r => r && r.to === normalizedTo);
+        } catch (e) {
+            console.warn('[BroadcastAPI] cancelRecurrentTransfer: could not read the schedule, broadcasting anyway:', e.message);
+        }
+
+        const LIQUID = CONFIG.ASSET_LIQUID[0];
+        const SUPRA = CONFIG.ASSET_SUPRA[0];
+        let chainSymbol = null;
+
+        if (schedules) {
+            if (schedules.length === 0) return { notFound: true };
+            // pair_id is absent on nodes older than HF28: that is pair 0.
+            const target = schedules.find(r => !Number(r.pair_id));
+            if (!target) {
+                throw new PixaAPIError(
+                    `The recurring transfer to @${normalizedTo} uses pair_id ${schedules[0].pair_id}, which this app cannot cancel`,
+                    'PAIR_ID_UNSUPPORTED',
+                    { from: normalizedFrom, to: normalizedTo, pairIds: schedules.map(r => r.pair_id) }
+                );
+            }
+            const live = parseAsset(typeof target.amount === 'string' ? target.amount : '');
+            if (live && (live.symbol === LIQUID || live.symbol === SUPRA)) chainSymbol = live.symbol;
+        }
+
+        if (!chainSymbol) {
+            const s = String(symbol || '').trim().toUpperCase();
+            const mapped = s === 'PXA' ? LIQUID : (ASSET_MAP_TO_CHAIN[s] || s || LIQUID);
+            if (mapped !== LIQUID && mapped !== SUPRA) {
+                throw new PixaAPIError(`Recurring transfers are in ${LIQUID} or ${SUPRA}, not ${s}`, 'INVALID_AMOUNT', { symbol });
+            }
+            chainSymbol = mapped;
+        }
+
+        const key = await this.proxy.keyManager.requestKeyBuffer(normalizedFrom, 'active');
+        return this._send(
+            [['recurrent_transfer', {
+                from: normalizedFrom,
+                to: normalizedTo,
+                amount: formatAssetString(0, chainSymbol),   // amount 0 = delete
+                memo: '',
+                recurrence: RECURRENT_TRANSFER_CANCEL.recurrence,
+                executions: RECURRENT_TRANSFER_CANCEL.executions,
+                extensions: []                                // pair_id 0
             }]],
             key,
             { account: normalizedFrom, keyType: 'active' }

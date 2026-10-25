@@ -1721,6 +1721,9 @@ export default {
             "permission_required_for_action": "Permission required for {{type}} action",
             "welcome_back": "Welcome back, @{{user}}",
             "failed_to_initialize_blockchain_connection": "Failed to initialize Blockchain connection",
+            "endpoint_unreachable_searching": "Endpoint {{url}} is not answering — looking for the fastest working node…",
+            "switched_to_fallback_endpoint": "Switched to {{url}} ({{ms}} ms). Your saved endpoint is unchanged.",
+            "no_endpoint_reachable": "No API endpoint is reachable right now.",
             "logged_out_successfully": "Logged out successfully",
             "hey_its_a_demo_only_follow_us": "HEY! It's a demo only. Follow us on LinkedIn!"
         },
@@ -3161,6 +3164,11 @@ export default {
             "always_ask_before_voting": "Always ask before voting",
             "reset_custom_endpoint": "Reset custom endpoint",
             "set_custom_endpoint": "Set custom endpoint",
+            "configured_endpoint_unreachable": "Your configured endpoint is not answering:",
+            "connected_to_fallback": "temporarily connected to",
+            "fallback_not_saved": "This switch is not saved — a reload tries your configured endpoint again.",
+            "keep_this_node": "Keep this node",
+            "retry_configured_node": "Retry configured node",
             "this_is_an_adult_functionality": "This is an adult functionality",
             "this_functionality_makes_age_restricted_material": "This functionality makes age-restricted materials visible including (and not limited to) nudity and potentially violence. By enabling it, you affirm that you are at least 18 years of age or the age of majority in the jurisdiction you are accessing the website from and you consent to viewing explicit content.",
             "i_am_18_or_older": "I am 18 or older"

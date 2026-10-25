@@ -2766,8 +2766,9 @@ class PixaWalletDialog extends React.PureComponent {
             if (recurrentOpts && Number(recurrentOpts.executions) > 0 && Number(recurrentOpts.recurrence) > 0) {
                 // Recurring transfer: the same amount every `recurrence` hours,
                 // repeated `executions` times. The chain fires the first transfer
-                // immediately and the rest on the schedule (executions: 0 cancels
-                // an existing schedule to the same recipient).
+                // immediately and the rest on the schedule. A schedule is
+                // cancelled with amount 0, never executions 0 (rejected by the
+                // chain) — see _request_cancel_recurrent_transfer.
                 await api.broadcast.recurrentTransfer({
                     from: senderUsername,
                     to,
@@ -3224,8 +3225,10 @@ class PixaWalletDialog extends React.PureComponent {
     };
 
     /**
-     * Cancel an outgoing recurrent transfer by re-broadcasting it with
-     * executions: 0 — the chain's documented cancellation path.
+     * Cancel an outgoing recurrent transfer. The chain deletes a schedule when
+     * it receives recurrent_transfer with amount 0 for the same recipient;
+     * executions: 0, which this used to send, fails the chain's validation
+     * ("Executions must be at least 1"). See BroadcastAPI#cancelRecurrentTransfer.
      */
     _request_cancel_recurrent_transfer = (entry) => {
         this._open_confirm_action(
@@ -3235,16 +3238,9 @@ class PixaWalletDialog extends React.PureComponent {
                 const { api, account, _LIQUID_SYMBOL, _DOLLAR_SYMBOL } = this.state;
                 if (!api || !account) return;
                 try {
+                    // Fallback only: the API takes the symbol from the live schedule.
                     const symbol = entry.currency === 'PXS' ? _DOLLAR_SYMBOL : _LIQUID_SYMBOL;
-                    const formatted = api.formatter.formatAsset(entry.amount_num, symbol, 3);
-                    await api.broadcast.recurrentTransfer({
-                        from: account.username,
-                        to: entry.to,
-                        amount: formatted,
-                        memo: entry.memo || '',
-                        recurrence: entry.recurrence || 24,
-                        executions: 0,
-                    });
+                    await api.broadcast.cancelRecurrentTransfer(account.username, entry.to, symbol);
                     if (actions?.trigger_snackbar) actions.trigger_snackbar(t("components.pixa_wallet_dialog.recurring_transfer_to_cancelled", {
                         to: entry.to
                     }), 'success');
@@ -3643,7 +3639,7 @@ class PixaWalletDialog extends React.PureComponent {
 
     /**
      * Outgoing recurring transfers for a given currency. Each row is cancellable
-     * (re-broadcasts with executions: 0).
+     * (re-broadcasts with amount 0).
      */
     _render_recurrent_section = (currency) => {
         const classes = this.state.classes;

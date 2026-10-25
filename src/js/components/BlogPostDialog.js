@@ -54,6 +54,7 @@ import { votesWithLocalVote } from "../utils/voteSync";
 import { resolvePortal, fetchPortalTitle } from "../utils/portal";
 import EditPostDialog, { DeletePostDialog } from "./EditPostDialog";
 import DeleteCommentModal from "./DeleteCommentModal";
+import ImageLightbox from "./ImageLightbox";
 import * as clipboard from "clipboard-polyfill";
 import * as actions from "../actions/utils";
 import * as favorites from "../utils/favorites";
@@ -244,18 +245,301 @@ function slugifyHeading(text) {
         .slice(0, 64) || "section";
 }
 
+/**
+ * Image captions — the picture's alt text, set under it.
+ *
+ * Runs in the same pass as the heading ids (after safeHTML, on the inert
+ * DOMParser document) and only adds what the post allowlist already
+ * accepts: <figure> / <figcaption> carrying "pixa-" classes, and the alt as
+ * a TEXT node — so the boundary guard keeps it verbatim and no markup an
+ * author wrote can come out of it.
+ *
+ * Captioned: a picture standing on its own line — alone in its block, or
+ * set apart by <br>s — whether it is a bare <img> or sits in a link (or
+ * another inline wrapper) holding nothing else. Left alone: emoji-style
+ * images inside a sentence, pictures sharing their line (a row stays a
+ * row), pictures the author already captioned (a <figcaption>; a short
+ * line right under the picture — "Source: …", a credit link, an italic or
+ * <sup> line, `<center>picture<br>caption</center>`; a credit paragraph
+ * right after it), author <figure>s holding several pictures, headings,
+ * tiny images, and alts that aren't descriptions — empty, file names
+ * ("image.png", "IMG_2041"), bare URLs, "image".
+ *
+ * A <figure> may not live inside a <p> (the HTML parser would close the
+ * paragraph around it and leave empty ones behind), so a paragraph holding
+ * a captioned picture is split around it: text before → <p>, the figure,
+ * text after → <p> (same class as the original; the figure keeps its
+ * text-/align- classes, so a centred paragraph's picture stays centred).
+ */
+const FIGURE_CLASS = "pixa-figure";
+const FIGCAPTION_CLASS = "pixa-figcaption";
+const CAPTION_MIN_IMAGE_PX = 48;            // same floor as the lightbox's
+// Inline elements a picture can be wrapped in and still stand alone.
+const CAPTION_INLINE_WRAPPERS = new Set([
+    "A", "SPAN", "STRONG", "B", "EM", "I", "U", "S", "DEL", "INS", "MARK",
+    "SMALL", "SUB", "SUP", "CITE", "Q", "ABBR", "KBD", "VAR", "SAMP", "TIME",
+]);
+// Blocks that may hold a <figure> directly.
+const CAPTION_FIGURE_HOSTS = new Set([
+    "BODY", "DIV", "SECTION", "CENTER", "TD", "TH", "LI", "DD", "BLOCKQUOTE", "FIGURE", "DETAILS",
+]);
+const CAPTION_BLOCK_TAGS = new Set([
+    "P", "DIV", "SECTION", "CENTER", "BLOCKQUOTE", "PRE", "UL", "OL", "LI", "DL", "DT", "DD",
+    "TABLE", "THEAD", "TBODY", "TFOOT", "TR", "TD", "TH", "CAPTION", "COLGROUP", "COL",
+    "FIGURE", "FIGCAPTION", "DETAILS", "SUMMARY", "HR", "H1", "H2", "H3", "H4", "H5", "H6",
+]);
+// An italic / small / superscript run right under a picture is the author's caption.
+const AUTHOR_CAPTION_TAGS = new Set(["EM", "I", "SMALL", "SUB", "SUP", "CITE"]);
+const CAPTION_LINE_MAX = 160;               // a line this short right under a picture is its caption
+const CREDIT_LINE_RE = /^(?:source|sources|credit|credits|image|images|photo|photos|picture|pic|illustration|artwork|art|via|by|courtesy|©|\(c\))(?=[\s:.,\-]|$)/i;
+const ALIGN_CLASS_RE = /^(?:text|align)-/;
+const NO_CAPTION_INSIDE = "h1, h2, h3, h4, h5, h6, pre, summary, caption, dt, figcaption";
+const ALT_FILE_NAME_RE = /\.(a?png|jpe?g|jfif|gif|webp|avif|bmp|svg|tiff?|heic|heif|ico)$/i;
+const ALT_CAMERA_NAME_RE = /^(img|dsc|dscn|dscf|pxl|mvimg|image|photo|screenshot|screen ?shot)[\s_-]*\d[\w\s.-]*$/i;
+const ALT_PLACEHOLDER_RE = /^(image|img|photo|picture|pic|alt|alt text|untitled|screenshot|thumbnail|null|undefined)$/i;
+const ALT_URL_RE = /^(https?:|data:|\/\/)/i;
+
+function altCaption(img) {
+    const text = (img.getAttribute("alt") || "").replace(/\s+/g, " ").trim();
+    if (text.length < 2) return "";
+    if (ALT_PLACEHOLDER_RE.test(text) || ALT_FILE_NAME_RE.test(text) ||
+        ALT_CAMERA_NAME_RE.test(text) || ALT_URL_RE.test(text)) return "";
+    return text;
+}
+
+const isBlankNode = (n) => (n.nodeType === 3 && !/\S/.test(n.nodeValue)) || n.nodeType === 8;
+const isBreak = (n) => !!n && n.nodeType === 1 && n.tagName === "BR";
+
+// A picture, or an inline wrapper (link, <strong>, <span>…) holding only one.
+function isPictureNode(n, depth = 0) {
+    if (!n || n.nodeType !== 1) return false;
+    if (n.tagName === "IMG") return true;
+    if (depth > 3 || !CAPTION_INLINE_WRAPPERS.has(n.tagName)) return false;
+    let found = false;
+    for (let c = n.firstChild; c; c = c.nextSibling) {
+        if (isBlankNode(c)) continue;
+        if (found || !isPictureNode(c, depth + 1)) return false;
+        found = true;
+    }
+    return found;
+}
+
+// The outermost inline wrapper whose only content is this picture.
+function pictureHost(img) {
+    let host = img;
+    for (let i = 0; i < 4; i++) {
+        const p = host.parentNode;
+        if (!p || p.nodeType !== 1 || !CAPTION_INLINE_WRAPPERS.has(p.tagName) || !isPictureNode(p)) break;
+        host = p;
+    }
+    return host;
+}
+
+function meaningfulSibling(n, dir) {
+    let s = dir < 0 ? n.previousSibling : n.nextSibling;
+    while (s && isBlankNode(s)) s = dir < 0 ? s.previousSibling : s.nextSibling;
+    return s;
+}
+
+// On a line of its own: only line breaks or block edges around it. Text,
+// an inline element, or another picture on the same line (a row of images,
+// `![a](x) ![b](y)`) all mean it isn't.
+function standsAlone(host) {
+    for (let i = 0; i < 2; i++) {
+        const s = meaningfulSibling(host, i ? 1 : -1);
+        if (!s || isBreak(s)) continue;
+        if (s.nodeType === 1 && CAPTION_BLOCK_TAGS.has(s.tagName)) continue;
+        return false;
+    }
+    return true;
+}
+
+function isAuthorCaptionRun(n) {
+    return !!n && n.nodeType === 1 && AUTHOR_CAPTION_TAGS.has(n.tagName);
+}
+
+// The text of one line: from after `n` to the next <br> / block edge.
+function lineAfter(n) {
+    let first = null, text = "";
+    for (let s = n.nextSibling; s; s = s.nextSibling) {
+        if (isBreak(s) || (s.nodeType === 1 && CAPTION_BLOCK_TAGS.has(s.tagName))) break;
+        if (isBlankNode(s)) continue;
+        if (!first) first = s;
+        text += s.textContent || "";
+        if (text.length > CAPTION_LINE_MAX * 2) break;
+    }
+    return { first, text: text.replace(/\s+/g, " ").trim() };
+}
+
+function looksLikeCaption(line, anyShortLine) {
+    if (!line.first) return false;
+    if (isAuthorCaptionRun(line.first)) return true;
+    if (!line.text || line.text.length > CAPTION_LINE_MAX) return false;
+    return anyShortLine || CREDIT_LINE_RE.test(line.text);
+}
+
+// The author already wrote a caption / credit for this picture.
+function hasAuthorCaption(host) {
+    const s = meaningfulSibling(host, 1);
+    if (isAuthorCaptionRun(s)) return true;
+    if (isBreak(s)) {
+        // The line right under it, in the same block: any short line counts
+        // ("Source: …", a credit link, "Figure 1. …", `<center>pic<br>text`);
+        // past a blank line only a credit-looking one does.
+        let last = s, breaks = 1, n = meaningfulSibling(s, 1);
+        while (isBreak(n)) { last = n; breaks++; n = meaningfulSibling(n, 1); }
+        return looksLikeCaption(lineAfter(last), breaks === 1);
+    }
+    if (!s) {
+        // The picture closes its block: is the next paragraph a credit line?
+        // (Not one holding a picture of its own — that text belongs to it.)
+        const block = host.parentNode;
+        let next = block && block.nextSibling;
+        while (next && isBlankNode(next)) next = next.nextSibling;
+        if (next && next.nodeType === 1 && next.tagName === "P" && !next.getElementsByTagName("img").length) {
+            let only = null, count = 0;
+            for (let c = next.firstChild; c; c = c.nextSibling) {
+                if (isBlankNode(c)) continue;
+                only = c;
+                count++;
+            }
+            if (count === 1 && isAuthorCaptionRun(only)) return true;
+            const t = (next.textContent || "").replace(/\s+/g, " ").trim();
+            if (t && t.length <= CAPTION_LINE_MAX && CREDIT_LINE_RE.test(t)) return true;
+        }
+    }
+    return false;
+}
+
+function tinyByAttributes(img) {
+    const w = parseInt(img.getAttribute("width"), 10);
+    const h = parseInt(img.getAttribute("height"), 10);
+    return (w > 0 && w < CAPTION_MIN_IMAGE_PX) || (h > 0 && h < CAPTION_MIN_IMAGE_PX);
+}
+
+function makeFigcaption(doc, text) {
+    const cap = doc.createElement("figcaption");
+    cap.setAttribute("class", FIGCAPTION_CLASS);
+    cap.textContent = text;
+    return cap;
+}
+
+function makeFigure(doc, host, text, alignClasses) {
+    const fig = doc.createElement("figure");
+    fig.setAttribute("class", [FIGURE_CLASS].concat(alignClasses || []).join(" "));
+    fig.appendChild(host);
+    fig.appendChild(makeFigcaption(doc, text));
+    return fig;
+}
+
+function trimBreaks(el) {
+    while (el.firstChild && (isBlankNode(el.firstChild) || isBreak(el.firstChild))) el.removeChild(el.firstChild);
+    while (el.lastChild && (isBlankNode(el.lastChild) || isBreak(el.lastChild))) el.removeChild(el.lastChild);
+}
+
+// Figure in place, inside a block that may hold one. The <br>s that only
+// set the picture apart would leave empty lines beside the block.
+function wrapInFigure(doc, host, text) {
+    const parent = host.parentNode;
+    if (parent.tagName === "FIGURE") {           // the author's own, uncaptioned
+        parent.classList.add(FIGURE_CLASS);
+        parent.appendChild(makeFigcaption(doc, text));
+        return;
+    }
+    for (let i = 0; i < 2; i++) {
+        let s = meaningfulSibling(host, i ? 1 : -1);
+        while (isBreak(s)) {
+            const next = meaningfulSibling(s, i ? 1 : -1);
+            s.parentNode.removeChild(s);
+            s = next;
+        }
+    }
+    const marker = doc.createTextNode("");
+    parent.insertBefore(marker, host);
+    parent.replaceChild(makeFigure(doc, host, text), marker);
+}
+
+// <p> → [<p>text before</p>] <figure/> [<p>text after</p>] …
+function splitParagraph(doc, p, hosts) {
+    const parent = p.parentNode;
+    if (!parent) return;
+    const out = [];
+    const align = (p.getAttribute("class") || "").split(/\s+/).filter((c) => ALIGN_CLASS_RE.test(c));
+    let run = null;
+    const flush = () => {
+        if (!run) return;
+        trimBreaks(run);
+        if (run.firstChild) out.push(run);
+        run = null;
+    };
+    const kids = Array.prototype.slice.call(p.childNodes);
+    for (let i = 0; i < kids.length; i++) {
+        const n = kids[i];
+        if (hosts.has(n)) {
+            flush();
+            out.push(makeFigure(doc, n, hosts.get(n), align));
+        } else {
+            if (!run) run = p.cloneNode(false);   // keeps the paragraph's class
+            run.appendChild(n);
+        }
+    }
+    flush();
+    for (let i = 0; i < out.length; i++) parent.insertBefore(out[i], p);
+    parent.removeChild(p);
+}
+
+function captionImages(doc) {
+    const imgs = Array.prototype.slice.call(doc.body.getElementsByTagName("img"));
+    const jobs = [];
+    for (let i = 0; i < imgs.length; i++) {
+        const img = imgs[i];
+        const text = altCaption(img);
+        if (!text || tinyByAttributes(img) || img.closest(NO_CAPTION_INSIDE)) continue;
+        const fig = img.closest("figure");
+        if (fig && (fig.querySelector("figcaption") || fig.getElementsByTagName("img").length > 1)) continue;
+        const host = pictureHost(img);
+        const parent = host.parentNode;
+        if (!parent || parent.nodeType !== 1) continue;
+        if (parent.tagName !== "P" && !CAPTION_FIGURE_HOSTS.has(parent.tagName)) continue;
+        if (!standsAlone(host) || hasAuthorCaption(host)) continue;
+        jobs.push({ host, parent, text });
+    }
+    if (!jobs.length) return false;
+    const paragraphs = new Map();
+    for (let i = 0; i < jobs.length; i++) {
+        const { host, parent, text } = jobs[i];
+        if (parent.tagName === "P") {
+            let hosts = paragraphs.get(parent);
+            if (!hosts) paragraphs.set(parent, (hosts = new Map()));
+            hosts.set(host, text);
+        } else {
+            wrapInFigure(doc, host, text);
+        }
+    }
+    paragraphs.forEach((hosts, p) => splitParagraph(doc, p, hosts));
+    return true;
+}
+
 function processArticleHtml(safeHtml) {
     if (!safeHtml || typeof DOMParser === "undefined") {
         return { html: safeHtml || "", headings: [] };
     }
+    // Neither headings nor pictures: nothing to do, skip the parse.
+    if (!/<(h[1-6]|img)[\s>/]/i.test(safeHtml)) return { html: safeHtml, headings: [] };
     let doc = null;
     try {
         doc = new DOMParser().parseFromString(safeHtml, "text/html");
     } catch (e) {
         return { html: safeHtml, headings: [] };
     }
+    let captioned = false;
+    try {
+        captioned = captionImages(doc);
+    } catch (e) {
+        captioned = false;   // cosmetic — never worth losing the article over
+    }
     const nodes = doc.body.querySelectorAll(HEADING_SELECTOR);
-    if (!nodes.length) return { html: safeHtml, headings: [] };
+    if (!nodes.length) return { html: captioned ? doc.body.innerHTML : safeHtml, headings: [] };
 
     const counters = Object.create(null);
     const used = Object.create(null);
@@ -305,14 +589,11 @@ const ArticleBody = memo(({ className, html, setRef, onClick }) => (
     />
 ));
 
-// ── Image lightbox (hero zoom) tuning ────────────────────────────────────
-const LIGHTBOX_VIEWPORT_RATIO = 0.8;      // zoomed image fits 80% of the screen
+// ── Image lightbox (hero zoom) ───────────────────────────────────────────
+// The viewer's own tuning (fit, corners, zoom limits, gestures) lives in
+// ImageLightbox; the dialog only decides which images open it.
 const LIGHTBOX_MIN_SOURCE_PX = 48;        // inline icons / tiny images stay put
-const LIGHTBOX_SCROLL_DISMISS_PX = 100;   // container travel that sends it home
-const LIGHTBOX_GESTURE_DISMISS_PX = 140;  // accumulated wheel/touch when the container can't move
-const LIGHTBOX_MAX_RADIUS = 42;           // house radius of the cover surface
-const LIGHTBOX_MS = 340;
-const LIGHTBOX_EASING = "cubic-bezier(0.2, 0, 0, 1)";
+const LIGHTBOX_EASING = "cubic-bezier(0.2, 0, 0, 1)";   // also the TOC's easing
 const TOC_MS = 260;                       // minimap grow / shrink duration
 // Synthetic TOC entry for the post's main title (rendered above the body,
 // in view at scrollTop = 0). Underscores sit outside the [a-z0-9-] slug
@@ -665,6 +946,46 @@ const styles = theme => ({
         "& a img": {
             cursor: "pointer",   // linked images navigate, they don't zoom
         },
+        // Captioned pictures (processArticleHtml): the alt text small and
+        // muted under the image, in the paragraph rhythm. Aligned like the
+        // article's other images (start), centred / right where the author
+        // aligned the block, and the caption follows its picture.
+        "& .pixa-figure": {
+            display: "block",
+            margin: "0 0 1.5rem",
+            padding: 0,
+            textAlign: "start",
+        },
+        "& center .pixa-figure, & [align='center'] .pixa-figure, & .text-center .pixa-figure, & .align-center .pixa-figure, & .pixa-figure.text-center, & .pixa-figure.align-center": {
+            textAlign: "center",
+        },
+        "& [align='right'] .pixa-figure, & .text-right .pixa-figure, & .align-right .pixa-figure, & .pixa-figure.text-right, & .pixa-figure.align-right": {
+            textAlign: "right",
+        },
+        "& .pixa-figure img": {
+            display: "inline-block",
+            verticalAlign: "top",   // no descender gap between picture and caption
+        },
+        "& .pixa-figcaption": {
+            display: "block",
+            margin: "10px 0 0",
+            padding: 0,
+            fontFamily: "'Normative Pro'",
+            fontSize: "0.875rem",
+            lineHeight: 1.45,
+            letterSpacing: "0.01em",
+            color: "#9a9a9a",
+            overflowWrap: "anywhere",
+        },
+        "& td .pixa-figure, & th .pixa-figure, & li .pixa-figure": {
+            margin: "0.5rem 0",
+        },
+        [theme.breakpoints.down("sm")]: {
+            "& .pixa-figcaption": {
+                marginTop: 8,
+                fontSize: "0.8125rem",
+            },
+        },
         // Tables: rounded 16px frame, lighter header, lighter cells, thin
         // separators, horizontal scroll when too wide. Shared with the
         // editor's PreviewDialog so the preview matches the post.
@@ -895,40 +1216,6 @@ const styles = theme => ({
     // The open panel sets the document title apart from the section rows.
     tocLabelTitle: {
         fontSize: "15px",
-    },
-    /* ── Image lightbox (hero zoom of article images) ────────────────────── */
-    lightboxOverlay: {
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 150,
-        cursor: "zoom-out",
-        touchAction: "none",
-        userSelect: "none",
-    },
-    lightboxBackdrop: {
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: "rgba(0,0,0,0.82)",
-        backdropFilter: "blur(12px)",
-        opacity: 0,
-        transitionProperty: "opacity",
-        transitionTimingFunction: LIGHTBOX_EASING,
-        transitionDuration: `${LIGHTBOX_MS}ms`,
-        willChange: "opacity",
-    },
-    lightboxImage: {
-        position: "absolute",
-        display: "block",
-        transformOrigin: "0 0",
-        willChange: "transform",
-        boxShadow: "0 24px 80px rgba(0,0,0,0.55)",
-        objectFit: "fill",
     },
     // ── Deleted / unavailable / loading post ─────────────────────────────
     // Replaces the cover + article + comments entirely. Strictly greyscale,
@@ -1337,7 +1624,7 @@ class BlogPostDialog extends React.PureComponent {
             _toc_open: false,
             _toc_active: "",          // heading id currently in view
             // ── Image lightbox (hero zoom) ──
-            _lightbox: null,          // { src, alt, rendering } while an image is zoomed
+            _lightbox: null,          // { id, source, src, alt } while ImageLightbox shows an image
             // ── Machine translation ──
             // { key, target, src, status: "loading"|"done", html, title, source,
             //   partial, done, total, waking } — `html` is entity.body from
@@ -1365,10 +1652,7 @@ class BlogPostDialog extends React.PureComponent {
         this._toc_hover = false;
         this._toc_open_at_press = false;  // panel state when the last press began
         this._canHover = false;       // set in componentDidMount (matchMedia)
-        // ── Lightbox bookkeeping (imperative FLIP animation state) ──
-        this._lb = null;              // geometry + source element while open
-        this._lightboxImg = null;
-        this._lightboxBackdrop = null;
+        this._lightboxSeq = 0;        // remounts ImageLightbox for every opening
         // ── Translation bookkeeping ──
         this._translateAbort = null;  // AbortController of the request in flight
         this._translateToken = 0;     // bumps on cancel: stale callbacks are ignored
@@ -1403,8 +1687,6 @@ class BlogPostDialog extends React.PureComponent {
         // Touch fires a synthetic mouseenter before click — only trust hover
         // events on devices that actually have a hover-capable pointer.
         this._canHover = !!(window.matchMedia && window.matchMedia("(hover: hover)").matches);
-        // A viewport change invalidates the zoomed image's geometry — send it home.
-        window.addEventListener("resize", this._close_lightbox_on_resize);
         this._cacheOwnProfile();
         this._check_favorite();
         this._backfill_portal_title();
@@ -1427,8 +1709,7 @@ class BlogPostDialog extends React.PureComponent {
         }
         window.removeEventListener("resize", this._measureTitleHeight);
         window.removeEventListener("resize", this._syncMobileHeader);
-        window.removeEventListener("resize", this._close_lightbox_on_resize);
-        this._teardown_lightbox();
+        this._teardown_lightbox(false);   // the viewer unmounts with us and restores its source
         this._stop_translation_request();
         if (this._favUnsub) { this._favUnsub(); this._favUnsub = null; }
         if (this._commentRefreshTimer) {
@@ -1610,12 +1891,8 @@ class BlogPostDialog extends React.PureComponent {
         if (!this._ticking) {
             requestAnimationFrame(() => {
                 const scrollTop = this.scrollContainerRef.current?.scrollTop || 0;
-                // Zoomed image: scroll travel past the threshold sends it back
-                // to its place (the overlay forwards wheel/touch to the container).
-                if (this._lb && !this._lb.closing &&
-                    Math.abs(scrollTop - this._lb.startScrollTop) > LIGHTBOX_SCROLL_DISMISS_PX) {
-                    this._close_lightbox();
-                }
+                // (An open lightbox scrolls the article itself — drag-away and
+                // wheel-away — and decides on its own when to fly home.)
                 this._update_toc_active();   // collapsed minimap shows the active marker too
                 this.setSt4te({ _scrollTop: scrollTop });
                 this._ticking = false;
@@ -2093,225 +2370,51 @@ class BlogPostDialog extends React.PureComponent {
 
     /* ================================================================
      * IMAGE LIGHTBOX (hero zoom on article images)
-     * ================================================================ */
+     * ================================================================
+     * The viewer itself — hero flights, pinch / wheel / double-tap zoom,
+     * pan, drag-away — is ImageLightbox. The dialog only picks the image,
+     * mounts the viewer for it, and lends it the article's scroll so that
+     * sliding the picture away keeps the article moving underneath.
+     */
 
     // Delegated click on the rendered article: body images are plain sanitized
     // <img> tags, so they carry no React handlers of their own.
     _on_article_click = (e) => {
         const target = e.target;
         if (!target || target.tagName !== "IMG") return;
-        if (this._lb) return;
+        if (this.st4te._lightbox) return;
         if (target.closest && target.closest("a")) return;   // linked images navigate
         const rect = target.getBoundingClientRect();
         if (rect.width < LIGHTBOX_MIN_SOURCE_PX || rect.height < LIGHTBOX_MIN_SOURCE_PX) return;
-        this._open_lightbox(target, rect);
+        this._open_lightbox(target);
     }
 
-    _open_lightbox = (img, fromRect) => {
-        const vw = window.innerWidth, vh = window.innerHeight;
-        const natW = img.naturalWidth || fromRect.width;
-        const natH = img.naturalHeight || fromRect.height;
-        if (!natW || !natH || !vw || !vh) return;
-
-        // Fit the image's natural aspect inside 80% of the viewport.
-        const fit = Math.min((vw * LIGHTBOX_VIEWPORT_RATIO) / natW, (vh * LIGHTBOX_VIEWPORT_RATIO) / natH);
-        const toW = Math.max(1, Math.round(natW * fit));
-        const toH = Math.max(1, Math.round(natH * fit));
-        const to = {
-            x: Math.round((vw - toW) / 2),
-            y: Math.round((vh - toH) / 2),
-            w: toW,
-            h: toH,
-        };
-
-        let srcRadius = "0px";
-        let rendering = "auto";
-        try {
-            const cs = window.getComputedStyle(img);
-            srcRadius = cs.borderRadius || "0px";
-            rendering = cs.imageRendering || "auto";   // pixel art stays crisp blown up
-        } catch (e) {}
-
-        this._lb = {
-            source: img,
-            from: fromRect,
-            to,
-            radius: Math.max(12, Math.min(LIGHTBOX_MAX_RADIUS, toW / 5, toH / 5)),
-            srcRadius,
-            startScrollTop: this.scrollContainerRef.current ? this.scrollContainerRef.current.scrollTop : 0,
-            accum: 0,
-            lastTouchY: null,
-            started: false,
-            closing: false,
-            reduceMotion: !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches),
-        };
-        document.addEventListener("keydown", this._on_lightbox_key);
-        this.setSt4te({ _lightbox: { src: img.currentSrc || img.src, alt: img.alt || "", rendering } });
+    _open_lightbox = (img) => {
+        this._lightboxSeq += 1;
+        this.setSt4te({
+            _lightbox: { id: this._lightboxSeq, source: img, src: img.currentSrc || img.src, alt: img.alt || "" },
+        });
     }
 
-    _set_lightbox_backdrop_ref = (node) => { this._lightboxBackdrop = node; }
-
-    // FLIP: the clone mounts at its final centered geometry, is transformed
-    // back onto the source rect before first paint (ref callbacks run at
-    // commit), then transitions to identity — one compositor-friendly move.
-    _set_lightbox_img_ref = (node) => {
-        this._lightboxImg = node;
-        const lb = this._lb;
-        if (!node || !lb || lb.started) return;
-        lb.started = true;
-
-        const { from, to } = lb;
-        node.style.left = to.x + "px";
-        node.style.top = to.y + "px";
-        node.style.width = to.w + "px";
-        node.style.height = to.h + "px";
-        node.style.transform = "translate(" + (from.left - to.x) + "px, " + (from.top - to.y) + "px) " +
-            "scale(" + (from.width / to.w) + ", " + (from.height / to.h) + ")";
-        node.style.borderRadius = lb.srcRadius;
-        // The clone now sits exactly over the original — swap them this frame.
-        try { lb.source.style.visibility = "hidden"; } catch (e) {}
-
-        const duration = lb.reduceMotion ? 0 : LIGHTBOX_MS;
-        const run = () => {
-            if (this._lb !== lb || !node.isConnected) return;
-            node.style.transition = duration
-                ? "transform " + duration + "ms " + LIGHTBOX_EASING + ", border-radius " + duration + "ms " + LIGHTBOX_EASING
-                : "none";
-            node.style.transform = "none";
-            node.style.borderRadius = lb.radius + "px";
-            const bd = this._lightboxBackdrop;
-            if (bd) {
-                bd.style.transitionDuration = duration + "ms";
-                bd.style.opacity = "1";
-            }
-        };
-        if (duration) requestAnimationFrame(() => requestAnimationFrame(run));
-        else run();
-    }
-
-    _close_lightbox = () => {
-        const lb = this._lb;
-        const node = this._lightboxImg;
-        if (!lb || lb.closing) return;
-        lb.closing = true;
-        document.removeEventListener("keydown", this._on_lightbox_key);
-        if (!node || !node.isConnected) { this._finish_lightbox_close(); return; }
-
-        const duration = lb.reduceMotion ? 0 : LIGHTBOX_MS;
-        const bd = this._lightboxBackdrop;
-        if (bd) {
-            bd.style.transitionDuration = duration + "ms";
-            bd.style.opacity = "0";
-        }
-
-        // The page may have scrolled while zoomed — fly back to where the
-        // source sits NOW (possibly off-screen, which reads naturally).
-        let toRect = null;
-        try {
-            if (lb.source && lb.source.isConnected) toRect = lb.source.getBoundingClientRect();
-        } catch (e) {}
-
-        node.style.transition = duration
-            ? "transform " + duration + "ms " + LIGHTBOX_EASING +
-            ", border-radius " + duration + "ms " + LIGHTBOX_EASING +
-            ", opacity " + duration + "ms " + LIGHTBOX_EASING
-            : "none";
-        if (toRect && toRect.width > 0 && toRect.height > 0) {
-            node.style.transform = "translate(" + (toRect.left - lb.to.x) + "px, " + (toRect.top - lb.to.y) + "px) " +
-                "scale(" + (toRect.width / lb.to.w) + ", " + (toRect.height / lb.to.h) + ")";
-            node.style.borderRadius = lb.srcRadius;
-        } else {
-            // Source vanished (article re-rendered) — dissolve in place.
-            node.style.transformOrigin = "50% 50%";
-            node.style.transform = "scale(0.92)";
-            node.style.opacity = "0";
-        }
-
-        if (duration) {
-            const finish = () => this._finish_lightbox_close();
-            lb._closeTimer = setTimeout(finish, duration + 80);
-            node.addEventListener("transitionend", function onEnd(ev) {
-                if (ev.propertyName !== "transform" && ev.propertyName !== "opacity") return;
-                node.removeEventListener("transitionend", onEnd);
-                finish();
-            });
-        } else {
-            this._finish_lightbox_close();
-        }
-    }
-
-    _finish_lightbox_close = () => {
-        const lb = this._lb;
-        if (!lb) return;
-        if (lb._closeTimer) clearTimeout(lb._closeTimer);
-        try { if (lb.source) lb.source.style.visibility = ""; } catch (e) {}
-        this._lb = null;
-        this._lightboxImg = null;
-        this._lightboxBackdrop = null;
-        this.setSt4te({ _lightbox: null });
-    }
-
-    // Immediate, animation-free reset — dialog closing, post swap, unmount.
-    _teardown_lightbox = () => {
-        const lb = this._lb;
-        if (!lb) return;
-        document.removeEventListener("keydown", this._on_lightbox_key);
-        if (lb._closeTimer) clearTimeout(lb._closeTimer);
-        try { if (lb.source) lb.source.style.visibility = ""; } catch (e) {}
-        this._lb = null;
-        this._lightboxImg = null;
-        this._lightboxBackdrop = null;
+    // The viewer landed back in the article (or faded out) — unmount it.
+    _on_lightbox_closed = () => {
         if (this.st4te._lightbox) this.setSt4te({ _lightbox: null });
     }
 
-    _close_lightbox_on_resize = () => {
-        if (this._lb && !this._lb.closing) this._close_lightbox();
-    }
-
-    _on_lightbox_key = (e) => {
-        if (e.key === "Escape" || e.key === "Esc") {
-            e.stopPropagation();
-            this._close_lightbox();
-        }
-    }
-
-    _on_lightbox_click = () => { this._close_lightbox(); }
-
-    // The overlay covers the scroll container, so it forwards wheel/touch to
-    // it: the article keeps moving under the dimmer, and the accumulated
-    // travel doubles as the dismiss threshold for the case where the
-    // container is already at one of its ends and cannot move.
-    _on_lightbox_wheel = (e) => {
-        const lb = this._lb;
-        if (!lb || lb.closing) return;
-        if (e.cancelable) e.preventDefault();
-        let dy = e.deltaY || 0;
-        if (e.deltaMode === 1) dy *= 16;
-        else if (e.deltaMode === 2) dy *= window.innerHeight;
+    // Drag-away (touch) and wheel-away scroll the article under the viewer,
+    // the way the overlay used to forward them; the source image moves with
+    // it, so the flight home is measured from where it ends up.
+    _on_lightbox_scroll = (dy) => {
         const container = this.scrollContainerRef.current;
-        if (container) container.scrollTop += dy;
-        lb.accum += Math.abs(dy);
-        if (lb.accum > LIGHTBOX_GESTURE_DISMISS_PX) this._close_lightbox();
+        if (container && dy) container.scrollTop += dy;
     }
 
-    _on_lightbox_touch_start = (e) => {
-        if (this._lb && e.touches && e.touches.length) {
-            this._lb.lastTouchY = e.touches[0].clientY;
-        }
-    }
-
-    _on_lightbox_touch_move = (e) => {
-        const lb = this._lb;
-        if (!lb || lb.closing || !e.touches || !e.touches.length) return;
-        if (e.cancelable) e.preventDefault();
-        const y = e.touches[0].clientY;
-        if (lb.lastTouchY == null) { lb.lastTouchY = y; return; }
-        const dy = lb.lastTouchY - y;
-        lb.lastTouchY = y;
-        const container = this.scrollContainerRef.current;
-        if (container) container.scrollTop += dy;
-        lb.accum += Math.abs(dy);
-        if (lb.accum > LIGHTBOX_GESTURE_DISMISS_PX) this._close_lightbox();
+    // Immediate, animation-free reset — dialog closing, post swap, a new
+    // translation, unmount. Unmounting the viewer restores its source image.
+    _teardown_lightbox = (rerender = true) => {
+        if (!this.st4te._lightbox) return;
+        if (rerender) this.setSt4te({ _lightbox: null });
+        else this.st4te._lightbox = null;
     }
 
     /* ================================================================
@@ -3591,27 +3694,18 @@ class BlogPostDialog extends React.PureComponent {
                     </div>
 
                     {/* ── Image lightbox: hero zoom of an article image ──
-                        Covers everything (incl. the close button) while open;
-                        clicking anywhere, Escape, or scrolling past the
-                        threshold flies the image back to its place. */}
+                        Covers everything (incl. the close button) while open.
+                        Pinch / double-tap / wheel zoom, drag to pan; a tap,
+                        Escape, or sliding the picture away flies it home. */}
                     {_lightbox && (
-                        <div
-                            className={classes.lightboxOverlay}
-                            onClick={this._on_lightbox_click}
-                            onWheel={this._on_lightbox_wheel}
-                            onTouchStart={this._on_lightbox_touch_start}
-                            onTouchMove={this._on_lightbox_touch_move}
-                        >
-                            <div className={classes.lightboxBackdrop} ref={this._set_lightbox_backdrop_ref} />
-                            <img
-                                className={classes.lightboxImage}
-                                ref={this._set_lightbox_img_ref}
-                                src={_lightbox.src}
-                                alt={_lightbox.alt}
-                                draggable={false}
-                                style={{ imageRendering: _lightbox.rendering }}
-                            />
-                        </div>
+                        <ImageLightbox
+                            key={_lightbox.id}
+                            source={_lightbox.source}
+                            src={_lightbox.src}
+                            alt={_lightbox.alt}
+                            onClosed={this._on_lightbox_closed}
+                            onDragScroll={this._on_lightbox_scroll}
+                        />
                     )}
 
                 </Backdrop>

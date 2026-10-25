@@ -887,6 +887,8 @@ class Home extends React.PureComponent {
         // WebGL resource tracking for cleanup (single merged canvas)
         this._program = null;
         this._buffer = null;
+        // Redraws the current frame as-is (set by _renderBg; see _resizeCanvas)
+        this._repaintBg = null;
         // Lightning region size in framebuffer px (recomputed on every resize)
         this._energyW = 0;
         this._energyH = 0;
@@ -1054,12 +1056,51 @@ class Home extends React.PureComponent {
     /** Delete a program + buffer, then lose the context */
     _cleanupGL = (gl, program, buffer) => {
         if (!gl) return;
+        // A deliberate teardown must not be "restored": unhook the
+        // context-loss handlers BEFORE losing the context on purpose.
+        const canvas = gl.canvas;
+        if (canvas && canvas.removeEventListener) {
+            canvas.removeEventListener("webglcontextlost", this._onContextLost, false);
+            canvas.removeEventListener("webglcontextrestored", this._onContextRestored, false);
+        }
+        this._repaintBg = null;
         try {
             if (program) gl.deleteProgram(program);
             if (buffer) gl.deleteBuffer(buffer);
             const ext = gl.getExtension("WEBGL_lose_context");
             if (ext) ext.loseContext();
         } catch (_) { /* swallow */ }
+    }
+
+    // ── Context loss (mostly Android) ──
+    // Phones drop WebGL contexts far more often than desktops — typically
+    // after the browser was in the background and its GPU process got
+    // reclaimed under memory pressure. Nothing listened before, so the
+    // starfield stayed black for the rest of the visit while the loop kept
+    // issuing GL calls into the dead context. preventDefault() asks the
+    // browser to hand the context back; the restore rebuilds the program and
+    // buffer and restarts the loop, which fades in from black (uFade).
+    _onContextLost = (e) => {
+        e.preventDefault();
+        if (this._animationId) {
+            cancelAnimationFrame(this._animationId);
+            this._animationId = null;
+        }
+        if (this._initRafId) {
+            cancelAnimationFrame(this._initRafId);
+            this._initRafId = 0;
+        }
+        // Everything created on the lost context is gone with it.
+        this._repaintBg = null;
+        this._program = null;
+        this._buffer = null;
+        // A probe interrupted mid-window would measure the outage, not the GPU.
+        this._perfTestStart = 0;
+    }
+
+    _onContextRestored = () => {
+        if (!this._mounted || this._departed || !this._gl) return;
+        this._initBg();
     }
 
     _handleMouseMove = (e) => {
@@ -1555,7 +1596,15 @@ class Home extends React.PureComponent {
             depth: false,                 // 2D fullscreen pass — no depth buffer needed
             stencil: false,               // …and no stencil buffer
             preserveDrawingBuffer: false,
-            desynchronized: true,         // skip extra compositor sync where supported
+            // No `desynchronized` (it used to be true here). That hint is made
+            // for pen input: it asks the browser to skip the compositor and,
+            // where the device can, hand this buffer straight to the display
+            // controller (front-buffer rendering). With preserveDrawingBuffer
+            // false and the clear at the top of every frame, the display can
+            // then scan out a buffer that is empty or half-drawn: black
+            // flashes, and tear lines across the fast-moving bolt, on the
+            // devices that honour it. An ambient 30 fps background gains
+            // nothing from low latency.
             powerPreference: "low-power", // prefer the low-power GPU
             // On SOFTWARE renderers (SwiftShader / llvmpipe — Lighthouse, PSI
             // bots, VMs, remote desktops, GPU-blocklisted machines) every
@@ -1588,6 +1637,11 @@ class Home extends React.PureComponent {
 
         this._canvas = canvas;
         this._gl = gl;
+
+        // Context loss and restore — see _onContextLost. Unhooked by
+        // _cleanupGL before every deliberate loseContext().
+        canvas.addEventListener("webglcontextlost", this._onContextLost, false);
+        canvas.addEventListener("webglcontextrestored", this._onContextRestored, false);
 
         // The cursor parallax feeds ONLY the shader's uMouse uniform, so the
         // window listener starts here — after the reduced-motion, no-WebGL2
@@ -1645,9 +1699,11 @@ class Home extends React.PureComponent {
         // the value is unchanged — skip the reallocation when the backing
         // store is already right (e.g. a resize event that didn't change the
         // rounded device-px size).
+        let reallocated = false;
         if (canvas.width !== bw || canvas.height !== bh) {
             canvas.width  = bw;
             canvas.height = bh;
+            reallocated = true;
         }
         canvas.style.width  = cssW + 'px';
         canvas.style.height = cssH + 'px';
@@ -1662,6 +1718,13 @@ class Home extends React.PureComponent {
         this._energyH = bh;
 
         gl.viewport(0, 0, bw, bh);
+
+        // The reallocation above left the canvas cleared, and the loop only
+        // draws on every 2nd–5th refresh (createFramePacer): the cleared
+        // buffer could reach the screen first — a black flash on every
+        // rotation and every URL-bar resize on Android. Repaint the current
+        // frame right away, in this same frame.
+        if (reallocated && this._repaintBg) this._repaintBg();
     }
 
     // ── Single merged WebGL background ──
@@ -1672,6 +1735,8 @@ class Home extends React.PureComponent {
         const canvas = this._canvas;
         const gl = this._gl;
         if (!gl || !canvas || !this._mounted || this._departed) return;
+        // Lost while the init was pending: webglcontextrestored re-runs it.
+        if (gl.isContextLost()) return;
 
         this._resizeCanvas();
 
@@ -1714,9 +1779,7 @@ class Home extends React.PureComponent {
             uniform vec2  uMouse;        // normalised, (0,0) = screen centre, +y up
             uniform vec2  uEnergyRes;    // lightning region px (left-anchored, full height)
             uniform float uOctaves;      // fbm octaves (quality tier) — FRACTIONAL while a tier change eases in
-            uniform int   uNumLayers;    // star depth layers (fixed: STAR_LAYERS)
             uniform float uFade;         // 0 → 1 intro fade from black
-            uniform float uLayerStep;    // 1.0 / uNumLayers
 
             out vec4 fragColor;
             in vec2 v_uv;
@@ -1724,6 +1787,13 @@ class Home extends React.PureComponent {
             #define TAU 6.28318
             #define Velocity 0.02
             #define CanvasView 15.0
+            #define STAR_CORE 0.001      // floor of the star glow's 1/d, in cell units (see Star)
+
+            // Star depth layers: a compile-time constant now (it was the
+            // uNumLayers / uLayerStep uniform pair), since the count stopped
+            // being per-tier — see STAR_LAYERS.
+            const int   NUM_LAYERS = ${STAR_LAYERS};
+            const float LAYER_STEP = 1.0 / float(NUM_LAYERS);
 
             // ---------------- star field ----------------
             float Hash21(vec2 p) {
@@ -1732,10 +1802,20 @@ class Home extends React.PureComponent {
                 return fract(p.x * p.y);
             }
 
+            // A 1/d glow around the star's centre, with two guards:
+            //  - d is floored at STAR_CORE. Uncapped, a pixel landing right on
+            //    a centre got a near-infinite value and saturated to white even
+            //    for a star twinkled or faded down to nothing: random
+            //    single-pixel flashes. Only pixels inside that core change.
+            //  - 1.0 - smoothstep(0.2, 0.8, d), not smoothstep(0.8, 0.2, d):
+            //    GLSL leaves smoothstep UNDEFINED when edge0 >= edge1. Desktop
+            //    drivers happen to evaluate the reversed form as the mirrored
+            //    curve; nothing obliges a mobile GPU compiler to. Same curve,
+            //    exactly, wherever the old form did work.
             float Star(vec2 uv) {
                 float d = length(uv);
-                float m = 0.02 / d;
-                m *= smoothstep(0.8, 0.2, d);
+                float m = 0.02 / max(d, STAR_CORE);
+                m *= 1.0 - smoothstep(0.2, 0.8, d);
                 return m;
             }
 
@@ -1819,13 +1899,15 @@ class Home extends React.PureComponent {
 
                 float t = ts * Velocity;
                 float stars = 0.0;   // scalar: luminance accumulates directly
-                // 6 is the unrolled ceiling; the break trims layers on cheaper tiers
-                for (int li = 0; li < 6; li++) {
-                    if (li >= uNumLayers) break;
-                    float i = float(li) * uLayerStep;
+                // Constant bound, no data-dependent break: the compiler can
+                // unroll it, and mobile compilers get the plainest loop form.
+                for (int li = 0; li < NUM_LAYERS; li++) {
+                    float i = float(li) * LAYER_STEP;
                     float depth = fract(i + t);
                     float scl = mix(CanvasView, 1.0, depth);
-                    float fade = depth * smoothstep(1.0, 0.85, depth);
+                    // The old smoothstep(1.0, 0.85, depth) fade-out, written
+                    // without the reversed edges (undefined — see Star).
+                    float fade = depth * (1.0 - smoothstep(0.85, 1.0, depth));
                     stars += StarLayer(suv * scl + i * 453.2 + M, i, ts) * fade;
                 }
                 stars *= 1.0 - length(v_uv) * 0.25;   // vignette
@@ -1909,13 +1991,8 @@ class Home extends React.PureComponent {
         const mouseLoc      = gl.getUniformLocation(program, 'uMouse');
         const energyResLoc  = gl.getUniformLocation(program, 'uEnergyRes');
         const octavesLoc    = gl.getUniformLocation(program, 'uOctaves');
-        const layersLoc     = gl.getUniformLocation(program, 'uNumLayers');
-        const layerStepLoc  = gl.getUniformLocation(program, 'uLayerStep');
         const fadeLoc       = gl.getUniformLocation(program, 'uFade');
-
-        // Fixed for the page's life (see STAR_LAYERS) — set once.
-        gl.uniform1i(layersLoc, STAR_LAYERS);
-        gl.uniform1f(layerStepLoc, 1.0 / STAR_LAYERS);
+        // (The star-layer count is compiled into the shader — NUM_LAYERS.)
 
         const pace = createFramePacer(BG_TARGET_FPS);
         // Shader clock (ms). It advances by the time between DRAWN frames,
@@ -1930,6 +2007,29 @@ class Home extends React.PureComponent {
         let introStart = -1;
         // Starts on the cheap tier; eased toward the tier the probe settles on.
         let octaves = QUALITY.low.octaves;
+        // What the last frame was drawn with, so it can be drawn again as-is.
+        let mx = 0;
+        let my = 0;
+        let fade = 0;
+
+        const paint = () => {
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.uniform2f(resolutionLoc, canvas.width, canvas.height);
+            gl.uniform1f(timeLoc, clock * 0.001);
+            gl.uniform2f(mouseLoc, mx, -my);
+            gl.uniform2f(energyResLoc, this._energyW || canvas.width, this._energyH || canvas.height);
+            gl.uniform1f(octavesLoc, octaves);
+            gl.uniform1f(fadeLoc, fade);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        };
+
+        // The current frame again, clock untouched — for _resizeCanvas, whose
+        // reallocation clears the canvas between two paced frames. Nothing
+        // to repaint before the first frame (the canvas is black then anyway).
+        this._repaintBg = () => {
+            if (clock < 0 || gl !== this._gl || gl.isContextLost()) return;
+            paint();
+        };
 
         const render = (now) => {
             if (!this._mounted || this._departed) return;
@@ -1970,8 +2070,8 @@ class Home extends React.PureComponent {
                 // and no longer drifts toward a corner.
                 const w = window.innerWidth || 1;
                 const h = window.innerHeight || 1;
-                const mx = (this._smoothMouseX / w) * 2.0 - 1.0;
-                const my = (this._smoothMouseY / h) * 2.0 - 1.0;
+                mx = (this._smoothMouseX / w) * 2.0 - 1.0;
+                my = (this._smoothMouseY / h) * 2.0 - 1.0;
 
                 // Use the richer tier only once the perf test confirms headroom,
                 // eased in over ~0.6 s rather than switched in one frame.
@@ -1987,16 +2087,9 @@ class Home extends React.PureComponent {
 
                 // Intro: smoothstep from black over BG_INTRO_MS.
                 const p = Math.min(1, (now - introStart) / BG_INTRO_MS);
-                const fade = p * p * (3 - 2 * p);
+                fade = p * p * (3 - 2 * p);
 
-                gl.clear(gl.COLOR_BUFFER_BIT);
-                gl.uniform2f(resolutionLoc, canvas.width, canvas.height);
-                gl.uniform1f(timeLoc, clock * 0.001);
-                gl.uniform2f(mouseLoc, mx, -my);
-                gl.uniform2f(energyResLoc, this._energyW || canvas.width, this._energyH || canvas.height);
-                gl.uniform1f(octavesLoc, octaves);
-                gl.uniform1f(fadeLoc, fade);
-                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                paint();
             }
 
             this._animationId = requestAnimationFrame(render);

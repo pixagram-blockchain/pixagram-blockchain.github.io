@@ -137,6 +137,28 @@ const useStyles = makeStyles({
         alignItems: "center",
         gap: 8,
         margin: "12px 0px 0px 0px"
+    },
+    // ── Endpoint fallback notice ─────────────────────────────────────────────
+    // Shown above the Globe while the app runs on a fallback node because the
+    // configured one stopped answering. Amber, not red: the app works, the
+    // user's choice is just not what it is connected to right now.
+    fallbackNotice: {
+        margin: "8px 0px 12px 0px",
+        padding: "10px 12px",
+        borderRadius: 12,
+        border: "1px solid #ffb74d",
+        background: "rgba(255, 183, 77, 0.10)",
+        color: "#ffcc80",
+        fontSize: 12,
+        lineHeight: 1.45,
+        wordBreak: "break-word",
+        "& b": { color: "#ffffff", fontWeight: 600 }
+    },
+    fallbackActions: {
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 8,
+        marginTop: 8
     }
 });
 
@@ -189,7 +211,13 @@ const SettingsDialog = (props) => {
     useLanguage();
 
     const classes = useStyles();
-    const { open, onClose, keepMounted = false } = props;
+    // `fallbackNode` / `onRetryConfiguredNode`: node failover state from
+    // pages/Index.js (useNodeFailover). When the configured endpoint stopped
+    // answering, `fallbackNode` is { url, from, latencyMs, reason } for the
+    // node the app is temporarily connected to — in memory only, the saved
+    // setting is untouched — and null otherwise. Kept live by Index while the
+    // dialog is open.
+    const { open, onClose, keepMounted = false, fallbackNode = null, onRetryConfiguredNode = null } = props;
 
     // The settings "bag" mirrors props.settings (which already uses the _-prefixed keys).
     // _language is local-only and initialised from the document, never read in render.
@@ -480,10 +508,33 @@ const SettingsDialog = (props) => {
         [defaultLicenseSeed]
     );
 
-    // Active endpoint — always a URL; falls back to the default so the picker
-    // never renders "nothing selected" during the pre-hydration window.
-    const activeNodeUrl = _api_node_url || api.DEFAULT_API_NODE_URL;
-    const isCustomNodeActive = !isListedNodeUrl(activeNodeUrl);
+    // Configured endpoint — always a URL; falls back to the default so the
+    // picker never renders "nothing selected" during the pre-hydration window.
+    // The ACTIVE endpoint is the fallback while one is in force: that is what
+    // the Globe highlights, so the picker shows the node the app is really
+    // talking to. The custom-URL field keeps describing the configured one.
+    const configuredNodeUrl = _api_node_url || api.DEFAULT_API_NODE_URL;
+    const activeNodeUrl = (fallbackNode && fallbackNode.url) || configuredNodeUrl;
+    const isCustomNodeActive = !isListedNodeUrl(configuredNodeUrl);
+    const fallbackNodeName = useMemo(() => {
+        if (!fallbackNode) return null;
+        const listed = DEFAULT_NODES.find((n) => api.same_node_url(n.url, fallbackNode.url));
+        return listed ? listed.name : null;
+    }, [fallbackNode]);
+
+    // "Keep this node": persist the fallback as the configured endpoint
+    // through the normal write path. Index then sees configured === fallback,
+    // clears the fallback, and no reconnect happens (same URL string).
+    const _handle_keep_fallback = useCallback(() => {
+        if (fallbackNode && fallbackNode.url) _apply_api_node_url(fallbackNode.url);
+    }, [fallbackNode, _apply_api_node_url]);
+
+    // "Retry configured node": Index drops the fallback and reconnects to the
+    // configured endpoint; if it is still down the failover runs again.
+    const _handle_retry_configured = useCallback(() => {
+        actions.trigger_sfx("ui_lock");
+        if (typeof onRetryConfiguredNode === "function") onRetryConfiguredNode();
+    }, [onRetryConfiguredNode]);
 
     const locales = useMemo(
         () => LOCALES.find(l => l.code === _selected_locales_code) || LOCALES[0],
@@ -794,6 +845,26 @@ const SettingsDialog = (props) => {
                         labelPlacement="start"
                     />
                     <Typography component={"h2"} variant={"h6"} className={classes.subTitle}>{t("words.endpoint")}</Typography>
+                    {fallbackNode ? (
+                        <div className={classes.fallbackNotice} role="status">
+                            {t("components.settings_dialog.configured_endpoint_unreachable")}{" "}
+                            <b>{fallbackNode.from}</b>
+                            {" — "}
+                            {t("components.settings_dialog.connected_to_fallback")}{" "}
+                            <b>{fallbackNodeName ? `${fallbackNodeName} (${fallbackNode.url})` : fallbackNode.url}</b>
+                            {Number.isFinite(fallbackNode.latencyMs) ? ` · ${fallbackNode.latencyMs} ms` : ""}
+                            {". "}
+                            {t("components.settings_dialog.fallback_not_saved")}
+                            <div className={classes.fallbackActions}>
+                                <Button size="small" variant="contained" color="primary" onClick={_handle_keep_fallback}>
+                                    {t("components.settings_dialog.keep_this_node")}
+                                </Button>
+                                <Button size="small" variant="text" color="primary" onClick={_handle_retry_configured}>
+                                    {t("components.settings_dialog.retry_configured_node")}
+                                </Button>
+                            </div>
+                        </div>
+                    ) : null}
                     <Globe
                         nodes={DEFAULT_NODES}
                         selectedUrl={activeNodeUrl}

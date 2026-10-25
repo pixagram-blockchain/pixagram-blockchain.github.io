@@ -29,7 +29,7 @@ import { update_meta_title } from "../utils/meta-tags";
 import {
     PAGE_ROUTES, isPostUrl, hostPageForPostUrl,
     splitMetaPath, parseMeta, formatMeta, isHomePath, parseFeedFocusHash,
-    BROWSE_PATH, entryMeta, HELP_TELEGRAM_URL,
+    BROWSE_PATH, entryMeta, HELP_TELEGRAM_URL, DEFAULT_NODES,
 } from "../utils/constants";
 
 import LogoutModal from "../components/LogoutModal";
@@ -230,6 +230,20 @@ if (typeof window !== "undefined" && !window.__pixaResetTour) {
     window.__pixaResetTour = () => {
         try { window.localStorage.removeItem(TOUR_STORAGE_KEY); } catch (e) {}
     };
+}
+
+// Dev helper: window.__pixaLeakProbe() starts the leak probe, then
+// window.__pixaLeaks() lists what outlived the page it belonged to (usage in
+// utils/leakProbe.js). The probe is a separate chunk, fetched on the first
+// call: a normal session never downloads it. It reads the API's event
+// emitter through Index's apiRef (set below, in Index).
+let leakProbeApiRef = null;
+if (typeof window !== "undefined" && !window.__pixaLeakProbe) {
+    window.__pixaLeakProbe = () => import(/* webpackChunkName: "leak-probe" */ "../utils/leakProbe")
+        .then((probe) => probe.start({
+            dispatcher,
+            getEmitter: () => (leakProbeApiRef && leakProbeApiRef.current && leakProbeApiRef.current.eventEmitter) || null,
+        }));
 }
 
 // Drive a profile tab through its real DOM button so Profile's own handler
@@ -530,6 +544,11 @@ const DIALOG_REGISTRY = {
             settings,
             onClose: options.onClose || close,
             meta: options.meta || null,
+            // Node failover state (useNodeFailover, §9g): the in-memory
+            // fallback endpoint, if one is active, and the way back to the
+            // configured one. Reaches the open dialog live via updateDialog.
+            fallbackNode: options.fallbackNode || null,
+            onRetryConfiguredNode: options.onRetryConfiguredNode || null,
         }),
         sfxOpen: "state-change_confirm-down",
         sfxClose: "labactive",
@@ -1223,11 +1242,17 @@ function useMetaRoute(history) {
     const meta = useMemo(() => (metaKey ? parseMeta(metaKey) : null), [metaKey]);
 
     // history.replace, carrying "this document pushed it" over to the new key
-    // (every replace mints one).
+    // (every replace mints one). The old key goes: its entry no longer
+    // exists, and the set otherwise gained one key per typing pause in the
+    // search, for the rest of the session.
     const replaceEntry = useCallback((url, state) => {
-        const pushed = pushedKeysRef.current.has(history.location.key);
+        const oldKey = history.location.key;
+        const pushed = pushedKeysRef.current.has(oldKey);
         history.replace(url, state);
-        if (pushed) pushedKeysRef.current.add(history.location.key);
+        if (pushed) {
+            pushedKeysRef.current.delete(oldKey);
+            pushedKeysRef.current.add(history.location.key);
+        }
     }, [history]);
 
     const openMeta = useCallback((next) => {
@@ -1559,8 +1584,14 @@ function useSearchMeta(search, meta, route, ready) {
 // §9 — usePixaAPI: API lifecycle
 // ═════════════════════════════════════════════════════════════════════════════
 
-function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl) {
+// `onNodeUnreachable(url, reason)` is called when the node this connection was
+// built for stops answering — the proxy's `node_unreachable` event (three
+// consecutive transport failures), or an initialize() that never came up.
+// Read through a ref so a new callback identity never re-runs the effect.
+function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl, onNodeUnreachable) {
     const [apiReady, setApiReady] = useState(false);
+    const onNodeUnreachableRef = useRef(onNodeUnreachable);
+    onNodeUnreachableRef.current = onNodeUnreachable;
     // apiGeneration counts successful connections AFTER the first: 0 for the
     // whole boot, +1 for every node switch that came up. The render tree keys
     // the api consumers on it (page content, menu, drawer), so a switch
@@ -1702,6 +1733,14 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl) {
                         }), 3000);
                     });
 
+                    // The node stopped answering mid-session (pixaproxyapi
+                    // _installNodeWatch). The failover decides what to do;
+                    // this instance is torn down by the nodeUrl change.
+                    on("node_unreachable", (data) => {
+                        const handler = onNodeUnreachableRef.current;
+                        if (typeof handler === "function") handler((data && data.url) || nodeUrl, data && data.reason);
+                    });
+
                     if (cancelled) return;
                     const sessionState = await pixaAPI.restoreSession();
                     if (cancelled) return;
@@ -1730,7 +1769,18 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl) {
                 } catch (e) {
                     if (cancelled) return;
                     console.error("API Init failed", e);
-                    showSnackbar(t("components.index.failed_to_initialize_blockchain_connection"), 5000);
+                    // A node that never comes up is the same case as one that
+                    // died mid-session: hand it to the failover first. Only
+                    // when nothing is listening — or the browser itself is
+                    // offline, where no node would do better — is it reported
+                    // as a plain initialization failure.
+                    const handler = onNodeUnreachableRef.current;
+                    const browserOnline = typeof navigator === "undefined" || navigator.onLine !== false;
+                    if (typeof handler === "function" && browserOnline) {
+                        handler(nodeUrl, (e && e.message) || "init failed");
+                    } else {
+                        showSnackbar(t("components.index.failed_to_initialize_blockchain_connection"), 5000);
+                    }
                 }
             })();
         });
@@ -2236,6 +2286,106 @@ function useShareArtwork(settingsRef, busy) {
 
     return useMemo(() => ({ share, open, mounted, begin, animationEnded, close, exited, retry }),
         [share, open, mounted, begin, animationEnded, close, exited, retry]);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// §9g — useNodeFailover: an endpoint that stops answering is swapped in memory
+// ═════════════════════════════════════════════════════════════════════════════
+// The configured endpoint is what settings say (or the boot hint before they
+// are known). When it stops answering — usePixaAPI reports it, either from
+// the proxy's `node_unreachable` event or from an initialize() that failed —
+// every other DEFAULT_NODES entry is probed with a real JSON-RPC call
+// (utils/settings pick_fastest_working_node) and the fastest WORKING one
+// becomes the fallback: a snackbar says so, and usePixaAPI reconnects to it
+// because the URL it is keyed on changes.
+//
+// The fallback lives here, in React state, and nowhere else. Nothing is
+// written to the settings store: a reload tries the configured endpoint
+// again, and the Settings dialog shows the configured node as "unreachable,
+// temporarily connected to <fallback>" with two ways out — "Keep this node"
+// (the dialog persists the fallback as the configured node through its
+// normal write path, so configured === fallback and no reconnect happens)
+// and "Retry configured node" (`retry` below). A node picked in the dialog
+// — any node — changes the configured URL, which clears the fallback.
+//
+// Nodes that failed this page load are remembered so a fallback that dies
+// in turn is not retried before the others; when every node has failed once
+// the list is cleared and all are probed again. One failover at a time; a
+// report while one is running is dropped (the connection it came from is
+// being torn down anyway).
+function useNodeFailover(configuredNodeUrl, showSnackbar) {
+    const [fallbackNode, setFallbackNode] = useState(null); // { url, from, latencyMs, reason }
+    const deadNodesRef = useRef(new Set());
+    const busyRef = useRef(false);
+    const configuredRef = useRef(configuredNodeUrl);
+    configuredRef.current = configuredNodeUrl;
+    const showSnackbarRef = useRef(showSnackbar);
+    showSnackbarRef.current = showSnackbar;
+
+    // The configured endpoint moved (a pick in the dialog, "Keep this node",
+    // settings hydrating): the fallback belonged to the previous one.
+    useEffect(() => {
+        setFallbackNode(null);
+        deadNodesRef.current = new Set();
+    }, [configuredNodeUrl]);
+
+    const onNodeUnreachable = useCallback(async (deadUrl, reason) => {
+        if (busyRef.current) return;
+        busyRef.current = true;
+        try {
+            const dead = api.normalize_node_url(deadUrl) || deadUrl;
+            deadNodesRef.current.add(dead);
+
+            let exclude = Array.from(deadNodesRef.current);
+            const allUrls = DEFAULT_NODES.map((n) => api.normalize_node_url(n.url)).filter(Boolean);
+            if (!allUrls.some((u) => !deadNodesRef.current.has(u))) {
+                // Everything has failed once this page load: start over,
+                // keeping out only the node that just died.
+                deadNodesRef.current = new Set([dead]);
+                exclude = [dead];
+            }
+
+            showSnackbarRef.current(
+                t("components.index.endpoint_unreachable_searching", { url: dead }),
+                3500
+            );
+
+            const { best } = await api.pick_fastest_working_node(null, exclude);
+            if (!best) {
+                showSnackbarRef.current(t("components.index.no_endpoint_reachable"), 6000);
+                return;
+            }
+            // Same node as configured (the configured one came back while we
+            // probed): nothing to fall back to, just reconnect to it.
+            if (api.same_node_url(best.url, configuredRef.current)) {
+                setFallbackNode(null);
+                return;
+            }
+            setFallbackNode({
+                url: best.url,
+                from: configuredRef.current,
+                latencyMs: best.latencyMs,
+                reason: reason || null,
+                since: Date.now(),
+            });
+            showSnackbarRef.current(
+                t("components.index.switched_to_fallback_endpoint", { url: best.url, ms: best.latencyMs }),
+                6000
+            );
+        } finally {
+            busyRef.current = false;
+        }
+    }, []);
+
+    // "Retry configured node" (Settings dialog): drop the fallback so
+    // usePixaAPI reconnects to the configured endpoint. If it is still down,
+    // the watch reports it again and the failover runs again.
+    const retry = useCallback(() => {
+        deadNodesRef.current = new Set();
+        setFallbackNode(null);
+    }, []);
+
+    return { fallbackNode, onNodeUnreachable, retry };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -2905,7 +3055,7 @@ const styles = (theme) => {
             marginTop: 8,
             marginLeft: 8,
             padding: "8px 18px",
-            borderRadius: 16,
+            borderRadius: 32,
             overflow: "hidden",
             isolation: "isolate",
             color: "#222",
@@ -3075,6 +3225,12 @@ function Index({ classes, history, settings: rawSettings }) {
     // ── API ref (single source of truth, shared across hooks) ──────────
     const apiRef = useRef(null);
 
+    // The leak probe's way to the API emitter (see __pixaLeakProbe above).
+    useEffect(() => {
+        leakProbeApiRef = apiRef;
+        return () => { if (leakProbeApiRef === apiRef) leakProbeApiRef = null; };
+    }, []);
+
     // ── Dialog manager (single slot) ─────────────────────────────────────
     const dialogs = useDialogManager(apiRef, settingsRef);
     const { dialog, openDialog, closeDialog } = dialogs;
@@ -3087,10 +3243,18 @@ function Index({ classes, history, settings: rawSettings }) {
     // read), so there is nothing to map here anymore: the boot hint only
     // matters while `_api_node_url` is still undefined (settings not yet
     // hydrated); once normalizeSettings has run it is always set.
-    const apiNodeUrl = processedSettings._api_node_url || BOOT_API_NODE_URL_HINT || api.DEFAULT_API_NODE_URL;
+    const configuredNodeUrl = processedSettings._api_node_url || BOOT_API_NODE_URL_HINT || api.DEFAULT_API_NODE_URL;
+
+    // ── Node failover (§9g) ───────────────────────────────────────────────
+    // When the configured endpoint stops answering, the fastest working node
+    // takes over IN MEMORY — the saved setting stays what the user chose —
+    // and the Settings dialog shows the switch. The effective endpoint is
+    // what usePixaAPI connects to; a change of it is what reconnects.
+    const { fallbackNode, onNodeUnreachable, retry: retryConfiguredNode } = useNodeFailover(configuredNodeUrl, showSnackbar);
+    const apiNodeUrl = (fallbackNode && fallbackNode.url) || configuredNodeUrl;
 
     // ── API lifecycle (populates apiRef) ─────────────────────────────────
-    const { apiReady, apiGeneration, restored } = usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, apiNodeUrl);
+    const { apiReady, apiGeneration, restored } = usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, apiNodeUrl, onNodeUnreachable);
 
     // ── Active account's profile image → compact drawer opener ───────────
     const menuAvatar = useSessionAvatar(apiRef, apiReady, apiGeneration);
@@ -3154,6 +3318,15 @@ function Index({ classes, history, settings: rawSettings }) {
     // defaultUsername, requiredKeyType…), keyed by dialog name: the address
     // can't hold callbacks, so useMetaDialogs merges it into the open.
     const metaExtrasRef = useRef({});
+    // The Settings overlay always carries the node-failover state (§9g):
+    // assigned during render so the very first open already has it, and
+    // pushed into an OPEN dialog below so a switch while Settings is up is
+    // shown at once.
+    metaExtrasRef.current.settings = { fallbackNode, onRetryConfiguredNode: retryConfiguredNode };
+    const updateDialog = dialogs.updateDialog; // stable (useCallback, [])
+    useEffect(() => {
+        updateDialog("settings", { fallbackNode, onRetryConfiguredNode: retryConfiguredNode });
+    }, [fallbackNode, retryConfiguredNode, updateDialog]);
     useMetaDialogs(meta, metaRoute, dialogs, {
         pageName: page.name,
         apiReady,

@@ -12,18 +12,22 @@
  *   - the synchronous getCached() lookup used by the render path.
  *
  * Public API (unchanged):
- *   configure({ filterEnabled, threshold, thresholds, wasmPaths, ... })
+ *   configure({ filterEnabled, threshold, thresholds, wasmPaths, inputSize, ... })
  *   ensureNsfw({ id, getImgData, alreadyFlagged }) -> Promise<boolean>
  *   getCached(id) -> boolean | undefined
  *   warmup() -> Promise<void>
  *   dispose()
  *
  * `getImgData` is the same async () => ImageData PaperCard already builds from
- * png-db. ensureNsfw() decodes that ImageData into a transferable ImageBitmap
- * and hands THAT to the detector, so the package can move it to its worker with
- * zero copies. createImageBitmap only reads the source pixels, so the caller's
- * ImageData is never neutered (which is also why the old toTransferable() copy
- * step is gone).
+ * png-db. ensureNsfw() turns that ImageData into an ImageBitmap for the
+ * detector. The package does NOT move the bitmap to its worker: it draws it on
+ * the main thread, reads it back with getImageData, and transfers those pixels.
+ * So when the source is larger than the model input, the bitmap is created
+ * already shrunk to fit inside inputSize x inputSize (aspect ratio kept,
+ * nearest filter). That makes the main-thread readback and the transfer tiny,
+ * while the model input stays identical: the package's own letterbox then
+ * resizes 1:1 and only adds the padding bars. createImageBitmap only reads the
+ * source pixels, so the caller's ImageData is never neutered.
  */
 
 "use strict";
@@ -111,6 +115,8 @@ function log(...args) {
     if (config.debug) console.log("[nsfw]", ...args);
 }
 
+const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+
 // --- Config ----------------------------------------------------------------
 const config = {
     filterEnabled: false, // set true when the user has NSFW filtering ON
@@ -120,16 +126,23 @@ const config = {
     debug: true,
     // Binary gate: an image is flagged when P(nsfw) >= thresholds.nsfw.
     thresholds: { nsfw: 0.40 },
+    // Model input edge: preprocess.size of the embedded model (160 for the
+    // current build). Sources larger than this are shrunk to fit inside
+    // inputSize x inputSize before they reach the detector. It MUST equal the
+    // model's size — if you ship a model trained at another resolution, change
+    // it here too, or the package would resize a second time and the model
+    // would no longer see the pixels it was trained on.
+    inputSize: 160,
     // Passed through to NsfwDetector.create(). wasmPaths usually MUST point at
     // wherever onnxruntime-web's .wasm/.mjs assets are served from for the model
     // to load; the rest are optional.
     runtime: {
-        useWorker: "false",   // "auto" (default) | true | false
-        backend: "auto",     // "auto" tries WebGPU then WASM | "webgpu" | "wasm"
+        useWorker: "auto",   // "auto" (default) | true | false
+        backend: isMobile ? "wasm" : "auto",   // "auto" tries WebGPU then WASM | "webgpu" | "wasm"
         wasmPaths: undefined, // e.g. "/ort/"
         numThreads: 1, // >1 needs cross-origin isolation (COOP/COEP)
-        maxBatch: 2, // images per batched inference (package default 8)
-        batchDelayMs: 12, // coalescing window (package default 12ms)
+        maxBatch: isMobile ? 4 : 8, // images per batched inference (package default 8)
+        batchDelayMs: 24, // coalescing window (package default 12ms)
     },
 };
 
@@ -143,6 +156,8 @@ export function configure(opts = {}) {
     if (typeof opts.threshold === "number") {
         config.thresholds = Object.assign({}, config.thresholds, { nsfw: opts.threshold });
     }
+    // Must match the model's input size (see config.inputSize).
+    if (Number.isInteger(opts.inputSize) && opts.inputSize > 0) config.inputSize = opts.inputSize;
     // Engine/runtime options forwarded to the detector.
     for (const k of ["useWorker", "backend", "wasmPaths", "numThreads", "maxBatch", "batchDelayMs"]) {
         if (k in opts) config.runtime[k] = opts[k];
@@ -174,6 +189,75 @@ function getDetector() {
     return _detectorPromise;
 }
 
+// --- Pre-shrink helpers -----------------------------------------------------
+// Fit (w, h) inside S x S without distortion, with the same rounding as the
+// trainer's letterbox and the package's resizeToSquare (round half up, >= 1px).
+// Both sides are computed here on purpose: when only resizeWidth or only
+// resizeHeight is given, createImageBitmap derives the other side with ceil(),
+// which is 1px off the trainer's rounding for about half of all sizes
+// (e.g. 161x92 -> 160x92 instead of 160x91).
+function fitInside(w, h, S) {
+    const scale = Math.min(S / w, S / h);
+    return {
+        scale,
+        width: Math.max(1, Math.round(w * scale)),
+        height: Math.max(1, Math.round(h * scale)),
+    };
+}
+
+// The model was trained with nearest-neighbour resizing, so the shrink must use
+// resizeQuality: "pixelated" (the default, "low", smooths). Not every browser
+// honours it — Firefox only supports resizeQuality since v149; older versions
+// ignore it and smooth — so test once, the same way the package does before
+// it trusts the option, upscaling and downscaling an alternating black/white
+// row and checking that no in-between grey appears. If the test fails,
+// bitmaps are created at full size exactly as before and the package's own
+// canvas-based nearest resize is used.
+let _pixelatedPromise = null;
+function pixelatedResizeWorks() {
+    if (_pixelatedPromise) return _pixelatedPromise;
+    _pixelatedPromise = (async () => {
+        if (typeof createImageBitmap !== "function" || typeof ImageData === "undefined") return false;
+        const staysCrisp = async (srcW, dstW) => {
+            const src = new Uint8ClampedArray(srcW * 4);
+            for (let i = 0; i < srcW; i++) {
+                const v = i % 2 ? 255 : 0;
+                src[i * 4] = src[i * 4 + 1] = src[i * 4 + 2] = v;
+                src[i * 4 + 3] = 255;
+            }
+            const bmp = await createImageBitmap(new ImageData(src, srcW, 1), {
+                resizeWidth: dstW,
+                resizeHeight: 1,
+                resizeQuality: "pixelated",
+                premultiplyAlpha: "none",
+            });
+            try {
+                if (bmp.width !== dstW || bmp.height !== 1) return false; // resize ignored
+                const canvas = typeof OffscreenCanvas !== "undefined"
+                    ? new OffscreenCanvas(dstW, 1)
+                    : Object.assign(document.createElement("canvas"), { width: dstW, height: 1 });
+                const ctx = canvas.getContext("2d", { willReadFrequently: true });
+                if (!ctx) return false;
+                ctx.imageSmoothingEnabled = false;
+                ctx.drawImage(bmp, 0, 0);
+                const px = ctx.getImageData(0, 0, dstW, 1).data;
+                for (let i = 0; i < px.length; i += 4) {
+                    if (px[i] > 1 && px[i] < 254) return false; // blended -> not nearest
+                }
+                return true;
+            } finally {
+                bmp.close();
+            }
+        };
+        try {
+            return (await staysCrisp(4, 16)) && (await staysCrisp(16, 6));
+        } catch (e) {
+            return false;
+        }
+    })();
+    return _pixelatedPromise;
+}
+
 // --- Warmup + cache priming -------------------------------------------------
 let _primePromise = null;
 
@@ -201,17 +285,19 @@ export function primeCache() {
 
 /**
  * Warm everything the first classification would otherwise pay for on the
- * render path: spawn the worker + initialise the ORT session (model load), and
- * prime the verdict cache from IndexedDB. Both run in parallel and are
- * best-effort, so a failure in either never blocks rendering. No-op when
- * filtering is off (nothing will be classified). Idempotent — safe to call
- * from app bootstrap and again on settings changes.
+ * render path: spawn the worker + initialise the ORT session (model load),
+ * prime the verdict cache from IndexedDB, and run the one-time "pixelated"
+ * resize test. All run in parallel and are best-effort, so a failure in any
+ * never blocks rendering. No-op when filtering is off (nothing will be
+ * classified). Idempotent — safe to call from app bootstrap and again on
+ * settings changes.
  */
 export function warmup() {
     if (!config.filterEnabled) return Promise.resolve();
     return Promise.all([
         getDetector().then(() => {}).catch(() => {}),
         primeCache(),
+        pixelatedResizeWorks(),
     ]).then(() => {});
 }
 
@@ -295,10 +381,13 @@ export async function ensureNsfw({ id, getImgData, alreadyFlagged }) {
             return false;
         }
 
-        // The detector wants an ImageBitmap, not raw ImageData. A bitmap is a
-        // transferable, so the package can post it to its worker with zero
-        // copies (an ImageData would have to be structured-cloned across the
-        // boundary). Decode the source pixels into one here.
+        // The detector takes an ImageBitmap. When the source is bigger than the
+        // model input, create it already shrunk to fit inside
+        // inputSize x inputSize — no distortion, no padding (the package adds
+        // the letterbox bars itself, and with a bitmap that already fits its
+        // own resize is exactly 1:1, so the model sees the same pixels as
+        // before). Smaller sources (most sprites) are passed at native size and
+        // upscaled by the package, as before.
         //
         // The options mirror the render path in PaperCard's CanvasImage so the
         // classifier sees exactly the pixels we'd display:
@@ -308,25 +397,33 @@ export async function ensureNsfw({ id, getImgData, alreadyFlagged }) {
         //                                  channel values the model reads.
         //   colorSpaceConversion:"none" -> feed the raw sRGB bytes; don't let
         //                                  the UA apply an embedded color profile.
+        //   resizeQuality:"pixelated"   -> nearest neighbour, the filter the
+        //                                  model was trained with (only used
+        //                                  where the browser honours it).
         // createImageBitmap only READS imgd, so the caller's ImageData is never
         // neutered by this.
+        const fit = fitInside(imgd.width, imgd.height, config.inputSize);
+        const shrink = fit.scale < 1 && (await pixelatedResizeWorks());
+        const bitmapOpts = { premultiplyAlpha: "none", colorSpaceConversion: "none" };
+        if (shrink) {
+            bitmapOpts.resizeWidth = fit.width;
+            bitmapOpts.resizeHeight = fit.height;
+            bitmapOpts.resizeQuality = "pixelated";
+        }
+
         let bitmap = null;
         try {
-            bitmap = await createImageBitmap(imgd, {
-                premultiplyAlpha: "none",
-                colorSpaceConversion: "none",
-            });
+            bitmap = await createImageBitmap(imgd, bitmapOpts);
         } catch (e) {
             log(id, "createImageBitmap failed -> fail-open:", e && e.message);
             return false; // fail-open
         }
+        // Read the size before classify(): the bitmap may be closed afterwards.
+        const sent = `${bitmap.width}x${bitmap.height}`;
 
         let score = 0, sfw = 0, triggers = [], workerMs = 0, backend = null;
         try {
             const detector = await getDetector();
-            // Hand the bitmap straight to the detector. We own it, so it's fine
-            // for the package to transfer (and thus neuter) it on the way to its
-            // worker — we're done with it once classify() resolves.
             const res = await detector.classify(bitmap);
             const s = res && res.scores;
             score = s && typeof s.nsfw === "number" ? s.nsfw : 0;
@@ -338,8 +435,8 @@ export async function ensureNsfw({ id, getImgData, alreadyFlagged }) {
             log(id, "classify error:", e && e.message);
             return false; // fail-open
         } finally {
-            // Release the bitmap's memory promptly. close() is a harmless no-op
-            // if the package already transferred/neutered it on its worker hop.
+            // We own the bitmap and the package has finished reading it once
+            // classify() settles, so release its memory now.
             try { bitmap.close && bitmap.close(); } catch (e) {}
         }
 
@@ -347,7 +444,10 @@ export async function ensureNsfw({ id, getImgData, alreadyFlagged }) {
         const rec = { id, nsfw: verdict, score, sfw, triggers, ms: workerMs, backend, ts: Date.now() };
         memCache.set(id, rec);
         idbPut(rec);
-        config.debug && log(id, { nsfw: verdict, score: +Number(score).toFixed(3), backend, ms: workerMs });
+        config.debug && log(id, {
+            nsfw: verdict, score: +Number(score).toFixed(3), backend, ms: workerMs,
+            input: `${imgd.width}x${imgd.height}`, sent,
+        });
         return verdict;
     })();
 

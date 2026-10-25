@@ -3,8 +3,10 @@ import * as React from "preact/compat";
 import withStyles from "@material-ui/core/styles/withStyles";
 import Tab from "@material-ui/core/Tab";
 import Tabs from "@material-ui/core/Tabs";
+import Tooltip from "@material-ui/core/Tooltip";
 import SwipeableViews from "react-swipeable-views";
 import JSLoader from "../utils/JSLoader";
+import { t } from "../utils/text";
 import { GOVERNANCE_SECTIONS } from "../utils/constants";
 import DescriptionIcon from "@material-ui/icons/Description";
 import HowToVoteIcon from "@material-ui/icons/HowToVote";
@@ -30,43 +32,68 @@ function tabOfSection(section) {
     return i >= 0 ? i : TAB_PROPOSALS;
 }
 
+/** Translation with an English fallback: utils/text renders a missing key as its last segment. */
+function label(key, fallback) {
+    const v = t(key);
+    return !v || v === key || v === key.slice(key.lastIndexOf(".") + 1) ? fallback : v;
+}
+
+const L = "components.gdviability_management.";
+
+// The rail's tabs, in rail order (TAB_* above), named on hover and for screen readers.
+const TABS = [
+    { value: TAB_PROPOSALS, icon: DescriptionIcon, label: () => label(L + "tab_proposals", "Proposals") },
+    { value: TAB_WITNESSES, icon: HowToVoteIcon, label: () => label(L + "tab_witnesses", "Witnesses") },
+    { value: TAB_TOKENOMICS, icon: AccountBalanceIcon, label: () => label(L + "tab_tokenomics", "Tokenomics") }
+];
+
+// Width of the rail (a 40 px tab inside a 4 px padding) and its distance from the panel's edges.
+const RAIL = 48;
+const RAIL_INSET = 18.5;
+
+// Below this width (theme breakpoint xs) the rail becomes a bar of tabs over the content, swiped sideways.
+// The orientation of the tabs and the styles switch at the same width.
+const PHONE = "(max-width: 599.95px)";
+
 const styles = theme => ({
     root: {
         display: "flex",
         height: "100%",
         position: "relative",
-        [theme.breakpoints.down("sm")]: {
+        [theme.breakpoints.down("xs")]: {
             flexDirection: "column"
         }
     },
-    // Desktop: a vertical rail pinned to the left edge that runs the (nearly)
-    // full height of the panel — an 18.5px inset top and bottom, matching its
-    // left inset — with the three tabs splitting that height between them. The
-    // indicator pill follows the selected tab's own height (MUI writes it
-    // inline for vertical tabs), so it is NOT fixed here.
+    // Desktop: a thin rail pinned to the top left corner, just as tall as its
+    // three square tabs, which stays put while the content scrolls beside it.
+    // The indicator pill follows the selected tab (MUI writes its top and
+    // height inline for vertical tabs) and slides from one tab to the next.
     tabs: {
         "& .MuiTabs-scroller": {
             minHeight: 0
         },
         "& .MuiTab-root": {
-            flex: "1 1 0%",
-            minWidth: "88px",
-            minHeight: "64px",
+            flex: "0 0 auto",
+            width: "40px",
+            minWidth: "40px",
+            height: "40px",
+            minHeight: "40px",
             maxHeight: "none",
-            borderRadius: "16px",
-            transition: "color 225ms cubic-bezier(0.4, 0, 0.2, 1) 0ms"
+            padding: 0,
+            borderRadius: "12px",
+            transition: "color 225ms cubic-bezier(0.4, 0, 0.2, 1) 0ms, background-color 150ms ease"
         },
         "& button:last-child": {
             marginTop: "0px"
         },
         "& .MuiTab-labelIcon .MuiTab-wrapper > *:first-child": {
-            width: "1.25em",
-            height: "1.25em",
+            width: "20px",
+            height: "20px",
             marginBottom: 0
         },
         "& .MuiTab-textColorInherit": {
-            color: "#989898",
-            transition: "color 225ms cubic-bezier(0.4, 0, 0.2, 1) 0ms"
+            color: "#7a7a7a",
+            transition: "color 225ms cubic-bezier(0.4, 0, 0.2, 1) 0ms, background-color 150ms ease"
         },
         "& .MuiTab-textColorInherit.Mui-selected": {
             color: "#000000",
@@ -76,48 +103,46 @@ const styles = theme => ({
         "& .MuiTab-textColorInherit.Mui-selected .MuiTab-wrapper": {
             color: "#000000 !important"
         },
-        "& .MuiTabs-flexContainerVertical": {
-            backgroundColor: "transparent",
-            color: "#989898",
-            transition: "all 225ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
-            width: "88px",
-            height: "100%",
-            borderRadius: "16px"
+        // the rail only: its icons at full strength, lit on hover, ringed on keyboard focus
+        [theme.breakpoints.up("sm")]: {
+            "& .MuiTab-root": {
+                opacity: 1
+            },
+            "& .MuiTab-textColorInherit:not(.Mui-selected):hover": {
+                color: "#e8e8e8",
+                backgroundColor: "rgba(255,255,255,0.06)"
+            },
+            "& .MuiTab-textColorInherit.Mui-focusVisible": {
+                boxShadow: "inset 0 0 0 2px #555"
+            }
         },
-        "& .MuiTabs-flexContainerVertical:hover": {
-            backgroundColor: "rgba(255,255,255,0.06)"
+        "& .MuiTabs-flexContainerVertical": {
+            gap: "4px",
+            width: "40px",
+            backgroundColor: "transparent"
         },
         "& span.MuiTabs-indicator": {
             zIndex: "-1",
-            width: "88px",
-            // height: intentionally left to MUI's inline value (= tab height)
-            marginTop: 0,
-            marginRight: 0,
+            left: 0,
+            right: "auto",
+            width: "40px",
+            // height and top: MUI's inline values (those of the selected tab)
             backgroundColor: "#c7c7c7",
-            borderRadius: "16px",
-            transform: "scale3d(0.875, 0.965, 1)",
-            transformOrigin: "50% 50%",
+            borderRadius: "12px",
             transition: "all 360ms cubic-bezier(0.4, 0, 0.2, 1) 0ms"
         },
-        padding: "0px",
-        backgroundColor: "#020202",
+        padding: "4px",
+        minHeight: 0,
+        width: `${RAIL}px`,
+        backgroundColor: "#101010",
         display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
         position: "absolute",
-        top: 18.5,
-        bottom: 18.5,
-        transform: "none",
-        height: "auto",
-        borderRadius: "18px",
-        margin: "0px 0px 0px 18.5px",
+        top: RAIL_INSET,
         left: 0,
+        margin: `0px 0px 0px ${RAIL_INSET}px`,
+        borderRadius: "16px",
         zIndex: 1,
-        transition: "background-color 320ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
-        "&:hover": {
-            backgroundColor: "#000000",
-        },
-        [theme.breakpoints.down("sm")]: {
+        [theme.breakpoints.down("xs")]: {
             position: "relative",
             top: "0",
             bottom: "auto",
@@ -143,7 +168,9 @@ const styles = theme => ({
             },
             "& .MuiTab-root": {
                 flex: 1,
+                width: "auto",
                 minWidth: "unset",
+                height: "48px",
                 minHeight: "48px",
                 maxHeight: "none",
                 borderRadius: "21px"
@@ -173,7 +200,8 @@ const styles = theme => ({
     },
     contentWrapper: {
         flex: 1,
-        marginLeft: "124px",
+        // the rail, its inset, and as much again between the rail and the content
+        marginLeft: `${RAIL + 2 * RAIL_INSET - 1}px`,
         overflow: "hidden",
         "& .react-swipeable-view-container": {
             height: "100% !important"
@@ -182,7 +210,7 @@ const styles = theme => ({
             height: "100% !important",
             overflow: "hidden auto !important"
         },
-        [theme.breakpoints.down("sm")]: {
+        [theme.breakpoints.down("xs")]: {
             marginLeft: 0
         }
     }
@@ -195,7 +223,7 @@ class GDViabilityManagement extends React.PureComponent {
         this.state = {
             _sub_tab_value: tabOfSection(props.section),
             _authors: [],
-            _is_mobile: typeof window !== "undefined" && window.innerWidth <= 600
+            _is_mobile: typeof window !== "undefined" && window.matchMedia ? window.matchMedia(PHONE).matches : false
         };
     }
 
@@ -208,7 +236,7 @@ class GDViabilityManagement extends React.PureComponent {
         });
 
         if (typeof window !== "undefined" && window.matchMedia) {
-            this._mql = window.matchMedia("(max-width: 600px)");
+            this._mql = window.matchMedia(PHONE);
             this._mql.addEventListener("change", this._handleMediaChange);
         }
     }
@@ -266,9 +294,17 @@ class GDViabilityManagement extends React.PureComponent {
                     onChange={this._handleSubTabChange}
                     className={classes.tabs}
                 >
-                    <Tab icon={<DescriptionIcon />} value={TAB_PROPOSALS} />
-                    <Tab icon={<HowToVoteIcon />} value={TAB_WITNESSES} />
-                    <Tab icon={<AccountBalanceIcon />} value={TAB_TOKENOMICS} />
+                    {TABS.map((x) => {
+                        const Icon = x.icon;
+                        const tab = <Tab key={x.value} icon={<Icon />} value={x.value} aria-label={x.label()} />;
+                        // The thin rail shows icons only: each one is named on hover. The Tooltip passes
+                        // on to its Tab the props Tabs gives its children.
+                        return _is_mobile ? tab : (
+                            <Tooltip key={x.value} title={x.label()} placement="right" enterDelay={300}>
+                                {tab}
+                            </Tooltip>
+                        );
+                    })}
                 </Tabs>
 
                 <div className={classes.contentWrapper}>

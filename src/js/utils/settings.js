@@ -354,6 +354,71 @@ export const measure_node_latency = async (url, attempts = NODE_LATENCY_ATTEMPTS
     return best;
 };
 
+// ── Working-node probe: a real JSON-RPC round trip ──────────────────────────
+// The HEAD/no-cors ping above only proves that *something* answered at the
+// host — a reverse proxy serving a 502 page counts. The failover path
+// (pages/Index.js, when the live endpoint stops answering) needs to know that
+// the node actually serves the chain API, so it asks for the dynamic global
+// properties and requires a head block number in the reply. One request per
+// node, all nodes in parallel, with the connection cost included — the
+// fallback is a temporary choice, not the boot race's considered one.
+export const NODE_PROBE_TIMEOUT_MS = 4000;
+
+/**
+ * Probe one endpoint with condenser_api.get_dynamic_global_properties.
+ * @returns {Promise<{url: string, ok: boolean, latencyMs?: number, headBlock?: number, reason?: string}>}
+ */
+export const probe_node_rpc = async (url, timeout = NODE_PROBE_TIMEOUT_MS) => {
+    const normalized = normalize_node_url(url);
+    if (!normalized || typeof fetch === "undefined") return { url: normalized || url, ok: false, reason: "invalid" };
+    const now = () => (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+    const controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    const timer = setTimeout(() => { if (controller) controller.abort(); }, timeout);
+    const start = now();
+    try {
+        const res = await fetch(normalized, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "condenser_api.get_dynamic_global_properties", params: [] }),
+            cache: "no-store",
+            signal: controller ? controller.signal : undefined,
+        });
+        if (!res.ok) return { url: normalized, ok: false, reason: `http ${res.status}` };
+        const body = await res.json();
+        const head = body && body.result && Number(body.result.head_block_number);
+        if (!Number.isFinite(head) || head <= 0) return { url: normalized, ok: false, reason: "not a chain node" };
+        return { url: normalized, ok: true, latencyMs: Math.round(now() - start), headBlock: head };
+    } catch (e) {
+        const aborted = e && e.name === "AbortError";
+        return { url: normalized, ok: false, reason: aborted ? "timeout" : ((e && e.message) || "unreachable") };
+    } finally {
+        clearTimeout(timer);
+    }
+};
+
+/**
+ * The fastest WORKING node among `urls` (defaults to every DEFAULT_NODES
+ * entry), excluding anything in `exclude`. Mainnet nodes beat testnet ones
+ * regardless of latency, like the boot race.
+ * @returns {Promise<{best: (object|null), results: object[]}>} `best` is a
+ *   probe_node_rpc result, or null when nothing answered.
+ */
+export const pick_fastest_working_node = async (urls = null, exclude = []) => {
+    const excluded = new Set((exclude || []).map(normalize_node_url).filter(Boolean));
+    const networkOf = new Map((DEFAULT_NODES || []).map((n) => [normalize_node_url(n.url), n.network]));
+    const candidates = (urls || (DEFAULT_NODES || []).map((n) => n.url))
+        .map(normalize_node_url)
+        .filter((u) => u && !excluded.has(u));
+    if (candidates.length === 0) return { best: null, results: [] };
+    const results = await Promise.all(candidates.map((u) => probe_node_rpc(u)));
+    const alive = results.filter((r) => r.ok);
+    if (alive.length === 0) return { best: null, results };
+    const mainnet = alive.filter((r) => networkOf.get(r.url) !== "testnet");
+    const pool = mainnet.length > 0 ? mainnet : alive;
+    pool.sort((a, b) => a.latencyMs - b.latencyMs);
+    return { best: pool[0], results };
+};
+
 // ── Automatic node selection (boot race) ────────────────────────────────────
 // Runs after init() has resolved, only while the stored endpoint is still
 // nobody's choice (api_node_source === "default"): every DEFAULT_NODES entry
