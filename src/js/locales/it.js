@@ -694,6 +694,11 @@ export default {
             "trade": "Scambia",
         },
         "login_dialog": {
+            "master_password_works_too": "Funziona anche la tua password principale.",
+            "master_password_derives_key": "Password principale — la tua chiave {{requiredKeyType}} verrà derivata da essa",
+            "master_password_lacks_key": "La chiave {{requiredKeyType}} di @{{name}} è stata cambiata on-chain: questa password principale non la genera più. Inserisci direttamente la chiave {{requiredKeyType}}.",
+            "add_account_button": "AGGIUNGI ACCOUNT",
+            "add_another_account": "Aggiungi un altro account — quelli già connessi restano connessi",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2047,6 +2052,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Vuoi davvero eliminare «{{deleteConfirmDraftTitle}}»? Questa azione non può essere annullata."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "La {{t}} di @{{username}} è stata cambiata on-chain: questa password principale non la genera più. Inserisci direttamente la {{t}}.",
+            "attempts_remaining_before_logout": "Ancora %n {{{_plurals.attempt}}} e la sessione di @{{account}} verrà chiusa su questo dispositivo",
             "toggle_pin_visibility": "mostra o nascondi il PIN",
             "enter_your_pin_to_unlock_the_requested": "Inserisci il PIN per sbloccare la chiave richiesta.",
             "hint": "Suggerimento: {{vaultHint}}",
@@ -2178,6 +2185,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Quando altri interagiranno con i tuoi contenuti, lo vedrai qui"
         },
         "menu_content": {
+            "add_account": "Aggiungi account",
+            "add_account_hint": "Accedi con un altro account",
+            "switch_account": "Cambia account",
+            "session_tab_only": "Solo questa scheda",
+            "session_locked": "Bloccato",
+            "switch_failed": "Impossibile passare a @{{account}}",
+            "session_time_left_dh": "Tempo rimasto: {{days}} g {{hours}} h",
+            "session_time_left_h": "Tempo rimasto: {{hours}} h",
+            "session_time_left_soon": "Tempo rimasto: meno di 1 h",
             "notifications": "Notifiche",
             "feed": "Feed",
             "apps": "App",
@@ -2268,6 +2284,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Prenota un incontro con il nostro team per iniziare con un Simple Agreement for Future Token (SAFT)."
         },
         "index": {
+            "switched_to_account": "Ora stai usando @{{account}}",
+            "logged_out_switched": "Sessione di @{{from}} chiusa — ora stai usando @{{to}}",
+            "session_expired_switched": "La sessione di @{{from}} è scaduta — ora stai usando @{{to}}",
+            "logged_out_elsewhere_switched": "La sessione di @{{from}} è stata chiusa in un’altra scheda — ora stai usando @{{to}}",
+            "pin_wipe_switched": "La sessione di @{{from}} è stata chiusa dopo troppe password errate — ora stai usando @{{to}}",
+            "session_expired": "La tua sessione di @{{account}} è scaduta — accedi di nuovo",
+            "logged_out_elsewhere": "La sessione di @{{account}} è stata chiusa in un’altra scheda",
             "users": "Utenti",
             "communities": "Community",
             "exclusive_discount_for_a_limited_time_only": "Sconto esclusivo, solo per un periodo limitato!",
@@ -3150,6 +3173,14 @@ export default {
             "stored_on_arweave": "Archiviata su Arweave"
         },
         "logout_modal": {
+            "title_account": "Disconnettere @{{account}}?",
+            "title": "Vuoi davvero disconnetterti?",
+            "please_wait": "Attendi mentre chiudiamo la tua sessione in sicurezza…",
+            "forgotten_on_device": "Il browser di questo dispositivo dimenticherà il tuo account. Se non ti fidi di questo dispositivo, usa la navigazione privata o disconnettiti sempre per chiudere l’accesso al tuo account.",
+            "others_stay_logged_in": "Gli altri tuoi account restano connessi.",
+            "logout_failed": "Disconnessione non riuscita",
+            "retry": "Riprova",
+            "logout": "Disconnetti",
             "logging_out": "Disconnessione…"
         },
         "members_list_dialog": {

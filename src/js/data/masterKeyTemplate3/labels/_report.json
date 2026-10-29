@@ -1,0 +1,2324 @@
+{
+ "bn": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 8.5,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 6
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 6
+  },
+  "postingList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "cs": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 8.5,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 6
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 6
+  },
+  "postingList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "da": {
+  "tagline": {
+   "size": 19.45,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 11.76,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 6.04,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 6
+  },
+  "postingList": {
+   "size": 9.0,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.0,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.0,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.0,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "de": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 6.61,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.56,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 8.98,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 8.98,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 8.55,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 8.55,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 8.55,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 8.55,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "el": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 7.17,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 11.41,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 11.41,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 11.41,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 11.41,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 11.41,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.07,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 9.07,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 8.38,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 8.38,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 8.38,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 8.38,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "en": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 8.5,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "es": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 7.02,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 9.15,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 9.15,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 9.15,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 9.15,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 9.15,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.37,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "fi": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 6.16,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.3,
+   "overflow": false,
+   "lines": 3
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 6
+  },
+  "postingList": {
+   "size": 8.91,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 8.91,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 8.91,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 8.91,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "fr": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 6.29,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 10.53,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 10.53,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 10.53,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 10.53,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 10.53,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 8.98,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 8.98,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 9.09,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.09,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.09,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.09,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "hi": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 8.5,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 6
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 6
+  },
+  "postingList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "hu": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 8.5,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 10.22,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 10.22,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 10.22,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 10.22,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 10.22,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "id": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 7.38,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "intro": {
+   "size": 8.22,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 8.71,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 8.71,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 8.55,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 8.55,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 8.55,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 8.55,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "it": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 5.63,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 10.12,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 10.12,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 10.12,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 10.12,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 10.12,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.26,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 9.26,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "ja": {
+  "tagline": {
+   "size": 19.65,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 8.5,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "ko": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 8.5,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 6
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 5
+  },
+  "postingList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "nl": {
+  "tagline": {
+   "size": 20.25,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 6.04,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 10.53,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 10.53,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 10.53,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 10.53,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 10.53,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.37,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.07,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 9.07,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 9.09,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.09,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.09,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.09,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "no": {
+  "tagline": {
+   "size": 20.45,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 11.19,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 6.42,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 11.53,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 11.53,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 11.53,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 11.53,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 11.53,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 6
+  },
+  "postingList": {
+   "size": 8.73,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 8.73,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 8.73,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 8.73,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "pl": {
+  "tagline": {
+   "size": 18.5,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 8.5,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 10.43,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 10.43,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 10.43,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 10.43,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 10.43,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "pt": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 6.61,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 11.19,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 11.19,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 11.19,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 11.19,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 11.19,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.18,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 8.71,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 8.71,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 8.55,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 8.55,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 8.55,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 8.55,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "ro": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 8.5,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 9.62,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 9.62,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 9.62,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 9.62,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 9.62,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "ru": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 8.5,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 11.76,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 11.76,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 11.76,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 11.76,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 11.76,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 8.89,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 8.89,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 8.3,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 8.3,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 8.3,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 8.3,
+   "overflow": false,
+   "rows": 3
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "sk": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 8.5,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 11.64,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 11.64,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 11.64,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 11.64,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 11.64,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 6
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 6
+  },
+  "postingList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "sv": {
+  "tagline": {
+   "size": 20.05,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 6.95,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 11.53,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 11.53,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 11.53,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 11.53,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 11.53,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 8.73,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 8.73,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 8.73,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 8.73,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "ta": {
+  "tagline": {
+   "size": 20.05,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 6.81,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 11.07,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 11.07,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 11.07,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 11.07,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 11.07,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.0,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.12,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 7.5,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 7.5,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 8.55,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 8.55,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 8.55,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 8.55,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "tr": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 8.5,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 11.07,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 11.07,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 11.07,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 11.07,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 11.07,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "uk": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 7.24,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 10.43,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 10.43,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 10.43,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 10.43,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 10.43,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 7
+  },
+  "postingList": {
+   "size": 9.09,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.09,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.09,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.09,
+   "overflow": false,
+   "rows": 4
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ },
+ "zh": {
+  "tagline": {
+   "size": 20.66,
+   "overflow": false
+  },
+  "seedPhraseTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "seedPassTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "passwordLabel": {
+   "size": 4,
+   "overflow": false
+  },
+  "noPassword": {
+   "size": 8.5,
+   "overflow": false
+  },
+  "masterKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "postingKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "ownerKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "activeKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "memoKeyTitle": {
+   "size": 12,
+   "overflow": false
+  },
+  "intro": {
+   "size": 9.46,
+   "overflow": false,
+   "lines": 2
+  },
+  "copyNote": {
+   "size": 6.9,
+   "overflow": false,
+   "lines": 2
+  },
+  "footerLeft": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 5
+  },
+  "footerRight": {
+   "size": 9.35,
+   "overflow": false,
+   "lines": 4
+  },
+  "postingList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 6
+  },
+  "ownerList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 3
+  },
+  "activeList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 7
+  },
+  "memoList": {
+   "size": 9.46,
+   "overflow": false,
+   "rows": 2
+  },
+  "generatedOn": {
+   "size": 10,
+   "overflow": false
+  }
+ }
+}

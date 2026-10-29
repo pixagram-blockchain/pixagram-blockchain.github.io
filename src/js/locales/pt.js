@@ -694,6 +694,11 @@ export default {
             "trade": "Negociar",
         },
         "login_dialog": {
+            "master_password_works_too": "A sua palavra-passe mestra também funciona.",
+            "master_password_derives_key": "Palavra-passe mestra — a sua chave {{requiredKeyType}} será derivada dela",
+            "master_password_lacks_key": "A chave {{requiredKeyType}} de @{{name}} foi alterada na cadeia: esta palavra-passe mestra já não a gera. Introduza a própria chave {{requiredKeyType}}.",
+            "add_account_button": "ADICIONAR CONTA",
+            "add_another_account": "Adicione outra conta — as que têm sessão iniciada mantêm-na",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2047,6 +2052,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Tem a certeza de que quer eliminar «{{deleteConfirmDraftTitle}}»? Esta ação não pode ser anulada."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "A {{t}} de @{{username}} foi alterada na cadeia: esta palavra-passe mestra já não a gera. Introduza a própria {{t}}.",
+            "attempts_remaining_before_logout": "Mais %n {{{_plurals.attempt}}} e a sessão de @{{account}} será terminada neste dispositivo",
             "toggle_pin_visibility": "mostrar ou ocultar o PIN",
             "enter_your_pin_to_unlock_the_requested": "Introduza o seu PIN para desbloquear a chave pedida.",
             "hint": "Dica: {{vaultHint}}",
@@ -2178,6 +2185,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Quando alguém interagir com o seu conteúdo, verá aqui"
         },
         "menu_content": {
+            "add_account": "Adicionar conta",
+            "add_account_hint": "Iniciar sessão com outra conta",
+            "switch_account": "Mudar de conta",
+            "session_tab_only": "Só este separador",
+            "session_locked": "Bloqueada",
+            "switch_failed": "Não foi possível mudar para @{{account}}",
+            "session_time_left_dh": "Tempo restante: {{days}} d {{hours}} h",
+            "session_time_left_h": "Tempo restante: {{hours}} h",
+            "session_time_left_soon": "Tempo restante: menos de 1 h",
             "notifications": "Notificações",
             "feed": "Feed",
             "apps": "Aplicações",
@@ -2268,6 +2284,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Marque uma reunião com a nossa equipa para começar com um Simple Agreement for Future Token (SAFT)."
         },
         "index": {
+            "switched_to_account": "Passou a usar @{{account}}",
+            "logged_out_switched": "Sessão de @{{from}} terminada — agora a usar @{{to}}",
+            "session_expired_switched": "A sessão de @{{from}} expirou — agora a usar @{{to}}",
+            "logged_out_elsewhere_switched": "A sessão de @{{from}} foi terminada noutro separador — agora a usar @{{to}}",
+            "pin_wipe_switched": "A sessão de @{{from}} foi terminada após demasiadas palavras-passe erradas — agora a usar @{{to}}",
+            "session_expired": "A sua sessão de @{{account}} expirou — inicie sessão novamente",
+            "logged_out_elsewhere": "A sessão de @{{account}} foi terminada noutro separador",
             "users": "Utilizadores",
             "communities": "Comunidades",
             "exclusive_discount_for_a_limited_time_only": "Desconto exclusivo por tempo limitado!",
@@ -3150,6 +3173,14 @@ export default {
             "stored_on_arweave": "Guardada no Arweave"
         },
         "logout_modal": {
+            "title_account": "Terminar a sessão de @{{account}}?",
+            "title": "Quer mesmo terminar sessão?",
+            "please_wait": "Aguarde enquanto terminamos a sua sessão em segurança…",
+            "forgotten_on_device": "O navegador deste dispositivo vai esquecer a sua conta. Se não confia neste dispositivo, use a navegação privada ou termine sempre a sessão para fechar o acesso à sua conta.",
+            "others_stay_logged_in": "As suas outras contas mantêm a sessão iniciada.",
+            "logout_failed": "Não foi possível terminar a sessão",
+            "retry": "Tentar novamente",
+            "logout": "Terminar sessão",
             "logging_out": "A terminar sessão…"
         },
         "members_list_dialog": {

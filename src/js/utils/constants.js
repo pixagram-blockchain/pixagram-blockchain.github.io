@@ -20,7 +20,9 @@ export const PAGE_ROUTES = [
         tabs: ""
     },
     {
-        page_regex: /^\/(created|hot|trending|promoted)(\/[a-z\-]+)?\/?$/,
+        // The tag takes [a-z0-9-], the characters of a post's category:
+        // digits included ("/trending/web3", "/hot/3d").
+        page_regex: /^\/(created|hot|trending|promoted)(\/[a-z0-9\-]+)?\/?$/,
         page_name: "feed",
         tabs: ""
     },
@@ -849,7 +851,7 @@ export function parseFeedFocusHash(rawHash) {
 //   /@primerz/comments+info-privacy
 //   /portal-156480+governance-viability-vote
 //   /created+search-eyJxIjoiY2F0In0            base64url of {"q":"cat"}
-//   /created/+signup
+//   /trending/+signup
 //   /@primerz+login
 //
 // The first "+" of the pathname starts the meta. Nothing in front of it can
@@ -933,9 +935,15 @@ export function isHomePath(path) {
     return path === "/" || path === "";
 }
 
-// Where the landing page's Browse button enters the app. Logged out, the
-// button opens the sign-up over it.
-export const BROWSE_PATH = "/created/";
+// The feed's default sort. The landing page's Browse button and the logged-in
+// auto-enter open the feed on it (BROWSE_PATH below), and every tag link uses
+// it until the reader picks another sort on the feed, which utils/feedSort.js
+// then keeps for the rest of the visit.
+export const DEFAULT_FEED_SORT = "trending";
+
+// Where the landing page's Browse button enters the app. Logged out on a
+// desktop, the sign-up follows thirty seconds later (Index.js, §9e).
+export const BROWSE_PATH = "/" + DEFAULT_FEED_SORT + "/";
 
 // The overlays a visitor can ARRIVE with from outside: a log-in or sign-up
 // link may point at the landing page ("/+login", "/+signup"), which has no

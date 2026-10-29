@@ -11,6 +11,39 @@ import CircularProgress from "@material-ui/core/CircularProgress";
 import { t } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
+
+// ============================================================================
+// LogoutModal — confirms a logout, then hands it to the parent.
+//
+// Multi-account (pixaproxyapi v4.8 / session-manager v7): the logout itself is
+// the parent's onConfirm — Index calls api.logout({ account }), which ends the
+// account on this device (every tab), clears KeyManager, cancels the account's
+// queued offline operations and lets another logged-in account take over. This
+// dialog waits for it (onConfirm may return a promise) and then calls
+// onLogoutComplete.
+//
+// It used to end the session again by itself right after onConfirm
+// (sessionManager.endSession(), then keyManager.removeAccount — which does not
+// exist, so the throw also skipped clearAllSessions — and api.cacheManager,
+// which does not exist either). Its endSession reached SessionManager's queue
+// before api.logout's, so the account was ended with no hand-over: with several
+// accounts logged in, the next one never took over.
+//
+// Props: open, onConfirm, onClose, onLogoutComplete, api, account (the account
+// being logged out, shown in the title; Index passes the one active when the
+// dialog opened).
+// ============================================================================
+
+// components.logout_modal.* strings, with an English fallback for a build whose
+// locale files predate them (they were hard-coded English).
+const tr = (key, fallback, params) => {
+    let s = null;
+    try { s = t(key, params); } catch (e) { s = null; }
+    // utils/text.js renders a missing key as its last segment ("title_account").
+    const last = key.slice(key.lastIndexOf(".") + 1);
+    return typeof s === "string" && s && s !== key && s !== last ? s : fallback;
+};
+
 const styles = theme => ({
     whiteDialog: {
         backgroundColor: "#fff !important",
@@ -33,7 +66,21 @@ const styles = theme => ({
                 backgroundColor: "#222 !important",
             }
         }
-    }
+    },
+    progressContainer: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "8px",
+    },
+    error: {
+        display: "block",
+        marginTop: "12px",
+        color: "#b00020",
+    },
+    others: {
+        display: "block",
+        marginTop: "12px",
+    },
 });
 
 class LogoutModal extends React.PureComponent {
@@ -45,92 +92,72 @@ class LogoutModal extends React.PureComponent {
             keepMounted: props.keepMounted || false,
             open: props.open,
             loggingOut: false,
-            error: null
+            error: null,
+            // Other logged-in accounts: they stay logged in (one takes over).
+            others: 0,
         };
+        this._mounted = false;
     };
 
+    componentDidMount() {
+        this._mounted = true;
+        if (this.props.open) this._countOthers(this.props);
+    }
+
+    componentWillUnmount() {
+        this._mounted = false;
+    }
+
     componentWillReceiveProps(new_props) {
+        const opening = new_props.open && !this.state.open;
         this.setState({
             open: new_props.open,
             keepMounted: new_props.keepMounted || false,
             // Reset states when dialog opens
-            ...(new_props.open && !this.state.open ? {
+            ...(opening ? {
                 loggingOut: false,
-                error: null
+                error: null,
+                others: 0,
             } : {})
         });
+        if (opening) this._countOthers(new_props);
     }
 
-    handleLogout = async () => {
-        const { api, onConfirm, onLogoutComplete } = this.props;
+    /** How many other accounts are logged in on this device (they are not logged out). */
+    _countOthers = async (props) => {
+        const { api, account } = props;
+        if (!api || typeof api.listAccounts !== "function") return;
+        try {
+            const list = await api.listAccounts();
+            const gone = String(account || "").toLowerCase();
+            const others = (Array.isArray(list) ? list : [])
+                .filter((s) => s && s.account && (gone ? s.account !== gone : !s.active)).length;
+            if (this._mounted) this.setState({ others });
+        } catch (_) { /* informational only */ }
+    };
 
-        console.log('LogoutModal: Starting logout process');
+    handleLogout = async () => {
+        const { api, account, onConfirm, onLogoutComplete } = this.props;
+        if (this.state.loggingOut) return;
         this.setState({ loggingOut: true, error: null });
 
-        // Call onConfirm immediately to notify parent that logout is starting
-        if (onConfirm) {
-            console.log('LogoutModal: Calling onConfirm');
-            onConfirm();
-        }
-
         try {
-            if (api) {
-                // Get current account before clearing
-                const currentAccount = api.keyManager?.getActiveAccount?.();
-                console.log('LogoutModal: Current account:', currentAccount);
-
-                // End the current session - this emits 'session_ended' event
-                if (api.sessionManager) {
-                    console.log('LogoutModal: Ending session');
-                    try {
-                        await api.sessionManager.endSession();
-                        console.log('LogoutModal: Session ended');
-                    } catch (e) {
-                        console.warn('LogoutModal: endSession error (continuing):', e);
-                    }
-                }
-
-                // Clear session keys from memory
-                if (api.keyManager) {
-                    try {
-                        if (currentAccount) {
-                            console.log('LogoutModal: Removing account from key manager');
-                            await api.keyManager.removeAccount(currentAccount);
-                        }
-                        api.keyManager.clearAllSessions();
-                        console.log('LogoutModal: Cleared all sessions');
-                    } catch (e) {
-                        console.warn('LogoutModal: keyManager error (continuing):', e);
-                    }
-                }
-
-                // Invalidate any cached account data
-                if (api.cacheManager && currentAccount) {
-                    try {
-                        await api.cacheManager.invalidateKey('accounts', `account_${currentAccount}`);
-                        console.log('LogoutModal: Cache invalidated');
-                    } catch (e) {
-                        console.warn('LogoutModal: cacheManager error (continuing):', e);
-                    }
-                }
+            // The whole logout is the parent's (see the header). Without a
+            // parent handler, the API's logout does the same.
+            if (onConfirm) {
+                await onConfirm();
+            } else if (api && typeof api.logout === "function") {
+                await api.logout(account ? { account } : {});
             }
-
-            console.log('LogoutModal: Logout successful, calling onLogoutComplete');
-            // Always call logout complete callback
-            if (onLogoutComplete) {
-                onLogoutComplete();
-            }
-
+            if (onLogoutComplete) onLogoutComplete();
         } catch (error) {
             console.error('LogoutModal: Logout failed:', error);
-            // Even on error, try to complete the logout on UI side
-            if (onLogoutComplete) {
-                console.log('LogoutModal: Calling onLogoutComplete despite error');
-                onLogoutComplete();
+            if (this._mounted) {
+                this.setState({
+                    loggingOut: false,
+                    error: (error && error.message) || tr("components.logout_modal.logout_failed", "Logout failed"),
+                });
             }
-            this.setState({
-                loggingOut: false
-            });
         }
     };
 
@@ -150,8 +177,16 @@ class LogoutModal extends React.PureComponent {
             classes,
             open,
             loggingOut,
-            error
+            error,
+            others,
         } = this.state;
+        const { account } = this.props;
+
+        const title = loggingOut
+            ? tr("components.logout_modal.logging_out", "Logging out...")
+            : account
+                ? tr("components.logout_modal.title_account", "Log out @" + account + "?", { account })
+                : tr("components.logout_modal.title", "Do you really want to logout?");
 
         return (
             <Dialog
@@ -167,17 +202,27 @@ class LogoutModal extends React.PureComponent {
                 disableEscapeKeyDown={loggingOut}
             >
                 <DialogTitle id="alert-dialog-title">
-                    {loggingOut ? "Logging out..." : "Do you really want to logout?"}
+                    {title}
                 </DialogTitle>
                 <DialogContent>
                     <DialogContentText id="alert-dialog-description">
-                        {error ? (
-                            <span style={{ color: "#ffffff" }}>{error}</span>
-                        ) : loggingOut ? (
-                            "Please wait while we securely end your session..."
+                        {loggingOut ? (
+                            tr("components.logout_modal.please_wait", "Please wait while we securely end your session...")
                         ) : (
-                            "Your account will be forgotten on this device's web browser. Use private navigation or always logout to close the access to your account if you don't trust this device."
+                            <React.Fragment>
+                                {tr("components.logout_modal.forgotten_on_device",
+                                    "Your account will be forgotten on this device's web browser. Use private navigation or always logout to close the access to your account if you don't trust this device.")}
+                                {others > 0 ? (
+                                    // Its own line: no space to join sentences
+                                    // with (none after "。").
+                                    <span className={classes.others}>
+                                        {tr("components.logout_modal.others_stay_logged_in",
+                                            "Your other accounts stay logged in.", { count: others })}
+                                    </span>
+                                ) : null}
+                            </React.Fragment>
                         )}
+                        {error ? <span className={classes.error}>{error}</span> : null}
                     </DialogContentText>
                 </DialogContent>
                 <DialogActions>
@@ -199,9 +244,9 @@ class LogoutModal extends React.PureComponent {
                                 {t("components.logout_modal.logging_out")}
                             </span>
                         ) : error ? (
-                            "Retry"
+                            tr("components.logout_modal.retry", "Retry")
                         ) : (
-                            "Logout"
+                            tr("components.logout_modal.logout", "Logout")
                         )}
                     </Button>
                 </DialogActions>

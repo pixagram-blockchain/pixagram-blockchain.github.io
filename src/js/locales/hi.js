@@ -695,6 +695,11 @@ export default {
             "trade": "ट्रेड करें",
         },
         "login_dialog": {
+            "master_password_works_too": "आपका मास्टर पासवर्ड भी काम करता है।",
+            "master_password_derives_key": "मास्टर पासवर्ड — आपकी {{requiredKeyType}} की इसी से प्राप्त की जाएगी",
+            "master_password_lacks_key": "@{{name}} की {{requiredKeyType}} की ऑन-चेन बदल दी गई है: यह मास्टर पासवर्ड अब उसे नहीं देता। सीधे {{requiredKeyType}} की दर्ज करें।",
+            "add_account_button": "खाता जोड़ें",
+            "add_another_account": "एक और खाता जोड़ें — लॉग इन किए हुए खाते लॉग इन ही रहेंगे",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2048,6 +2053,8 @@ export default {
             "are_you_sure_you_want_to_delete": "क्या आप वाकई \"{{deleteConfirmDraftTitle}}\" हटाना चाहते हैं? यह क्रिया पूर्ववत नहीं की जा सकती।"
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "@{{username}} की {{t}} ऑन-चेन बदल दी गई है: यह मास्टर पासवर्ड अब उसे नहीं देता। सीधे वही की दर्ज करें।",
+            "attempts_remaining_before_logout": "इस डिवाइस पर @{{account}} के लॉग आउट होने से पहले %n {{{_plurals.attempt}}} शेष",
             "toggle_pin_visibility": "PIN दिखाएँ या छिपाएँ",
             "enter_your_pin_to_unlock_the_requested": "अनुरोधित की खोलने के लिए अपना PIN दर्ज करें।",
             "hint": "संकेत: {{vaultHint}}",
@@ -2179,6 +2186,15 @@ export default {
             "when_people_interact_with_your_content_youll": "जब लोग आपकी सामग्री से जुड़ेंगे, आप इसे यहाँ देखेंगे"
         },
         "menu_content": {
+            "add_account": "खाता जोड़ें",
+            "add_account_hint": "किसी दूसरे खाते से लॉग इन करें",
+            "switch_account": "खाता बदलें",
+            "session_tab_only": "केवल यह टैब",
+            "session_locked": "लॉक है",
+            "switch_failed": "@{{account}} पर स्विच नहीं हो सका",
+            "session_time_left_dh": "{{days}} दिन {{hours}} घंटे शेष",
+            "session_time_left_h": "{{hours}} घंटे शेष",
+            "session_time_left_soon": "1 घंटे से कम शेष",
             "notifications": "सूचनाएँ",
             "feed": "फ़ीड",
             "apps": "ऐप्स",
@@ -2269,6 +2285,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Simple Agreement for Future Token (SAFT) के साथ शुरुआत करने के लिए हमारी टीम से बैठक तय करें।"
         },
         "index": {
+            "switched_to_account": "@{{account}} पर स्विच किया गया",
+            "logged_out_switched": "@{{from}} से लॉग आउट किया गया — अब @{{to}} का उपयोग हो रहा है",
+            "session_expired_switched": "@{{from}} का सत्र समाप्त हो गया — अब @{{to}} का उपयोग हो रहा है",
+            "logged_out_elsewhere_switched": "@{{from}} को दूसरे टैब में लॉग आउट कर दिया गया — अब @{{to}} का उपयोग हो रहा है",
+            "pin_wipe_switched": "बहुत अधिक गलत पासवर्ड के बाद @{{from}} को लॉग आउट कर दिया गया — अब @{{to}} का उपयोग हो रहा है",
+            "session_expired": "@{{account}} के लिए आपका सत्र समाप्त हो गया — फिर से लॉग इन करें",
+            "logged_out_elsewhere": "@{{account}} को दूसरे टैब में लॉग आउट कर दिया गया",
             "users": "उपयोगकर्ता",
             "communities": "समुदाय",
             "exclusive_discount_for_a_limited_time_only": "सीमित समय के लिए विशेष छूट!",
@@ -3151,6 +3174,14 @@ export default {
             "stored_on_arweave": "Arweave पर संग्रहित"
         },
         "logout_modal": {
+            "title_account": "@{{account}} से लॉग आउट करें?",
+            "title": "क्या आप सच में लॉग आउट करना चाहते हैं?",
+            "please_wait": "कृपया प्रतीक्षा करें, हम आपका सत्र सुरक्षित रूप से समाप्त कर रहे हैं…",
+            "forgotten_on_device": "इस डिवाइस का वेब ब्राउज़र आपके खाते को भूल जाएगा। अगर आपको इस डिवाइस पर भरोसा नहीं है, तो प्राइवेट ब्राउज़िंग का उपयोग करें या अपने खाते की पहुँच बंद करने के लिए हमेशा लॉग आउट करें।",
+            "others_stay_logged_in": "आपके दूसरे खाते लॉग इन रहेंगे।",
+            "logout_failed": "लॉग आउट नहीं हो सका",
+            "retry": "फिर से कोशिश करें",
+            "logout": "लॉग आउट",
             "logging_out": "लॉग आउट हो रहा है…"
         },
         "members_list_dialog": {

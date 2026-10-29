@@ -695,6 +695,11 @@ export default {
             "trade": "交易",
         },
         "login_dialog": {
+            "master_password_works_too": "也可以使用你的主密码。",
+            "master_password_derives_key": "主密码 — 将从中派生你的 {{requiredKeyType}} 密钥",
+            "master_password_lacks_key": "@{{name}} 的 {{requiredKeyType}} 密钥已在链上更改，此主密码已无法得到它。请直接输入 {{requiredKeyType}} 密钥。",
+            "add_account_button": "添加账户",
+            "add_another_account": "添加另一个账户 — 已登录的账户会保持登录",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2048,6 +2053,8 @@ export default {
             "are_you_sure_you_want_to_delete": "确定要删除“{{deleteConfirmDraftTitle}}”吗？此操作无法撤销。"
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "@{{username}} 的 {{t}} 已在链上更改，此主密码已无法得到它。请直接输入该密钥。",
+            "attempts_remaining_before_logout": "还剩 %n {{{_plurals.attempt}}}，之后 @{{account}} 将在此设备上退出登录",
             "toggle_pin_visibility": "切换 PIN 显示",
             "enter_your_pin_to_unlock_the_requested": "请输入 PIN 以解锁所请求的密钥。",
             "hint": "提示：{{vaultHint}}",
@@ -2179,6 +2186,15 @@ export default {
             "when_people_interact_with_your_content_youll": "当有人与你的内容互动时，你会在这里看到"
         },
         "menu_content": {
+            "add_account": "添加账户",
+            "add_account_hint": "使用另一个账户登录",
+            "switch_account": "切换账户",
+            "session_tab_only": "仅限此标签页",
+            "session_locked": "已锁定",
+            "switch_failed": "无法切换到 @{{account}}",
+            "session_time_left_dh": "剩余 {{days}} 天 {{hours}} 小时",
+            "session_time_left_h": "剩余 {{hours}} 小时",
+            "session_time_left_soon": "剩余不到 1 小时",
             "notifications": "通知",
             "feed": "动态",
             "apps": "应用",
@@ -2269,6 +2285,13 @@ export default {
             "book_a_meeting_with_our_team_to": "预约与我们团队会面，以 Simple Agreement for Future Token（SAFT）开始合作。"
         },
         "index": {
+            "switched_to_account": "已切换到 @{{account}}",
+            "logged_out_switched": "已退出 @{{from}} — 当前使用 @{{to}}",
+            "session_expired_switched": "@{{from}} 的会话已过期 — 当前使用 @{{to}}",
+            "logged_out_elsewhere_switched": "@{{from}} 已在另一个标签页中退出登录 — 当前使用 @{{to}}",
+            "pin_wipe_switched": "密码错误次数过多，@{{from}} 已退出登录 — 当前使用 @{{to}}",
+            "session_expired": "@{{account}} 的会话已过期 — 请重新登录",
+            "logged_out_elsewhere": "@{{account}} 已在另一个标签页中退出登录",
             "users": "用户",
             "communities": "社区",
             "exclusive_discount_for_a_limited_time_only": "限时专属折扣！",
@@ -3151,6 +3174,14 @@ export default {
             "stored_on_arweave": "已存储于 Arweave"
         },
         "logout_modal": {
+            "title_account": "要退出 @{{account}} 吗？",
+            "title": "确定要退出登录吗？",
+            "please_wait": "正在安全地结束你的会话，请稍候…",
+            "forgotten_on_device": "此设备的浏览器将不再记住你的账户。如果你不信任此设备，请使用无痕浏览或每次都退出登录，以关闭对账户的访问。",
+            "others_stay_logged_in": "你的其他账户仍保持登录。",
+            "logout_failed": "退出登录失败",
+            "retry": "重试",
+            "logout": "退出登录",
             "logging_out": "正在退出登录…"
         },
         "members_list_dialog": {

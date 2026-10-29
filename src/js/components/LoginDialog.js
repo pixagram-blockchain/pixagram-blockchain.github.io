@@ -527,16 +527,38 @@ const KEY_TYPES = {
         color: "#c0c0c0",
     },
 };
+// The roles a master password derives a key for.
+const MASTER_ROLES = ['posting', 'active', 'owner', 'memo'];
+// An account name as the chain spells it (typed input gets the same treatment
+// in _onUsernameInputChange).
+const normalizeName = (name) => String(name || '').replace(/^@/, '').toLowerCase().trim();
 
-// Session timeout marks (in minutes) — 12h to 120h (5d) range
+// Session timeout marks (in minutes) — 3 days to 14 days. A login lasts at
+// least 3 days (SessionManager enforces the same floor: CONFIG.MIN_SESSION_TIMEOUT)
+// and 7 days by default; the window slides while the account is in use, under
+// the 30-day absolute cap.
+const SESSION_TIMEOUT_MIN = 3 * 24 * 60;
+const SESSION_TIMEOUT_DEFAULT = 7 * 24 * 60;
+const SESSION_TIMEOUT_MAX = 14 * 24 * 60;
 const SESSION_TIMEOUT_MARKS = [
-    { value: 12 * 60, label: '12h' },
-    { value: 24 * 60, label: '1d' },
-    { value: 48 * 60, label: '2d' },
-    { value: 72 * 60, label: '3d' },
-    { value: 96 * 60, label: '4d' },
-    { value: 120 * 60, label: '5d' },
+    { value: 3 * 24 * 60, label: '3d' },
+    { value: 5 * 24 * 60, label: '5d' },
+    { value: 7 * 24 * 60, label: '7d' },
+    { value: 10 * 24 * 60, label: '10d' },
+    { value: 14 * 24 * 60, label: '14d' },
 ];
+
+// Strings added after the locale files (components.login_dialog.add_another_account,
+// add_account_button, master_password_derives_key, master_password_lacks_key,
+// master_password_works_too), with an English fallback for a build whose
+// locale files predate them.
+const tr = (key, fallback, params) => {
+    let s = null;
+    try { s = t(key, params); } catch (e) { s = null; }
+    // utils/text.js renders a missing key as its last segment ("title_account").
+    const last = key.slice(key.lastIndexOf(".") + 1);
+    return typeof s === "string" && s && s !== key && s !== last ? s : fallback;
+};
 
 // PIN timeout marks (in minutes)
 const PIN_TIMEOUT_MARKS = [
@@ -802,7 +824,7 @@ const StepAuthenticate = memo(function StepAuthenticate({
                         k="components.login_dialog.this_action_specifically_requires_the_strong_str"
                         vars={{
                             requiredKeyType: KEY_TYPES[requiredKeyType]?.label ? t(KEY_TYPES[requiredKeyType].label) : requiredKeyType
-                        }} /></Typography>
+                        }} />{" "}{tr("components.login_dialog.master_password_works_too", "Your master password works too.")}</Typography>
                 )}
             </div>
         </DialogContent>
@@ -1114,7 +1136,7 @@ const StepSecurity = memo(function StepSecurity({
                                 </Typography>
                             </div>
                             <Slider value={sessionTimeout} onChange={onSessionTimeoutChange}
-                                    min={720} max={7200} marks={SESSION_TIMEOUT_MARKS} step={null}
+                                    min={SESSION_TIMEOUT_MIN} max={SESSION_TIMEOUT_MAX} marks={SESSION_TIMEOUT_MARKS} step={null}
                                     valueLabelDisplay="auto" valueLabelFormat={(v) => v < 1440 ? `${Math.floor(v / 60)}h` : `${Math.floor(v / 1440)}d`} />
                         </div>
                     </div>
@@ -1321,8 +1343,10 @@ class LoginDialog extends React.PureComponent {
             _autocomplete_open: false,
 
             // Step 1: Authentication
-            _username: props.defaultUsername || "",
-            _pending_username_validation: false,
+            // A pre-filled name (a caller asking for a key of the account
+            // logged in) is checked from the start: pending, not "not found".
+            _username: normalizeName(props.defaultUsername),
+            _pending_username_validation: !!normalizeName(props.defaultUsername),
             _username_exists: false,
             _username_message: "",
             // _selected_key_type is now AUTO-DETECTED from the entered key.
@@ -1350,7 +1374,8 @@ class LoginDialog extends React.PureComponent {
             _pin_hint: "",
             _encryption_profile: null,
             _persist_session: true,   // true by default — persistent LacertaDB session
-            _session_timeout: props.defaultSessionTimeout || 48 * 60, // minutes (default 48h)
+            // minutes; default 7 days, never under 3 (the slider's range)
+            _session_timeout: Math.max(props.defaultSessionTimeout || SESSION_TIMEOUT_DEFAULT, SESSION_TIMEOUT_MIN),
             _pin_timeout: props.defaultPinTimeout || 60, // minutes
             _additional_keys: {
                 posting: "",
@@ -1392,8 +1417,8 @@ class LoginDialog extends React.PureComponent {
         }
 
         // If default username provided, validate it
-        if (this.props.defaultUsername) {
-            this._validateUsername(this.props.defaultUsername);
+        if (this.state._username) {
+            this._validateUsername(this.state._username);
         }
 
         // Fetch encryption profile from vault config
@@ -1451,10 +1476,11 @@ class LoginDialog extends React.PureComponent {
         }
 
         if (newProps.defaultUsername !== this.props.defaultUsername) {
-            this.setState({ _username: newProps.defaultUsername || "" }, () => {
-                if (newProps.defaultUsername) {
-                    this._validateUsername(newProps.defaultUsername);
-                    this._resolveUsername(newProps.defaultUsername);
+            const name = normalizeName(newProps.defaultUsername);
+            this.setState({ _username: name, _pending_username_validation: !!name }, () => {
+                if (name) {
+                    this._validateUsername(name);
+                    this._resolveUsername(name);
                 }
             });
         }
@@ -1545,7 +1571,16 @@ class LoginDialog extends React.PureComponent {
      * Called on every keystroke in the username Autocomplete.
      * Debounces 280ms, then searches via lookupAccounts + getAccounts.
      */
-    _onUsernameInputChange = (event, newInputValue) => {
+    _onUsernameInputChange = (event, newInputValue, reason) => {
+        // The Autocomplete resets its input to its selected option's label
+        // whenever that `value` changes — on mount too, where there is none.
+        // That "reset" to "" wiped a defaultUsername (a caller asking for a
+        // key of the account logged in) while the account check for it was
+        // on its way, and the check then marked the account found with the
+        // name gone: the key was accepted and the login failed on an empty
+        // account. Typing, a selection (onChange) and the clear button come
+        // with their own reasons.
+        if (reason === 'reset' && !newInputValue && this.state._username) return;
         const input = (newInputValue || '').toLowerCase().replace(/^@/, '').trim();
 
         // Browser autofill provides plain `username` + master password.
@@ -1856,6 +1891,9 @@ class LoginDialog extends React.PureComponent {
                 }
             }
 
+            // The name may have changed while this check was on its way:
+            // its answer is about another account.
+            if (username !== this.state._username) return;
             this.setState({
                 _pending_username_validation: false,
                 _username_exists: exists,
@@ -1872,6 +1910,7 @@ class LoginDialog extends React.PureComponent {
             });
         } catch (error) {
             console.error("Username validation error:", error);
+            if (username !== this.state._username) return;
             this.setState({
                 _pending_username_validation: false,
                 _username_exists: false,
@@ -1935,7 +1974,9 @@ class LoginDialog extends React.PureComponent {
      *      here we just accept the format and label it "master".
      *
      * `requiredKeyType` (when set by the caller) restricts what counts as
-     * valid: anything not matching that role or 'master' is rejected.
+     * valid: that role's key, or a master password that gives it (checked
+     * here; _executeLogin then derives that key and logs in with it). Any
+     * other role's key is rejected.
      *
      * Side effects: sets `_selected_key_type`, `_primary_key_valid`,
      * `_key_detection_message`, and clears `_additional_keys` if the role
@@ -1996,7 +2037,13 @@ class LoginDialog extends React.PureComponent {
                 return;
             }
 
-            const detected = this._matchPublicKeyToRole(publicKey, _account_data);
+            // The role the caller needs is tried first: a key that is the
+            // account's key for several roles (one key for all of them) is
+            // that role's key, not "a memo key".
+            const detected = requiredKeyType && requiredKeyType !== 'master'
+            && this._roleHasPublicKey(_account_data, requiredKeyType, publicKey)
+                ? requiredKeyType
+                : this._matchPublicKeyToRole(publicKey, _account_data);
 
             if (!detected) {
                 // The WIF's own public key is not one of the account's
@@ -2004,63 +2051,8 @@ class LoginDialog extends React.PureComponent {
                 // key: pixa_bip39 master keys are themselves valid WIFs, and
                 // a master's own pubkey is never on-chain — only its derived
                 // children are. So before rejecting, test the key AS a
-                // master password: derive the role keys from it and match
-                // those public keys against the account.
-                const derivedPubkeys = this._deriveRolePublicKeysFromMaster(
-                    _account_data.name, key, auth
-                );
-
-                const acceptAsMaster = (message) => {
-                    if (requiredKeyType && requiredKeyType !== 'master') {
-                        // Caller demands a specific role WIF; a master
-                        // password won't do here (mirrors Path B).
-                        this.setState({
-                            _pending_key_validation: false,
-                            _primary_key_valid: false,
-                            _key_detection_message: t("components.login_dialog.the_action_requires_the_key_wif_not", {
-                                requiredKeyType: requiredKeyType
-                            }),
-                        });
-                        return;
-                    }
-                    const masterRoleChanged = this.state._selected_key_type !== 'master';
-                    this.setState({
-                        _selected_key_type: 'master',
-                        _pending_key_validation: false,
-                        _primary_key_valid: true,
-                        _key_detection_message: message,
-                        ...(masterRoleChanged ? {
-                            _additional_keys: { posting: "", active: "", owner: "", memo: "" },
-                        } : {}),
-                    });
-                };
-
-                if (Array.isArray(derivedPubkeys)) {
-                    // Exact check possible: the key is the master iff any
-                    // derived pubkey is one of the account's authorities.
-                    const masterMatches = derivedPubkeys.some(
-                        (pk) => this._matchPublicKeyToRole(pk, _account_data) !== null
-                    );
-                    if (masterMatches) {
-                        acceptAsMaster("Master password — will derive all keys");
-                    } else {
-                        this.setState({
-                            _pending_key_validation: false,
-                            _primary_key_valid: false,
-                            _key_detection_message: t("components.login_dialog.key_doesnt_match_any_of_s_authorities", {
-                                name: _account_data.name
-                            }),
-                        });
-                    }
-                } else {
-                    // The auth module exposes no client-side master
-                    // derivation, so a wrong role WIF and a WIF-shaped
-                    // master are indistinguishable here. Accept
-                    // provisionally as master (same spirit as the
-                    // !_account_data provisional path above) —
-                    // validateCredentials at confirm is authoritative.
-                    acceptAsMaster("Master password format — verified at login");
-                }
+                // master password.
+                this._detectMasterPassword(key, _account_data, auth, true);
                 return;
             }
 
@@ -2094,19 +2086,13 @@ class LoginDialog extends React.PureComponent {
             return;
         }
 
-        // ── Path B: master password — format-only check here ──────────────
-        // Final correctness is verified by validateCredentials at confirm.
+        // ── Path B: master password ───────────────────────────────────────
+        // When the caller needs a role key, check now that the master
+        // password gives it (one derivation per role, on the debounced
+        // detection). Otherwise format only: validateCredentials settles it
+        // at confirm.
         if (requiredKeyType && requiredKeyType !== 'master') {
-            // Caller demands a specific WIF; master won't do unless it
-            // happens to derive a matching key, which we can't check
-            // cheaply on every keystroke. Tell the user.
-            this.setState({
-                _pending_key_validation: false,
-                _primary_key_valid: false,
-                _key_detection_message: t("components.login_dialog.the_action_requires_the_key_wif_not", {
-                    requiredKeyType: requiredKeyType
-                }),
-            });
+            this._detectMasterPassword(key, _account_data, auth, false);
             return;
         }
 
@@ -2123,44 +2109,124 @@ class LoginDialog extends React.PureComponent {
     };
 
     /**
-     * Derive the public keys of all four roles from a candidate master
-     * password, using whatever derivation surface the dpixa auth module
-     * exposes. This MUST be the same derivation the actual login path
-     * (quickLogin / validateCredentials) uses, so detection and login
-     * can never disagree.
+     * The input is not one of the account's role keys: is it the master
+     * password? Derive each role's key from it and look for that key in the
+     * same role's authority on the account (`wifShaped`: Path A — pixa_bip39
+     * master keys are valid WIFs; otherwise Path B).
      *
-     * Returns an array of public-key strings, or null when the auth
-     * module offers no client-side derivation (callers then fall back
-     * to provisional acceptance — validateCredentials is authoritative).
+     * With `requiredKeyType` set to a role (the caller needs that key — the
+     * active key to create an account, say), a master password is accepted
+     * when the key it gives for that role is the account's: _executeLogin
+     * derives that key and logs in with it, as if it had been pasted. A
+     * master password that still gives the account's other keys but not
+     * that one (it was changed on chain) is refused with that reason.
+     *
+     * Without the account (still resolving — detection runs again once it
+     * is in) the input is accepted provisionally; validateCredentials
+     * settles it at login. Without a client-side derivation a required role
+     * key can't be derived at all, so the old refusal stands.
+     */
+    _detectMasterPassword = (key, accountData, auth, wifShaped) => {
+        const { requiredKeyType } = this.props;
+        const roleRequired = !!requiredKeyType && requiredKeyType !== 'master';
+        const roleLabel = roleRequired && KEY_TYPES[requiredKeyType]?.label
+            ? t(KEY_TYPES[requiredKeyType].label) : requiredKeyType;
+        const refuse = (message) => this.setState({
+            _pending_key_validation: false,
+            _primary_key_valid: false,
+            _key_detection_message: message,
+        });
+        const accept = (message) => {
+            const roleChanged = this.state._selected_key_type !== 'master';
+            this.setState({
+                _selected_key_type: 'master',
+                _pending_key_validation: false,
+                _primary_key_valid: true,
+                _key_detection_message: message,
+                ...(roleChanged ? {
+                    _additional_keys: { posting: "", active: "", owner: "", memo: "" },
+                } : {}),
+            });
+        };
+        const derivesRequired = () => tr("components.login_dialog.master_password_derives_key",
+            `Master password — your ${roleLabel} key will be derived from it`, { requiredKeyType: roleLabel });
+
+        if (!accountData) {
+            // Path B before the account is in: checked once it is.
+            accept(roleRequired ? "Key format OK — waiting for account…" : "Master password — will derive all keys");
+            return;
+        }
+        const derived = this._deriveRolePublicKeysFromMaster(accountData.name, key, auth);
+        if (!derived) {
+            if (roleRequired) {
+                refuse(t("components.login_dialog.the_action_requires_the_key_wif_not", { requiredKeyType }));
+                return;
+            }
+            // A wrong role WIF and a WIF-shaped master are indistinguishable
+            // here: accept provisionally, validateCredentials decides.
+            accept(wifShaped ? "Master password format — verified at login" : "Master password — will derive all keys");
+            return;
+        }
+        const matched = MASTER_ROLES.filter((role) => this._roleHasPublicKey(accountData, role, derived[role]));
+        if (matched.length === 0) {
+            refuse(t("components.login_dialog.key_doesnt_match_any_of_s_authorities", { name: accountData.name }));
+            return;
+        }
+        if (roleRequired && !matched.includes(requiredKeyType)) {
+            refuse(tr("components.login_dialog.master_password_lacks_key",
+                `@${accountData.name}'s ${roleLabel} key was changed on-chain: this master password no longer gives it. Enter the ${roleLabel} key itself.`,
+                { name: accountData.name, requiredKeyType: roleLabel }));
+            return;
+        }
+        accept(roleRequired ? derivesRequired() : "Master password — will derive all keys");
+    };
+
+    /**
+     * Derive the public key of each role from a candidate master password,
+     * using whatever derivation surface the dpixa auth module exposes. This
+     * MUST be the same derivation the actual login path (quickLogin /
+     * validateCredentials) uses, so detection and login can never disagree.
+     *
+     * Returns { posting, active, owner, memo } (public-key strings; a role
+     * that could not be derived is left out), or null when the auth module
+     * offers no client-side derivation.
      */
     _deriveRolePublicKeysFromMaster = (name, masterKey, auth) => {
         if (!name || !masterKey || !auth) return null;
-        const roles = ['posting', 'active', 'owner', 'memo'];
+        const out = {};
         try {
             // hive-js style: one call returns { posting: wif, postingPubkey, … }
             if (typeof auth.getPrivateKeys === 'function') {
-                const keys = auth.getPrivateKeys(name, masterKey, roles);
+                const keys = auth.getPrivateKeys(name, masterKey, MASTER_ROLES);
                 if (keys) {
-                    const pubkeys = roles.map((role) => {
-                        if (keys[`${role}Pubkey`]) return keys[`${role}Pubkey`];
-                        if (keys[role] && typeof auth.wifToPublic === 'function') {
-                            try { return auth.wifToPublic(keys[role]); } catch (_) { return null; }
+                    for (const role of MASTER_ROLES) {
+                        let pub = keys[`${role}Pubkey`] || null;
+                        if (!pub && keys[role] && typeof auth.wifToPublic === 'function') {
+                            try { pub = auth.wifToPublic(keys[role]); } catch (_) { pub = null; }
                         }
-                        return null;
-                    }).filter(Boolean);
-                    if (pubkeys.length > 0) return pubkeys;
+                        if (pub) out[role] = pub;
+                    }
+                    if (Object.keys(out).length > 0) return out;
                 }
             }
             // Per-role derivation: auth.toWif(name, password, role)
             if (typeof auth.toWif === 'function' && typeof auth.wifToPublic === 'function') {
-                const pubkeys = roles.map((role) => {
-                    try { return auth.wifToPublic(auth.toWif(name, masterKey, role)); }
-                    catch (_) { return null; }
-                }).filter(Boolean);
-                if (pubkeys.length > 0) return pubkeys;
+                for (const role of MASTER_ROLES) {
+                    try { out[role] = auth.wifToPublic(auth.toWif(name, masterKey, role)); }
+                    catch (_) { /* this role could not be derived */ }
+                }
+                if (Object.keys(out).length > 0) return out;
             }
         } catch (_) { /* fall through to null */ }
         return null;
+    };
+
+    /** Is `publicKey` in `role`'s authority on the account (memo: the memo key)? */
+    _roleHasPublicKey = (accountData, role, publicKey) => {
+        if (!accountData || !publicKey) return false;
+        if (role === 'memo') return publicKey === accountData.memo_key;
+        const auths = accountData[role]?.key_auths;
+        return Array.isArray(auths) && auths.some(([pk]) => pk === publicKey);
     };
 
     /**
@@ -2229,7 +2295,9 @@ class LoginDialog extends React.PureComponent {
             case 'pending': return 'LOGGING IN...';
             case 'success': return 'DONE';
             case 'error': return 'RETRY';
-            default: return 'LOG IN';
+            default: return this.props.addingAccount
+                ? tr("components.login_dialog.add_account_button", "ADD ACCOUNT")
+                : 'LOG IN';
         }
     };
 
@@ -2476,7 +2544,7 @@ class LoginDialog extends React.PureComponent {
 // FIXED: Login Execution - Ensures Events are ALWAYS Emitted
 
     _executeLogin = async () => {
-        const { api, onLogin, onClose } = this.props;
+        const { api, onLogin, onClose, requiredKeyType } = this.props;
         const {
             _username,
             _selected_key_type,
@@ -2539,28 +2607,59 @@ class LoginDialog extends React.PureComponent {
                 console.timeEnd('initializeVault');
 
                 // FIX (v4.1): Persist PIN hint so UnlockKeyDialog can display it
+                // Multi-account: each account has its own password, so the hint
+                // is stored per account (`vault_hint:<account>`, which
+                // UnlockKeyDialog reads). The single `vault_hint` record (last
+                // login wins) is still written for older readers; it names its
+                // account, and UnlockKeyDialog only falls back to it for that
+                // account. Logging out deletes both (pixaproxyapi _forgetPinHints).
                 if (this.state._pin_hint && api.settingsDb) {
                     try {
                         let hintCol;
                         try { await api.settingsDb.createCollection('pq_vault_config'); } catch (_) {}
                         hintCol = await api.settingsDb.getCollection('pq_vault_config');
-                        const hintRecord = { hint: this.state._pin_hint, updated_at: Date.now() };
-                        try {
-                            await hintCol.add(hintRecord, { id: 'vault_hint' });
-                        } catch (_) {
-                            await hintCol.update('vault_hint', hintRecord);
-                        }
+                        const account = String(_username || '').replace(/^@/, '').toLowerCase().trim();
+                        const hintRecord = { hint: this.state._pin_hint, account, updated_at: Date.now() };
+                        const save = async (id) => {
+                            if (typeof hintCol.upsert === 'function') { await hintCol.upsert(id, hintRecord); return; }
+                            try { await hintCol.add(hintRecord, { id }); }
+                            catch (_) { await hintCol.update(id, hintRecord); }
+                        };
+                        await save('vault_hint');
+                        if (account) await save('vault_hint:' + account);
                     } catch (e) {
                         console.warn('[LoginDialog] Failed to save PIN hint:', e);
                     }
                 }
             }
 
+            // A master password typed where the caller needs a role key
+            // (requiredKeyType; _detectMasterPassword checked that it gives
+            // that key): derive the key and log in with it, exactly as if it
+            // had been pasted. From here on the login only sees the derived
+            // key; `_primary_key` stays what the person typed.
+            let loginKey = _primary_key;
+            let loginKeyType = _selected_key_type;
+            const derivedFromMaster = !!requiredKeyType && requiredKeyType !== 'master' && _selected_key_type === 'master';
+            if (derivedFromMaster) {
+                const auth = this._getAuth();
+                const name = normalizeName(_username);
+                let wif = null;
+                try {
+                    wif = auth && typeof auth.toWif === 'function' ? auth.toWif(name, _primary_key, requiredKeyType) : null;
+                } catch (_) { wif = null; }
+                if (!wif) {
+                    throw new Error(t("components.login_dialog.the_action_requires_the_key_wif_not", { requiredKeyType }));
+                }
+                loginKey = wif;
+                loginKeyType = requiredKeyType;
+            }
+
             this.setState({ _login_progress: 'Validating credentials...' });
             console.time('validateCredentials');
 
             // Validate credentials first
-            const validation = await api.validateCredentials(_username, _primary_key, _selected_key_type);
+            const validation = await api.validateCredentials(_username, loginKey, loginKeyType);
             console.timeEnd('validateCredentials');
 
             if (!validation.valid) {
@@ -2583,8 +2682,8 @@ class LoginDialog extends React.PureComponent {
                 // SessionManager handles device-wrapping + PIN sealing internally.
                 let sessionKeys = {};
 
-                if (_selected_key_type === 'master') {
-                    const derivedKeys = await api.keyManager.addAccountWithMasterKey(_username, _primary_key, {
+                if (loginKeyType === 'master') {
+                    const derivedKeys = await api.keyManager.addAccountWithMasterKey(_username, loginKey, {
                         storeInVault: false,
                         matchedTypes: validation.matchedTypes,
                     });
@@ -2599,10 +2698,30 @@ class LoginDialog extends React.PureComponent {
                         );
                     }
                 } else {
-                    await api.keyManager.addIndividualKey(_username, _selected_key_type, _primary_key, {
+                    // The keys this account's session already holds stay in
+                    // the new one, as in quickLogin (path 2): logging in again
+                    // with one role key — a caller asking for the active key,
+                    // say — replaced the session's keys with that one. Only
+                    // the stored session's keys (SessionManager, while this
+                    // account is the active one): a key added to this tab's
+                    // memory alone (UnlockKeyDialog) is not sealed into the
+                    // new session. The key just given replaces its role's.
+                    const sm = api.sessionManager;
+                    if (sm && sm.currentAccount === normalizeName(_username) && sm.hasKeysInMemory) {
+                        for (const type of MASTER_ROLES) {
+                            if (type === loginKeyType) continue;
+                            let bytes = null;
+                            try {
+                                bytes = sm.getKey(type);
+                                sessionKeys[type] = new TextDecoder().decode(bytes);
+                            } catch (_) { /* not in the session */ }
+                            finally { if (bytes) bytes.fill(0); }
+                        }
+                    }
+                    await api.keyManager.addIndividualKey(_username, loginKeyType, loginKey, {
                         storeInVault: false,
                     });
-                    sessionKeys[_selected_key_type] = _primary_key;
+                    sessionKeys[loginKeyType] = loginKey;
 
                     // Add additional keys if provided
                     const auth = this._getAuth();
@@ -2638,7 +2757,7 @@ class LoginDialog extends React.PureComponent {
                             pin:            _pin,
                             timeout_ms:     _session_timeout * 60 * 1000,
                             pin_timeout_ms: _pin_timeout * 60 * 1000,
-                            login_type:     _selected_key_type,
+                            login_type:     loginKeyType,
                             user_agent:     navigator.userAgent || 'unknown',
                         });
                         eventEmitted = true;
@@ -2658,7 +2777,7 @@ class LoginDialog extends React.PureComponent {
                 console.time('quickLogin');
 
                 // Use quickLogin but DON'T skip session creation
-                const loginResult = await api.quickLogin(_username, _primary_key, _selected_key_type, {
+                const loginResult = await api.quickLogin(_username, loginKey, loginKeyType, {
                     skipValidation: true,
                     validation: validation,
                     skipSession: false,
@@ -2678,7 +2797,7 @@ class LoginDialog extends React.PureComponent {
                 // _decryptFromCache() (Bug B) and never updated the session
                 // record's plaintext_keys, so additional keys were lost on
                 // tab reload (Bug C).
-                if (_selected_key_type !== 'master') {
+                if (loginKeyType !== 'master') {
                     const auth = this._getAuth();
                     const additionalKeysAdded = {};
                     for (const [keyType, keyValue] of Object.entries(_additional_keys)) {
@@ -2704,9 +2823,10 @@ class LoginDialog extends React.PureComponent {
                     // wraps keys with device-bound CryptoKey (persist mode) or
                     // seals with Argon2id+ChaCha20 (PIN mode).
                     if (Object.keys(additionalKeysAdded).length > 0 && _effective_persist && api.sessionManager) {
+                        let currentKeys = null;
                         try {
                             const sm = api.sessionManager;
-                            const currentKeys = sm.exportKeysForSealing() || {};
+                            currentKeys = sm.exportKeysForSealing() || {};
                             const mergedKeys = { ...currentKeys, ...additionalKeysAdded };
                             sm.importKeys(mergedKeys);
 
@@ -2724,6 +2844,15 @@ class LoginDialog extends React.PureComponent {
                             console.warn('[LoginDialog] Failed to persist additional keys to session:', e);
                             // Keys are still in memory via importKeys() — they'll work
                             // for this tab session, just won't survive a reload
+                        } finally {
+                            // exportKeysForSealing() hands out byte CLONES that
+                            // importKeys()/createSession() copy again; these were
+                            // never zeroed.
+                            if (currentKeys) {
+                                for (const v of Object.values(currentKeys)) {
+                                    if (v instanceof Uint8Array) v.fill(0);
+                                }
+                            }
                         }
                     }
                 }
@@ -2752,7 +2881,10 @@ class LoginDialog extends React.PureComponent {
             if (onLogin) {
                 onLogin({
                     username: _username,
-                    keyType: _selected_key_type,
+                    keyType: loginKeyType,
+                    // The key above was derived from the master password typed
+                    // (a caller that needed a role key — requiredKeyType).
+                    derivedFromMaster,
                     enabledPIN: _enable_pin,
                     persistSession: _effective_persist,
                     sessionTimeout: _session_timeout,
@@ -2765,7 +2897,7 @@ class LoginDialog extends React.PureComponent {
             }
 
             // Warn user about mismatched keys (master password doesn't derive all on-chain keys)
-            if (_selected_key_type === 'master' && validation.mismatchedTypes && validation.mismatchedTypes.length > 0) {
+            if (loginKeyType === 'master' && validation.mismatchedTypes && validation.mismatchedTypes.length > 0) {
                 const missing = validation.mismatchedTypes.join(', ');
                 if (actions && typeof actions.trigger_snackbar === 'function') {
                     actions.trigger_snackbar(
@@ -2921,7 +3053,9 @@ class LoginDialog extends React.PureComponent {
                         </Typography>
                         <Collapse in={!compactHeader}>
                             <Typography className={classes.headerTagline}>
-                                {t("components.login_dialog.inherit_eternity_shape_infinity")}
+                                {this.props.addingAccount
+                                    ? tr("components.login_dialog.add_another_account", "Add another account — the ones logged in stay logged in")
+                                    : t("components.login_dialog.inherit_eternity_shape_infinity")}
                             </Typography>
                         </Collapse>
                     </div>
@@ -3176,8 +3310,11 @@ class LoginDialog extends React.PureComponent {
  * @param {string} requiredKeyType - Force specific key type ('posting'|'active'|'owner'|'memo')
  * @param {string} requiredKeyHint - Hint text when specific key is required
  * @param {string} defaultUsername - Pre-filled username
- * @param {number} defaultSessionTimeout - Default session timeout in minutes (default: 30)
- * @param {number} defaultPinTimeout - Default PIN timeout in minutes (default: 5)
+ * @param {number} defaultSessionTimeout - Default session timeout in minutes (default: 7 days; never under 3 days)
+ * @param {number} defaultPinTimeout - Default PIN timeout in minutes (default: 60)
+ * @param {boolean} addingAccount - Opened from the Accounts menu to log in ANOTHER
+ *        account: the accounts already logged in stay logged in (session-manager v7
+ *        parks the active one), so the header and the button say so.
  */
 LoginDialog.defaultProps = {
     open: false,
@@ -3188,8 +3325,9 @@ LoginDialog.defaultProps = {
     requiredKeyType: null,
     requiredKeyHint: null,
     defaultUsername: "",
-    defaultSessionTimeout: 60 * 48,   // 48 hours (in minutes)
+    defaultSessionTimeout: SESSION_TIMEOUT_DEFAULT,   // 7 days (in minutes)
     defaultPinTimeout: 60,             // 60 minutes
+    addingAccount: false,
 };
 
 export default withLanguage(withStyles(styles)(LoginDialog));

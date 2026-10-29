@@ -695,6 +695,11 @@ export default {
             "trade": "取引",
         },
         "login_dialog": {
+            "master_password_works_too": "マスターパスワードでも使えます。",
+            "master_password_derives_key": "マスターパスワード — ここから {{requiredKeyType}} 鍵を導出します",
+            "master_password_lacks_key": "@{{name}} の {{requiredKeyType}} 鍵はオンチェーンで変更されているため、このマスターパスワードからは得られません。{{requiredKeyType}} 鍵そのものを入力してください。",
+            "add_account_button": "アカウントを追加",
+            "add_another_account": "別のアカウントを追加 — ログイン中のアカウントはログインしたままです",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2048,6 +2053,8 @@ export default {
             "are_you_sure_you_want_to_delete": "「{{deleteConfirmDraftTitle}}」を削除しますか？この操作は取り消せません。"
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "@{{username}} の {{t}} はオンチェーンで変更されているため、このマスターパスワードからは得られません。{{t}} そのものを入力してください。",
+            "attempts_remaining_before_logout": "このデバイスで @{{account}} がログアウトされるまで残り %n {{{_plurals.attempt}}}",
             "toggle_pin_visibility": "PINの表示を切り替え",
             "enter_your_pin_to_unlock_the_requested": "要求された鍵を解除するには PIN を入力してください。",
             "hint": "ヒント：{{vaultHint}}",
@@ -2179,6 +2186,15 @@ export default {
             "when_people_interact_with_your_content_youll": "あなたの投稿に反応があると、ここに表示されます"
         },
         "menu_content": {
+            "add_account": "アカウントを追加",
+            "add_account_hint": "別のアカウントでログイン",
+            "switch_account": "アカウントを切り替え",
+            "session_tab_only": "このタブのみ",
+            "session_locked": "ロック中",
+            "switch_failed": "@{{account}} に切り替えられませんでした",
+            "session_time_left_dh": "残り {{days}}日 {{hours}}時間",
+            "session_time_left_h": "残り {{hours}}時間",
+            "session_time_left_soon": "残り1時間未満",
             "notifications": "通知",
             "feed": "フィード",
             "apps": "アプリ",
@@ -2269,6 +2285,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Simple Agreement for Future Token（SAFT）で始めるには、当チームとの面談をご予約ください。"
         },
         "index": {
+            "switched_to_account": "@{{account}} に切り替えました",
+            "logged_out_switched": "@{{from}} からログアウトしました — 現在は @{{to}} を使用中",
+            "session_expired_switched": "@{{from}} のセッションの有効期限が切れました — 現在は @{{to}} を使用中",
+            "logged_out_elsewhere_switched": "@{{from}} は別のタブでログアウトされました — 現在は @{{to}} を使用中",
+            "pin_wipe_switched": "パスワードの誤入力が多すぎたため @{{from}} はログアウトされました — 現在は @{{to}} を使用中",
+            "session_expired": "@{{account}} のセッションの有効期限が切れました — もう一度ログインしてください",
+            "logged_out_elsewhere": "@{{account}} は別のタブでログアウトされました",
             "users": "ユーザー",
             "communities": "コミュニティ",
             "exclusive_discount_for_a_limited_time_only": "期間限定の特別割引。",
@@ -3151,6 +3174,14 @@ export default {
             "stored_on_arweave": "Arweave に保存済み"
         },
         "logout_modal": {
+            "title_account": "@{{account}} からログアウトしますか？",
+            "title": "本当にログアウトしますか？",
+            "please_wait": "セッションを安全に終了しています。しばらくお待ちください…",
+            "forgotten_on_device": "このデバイスのブラウザはあなたのアカウントを記憶しなくなります。このデバイスを信頼できない場合は、プライベートブラウズを使うか、必ずログアウトしてアカウントへのアクセスを閉じてください。",
+            "others_stay_logged_in": "ほかのアカウントはログインしたままです。",
+            "logout_failed": "ログアウトできませんでした",
+            "retry": "再試行",
+            "logout": "ログアウト",
             "logging_out": "ログアウトしています…"
         },
         "members_list_dialog": {

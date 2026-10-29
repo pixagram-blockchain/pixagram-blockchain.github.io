@@ -1708,6 +1708,13 @@ export default {
             "your_picture_must_be_pixel_art_under": "Your picture must be pixel art under {{maxKb}} kB for on-chain storage, so it needs a conversion.<br>The AI style transfer is free and anonymous, and only takes around 20 seconds. Pick a style:"
         },
         "index": {
+            "switched_to_account": "Switched to @{{account}}",
+            "logged_out_switched": "Logged out of @{{from}} — now using @{{to}}",
+            "session_expired_switched": "@{{from}}'s session expired — now using @{{to}}",
+            "logged_out_elsewhere_switched": "@{{from}} was logged out in another tab — now using @{{to}}",
+            "pin_wipe_switched": "@{{from}} was logged out after too many wrong passwords — now using @{{to}}",
+            "session_expired": "Your session for @{{account}} expired — log in again",
+            "logged_out_elsewhere": "@{{account}} was logged out in another tab",
             "omnibus_carpe_diem_aeternum_crea": "Omnibus Carpe Diem Aeternum Crea",
             "users": "Users",
             "communities": "Communities",
@@ -1818,6 +1825,11 @@ export default {
             "download_as_pdf": "Download as PDF"
         },
         "login_dialog": {
+            "master_password_works_too": "Your master password works too.",
+            "master_password_derives_key": "Master password — your {{requiredKeyType}} key will be derived from it",
+            "master_password_lacks_key": "@{{name}}'s {{requiredKeyType}} key was changed on-chain: this master password no longer gives it. Enter the {{requiredKeyType}} key itself.",
+            "add_account_button": "ADD ACCOUNT",
+            "add_another_account": "Add another account — the ones logged in stay logged in",
             "resource_credits_used_for_blockchain_operations": "Resource Credits - used for blockchain operations",
             "account_not_found": "Account not found",
             "master_password_or_private_key": "Master password or private key",
@@ -1902,6 +1914,14 @@ export default {
             "enter_your_memo_private_key_wif": "Enter your memo private key (WIF)"
         },
         "logout_modal": {
+            "title_account": "Log out @{{account}}?",
+            "title": "Do you really want to logout?",
+            "please_wait": "Please wait while we securely end your session...",
+            "forgotten_on_device": "Your account will be forgotten on this device's web browser. Use private navigation or always logout to close the access to your account if you don't trust this device.",
+            "others_stay_logged_in": "Your other accounts stay logged in.",
+            "logout_failed": "Logout failed",
+            "retry": "Retry",
+            "logout": "Logout",
 
             "logging_out": "Logging out..."
         },
@@ -1913,6 +1933,15 @@ export default {
             "add_someone": "Add someone"
         },
         "menu_content": {
+            "add_account": "Add account",
+            "add_account_hint": "Log in with another account",
+            "switch_account": "Switch account",
+            "session_tab_only": "This tab only",
+            "session_locked": "Locked",
+            "switch_failed": "Couldn't switch to @{{account}}",
+            "session_time_left_dh": "{{days}}d {{hours}}h left",
+            "session_time_left_h": "{{hours}}h left",
+            "session_time_left_soon": "Less than 1h left",
             "notifications": "Notifications",
             "feed": "Feed",
             "apps": "Apps",
@@ -3501,6 +3530,8 @@ export default {
             "rated_likely_to_read_as_toxic_by": "Rated {{percent}}% likely to read as toxic by the on-device Toxic Comment Helper — nothing was sent to a server. You can still post it as-is, or turn the helper off in Settings."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "@{{username}}'s {{t}} was changed on-chain: this master password no longer gives it. Enter the {{t}} itself.",
+            "attempts_remaining_before_logout": "%n {{{_plurals.attempt}}} left before @{{account}} is logged out on this device",
             "toggle_pin_visibility": "toggle PIN visibility",
             "enter_your_pin_to_unlock_the_requested": "Enter your PIN to unlock the requested key.",
             "hint": "Hint: {{vaultHint}}",

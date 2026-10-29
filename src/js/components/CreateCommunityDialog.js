@@ -36,12 +36,12 @@ import Box from "@material-ui/core/Box";
 import AccountCheck from "../icons/AccountCheck";
 import AccountAlert from "../icons/AccountAlert";
 import AccountQuestion from "../icons/AccountQuestion";
-import { generateMnemonic, generateMasterKey, generatePDF } from "../utils/BackUpWallet2";
+import { generateMnemonic, generateMasterKey, generatePDF, backupPdfOptions } from "../utils/BackUpWallet3";
 import * as actions from "../actions/utils";
 import { HISTORY } from "../utils/constants";
 import { CONTENT_LANGUAGES, LANGUAGE_NAME } from "../utils/locale-status";
 
-import { t, getLanguage } from "../utils/text";
+import { t, getLanguage, getLocaleCode } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
 
@@ -531,7 +531,9 @@ class CreateCommunityDialog extends React.PureComponent {
             // Wordlist follows the active UI language (English fallback).
             const seed = await generateMnemonic(24, getLanguage());
             const masterKey = await generateMasterKey(seed, "");
-            const [blob, keys] = await generatePDF(_portal_username, seed, "", masterKey);
+            // Printed in the locale and page size chosen in the settings.
+            const [blob, keys] = await generatePDF(_portal_username, seed, "", masterKey,
+                backupPdfOptions(this.state.api || this.props.api, this.props.locales || getLocaleCode()));
 
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
@@ -539,7 +541,9 @@ class CreateCommunityDialog extends React.PureComponent {
             a.href = url;
             a.click();
             a.remove();
-            URL.revokeObjectURL(url);
+            // Revoking on the same tick as click() cancels the download in
+            // Firefox, and this blob is the portal's only key backup.
+            setTimeout(() => URL.revokeObjectURL(url), 2000);
 
             this.setState({
                 _publicKeys: keys.pub,

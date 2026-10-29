@@ -694,6 +694,11 @@ export default {
             "trade": "Obchodovat",
         },
         "login_dialog": {
+            "master_password_works_too": "Funguje i vaše hlavní heslo.",
+            "master_password_derives_key": "Hlavní heslo — váš {{requiredKeyType}} klíč z něj bude odvozen",
+            "master_password_lacks_key": "{{requiredKeyType}} klíč účtu @{{name}} byl změněn on-chain: toto hlavní heslo ho už nevytváří. Zadejte přímo {{requiredKeyType}} klíč.",
+            "add_account_button": "PŘIDAT ÚČET",
+            "add_another_account": "Přidejte další účet — přihlášené účty zůstanou přihlášené",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2046,6 +2051,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Opravdu chcete smazat „{{deleteConfirmDraftTitle}}“? Tuto akci nelze vrátit zpět."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "{{t}} účtu @{{username}} byl změněn on-chain: toto master heslo ho už nevytváří. Zadejte přímo tento klíč.",
+            "attempts_remaining_before_logout": "Ještě %n {{{_plurals.attempt}}} a @{{account}} bude na tomto zařízení odhlášen",
             "toggle_pin_visibility": "přepnout viditelnost PINu",
             "enter_your_pin_to_unlock_the_requested": "Zadejte svůj PIN pro odemčení požadovaného klíče.",
             "hint": "Nápověda: {{vaultHint}}",
@@ -2177,6 +2184,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Když lidé interagují s vaším obsahem, uvidíte to zde"
         },
         "menu_content": {
+            "add_account": "Přidat účet",
+            "add_account_hint": "Přihlásit se jiným účtem",
+            "switch_account": "Přepnout účet",
+            "session_tab_only": "Jen tato karta",
+            "session_locked": "Zamčeno",
+            "switch_failed": "Nepodařilo se přepnout na @{{account}}",
+            "session_time_left_dh": "Zbývá {{days}} d {{hours}} h",
+            "session_time_left_h": "Zbývá {{hours}} h",
+            "session_time_left_soon": "Zbývá méně než 1 h",
             "notifications": "Oznámení",
             "feed": "Feed",
             "apps": "Aplikace",
@@ -2267,6 +2283,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Domluvte si schůzku s naším týmem a začněte se Simple Agreement for Future Token (SAFT)."
         },
         "index": {
+            "switched_to_account": "Přepnuto na @{{account}}",
+            "logged_out_switched": "Odhlášeno z @{{from}} — nyní používáte @{{to}}",
+            "session_expired_switched": "Relace @{{from}} vypršela — nyní používáte @{{to}}",
+            "logged_out_elsewhere_switched": "@{{from}} byl odhlášen na jiné kartě — nyní používáte @{{to}}",
+            "pin_wipe_switched": "@{{from}} byl odhlášen po příliš mnoha chybných heslech — nyní používáte @{{to}}",
+            "session_expired": "Vaše relace pro @{{account}} vypršela — přihlaste se znovu",
+            "logged_out_elsewhere": "@{{account}} byl odhlášen na jiné kartě",
             "users": "Uživatelé",
             "communities": "Komunity",
             "exclusive_discount_for_a_limited_time_only": "Exkluzivní sleva pouze po omezenou dobu!",
@@ -3149,6 +3172,14 @@ export default {
             "stored_on_arweave": "Uloženo na Arweave"
         },
         "logout_modal": {
+            "title_account": "Odhlásit @{{account}}?",
+            "title": "Opravdu se chcete odhlásit?",
+            "please_wait": "Počkejte prosím, než bezpečně ukončíme vaši relaci…",
+            "forgotten_on_device": "Prohlížeč tohoto zařízení váš účet zapomene. Pokud tomuto zařízení nedůvěřujete, používejte anonymní režim nebo se vždy odhlaste, abyste uzavřeli přístup ke svému účtu.",
+            "others_stay_logged_in": "Vaše ostatní účty zůstávají přihlášené.",
+            "logout_failed": "Odhlášení se nezdařilo",
+            "retry": "Zkusit znovu",
+            "logout": "Odhlásit se",
             "logging_out": "Odhlašování…"
         },
         "members_list_dialog": {

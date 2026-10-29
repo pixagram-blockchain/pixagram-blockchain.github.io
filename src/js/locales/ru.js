@@ -697,6 +697,11 @@ export default {
             "trade": "Торговать",
         },
         "login_dialog": {
+            "master_password_works_too": "Мастер-пароль тоже подойдёт.",
+            "master_password_derives_key": "Мастер-пароль — ключ {{requiredKeyType}} будет выведен из него",
+            "master_password_lacks_key": "Ключ {{requiredKeyType}} аккаунта @{{name}} был изменён в блокчейне: этот мастер-пароль его больше не даёт. Введите сам ключ {{requiredKeyType}}.",
+            "add_account_button": "ДОБАВИТЬ АККАУНТ",
+            "add_another_account": "Добавьте ещё один аккаунт — аккаунты, в которые вы вошли, останутся в системе",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2050,6 +2055,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Удалить «{{deleteConfirmDraftTitle}}»? Это действие нельзя отменить."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "{{t}} аккаунта @{{username}} был изменён в блокчейне: этот мастер-пароль его больше не даёт. Введите сам ключ.",
+            "attempts_remaining_before_logout": "Ещё %n {{{_plurals.attempt}}} — и на этом устройстве будет выполнен выход из @{{account}}",
             "toggle_pin_visibility": "показать или скрыть PIN",
             "enter_your_pin_to_unlock_the_requested": "Введите PIN, чтобы разблокировать запрошенный ключ.",
             "hint": "Подсказка: {{vaultHint}}",
@@ -2181,6 +2188,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Когда другие начнут взаимодействовать с вашим контентом, вы увидите это здесь"
         },
         "menu_content": {
+            "add_account": "Добавить аккаунт",
+            "add_account_hint": "Войти в другой аккаунт",
+            "switch_account": "Сменить аккаунт",
+            "session_tab_only": "Только эта вкладка",
+            "session_locked": "Заблокирован",
+            "switch_failed": "Не удалось переключиться на @{{account}}",
+            "session_time_left_dh": "Осталось {{days}} дн. {{hours}} ч",
+            "session_time_left_h": "Осталось {{hours}} ч",
+            "session_time_left_soon": "Осталось меньше 1 ч",
             "notifications": "Уведомления",
             "feed": "Лента",
             "apps": "Приложения",
@@ -2271,6 +2287,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Назначьте встречу с нашей командой, чтобы начать с Simple Agreement for Future Token (SAFT)."
         },
         "index": {
+            "switched_to_account": "Вы переключились на @{{account}}",
+            "logged_out_switched": "Выполнен выход из @{{from}} — теперь используется @{{to}}",
+            "session_expired_switched": "Сеанс @{{from}} истёк — теперь используется @{{to}}",
+            "logged_out_elsewhere_switched": "Из @{{from}} выполнен выход в другой вкладке — теперь используется @{{to}}",
+            "pin_wipe_switched": "Из @{{from}} выполнен выход после слишком большого числа неверных паролей — теперь используется @{{to}}",
+            "session_expired": "Сеанс @{{account}} истёк — войдите снова",
+            "logged_out_elsewhere": "Из @{{account}} выполнен выход в другой вкладке",
             "users": "Пользователи",
             "communities": "Сообщества",
             "exclusive_discount_for_a_limited_time_only": "Эксклюзивная скидка, только ограниченное время!",
@@ -3153,6 +3176,14 @@ export default {
             "stored_on_arweave": "Хранится в Arweave"
         },
         "logout_modal": {
+            "title_account": "Выйти из @{{account}}?",
+            "title": "Вы действительно хотите выйти?",
+            "please_wait": "Подождите, пока мы безопасно завершаем ваш сеанс…",
+            "forgotten_on_device": "Браузер этого устройства забудет ваш аккаунт. Если вы не доверяете этому устройству, используйте приватный режим или всегда выходите из аккаунта, чтобы закрыть к нему доступ.",
+            "others_stay_logged_in": "Другие ваши аккаунты остаются в системе.",
+            "logout_failed": "Не удалось выйти",
+            "retry": "Повторить",
+            "logout": "Выйти",
             "logging_out": "Выход…"
         },
         "members_list_dialog": {

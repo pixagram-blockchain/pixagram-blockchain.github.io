@@ -697,6 +697,11 @@ export default {
             "trade": "Handluj",
         },
         "login_dialog": {
+            "master_password_works_too": "Twoje hasło główne też zadziała.",
+            "master_password_derives_key": "Hasło główne — Twój klucz {{requiredKeyType}} zostanie z niego wyprowadzony",
+            "master_password_lacks_key": "Klucz {{requiredKeyType}} konta @{{name}} został zmieniony w blockchainie: to hasło główne już go nie daje. Wpisz bezpośrednio klucz {{requiredKeyType}}.",
+            "add_account_button": "DODAJ KONTO",
+            "add_another_account": "Dodaj kolejne konto — zalogowane konta pozostaną zalogowane",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2049,6 +2054,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Czy na pewno chcesz usunąć „{{deleteConfirmDraftTitle}}”? Tej akcji nie można cofnąć."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "{{t}} konta @{{username}} został zmieniony w blockchainie: to hasło główne już go nie daje. Wpisz bezpośrednio ten klucz.",
+            "attempts_remaining_before_logout": "Jeszcze %n {{{_plurals.attempt}}} i nastąpi wylogowanie @{{account}} na tym urządzeniu",
             "toggle_pin_visibility": "przełącz widoczność PIN-u",
             "enter_your_pin_to_unlock_the_requested": "Wprowadź PIN, aby odblokować żądany klucz.",
             "hint": "Podpowiedź: {{vaultHint}}",
@@ -2180,6 +2187,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Gdy inni wejdą w interakcję z Twoimi treściami, zobaczysz to tutaj"
         },
         "menu_content": {
+            "add_account": "Dodaj konto",
+            "add_account_hint": "Zaloguj się na inne konto",
+            "switch_account": "Przełącz konto",
+            "session_tab_only": "Tylko ta karta",
+            "session_locked": "Zablokowane",
+            "switch_failed": "Nie udało się przełączyć na @{{account}}",
+            "session_time_left_dh": "Pozostało: {{days}} d {{hours}} h",
+            "session_time_left_h": "Pozostało: {{hours}} h",
+            "session_time_left_soon": "Pozostało: mniej niż 1 h",
             "notifications": "Powiadomienia",
             "feed": "Feed",
             "apps": "Aplikacje",
@@ -2270,6 +2286,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Umów spotkanie z naszym zespołem, aby zacząć od Simple Agreement for Future Token (SAFT)."
         },
         "index": {
+            "switched_to_account": "Przełączono na @{{account}}",
+            "logged_out_switched": "Wylogowano z @{{from}} — teraz używasz @{{to}}",
+            "session_expired_switched": "Sesja @{{from}} wygasła — teraz używasz @{{to}}",
+            "logged_out_elsewhere_switched": "@{{from}} wylogowano w innej karcie — teraz używasz @{{to}}",
+            "pin_wipe_switched": "@{{from}} wylogowano po zbyt wielu błędnych hasłach — teraz używasz @{{to}}",
+            "session_expired": "Twoja sesja @{{account}} wygasła — zaloguj się ponownie",
+            "logged_out_elsewhere": "@{{account}} wylogowano w innej karcie",
             "users": "Użytkownicy",
             "communities": "Społeczności",
             "exclusive_discount_for_a_limited_time_only": "Ekskluzywna zniżka tylko przez ograniczony czas!",
@@ -3152,6 +3175,14 @@ export default {
             "stored_on_arweave": "Przechowywane na Arweave"
         },
         "logout_modal": {
+            "title_account": "Wylogować @{{account}}?",
+            "title": "Czy na pewno chcesz się wylogować?",
+            "please_wait": "Poczekaj, aż bezpiecznie zakończymy Twoją sesję…",
+            "forgotten_on_device": "Przeglądarka na tym urządzeniu zapomni Twoje konto. Jeśli nie ufasz temu urządzeniu, używaj trybu prywatnego lub zawsze się wylogowuj, aby zamknąć dostęp do konta.",
+            "others_stay_logged_in": "Twoje pozostałe konta pozostają zalogowane.",
+            "logout_failed": "Nie udało się wylogować",
+            "retry": "Spróbuj ponownie",
+            "logout": "Wyloguj",
             "logging_out": "Wylogowywanie…"
         },
         "members_list_dialog": {

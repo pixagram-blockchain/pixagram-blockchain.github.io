@@ -4,7 +4,8 @@ import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, mem
 // inside event handlers but NOT across an `await` (each setState in a promise
 // continuation would otherwise re-render separately).
 import { unstable_batchedUpdates as batch } from "preact/compat";
-import { HISTORY, buildPostUrl, isPostUrl, parsePostUrl, isDeletedPost, POST_DRAWER_TAB_HASHES } from "../utils/constants";
+import { HISTORY, BROWSE_PATH, buildPostUrl, isPostUrl, parsePostUrl, isDeletedPost, POST_DRAWER_TAB_HASHES } from "../utils/constants";
+import { getFeedSort } from "../utils/feedSort";
 import withStyles from "@material-ui/core/styles/withStyles";
 import * as actions from "../actions/utils";
 import { CellMeasurer } from "@pixagram/virtualized/dist/es/index";
@@ -17,6 +18,7 @@ import useVoteSync from "../hooks/useVoteSync";
 import useActiveAccount from "../hooks/useActiveAccount";
 import usePullToRefresh from "../hooks/usePullToRefresh";
 import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto, votesSignature } from "../utils/voteSync";
+import { countUpvotes, countDownvotes } from "../utils/voteValue";
 import { EASE, RAINBOW_RIPPLE } from "../theme/motion";
 import ImageMeasurer from "../components/ImageMeasurer";
 
@@ -45,7 +47,7 @@ const LazyNewPost = React.lazy(loadNewPost);
 // PostDialog is the full post viewer (recursive comment threads, vote lists,
 // artwork rendering) — the most common thing opened after the feed, but not
 // needed to PAINT the feed. Feed is the default landing surface after Home
-// (`/created/` and every non-community post deep-link cold-mounts here — see
+// (`/trending/` and every non-community post deep-link cold-mounts here — see
 // Index's OVERLAY_HOSTS_BY_POST_KIND), so keeping the viewer out of this
 // chunk directly shrinks the app's main entry path. Warmed on idle for
 // everyone (see effect in the component) so the open-from-card animation
@@ -248,13 +250,20 @@ const SortTabs = memo(function SortTabs({ className, hidden, value, isMobile, la
     );
 });
 
+// The sort a feed address names. An address without one — a post deep-link,
+// which cold-mounts this page — opens the listing beneath the post in the
+// sort the reader is browsing: trending until they pick another
+// (utils/feedSort), where it used to be created.
 const parseSortFromPathname = (pathname) => {
     const match = (pathname || '').match(/^\/(created|hot|trending|promoted)(?:\/|$)/);
-    return match ? Math.max(0, SORT_METHODS.indexOf(match[1])) : 0;
+    return Math.max(0, SORT_METHODS.indexOf(match ? match[1] : getFeedSort()));
 };
 
+// The tag a feed address names, with the feed route's characters (PAGE_ROUTES:
+// [a-z0-9-]). Digits were missing, so "/trending/web3" read as no tag at all
+// and showed the untagged feed.
 const parseTagFromPathname = (pathname) => {
-    const match = (pathname || '').match(/^\/(?:created|hot|trending|promoted)\/([a-z\-]+)(?:\/|$)/);
+    const match = (pathname || '').match(/^\/(?:created|hot|trending|promoted)\/([a-z0-9\-]+)(?:\/|$)/);
     return match ? match[1] : '';
 };
 
@@ -369,8 +378,11 @@ const enrichPostForCard = (post, account, voterProfiles) => {
         image: imageSrc,
         date: post.created ? new Date(post.created).getTime() : Date.now(),
         payout: `$${payout.toFixed(2)}`,
-        upVotesNumber: Math.max(0, post.net_votes || activeVotes.filter(v => v?.weight >= 0).length || 0),
-        downVotesNumber: Math.max(0, activeVotes.filter(v => v?.weight < 0).length || 0),
+        // Count by vote sign (rshares/percent), never by `weight`: the curation
+        // weight is always >= 0, so it cannot distinguish a downvote from an
+        // upvote. `net_votes` is ups - downs, not an upvote count either.
+        upVotesNumber: countUpvotes(activeVotes),
+        downVotesNumber: countDownvotes(activeVotes),
         active_votes: activeVotes,
         // Post-level rshares as the chain saw them — lets the card price its
         // own pending vote on the fund's reward curve (useVotePayoutEstimate).
@@ -695,7 +707,7 @@ const useFeedData = (api, pathname, gridBridgeRef) => {
         // next/prev navigation) only adds, swaps or removes a
         // `/@author/permlink` URL on top of the listing, and the listing must
         // be left alone: parseTagFromPathname can't even read the tag off a
-        // post URL (`[a-z\-]+` rejects the `@`, so `/trending/some-tag`
+        // post URL (`[a-z0-9\-]+` rejects the `@`, so `/trending/some-tag`
         // opening a post reads as untagged), and a reload there wiped scroll
         // position, the `hasMore` flag and any already-paginated pages, then
         // forced a full Masonry reset — and did it all again on close.
@@ -1402,7 +1414,7 @@ const usePostNavigation = ({ api, posts, masonryRef, scrollToIndex, scrollTo, se
             // would leave the post URL sitting behind us in history, and the very
             // next browser Back would land on it and re-open the dialog. Replace
         // swaps it out entirely, so Back goes to whatever preceded the post.
-        else HISTORY.replace(fallbackUrl || "/created/");
+        else HISTORY.replace(fallbackUrl || BROWSE_PATH);
     }, [fallbackUrl]);
 
     // Counter-bump for PostDialog's drawer-hash push (mobile-only, when the

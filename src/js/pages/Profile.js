@@ -17,6 +17,7 @@ import useActiveAccount from "../hooks/useActiveAccount";
 import usePullToRefresh from "../hooks/usePullToRefresh";
 import { usePictureDialog } from "../hooks/usePictureDialog";
 import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto } from "../utils/voteSync";
+import { countUpvotes, countDownvotes } from "../utils/voteValue";
 import { idle, cancelIdle } from "../utils/idle";
 import {
     EASE as E, TRANSITION_FAST as TF, TRANSITION_MEDIUM as TM,
@@ -508,8 +509,9 @@ const enrichPostForCard = (post, account, voterProfiles) => {
         author: { username: account.name || '', name: resolveDisplayName(account), image: account.image || account._profile?.profile_image || '' },
         title: post.root_title || post.title || '', image: fi ? (typeof fi === 'string' ? fi : fi.src) : null,
         date: post.created ? new Date(post.created).getTime() : Date.now(), payout: `$${payout.toFixed(2)}`,
-        upVotesNumber: Math.max(0, post.net_votes || activeVotes.filter(v => v?.weight >= 0).length || 0),
-        downVotesNumber: Math.max(0, activeVotes.filter(v => v?.weight < 0).length || 0),
+        // Count by vote sign (rshares/percent), never by `weight` (curation weight is always >= 0).
+        upVotesNumber: countUpvotes(activeVotes),
+        downVotesNumber: countDownvotes(activeVotes),
         active_votes: activeVotes, net_rshares: post.net_rshares != null ? String(post.net_rshares) : '0',
         _voter_profiles: voterProfiles || {}, nsfw: isNsfwPost(post), deleted: isDeletedPost(post), tags,
         permlink: post.permlink || '', category: resolveRootCategory(post), _content_type: post._content_type || resolveContentType(post) || 'pixel_art',
@@ -528,8 +530,8 @@ const enrichCommentForCard = (comment, account, index, voterProfiles) => {
         title: comment.root_title || comment.parent_permlink || '',
         author: { username: account.name || '', name: resolveDisplayName(account), image: account.image || account._profile?.profile_image || '' },
         payout: `$${payout.toFixed(2)}`,
-        upVotesNumber: Math.max(0, comment.net_votes || activeVotes.filter(v => v?.weight >= 0).length || 0),
-        downVotesNumber: Math.max(0, activeVotes.filter(v => v?.weight < 0).length || 0),
+        upVotesNumber: countUpvotes(activeVotes),
+        downVotesNumber: countDownvotes(activeVotes),
         active_votes: activeVotes, net_rshares: comment.net_rshares != null ? String(comment.net_rshares) : '0', _voter_profiles: voterProfiles || {},
         permlink: comment.permlink || '', parent_author: comment.parent_author || '', parent_permlink: comment.parent_permlink || '',
         root_author: comment.root_author || '', root_permlink: comment.root_permlink || '', category: resolveRootCategory(comment),
@@ -556,8 +558,8 @@ const transformRepliesToCardFormat = (rawReplies, profileOwnerAccount, voterProf
             author: { username: ra.name || r.author, name: resolveDisplayName(ra, r.author), image: ra.image || ra._profile?.profile_image || '' },
             replyTo: { username: pa.name || r.parent_author, name: resolveDisplayName(pa, r.parent_author), image: pa.image || pa._profile?.profile_image || '' },
             payout: `$${payout.toFixed(2)}`,
-            upVotesNumber: Math.max(0, r.net_votes || activeVotes.filter(v => v?.weight >= 0).length || 0),
-            downVotesNumber: Math.max(0, activeVotes.filter(v => v?.weight < 0).length || 0),
+            upVotesNumber: countUpvotes(activeVotes),
+            downVotesNumber: countDownvotes(activeVotes),
             active_votes: activeVotes, net_rshares: r.net_rshares != null ? String(r.net_rshares) : '0', _voter_profiles: voterProfiles || {}, originalComment: '',
             permlink: r.permlink || '', parent_author: r.parent_author || '', parent_permlink: r.parent_permlink || '',
             root_author: r.root_author || '', root_permlink: r.root_permlink || '', category: resolveRootCategory(r),

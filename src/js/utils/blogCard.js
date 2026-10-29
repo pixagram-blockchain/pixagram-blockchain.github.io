@@ -1,4 +1,5 @@
 import { COMMUNITY_TAG_REGEX } from "./constants";
+import { countUpvotes, countDownvotes } from "./voteValue";
 
 // ── Portal blog cards ───────────────────────────────────────────────────
 // A portal blog post is a top-level post whose category (parent_permlink) is
@@ -112,8 +113,11 @@ export const enrichPostForBlogCard = (post, account, voterProfiles) => {
         image: resolveCoverImage(post),
         date: post.created ? new Date(post.created).getTime() : Date.now(),
         payout: `$${payout.toFixed(2)}`,
-        upVotesNumber: Math.max(0, post.net_votes || activeVotes.filter(v => v?.weight >= 0).length || 0),
-        downVotesNumber: Math.max(0, activeVotes.filter(v => v?.weight < 0).length || 0),
+        // Count by vote sign (rshares/percent), never by `weight`: the curation
+        // weight is always >= 0, so it cannot distinguish a downvote from an
+        // upvote. `net_votes` is ups - downs, not an upvote count either.
+        upVotesNumber: countUpvotes(activeVotes),
+        downVotesNumber: countDownvotes(activeVotes),
         commentsNumber: post.children || 0,
         active_votes: activeVotes,
         // Post-level rshares as the chain saw them — lets the card price its

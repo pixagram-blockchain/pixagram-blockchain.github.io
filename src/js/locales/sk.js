@@ -698,6 +698,11 @@ export default {
             "trade": "Obchodovať",
         },
         "login_dialog": {
+            "master_password_works_too": "Funguje aj vaše hlavné heslo.",
+            "master_password_derives_key": "Hlavné heslo — váš kľúč {{requiredKeyType}} sa z neho odvodí",
+            "master_password_lacks_key": "Kľúč {{requiredKeyType}} účtu @{{name}} bol zmenený na blockchaine: toto hlavné heslo ho už nevytvára. Zadajte priamo kľúč {{requiredKeyType}}.",
+            "add_account_button": "PRIDAŤ ÚČET",
+            "add_another_account": "Pridajte ďalší účet — prihlásené účty zostanú prihlásené",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2050,6 +2055,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Naozaj chcete vymazať \"{{deleteConfirmDraftTitle}}\"? Túto akciu nemožno vrátiť späť."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "{{t}} účtu @{{username}} bol zmenený na blockchaine: toto hlavné heslo ho už nevytvára. Zadajte priamo tento kľúč.",
+            "attempts_remaining_before_logout": "Ešte %n {{{_plurals.attempt}}} a @{{account}} bude na tomto zariadení odhlásený",
             "toggle_pin_visibility": "prepnúť viditeľnosť PIN",
             "enter_your_pin_to_unlock_the_requested": "Zadajte svoj PIN na odomknutie požadovaného kľúča.",
             "hint": "Nápoveda: {{vaultHint}}",
@@ -2181,6 +2188,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Keď budú ľudia interagovať s vaším obsahom, uvidíte to tu"
         },
         "menu_content": {
+            "add_account": "Pridať účet",
+            "add_account_hint": "Prihlásiť sa iným účtom",
+            "switch_account": "Prepnúť účet",
+            "session_tab_only": "Len táto karta",
+            "session_locked": "Zamknuté",
+            "switch_failed": "Nepodarilo sa prepnúť na @{{account}}",
+            "session_time_left_dh": "Zostáva {{days}} d {{hours}} h",
+            "session_time_left_h": "Zostáva {{hours}} h",
+            "session_time_left_soon": "Zostáva menej ako 1 h",
             "notifications": "Notifikácie",
             "feed": "Feed",
             "apps": "Aplikácie",
@@ -2271,6 +2287,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Rezervujte si stretnutie s naším tímom a začnite so Simple Agreement for Future Token (SAFT)."
         },
         "index": {
+            "switched_to_account": "Prepnuté na @{{account}}",
+            "logged_out_switched": "Odhlásené z @{{from}} — teraz používate @{{to}}",
+            "session_expired_switched": "Relácia @{{from}} vypršala — teraz používate @{{to}}",
+            "logged_out_elsewhere_switched": "@{{from}} bol odhlásený na inej karte — teraz používate @{{to}}",
+            "pin_wipe_switched": "@{{from}} bol odhlásený po príliš mnohých nesprávnych heslách — teraz používate @{{to}}",
+            "session_expired": "Vaša relácia pre @{{account}} vypršala — prihláste sa znova",
+            "logged_out_elsewhere": "@{{account}} bol odhlásený na inej karte",
             "users": "Používatelia",
             "communities": "Komunity",
             "exclusive_discount_for_a_limited_time_only": "Exkluzívna zľava iba na obmedzený čas!",
@@ -3153,6 +3176,14 @@ export default {
             "stored_on_arweave": "Uložené na Arweave"
         },
         "logout_modal": {
+            "title_account": "Odhlásiť @{{account}}?",
+            "title": "Naozaj sa chcete odhlásiť?",
+            "please_wait": "Počkajte, kým bezpečne ukončíme vašu reláciu...",
+            "forgotten_on_device": "Prehliadač tohto zariadenia váš účet zabudne. Ak tomuto zariadeniu nedôverujete, používajte súkromné prehliadanie alebo sa vždy odhláste, aby ste uzavreli prístup k svojmu účtu.",
+            "others_stay_logged_in": "Vaše ostatné účty zostávajú prihlásené.",
+            "logout_failed": "Odhlásenie zlyhalo",
+            "retry": "Skúsiť znova",
+            "logout": "Odhlásiť sa",
             "logging_out": "Odhlasuje sa..."
         },
         "members_list_dialog": {

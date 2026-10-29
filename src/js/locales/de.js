@@ -694,6 +694,11 @@ export default {
             "trade": "Handeln",
         },
         "login_dialog": {
+            "master_password_works_too": "Dein Master-Passwort funktioniert auch.",
+            "master_password_derives_key": "Master-Passwort — dein {{requiredKeyType}}-Key wird daraus abgeleitet",
+            "master_password_lacks_key": "Der {{requiredKeyType}}-Key von @{{name}} wurde on-chain geändert: Dieses Master-Passwort ergibt ihn nicht mehr. Gib den {{requiredKeyType}}-Key selbst ein.",
+            "add_account_button": "KONTO HINZUFÜGEN",
+            "add_another_account": "Weiteres Konto hinzufügen — angemeldete Konten bleiben angemeldet",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2047,6 +2052,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Möchtest du „{{deleteConfirmDraftTitle}}“ wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "Der {{t}} von @{{username}} wurde on-chain geändert: Dieses Master-Passwort ergibt ihn nicht mehr. Gib den {{t}} selbst ein.",
+            "attempts_remaining_before_logout": "Noch %n {{{_plurals.attempt}}}, dann wird @{{account}} auf diesem Gerät abgemeldet",
             "toggle_pin_visibility": "PIN ein-/ausblenden",
             "enter_your_pin_to_unlock_the_requested": "Gib deine PIN ein, um den angeforderten Key zu entsperren.",
             "hint": "Hinweis: {{vaultHint}}",
@@ -2178,6 +2185,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Wenn andere mit deinen Inhalten interagieren, siehst du es hier"
         },
         "menu_content": {
+            "add_account": "Konto hinzufügen",
+            "add_account_hint": "Mit einem anderen Konto anmelden",
+            "switch_account": "Konto wechseln",
+            "session_tab_only": "Nur dieser Tab",
+            "session_locked": "Gesperrt",
+            "switch_failed": "Wechsel zu @{{account}} fehlgeschlagen",
+            "session_time_left_dh": "Noch {{days}} T. {{hours}} h",
+            "session_time_left_h": "Noch {{hours}} h",
+            "session_time_left_soon": "Noch weniger als 1 h",
             "notifications": "Benachrichtigungen",
             "feed": "Feed",
             "apps": "Apps",
@@ -2268,6 +2284,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Vereinbare einen Termin mit unserem Team, um mit einem Simple Agreement for Future Token (SAFT) zu starten."
         },
         "index": {
+            "switched_to_account": "Gewechselt zu @{{account}}",
+            "logged_out_switched": "Von @{{from}} abgemeldet — jetzt mit @{{to}}",
+            "session_expired_switched": "Die Sitzung von @{{from}} ist abgelaufen — jetzt mit @{{to}}",
+            "logged_out_elsewhere_switched": "@{{from}} wurde in einem anderen Tab abgemeldet — jetzt mit @{{to}}",
+            "pin_wipe_switched": "@{{from}} wurde nach zu vielen falschen Passwörtern abgemeldet — jetzt mit @{{to}}",
+            "session_expired": "Deine Sitzung für @{{account}} ist abgelaufen — melde dich erneut an",
+            "logged_out_elsewhere": "@{{account}} wurde in einem anderen Tab abgemeldet",
             "users": "Nutzer:innen",
             "communities": "Communities",
             "exclusive_discount_for_a_limited_time_only": "Exklusiver Rabatt – nur für kurze Zeit!",
@@ -3150,6 +3173,14 @@ export default {
             "stored_on_arweave": "Auf Arweave gespeichert"
         },
         "logout_modal": {
+            "title_account": "@{{account}} abmelden?",
+            "title": "Möchtest du dich wirklich abmelden?",
+            "please_wait": "Bitte warte, während wir deine Sitzung sicher beenden…",
+            "forgotten_on_device": "Dein Konto wird im Webbrowser dieses Geräts vergessen. Wenn du diesem Gerät nicht vertraust, nutze den privaten Modus oder melde dich immer ab, um den Zugriff auf dein Konto zu schließen.",
+            "others_stay_logged_in": "Deine anderen Konten bleiben angemeldet.",
+            "logout_failed": "Abmeldung fehlgeschlagen",
+            "retry": "Erneut versuchen",
+            "logout": "Abmelden",
             "logging_out": "Abmeldung läuft…"
         },
         "members_list_dialog": {

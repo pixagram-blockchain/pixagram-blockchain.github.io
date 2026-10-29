@@ -30,7 +30,7 @@ import SeedPhraseMenu from "./SeedPhraseMenu";
 import SeedPlus from "../icons/SeedPlus";
 import SproutOutline from "../icons/SproutOutline";
 import KeyIcon from "@material-ui/icons/VpnKey";
-import { generateMnemonic, generateMasterKey, generatePDF, getWordsPossible } from "../utils/BackUpWallet2";
+import { generateMnemonic, generateMasterKey, generatePDF, getWordsPossible, backupPdfOptions } from "../utils/BackUpWallet3";
 import SecurityRounded from "@material-ui/icons/SecurityRounded";
 import RestoreRounded from "@material-ui/icons/RestoreRounded";
 import TextField from "@material-ui/core/TextField";
@@ -42,7 +42,7 @@ import Tabs from "@material-ui/core/Tabs";
 import SwipeableViews from "react-swipeable-views";
 
 import { T } from "../utils/T";
-import { t, useLanguage, getLanguage } from "../utils/text";
+import { t, useLanguage, getLanguage, getLocaleCode } from "../utils/text";
 import * as actions from "../actions/utils";
 
 import { withLanguage } from "../utils/withLanguage";
@@ -742,7 +742,9 @@ class PixaWalletKeysDialog extends React.PureComponent {
         const callback = async () => {
             const { username, _seed, _password } = this.state;
             const masterKey = await generateMasterKey(_seed, _password);
-            const [blob, keys] = await generatePDF(username, _seed, _password, masterKey);
+            // Printed in the locale and page size chosen in the settings.
+            const [blob, keys] = await generatePDF(username, _seed, _password, masterKey,
+                backupPdfOptions(this.props.api, getLocaleCode()));
             const url = URL.createObjectURL(blob);
             let a = document.createElement("a"); a.download = `KeysOf-${username}-Pixagram.pdf`; a.href = url; a.click(); a.remove();
             // Revoking on the same tick as click() cancels the download in

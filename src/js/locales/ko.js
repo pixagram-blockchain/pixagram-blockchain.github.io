@@ -695,6 +695,11 @@ export default {
             "trade": "거래",
         },
         "login_dialog": {
+            "master_password_works_too": "마스터 비밀번호도 사용할 수 있습니다.",
+            "master_password_derives_key": "마스터 비밀번호 — 여기에서 {{requiredKeyType}} 키를 도출합니다",
+            "master_password_lacks_key": "@{{name}} 님의 {{requiredKeyType}} 키가 체인에서 변경되어 이 마스터 비밀번호로는 더 이상 얻을 수 없습니다. {{requiredKeyType}} 키를 직접 입력하세요.",
+            "add_account_button": "계정 추가",
+            "add_another_account": "다른 계정 추가 — 로그인된 계정은 그대로 로그인 상태로 유지됩니다",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2048,6 +2053,8 @@ export default {
             "are_you_sure_you_want_to_delete": "\"{{deleteConfirmDraftTitle}}\"을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "@{{username}} 님의 {{t}}가 체인에서 변경되어 이 마스터 비밀번호로는 더 이상 얻을 수 없습니다. {{t}}를 직접 입력하세요.",
+            "attempts_remaining_before_logout": "이 기기에서 @{{account}} 계정이 로그아웃되기까지 %n {{{_plurals.attempt}}} 남음",
             "toggle_pin_visibility": "PIN 표시 전환",
             "enter_your_pin_to_unlock_the_requested": "요청된 키를 해제하려면 PIN을 입력하세요.",
             "hint": "힌트: {{vaultHint}}",
@@ -2179,6 +2186,15 @@ export default {
             "when_people_interact_with_your_content_youll": "다른 사람이 내 콘텐츠에 반응하면 여기에 표시됩니다"
         },
         "menu_content": {
+            "add_account": "계정 추가",
+            "add_account_hint": "다른 계정으로 로그인",
+            "switch_account": "계정 전환",
+            "session_tab_only": "이 탭에서만",
+            "session_locked": "잠김",
+            "switch_failed": "@{{account}} 계정으로 전환하지 못했습니다",
+            "session_time_left_dh": "{{days}}일 {{hours}}시간 남음",
+            "session_time_left_h": "{{hours}}시간 남음",
+            "session_time_left_soon": "1시간 미만 남음",
             "notifications": "알림",
             "feed": "피드",
             "apps": "앱",
@@ -2269,6 +2285,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Simple Agreement for Future Token(SAFT)으로 시작하시려면 저희 팀과 미팅을 예약하세요."
         },
         "index": {
+            "switched_to_account": "@{{account}} 계정으로 전환했습니다",
+            "logged_out_switched": "@{{from}} 계정에서 로그아웃했습니다 — 지금은 @{{to}} 계정을 사용 중입니다",
+            "session_expired_switched": "@{{from}} 계정의 세션이 만료되었습니다 — 지금은 @{{to}} 계정을 사용 중입니다",
+            "logged_out_elsewhere_switched": "다른 탭에서 @{{from}} 계정이 로그아웃되었습니다 — 지금은 @{{to}} 계정을 사용 중입니다",
+            "pin_wipe_switched": "비밀번호를 너무 많이 틀려 @{{from}} 계정이 로그아웃되었습니다 — 지금은 @{{to}} 계정을 사용 중입니다",
+            "session_expired": "@{{account}} 계정의 세션이 만료되었습니다 — 다시 로그인하세요",
+            "logged_out_elsewhere": "다른 탭에서 @{{account}} 계정이 로그아웃되었습니다",
             "users": "사용자",
             "communities": "커뮤니티",
             "exclusive_discount_for_a_limited_time_only": "기간 한정 특별 할인!",
@@ -3151,6 +3174,14 @@ export default {
             "stored_on_arweave": "Arweave에 저장됨"
         },
         "logout_modal": {
+            "title_account": "@{{account}} 계정에서 로그아웃할까요?",
+            "title": "정말 로그아웃할까요?",
+            "please_wait": "세션을 안전하게 종료하는 중입니다. 잠시 기다려 주세요…",
+            "forgotten_on_device": "이 기기의 웹 브라우저에서 계정 정보가 지워집니다. 이 기기를 신뢰할 수 없다면 시크릿 모드를 사용하거나 항상 로그아웃해 계정에 대한 접근을 차단하세요.",
+            "others_stay_logged_in": "다른 계정은 로그인 상태로 유지됩니다.",
+            "logout_failed": "로그아웃하지 못했습니다",
+            "retry": "다시 시도",
+            "logout": "로그아웃",
             "logging_out": "로그아웃하는 중…"
         },
         "members_list_dialog": {

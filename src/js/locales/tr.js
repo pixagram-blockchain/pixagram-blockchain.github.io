@@ -698,6 +698,11 @@ export default {
             "trade": "İşlem yap",
         },
         "login_dialog": {
+            "master_password_works_too": "Ana şifren de işe yarar.",
+            "master_password_derives_key": "Ana şifre — {{requiredKeyType}} anahtarın bundan türetilecek",
+            "master_password_lacks_key": "@{{name}} hesabının {{requiredKeyType}} anahtarı zincir üzerinde değiştirilmiş: bu ana şifre artık onu vermiyor. {{requiredKeyType}} anahtarının kendisini gir.",
+            "add_account_button": "HESAP EKLE",
+            "add_another_account": "Başka bir hesap ekle — giriş yapmış hesaplar açık kalır",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2050,6 +2055,8 @@ export default {
             "are_you_sure_you_want_to_delete": "\"{{deleteConfirmDraftTitle}}\" silinsin mi? Bu işlem geri alınamaz."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "@{{username}} hesabının {{t}} zincir üzerinde değiştirilmiş: bu ana şifre artık onu vermiyor. Anahtarın kendisini gir.",
+            "attempts_remaining_before_logout": "Bu cihazda @{{account}} hesabından çıkış yapılmadan önce %n {{{_plurals.attempt}}} kaldı",
             "toggle_pin_visibility": "PIN görünürlüğünü değiştir",
             "enter_your_pin_to_unlock_the_requested": "İstenen anahtarın kilidini açmak için PIN'ini gir.",
             "hint": "İpucu: {{vaultHint}}",
@@ -2181,6 +2188,15 @@ export default {
             "when_people_interact_with_your_content_youll": "İçeriğinle etkileşime girildiğinde burada görürsün"
         },
         "menu_content": {
+            "add_account": "Hesap ekle",
+            "add_account_hint": "Başka bir hesapla giriş yap",
+            "switch_account": "Hesap değiştir",
+            "session_tab_only": "Yalnızca bu sekme",
+            "session_locked": "Kilitli",
+            "switch_failed": "@{{account}} hesabına geçilemedi",
+            "session_time_left_dh": "{{days}} g {{hours}} sa kaldı",
+            "session_time_left_h": "{{hours}} sa kaldı",
+            "session_time_left_soon": "1 saatten az kaldı",
             "notifications": "Bildirimler",
             "feed": "Akış",
             "apps": "Uygulamalar",
@@ -2271,6 +2287,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Simple Agreement for Future Token (SAFT) ile başlamak için ekibimizle bir toplantı ayarla."
         },
         "index": {
+            "switched_to_account": "@{{account}} hesabına geçildi",
+            "logged_out_switched": "@{{from}} hesabından çıkış yapıldı — şimdi @{{to}} kullanılıyor",
+            "session_expired_switched": "@{{from}} oturumunun süresi doldu — şimdi @{{to}} kullanılıyor",
+            "logged_out_elsewhere_switched": "@{{from}} hesabından başka bir sekmede çıkış yapıldı — şimdi @{{to}} kullanılıyor",
+            "pin_wipe_switched": "Çok fazla yanlış şifre nedeniyle @{{from}} hesabından çıkış yapıldı — şimdi @{{to}} kullanılıyor",
+            "session_expired": "@{{account}} oturumunun süresi doldu — yeniden giriş yap",
+            "logged_out_elsewhere": "@{{account}} hesabından başka bir sekmede çıkış yapıldı",
             "users": "Kullanıcılar",
             "communities": "Topluluklar",
             "exclusive_discount_for_a_limited_time_only": "Yalnızca Sınırlı Süre İçin Özel İndirim!",
@@ -3153,6 +3176,14 @@ export default {
             "stored_on_arweave": "Arweave'de saklanıyor"
         },
         "logout_modal": {
+            "title_account": "@{{account}} hesabından çıkış yapılsın mı?",
+            "title": "Gerçekten çıkış yapmak istiyor musun?",
+            "please_wait": "Oturumunu güvenli şekilde kapatırken lütfen bekle…",
+            "forgotten_on_device": "Bu cihazdaki tarayıcı hesabını unutacak. Bu cihaza güvenmiyorsan gizli gezinmeyi kullan ya da hesabına erişimi kapatmak için her zaman çıkış yap.",
+            "others_stay_logged_in": "Diğer hesapların açık kalır.",
+            "logout_failed": "Çıkış yapılamadı",
+            "retry": "Yeniden dene",
+            "logout": "Çıkış yap",
             "logging_out": "Çıkış yapılıyor…"
         },
         "members_list_dialog": {

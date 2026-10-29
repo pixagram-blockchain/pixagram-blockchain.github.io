@@ -697,6 +697,11 @@ export default {
             "trade": "Торгувати",
         },
         "login_dialog": {
+            "master_password_works_too": "Майстер-пароль теж підійде.",
+            "master_password_derives_key": "Майстер-пароль — ключ {{requiredKeyType}} буде виведено з нього",
+            "master_password_lacks_key": "Ключ {{requiredKeyType}} акаунта @{{name}} змінено в блокчейні: цей майстер-пароль його більше не дає. Введіть сам ключ {{requiredKeyType}}.",
+            "add_account_button": "ДОДАТИ АКАУНТ",
+            "add_another_account": "Додайте ще один акаунт — акаунти, у які ви ввійшли, залишаться в системі",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2049,6 +2054,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Ви впевнені, що хочете видалити \"{{deleteConfirmDraftTitle}}\"? Цю дію не можна скасувати."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "{{t}} акаунта @{{username}} змінено в блокчейні: цей майстер-пароль його більше не дає. Введіть сам ключ.",
+            "attempts_remaining_before_logout": "Ще %n {{{_plurals.attempt}}} — і на цьому пристрої буде виконано вихід з @{{account}}",
             "toggle_pin_visibility": "перемкнути видимість PIN",
             "enter_your_pin_to_unlock_the_requested": "Введіть PIN, щоб розблокувати потрібний ключ.",
             "hint": "Підказка: {{vaultHint}}",
@@ -2180,6 +2187,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Коли люди взаємодіятимуть з вашим контентом, ви побачите це тут"
         },
         "menu_content": {
+            "add_account": "Додати акаунт",
+            "add_account_hint": "Увійти в інший акаунт",
+            "switch_account": "Змінити акаунт",
+            "session_tab_only": "Лише ця вкладка",
+            "session_locked": "Заблоковано",
+            "switch_failed": "Не вдалося перемкнутися на @{{account}}",
+            "session_time_left_dh": "Залишилось {{days}} дн. {{hours}} год",
+            "session_time_left_h": "Залишилось {{hours}} год",
+            "session_time_left_soon": "Залишилось менше 1 год",
             "notifications": "Сповіщення",
             "feed": "Стрічка",
             "apps": "Застосунки",
@@ -2270,6 +2286,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Запишіться на зустріч з нашою командою, щоб почати з Simple Agreement for Future Token (SAFT)."
         },
         "index": {
+            "switched_to_account": "Ви перемкнулися на @{{account}}",
+            "logged_out_switched": "Виконано вихід з @{{from}} — тепер використовується @{{to}}",
+            "session_expired_switched": "Сесія @{{from}} завершилася — тепер використовується @{{to}}",
+            "logged_out_elsewhere_switched": "З @{{from}} виконано вихід в іншій вкладці — тепер використовується @{{to}}",
+            "pin_wipe_switched": "З @{{from}} виконано вихід після надто великої кількості неправильних паролів — тепер використовується @{{to}}",
+            "session_expired": "Сесія @{{account}} завершилася — увійдіть знову",
+            "logged_out_elsewhere": "З @{{account}} виконано вихід в іншій вкладці",
             "users": "Користувачі",
             "communities": "Спільноти",
             "exclusive_discount_for_a_limited_time_only": "Ексклюзивна знижка лише на обмежений час!",
@@ -3152,6 +3175,14 @@ export default {
             "stored_on_arweave": "Зберігається на Arweave"
         },
         "logout_modal": {
+            "title_account": "Вийти з @{{account}}?",
+            "title": "Ви справді хочете вийти?",
+            "please_wait": "Зачекайте, поки ми безпечно завершуємо вашу сесію...",
+            "forgotten_on_device": "Браузер цього пристрою забуде ваш акаунт. Якщо ви не довіряєте цьому пристрою, використовуйте приватний режим або завжди виходьте з акаунта, щоб закрити до нього доступ.",
+            "others_stay_logged_in": "Інші ваші акаунти залишаються в системі.",
+            "logout_failed": "Не вдалося вийти",
+            "retry": "Повторити",
+            "logout": "Вийти",
             "logging_out": "Вихід..."
         },
         "members_list_dialog": {

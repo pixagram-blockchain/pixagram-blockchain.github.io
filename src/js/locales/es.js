@@ -694,6 +694,11 @@ export default {
             "trade": "Operar",
         },
         "login_dialog": {
+            "master_password_works_too": "Tu contraseña maestra también sirve.",
+            "master_password_derives_key": "Contraseña maestra: tu clave {{requiredKeyType}} se derivará de ella",
+            "master_password_lacks_key": "La clave {{requiredKeyType}} de @{{name}} se cambió en la cadena: esta contraseña maestra ya no la genera. Introduce la propia clave {{requiredKeyType}}.",
+            "add_account_button": "AÑADIR CUENTA",
+            "add_another_account": "Añade otra cuenta — las que tienen la sesión iniciada la mantienen",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2047,6 +2052,8 @@ export default {
             "are_you_sure_you_want_to_delete": "¿Seguro que quieres eliminar «{{deleteConfirmDraftTitle}}»? Esta acción no se puede deshacer."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "La {{t}} de @{{username}} se cambió en la cadena: esta contraseña maestra ya no la genera. Introduce la propia {{t}}.",
+            "attempts_remaining_before_logout": "%n {{{_plurals.attempt}}} más y se cerrará la sesión de @{{account}} en este dispositivo",
             "toggle_pin_visibility": "mostrar u ocultar el PIN",
             "enter_your_pin_to_unlock_the_requested": "Introduce tu PIN para desbloquear la clave solicitada.",
             "hint": "Pista: {{vaultHint}}",
@@ -2178,6 +2185,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Cuando otras personas interactúen con tu contenido, lo verás aquí"
         },
         "menu_content": {
+            "add_account": "Añadir cuenta",
+            "add_account_hint": "Iniciar sesión con otra cuenta",
+            "switch_account": "Cambiar de cuenta",
+            "session_tab_only": "Solo esta pestaña",
+            "session_locked": "Bloqueada",
+            "switch_failed": "No se pudo cambiar a @{{account}}",
+            "session_time_left_dh": "Tiempo restante: {{days}} d {{hours}} h",
+            "session_time_left_h": "Tiempo restante: {{hours}} h",
+            "session_time_left_soon": "Tiempo restante: menos de 1 h",
             "notifications": "Notificaciones",
             "feed": "Feed",
             "apps": "Aplicaciones",
@@ -2268,6 +2284,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Reserva una reunión con nuestro equipo para empezar con un Simple Agreement for Future Token (SAFT)."
         },
         "index": {
+            "switched_to_account": "Ahora usas @{{account}}",
+            "logged_out_switched": "Sesión de @{{from}} cerrada — ahora usas @{{to}}",
+            "session_expired_switched": "La sesión de @{{from}} expiró — ahora usas @{{to}}",
+            "logged_out_elsewhere_switched": "Se cerró la sesión de @{{from}} en otra pestaña — ahora usas @{{to}}",
+            "pin_wipe_switched": "Se cerró la sesión de @{{from}} tras demasiadas contraseñas incorrectas — ahora usas @{{to}}",
+            "session_expired": "Tu sesión de @{{account}} expiró — inicia sesión de nuevo",
+            "logged_out_elsewhere": "Se cerró la sesión de @{{account}} en otra pestaña",
             "users": "Usuarios",
             "communities": "Comunidades",
             "exclusive_discount_for_a_limited_time_only": "¡Descuento exclusivo por tiempo limitado!",
@@ -3150,6 +3173,14 @@ export default {
             "stored_on_arweave": "Almacenada en Arweave"
         },
         "logout_modal": {
+            "title_account": "¿Cerrar la sesión de @{{account}}?",
+            "title": "¿Seguro que quieres cerrar sesión?",
+            "please_wait": "Espera mientras cerramos tu sesión de forma segura…",
+            "forgotten_on_device": "El navegador de este dispositivo olvidará tu cuenta. Si no confías en este dispositivo, usa la navegación privada o cierra siempre sesión para cerrar el acceso a tu cuenta.",
+            "others_stay_logged_in": "Tus otras cuentas siguen con la sesión iniciada.",
+            "logout_failed": "No se pudo cerrar la sesión",
+            "retry": "Reintentar",
+            "logout": "Cerrar sesión",
             "logging_out": "Cerrando sesión…"
         },
         "members_list_dialog": {

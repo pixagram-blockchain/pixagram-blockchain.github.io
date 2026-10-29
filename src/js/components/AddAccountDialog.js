@@ -98,10 +98,10 @@ import PixaSupra from "../icons/PixaSupra";
 import PixaPower from "../icons/PixaPower";
 import CheckCircleOutlineIcon from "@material-ui/icons/CheckCircleOutline";
 import FlashOnIcon from "@material-ui/icons/FlashOn";
-import { validateUsername, generateMnemonic, generateMasterKey, generatePDF } from "../utils/BackUpWallet2";
+import { validateUsername, generateMnemonic, generateMasterKey, generatePDF, backupPdfOptions } from "../utils/BackUpWallet3";
 import * as actions from "../actions/utils";
 
-import { t, useLanguage, getLanguage } from "../utils/text";
+import { t, useLanguage, getLanguage, getLocaleCode } from "../utils/text";
 
 // =============================================================================
 // CONSTANTS
@@ -1210,12 +1210,13 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
             // 2. Derive keys inline so any failure surfaces in the error panel.
             console.log("[AddAccountDialog] generating mnemonic…");
             // Seed wordlist follows the active UI language; languages without
-            // a BIP-39 wordlist fall back to English inside BackUpWallet2.
+            // a BIP-39 wordlist fall back to English inside BackUpWallet3.
             const seed = await generateMnemonic(18, getLanguage());
             console.log("[AddAccountDialog] deriving master key…");
             const masterKey = await generateMasterKey(seed, "");
             console.log("[AddAccountDialog] building backup PDF + role keys…");
-            const [pdfBlob, keys] = await generatePDF(username, seed, "", masterKey);
+            // Printed in the locale and page size chosen in the settings.
+            const [pdfBlob, keys] = await generatePDF(username, seed, "", masterKey, backupPdfOptions(api, getLocaleCode()));
             const pub = keys && keys.pub;
             if (!pub || !pub.owner || !pub.active || !pub.posting || !pub.memo) {
                 throw new Error(t("components.add_account_dialog.incomplete_authority_set"));

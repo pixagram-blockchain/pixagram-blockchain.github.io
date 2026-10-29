@@ -26,10 +26,10 @@ import ErrorRounded from "@material-ui/icons/ErrorRounded";
 import DownloadRounded from "@material-ui/icons/SaveAltRounded";
 import ShieldKey from "../icons/shieldKey";
 import * as actions from "../actions/utils";
-import { generateMnemonic, generateMasterKey, generatePDF } from "../utils/BackUpWallet2";
+import { generateMnemonic, generateMasterKey, generatePDF, backupPdfOptions } from "../utils/BackUpWallet3";
 
 import { T } from "../utils/T";
-import { t, getLanguage } from "../utils/text";
+import { t, getLanguage, getLocaleCode } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
 /*
@@ -387,7 +387,8 @@ class CreateBulkAccountDialog extends React.PureComponent {
                 // Wordlist follows the active UI language (English fallback).
                 const seed = await generateMnemonic(24, getLanguage());
                 const masterKey = await generateMasterKey(seed, "");
-                const [pdfBlob, keys] = await generatePDF(name, seed, "", masterKey);
+                // Printed in the locale and page size chosen in the settings.
+                const [pdfBlob, keys] = await generatePDF(name, seed, "", masterKey, backupPdfOptions(api, getLocaleCode()));
                 const publicKeys = keys && keys.pub ? keys.pub : null;
                 if (!publicKeys || !publicKeys.owner || !publicKeys.active || !publicKeys.posting || !publicKeys.memo) {
                     throw new Error("key derivation failed");
@@ -484,14 +485,14 @@ class CreateBulkAccountDialog extends React.PureComponent {
                 <DialogContent>
                     <Typography component="h2" variant="h6">{t("words.create_accounts")}</Typography>
                     <div className={classes.banner}><T
-                            k="components.create_bulk_account_dialog.strong_genesis_operation_strong_broadcast_0_acco"
-                            vars={{
-                                creator: (creator || "").toLowerCase()
-                            }}
-                            slots={[
-                                <span className={classes.mono} key="0" />,
-                                <span className={classes.mono} key="1" />
-                            ]} /></div>
+                        k="components.create_bulk_account_dialog.strong_genesis_operation_strong_broadcast_0_acco"
+                        vars={{
+                            creator: (creator || "").toLowerCase()
+                        }}
+                        slots={[
+                            <span className={classes.mono} key="0" />,
+                            <span className={classes.mono} key="1" />
+                        ]} /></div>
 
                     <TextField
                         style={KEY_FIELD_STYLE}
@@ -560,7 +561,7 @@ class CreateBulkAccountDialog extends React.PureComponent {
                     />
 
                     <div className={classes.warnBanner}><T
-                            k="components.create_bulk_account_dialog.each_account_is_generated_from_a_fresh" /></div>
+                        k="components.create_bulk_account_dialog.each_account_is_generated_from_a_fresh" /></div>
 
                     <Collapse in={_running || _done}>
                         <LinearProgress className={classes.progress} variant="determinate" value={_progress} />
@@ -577,8 +578,8 @@ class CreateBulkAccountDialog extends React.PureComponent {
                                             primary={<span className={classes.mono}>@{r.name}</span>}
                                             secondary={r.status === "ok"
                                                 ? t("components.create_bulk_account_dialog.block_backup_pdf_ready", {
-                                                block: r.block ?? "—"
-                                            })
+                                                    block: r.block ?? "—"
+                                                })
                                                 : (r.message || "Failed")}
                                             secondaryTypographyProps={r.status === "ok" ? RESULT_SECONDARY_OK : RESULT_SECONDARY_BAD}
                                         />

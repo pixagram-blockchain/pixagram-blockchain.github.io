@@ -16,6 +16,7 @@ import useVoteSync from "../hooks/useVoteSync";
 import useActiveAccount from "../hooks/useActiveAccount";
 import usePullToRefresh from "../hooks/usePullToRefresh";
 import { applyOptimisticVote, overlayPendingVote, overlayPendingVotes, mergeFreshVoteDataInto, votesSignature } from "../utils/voteSync";
+import { countUpvotes, countDownvotes } from "../utils/voteValue";
 import { markFeedSeen, toMs } from "../utils/feedSeen";
 import { EASE } from "../theme/motion";
 import ImageMeasurer from "../components/ImageMeasurer";
@@ -275,8 +276,9 @@ const enrichPostForCard = (post, account, voterProfiles) => {
         title: post.root_title || post.title || '', image: fi ? (typeof fi === 'string' ? fi : fi.src) : null,
         date: post.created ? new Date(post.created).getTime() : Date.now(), payout: `$${payout.toFixed(2)}`,
         created: post.created ?? null, // raw, for the seen tracking (see enrichFeedBlogCard)
-        upVotesNumber: Math.max(0, post.net_votes || activeVotes.filter(v => v?.weight >= 0).length || 0),
-        downVotesNumber: Math.max(0, activeVotes.filter(v => v?.weight < 0).length || 0),
+        // Count by vote sign (rshares/percent), never by `weight` (curation weight is always >= 0).
+        upVotesNumber: countUpvotes(activeVotes),
+        downVotesNumber: countDownvotes(activeVotes),
         active_votes: activeVotes, net_rshares: post.net_rshares != null ? String(post.net_rshares) : '0',
         _voter_profiles: voterProfiles || {}, nsfw: isNsfwPost(post), deleted: isDeletedPost(post), tags,
         permlink: post.permlink || '', category: post.category || '', _content_type: post._content_type || 'pixel_art',

@@ -694,6 +694,11 @@ export default {
             "trade": "Kereskedés",
         },
         "login_dialog": {
+            "master_password_works_too": "A master jelszavad is működik.",
+            "master_password_derives_key": "Master jelszó — a(z) {{requiredKeyType}} kulcsodat ebből származtatjuk",
+            "master_password_lacks_key": "@{{name}} {{requiredKeyType}} kulcsa megváltozott a láncon: ez a master jelszó már nem adja ki. Add meg magát a(z) {{requiredKeyType}} kulcsot.",
+            "add_account_button": "FIÓK HOZZÁADÁSA",
+            "add_another_account": "Adj hozzá még egy fiókot — a bejelentkezett fiókok bejelentkezve maradnak",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2046,6 +2051,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Biztosan törlöd ezt: „{{deleteConfirmDraftTitle}}”? Ez a művelet nem vonható vissza."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "A(z) {{t}} megváltozott a láncon (@{{username}}): ez a master jelszó már nem adja ki. Add meg magát a kulcsot.",
+            "attempts_remaining_before_logout": "Még %n {{{_plurals.attempt}}}, és @{{account}} ki lesz jelentkeztetve ezen az eszközön",
             "toggle_pin_visibility": "PIN láthatóságának váltása",
             "enter_your_pin_to_unlock_the_requested": "Add meg a PIN-kódodat a kért kulcs feloldásához.",
             "hint": "Tipp: {{vaultHint}}",
@@ -2177,6 +2184,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Amikor mások interakcióba lépnek a tartalmaddal, itt fogod látni"
         },
         "menu_content": {
+            "add_account": "Fiók hozzáadása",
+            "add_account_hint": "Bejelentkezés másik fiókkal",
+            "switch_account": "Fiókváltás",
+            "session_tab_only": "Csak ez a lap",
+            "session_locked": "Zárolva",
+            "switch_failed": "Nem sikerült átváltani erre: @{{account}}",
+            "session_time_left_dh": "Még {{days}} nap {{hours}} óra",
+            "session_time_left_h": "Még {{hours}} óra",
+            "session_time_left_soon": "Kevesebb mint 1 óra van hátra",
             "notifications": "Értesítések",
             "feed": "Hírfolyam",
             "apps": "Alkalmazások",
@@ -2267,6 +2283,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Foglalj megbeszélést a csapatunkkal, hogy elindulhass egy Simple Agreement for Future Token (SAFT) megállapodással."
         },
         "index": {
+            "switched_to_account": "Átváltva erre: @{{account}}",
+            "logged_out_switched": "Kijelentkeztél innen: @{{from}} — most ezt használod: @{{to}}",
+            "session_expired_switched": "Lejárt a munkamenet: @{{from}} — most ezt használod: @{{to}}",
+            "logged_out_elsewhere_switched": "@{{from}} ki lett jelentkeztetve egy másik lapon — most ezt használod: @{{to}}",
+            "pin_wipe_switched": "@{{from}} ki lett jelentkeztetve túl sok hibás jelszó után — most ezt használod: @{{to}}",
+            "session_expired": "Lejárt a munkameneted: @{{account}} — jelentkezz be újra",
+            "logged_out_elsewhere": "@{{account}} ki lett jelentkeztetve egy másik lapon",
             "users": "Felhasználók",
             "communities": "Közösségek",
             "exclusive_discount_for_a_limited_time_only": "Exkluzív kedvezmény, csak korlátozott ideig!",
@@ -3149,6 +3172,14 @@ export default {
             "stored_on_arweave": "Tárolva az Arweave-en"
         },
         "logout_modal": {
+            "title_account": "Kijelentkezel ebből: @{{account}}?",
+            "title": "Biztosan ki szeretnél jelentkezni?",
+            "please_wait": "Várj, amíg biztonságosan lezárjuk a munkamenetedet…",
+            "forgotten_on_device": "Ennek az eszköznek a böngészője elfelejti a fiókodat. Ha nem bízol ebben az eszközben, használj privát böngészést, vagy mindig jelentkezz ki, hogy lezárd a hozzáférést a fiókodhoz.",
+            "others_stay_logged_in": "A többi fiókod bejelentkezve marad.",
+            "logout_failed": "A kijelentkezés nem sikerült",
+            "retry": "Újrapróbálás",
+            "logout": "Kijelentkezés",
             "logging_out": "Kijelentkezés…"
         },
         "members_list_dialog": {

@@ -694,6 +694,11 @@ export default {
             "trade": "வர்த்தகம் செய்",
         },
         "login_dialog": {
+            "master_password_works_too": "உங்கள் மாஸ்டர் கடவுச்சொல்லும் வேலை செய்யும்.",
+            "master_password_derives_key": "மாஸ்டர் கடவுச்சொல் — உங்கள் {{requiredKeyType}} சாவி இதிலிருந்து பெறப்படும்",
+            "master_password_lacks_key": "@{{name}} இன் {{requiredKeyType}} சாவி செயினில் மாற்றப்பட்டுள்ளது: இந்த மாஸ்டர் கடவுச்சொல் இனி அதைத் தராது. {{requiredKeyType}} சாவியையே நேரடியாக உள்ளிடவும்.",
+            "add_account_button": "கணக்கைச் சேர்",
+            "add_another_account": "மற்றொரு கணக்கைச் சேர்க்கவும் — உள்நுழைந்துள்ள கணக்குகள் உள்நுழைந்த நிலையிலேயே இருக்கும்",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2046,6 +2051,8 @@ export default {
             "are_you_sure_you_want_to_delete": "\"{{deleteConfirmDraftTitle}}\" ஐ நீக்க விரும்புகிறீர்களா? இந்தச் செயலை மீட்க முடியாது."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "@{{username}} இன் {{t}} செயினில் மாற்றப்பட்டுள்ளது: இந்த மாஸ்டர் கடவுச்சொல் இனி அதைத் தராது. அந்தச் சாவியையே நேரடியாக உள்ளிடவும்.",
+            "attempts_remaining_before_logout": "இந்தச் சாதனத்தில் @{{account}} வெளியேற்றப்படுவதற்கு முன் %n {{{_plurals.attempt}}} மீதம்",
             "toggle_pin_visibility": "PIN புலப்பாட்டை மாற்று",
             "enter_your_pin_to_unlock_the_requested": "கோரிய சாவியைத் திறக்க உங்கள் PIN ஐ உள்ளிடவும்.",
             "hint": "குறிப்பு: {{vaultHint}}",
@@ -2177,6 +2184,15 @@ export default {
             "when_people_interact_with_your_content_youll": "உங்கள் உள்ளடக்கத்துடன் மக்கள் தொடர்பாடும் போது, அதை இங்கே காண்பீர்கள்"
         },
         "menu_content": {
+            "add_account": "கணக்கைச் சேர்",
+            "add_account_hint": "வேறொரு கணக்கில் உள்நுழை",
+            "switch_account": "கணக்கை மாற்று",
+            "session_tab_only": "இந்தத் தாவல் மட்டும்",
+            "session_locked": "பூட்டப்பட்டது",
+            "switch_failed": "@{{account}} கணக்கிற்கு மாற முடியவில்லை",
+            "session_time_left_dh": "{{days}} நாள் {{hours}} மணிநேரம் மீதம்",
+            "session_time_left_h": "{{hours}} மணிநேரம் மீதம்",
+            "session_time_left_soon": "1 மணிநேரத்துக்கும் குறைவாக மீதம்",
             "notifications": "அறிவிப்புகள்",
             "feed": "ஊட்டம்",
             "apps": "ஆப்ஸ்",
@@ -2267,6 +2283,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Simple Agreement for Future Token (SAFT) உடன் தொடங்க எங்கள் குழுவுடன் சந்திப்பை முன்பதிவு செய்யுங்கள்."
         },
         "index": {
+            "switched_to_account": "@{{account}} கணக்கிற்கு மாறப்பட்டது",
+            "logged_out_switched": "@{{from}} கணக்கிலிருந்து வெளியேறப்பட்டது — இப்போது @{{to}} பயன்பாட்டில் உள்ளது",
+            "session_expired_switched": "@{{from}} கணக்கின் அமர்வு காலாவதியானது — இப்போது @{{to}} பயன்பாட்டில் உள்ளது",
+            "logged_out_elsewhere_switched": "மற்றொரு தாவலில் @{{from}} கணக்கிலிருந்து வெளியேற்றப்பட்டது — இப்போது @{{to}} பயன்பாட்டில் உள்ளது",
+            "pin_wipe_switched": "பலமுறை தவறான கடவுச்சொல் உள்ளிட்டதால் @{{from}} கணக்கிலிருந்து வெளியேற்றப்பட்டது — இப்போது @{{to}} பயன்பாட்டில் உள்ளது",
+            "session_expired": "@{{account}} கணக்கிற்கான உங்கள் அமர்வு காலாவதியானது — மீண்டும் உள்நுழையவும்",
+            "logged_out_elsewhere": "மற்றொரு தாவலில் @{{account}} கணக்கிலிருந்து வெளியேற்றப்பட்டது",
             "users": "பயனர்கள்",
             "communities": "சமூகங்கள்",
             "exclusive_discount_for_a_limited_time_only": "வரம்புள்ள காலத்திற்கு மட்டும் பிரத்யேகத் தள்ளுபடி!",
@@ -3149,6 +3172,14 @@ export default {
             "stored_on_arweave": "Arweave இல் சேமிக்கப்பட்டது"
         },
         "logout_modal": {
+            "title_account": "@{{account}} கணக்கிலிருந்து வெளியேறவா?",
+            "title": "நிச்சயமாக வெளியேற விரும்புகிறீர்களா?",
+            "please_wait": "உங்கள் அமர்வைப் பாதுகாப்பாக முடிக்கிறோம், காத்திருக்கவும்…",
+            "forgotten_on_device": "இந்தச் சாதனத்தின் இணைய உலாவி உங்கள் கணக்கை மறந்துவிடும். இந்தச் சாதனத்தை நம்பவில்லை என்றால், தனிப்பட்ட உலாவலைப் பயன்படுத்தவும் அல்லது உங்கள் கணக்கிற்கான அணுகலை மூட எப்போதும் வெளியேறவும்.",
+            "others_stay_logged_in": "உங்கள் மற்ற கணக்குகள் உள்நுழைந்த நிலையிலேயே இருக்கும்.",
+            "logout_failed": "வெளியேற முடியவில்லை",
+            "retry": "மீண்டும் முயல்",
+            "logout": "வெளியேறு",
             "logging_out": "வெளியேறுகிறது…"
         },
         "members_list_dialog": {

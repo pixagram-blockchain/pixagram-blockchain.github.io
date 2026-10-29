@@ -114,12 +114,6 @@ class WitnessesDialog extends React.PureComponent {
     }
 
     componentDidMount() {
-        JSLoader(() => import("../data/authors")).then((d1) => {
-            const authors = d1.default();
-            this.setState({ _authors: authors }, () => {
-                this.forceUpdate();
-            });
-        });
     }
 
     componentWillReceiveProps(nextProps, nextContext) {

@@ -28,6 +28,7 @@ import ArrowForwardIosIcon from "@material-ui/icons/ArrowForwardIos";
 import InfoOutlined from "@material-ui/icons/InfoOutlined";
 import JSLoader from "../utils/JSLoader";
 import {HISTORY, POST_DRAWER_TAB_HASHES, parsePostDrawerHash, parseCommentFocusHash, buildCommentFocusHash, getPostState, POST_STATE, buildPostUrl} from "../utils/constants";
+import { feedTagPath } from "../utils/feedSort";
 import Chip from "@material-ui/core/Chip";
 import Palette from '@material-ui/icons/Palette'
 import SwapVert from '@material-ui/icons/SwapVert'
@@ -4203,8 +4204,10 @@ function PostDialog(props) {
         }
     }, [props.onClose]);
 
+    // In the sort the reader is browsing: trending until they pick another on
+    // the feed (utils/feedSort).
     const handleTagClick = useCallback((tag) => {
-        HISTORY.push("/trending/" + tag); props.onClose?.();
+        HISTORY.push(feedTagPath(tag)); props.onClose?.();
     }, [props.onClose]);
 
     /* ── Related artworks (Details → Originality / Inspiration) ───────────

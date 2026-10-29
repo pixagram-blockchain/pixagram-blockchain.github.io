@@ -694,6 +694,11 @@ export default {
             "trade": "Handl",
         },
         "login_dialog": {
+            "master_password_works_too": "Din master-adgangskode virker også.",
+            "master_password_derives_key": "Master-adgangskode — din {{requiredKeyType}}-nøgle bliver afledt af den",
+            "master_password_lacks_key": "{{requiredKeyType}}-nøglen for @{{name}} er ændret on-chain: denne master-adgangskode giver den ikke længere. Indtast selve {{requiredKeyType}}-nøglen.",
+            "add_account_button": "TILFØJ KONTO",
+            "add_another_account": "Tilføj endnu en konto — de konti, der er logget ind, forbliver logget ind",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2046,6 +2051,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Er du sikker på, at du vil slette ”{{deleteConfirmDraftTitle}}”? Denne handling kan ikke fortrydes."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "Denne master-adgangskode giver ikke længere {{t}} for @{{username}} — den er ændret on-chain. Indtast selve nøglen.",
+            "attempts_remaining_before_logout": "%n {{{_plurals.attempt}}} tilbage, før @{{account}} logges ud på denne enhed",
             "toggle_pin_visibility": "slå PIN-synlighed til/fra",
             "enter_your_pin_to_unlock_the_requested": "Indtast din PIN for at låse den ønskede nøgle op.",
             "hint": "Tip: {{vaultHint}}",
@@ -2177,6 +2184,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Når folk interagerer med dit indhold, ser du det her"
         },
         "menu_content": {
+            "add_account": "Tilføj konto",
+            "add_account_hint": "Log ind med en anden konto",
+            "switch_account": "Skift konto",
+            "session_tab_only": "Kun denne fane",
+            "session_locked": "Låst",
+            "switch_failed": "Kunne ikke skifte til @{{account}}",
+            "session_time_left_dh": "{{days}} d. {{hours}} t. tilbage",
+            "session_time_left_h": "{{hours}} t. tilbage",
+            "session_time_left_soon": "Under 1 t. tilbage",
             "notifications": "Notifikationer",
             "feed": "Feed",
             "apps": "Apps",
@@ -2267,6 +2283,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Book et møde med vores team for at komme i gang med en Simple Agreement for Future Token (SAFT)."
         },
         "index": {
+            "switched_to_account": "Skiftede til @{{account}}",
+            "logged_out_switched": "Logget ud af @{{from}} — bruger nu @{{to}}",
+            "session_expired_switched": "Sessionen for @{{from}} er udløbet — bruger nu @{{to}}",
+            "logged_out_elsewhere_switched": "@{{from}} blev logget ud i en anden fane — bruger nu @{{to}}",
+            "pin_wipe_switched": "@{{from}} blev logget ud efter for mange forkerte adgangskoder — bruger nu @{{to}}",
+            "session_expired": "Din session for @{{account}} er udløbet — log ind igen",
+            "logged_out_elsewhere": "@{{account}} blev logget ud i en anden fane",
             "users": "Brugere",
             "communities": "Fællesskaber",
             "exclusive_discount_for_a_limited_time_only": "Eksklusiv rabat kun i begrænset tid!",
@@ -3149,6 +3172,14 @@ export default {
             "stored_on_arweave": "Gemt på Arweave"
         },
         "logout_modal": {
+            "title_account": "Log @{{account}} ud?",
+            "title": "Vil du virkelig logge ud?",
+            "please_wait": "Vent, mens vi afslutter din session sikkert…",
+            "forgotten_on_device": "Webbrowseren på denne enhed glemmer din konto. Hvis du ikke stoler på denne enhed, så brug privat browsing eller log altid ud for at lukke adgangen til din konto.",
+            "others_stay_logged_in": "Dine andre konti forbliver logget ind.",
+            "logout_failed": "Log ud mislykkedes",
+            "retry": "Prøv igen",
+            "logout": "Log ud",
             "logging_out": "Logger ud…"
         },
         "members_list_dialog": {

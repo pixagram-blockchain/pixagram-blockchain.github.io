@@ -228,13 +228,6 @@ class GDViabilityManagement extends React.PureComponent {
     }
 
     componentDidMount() {
-        JSLoader(() => import("../data/authors")).then((d1) => {
-            const authors = d1.default();
-            this.setState({ _authors: authors }, () => {
-                this.forceUpdate();
-            });
-        });
-
         if (typeof window !== "undefined" && window.matchMedia) {
             this._mql = window.matchMedia(PHONE);
             this._mql.addEventListener("change", this._handleMediaChange);

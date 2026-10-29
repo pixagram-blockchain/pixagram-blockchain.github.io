@@ -22,7 +22,7 @@ import CircularProgress from "@material-ui/core/CircularProgress";
 import IconButton from "@material-ui/core/IconButton";
 import Box from "@material-ui/core/Box";
 import JSLoader from "../utils/JSLoader";
-import {validateUsername, generateMnemonic, generateMasterKey, generatePDF, getWordsPossible} from "../utils/BackUpWallet2";
+import {validateUsername, generateMnemonic, generateMasterKey, generatePDF, getWordsPossible, backupPdfOptions} from "../utils/BackUpWallet3";
 import Collapse from "@material-ui/core/Collapse";
 import ChipInput from "./ChipInput";
 import SeedPhraseMenu from "./SeedPhraseMenu";
@@ -432,9 +432,11 @@ const destSupport = (dialCode) => {
     return "unsupported";
 };
 
-// 1-day session, matching LoginDialog's "1d" preset (24 * 60 minutes).
-const SESSION_TIMEOUT_MIN = 24 * 60;
-const PIN_TIMEOUT_MIN = 24 * 60;
+// The new account's session: 7 days, LoginDialog's default (its range is 3 to
+// 14 days; SessionManager v7 never goes below 3). Was 1 day — lifted to the
+// 3-day floor anyway — and a 1-day PIN auto-lock that this sign-in (no PIN)
+// does not use but left in the API's config for later PIN logins.
+const SESSION_TIMEOUT_MIN = 7 * 24 * 60;
 
 // Signing a just-created account in: how long to keep asking the node to
 // validate it before giving up, and how often (see _loginCurrentAccount).
@@ -3468,7 +3470,9 @@ class CreateAccountDialog extends React.PureComponent {
         const {_username, _seed, _password} = this.state;
         try {
             const masterKey = await generateMasterKey(_seed, _password);
-            const [blob, keys] = await generatePDF(_username, _seed, _password, masterKey);
+            // Printed in the locale and page size chosen in the settings.
+            const [blob, keys] = await generatePDF(_username, _seed, _password, masterKey,
+                backupPdfOptions(this.props.api || this.state.api, getLocaleCode()));
 
             this.setState({
                 _publicKeys:  keys.pub,
@@ -4346,7 +4350,8 @@ class CreateAccountDialog extends React.PureComponent {
             const masterKey = await generateMasterKey(_seed, _password);
             // generatePDF returns [blob, keys] — keep both so the user can
             // download a refreshed backup at step 2 success.
-            const [blob, keys] = await generatePDF(_username, _seed, _password, masterKey);
+            const [blob, keys] = await generatePDF(_username, _seed, _password, masterKey,
+                backupPdfOptions(this.props.api || api, getLocaleCode()));
             const derived = keys.pub || {};
 
             // Fetch the on-chain account and compare each role key.
@@ -4402,8 +4407,10 @@ class CreateAccountDialog extends React.PureComponent {
     // if they had typed their master password there. What each step does is
     // read off utils/api/pixaproxyapi.js:
     //
-    //   1. api.updateConfig({ SESSION_TIMEOUT, PIN_TIMEOUT }) — the 1-day
-    //      window the session is created with.
+    //   1. api.updateConfig({ SESSION_TIMEOUT }) — the 7-day window the
+    //      session is created with. Only the session length: this sign-in has
+    //      no PIN, and the PIN auto-lock it used to set (1 day) stayed in the
+    //      API's config for the next PIN login.
     //   2. api.validateCredentials(username, masterKey, 'master') — derives
     //      the role keys and checks them against the account ON CHAIN. While
     //      the node doesn't show a just-created account yet it answers
@@ -4414,13 +4421,17 @@ class CreateAccountDialog extends React.PureComponent {
     //      stayConnected: true }) — handed that validation, it doesn't check
     //      again: it caches the keys, creates the persistent session (with
     //      its session_created event) and makes the account the active one.
+    //      An account already logged in stays logged in, parked (multi-account,
+    //      session-manager v7): the new one is simply added and takes over.
     //      Not handed one, quickLogin validates by itself: the
     //      `skipValidation` the previous version passed has been ignored
     //      since the API's v3.5.2. So it checked the brand-new account once,
     //      the moment it was created, got 'Account not found' — and the
     //      "You're signed in" text hid the failure.
-    //   4. No session id back: session_created is emitted by hand, as
-    //      LoginDialog does — the keys are cached and the account active.
+    //   4. (Removed: emitting session_created by hand when no session id
+    //      came back. Since pixaproxyapi v4.8 quickLogin falls back to a
+    //      tab-only session, and emits session_created itself when even that
+    //      fails — the hand-made one was a second event.)
     //
     // Resolves { ok, error }: a failure is reported, never covered by a
     // "You're signed in". Registration runs it when the finished dialog
@@ -4437,17 +4448,13 @@ class CreateAccountDialog extends React.PureComponent {
         }
 
         const sessionTimeoutMs = SESSION_TIMEOUT_MIN * 60 * 1000;
-        const pinTimeoutMs     = PIN_TIMEOUT_MIN     * 60 * 1000;
         const userAgent        = (typeof navigator !== "undefined" && navigator.userAgent) || "unknown";
 
         try {
-            // Step 1: align session manager config with the desired 1-day window.
+            // Step 1: the session length (7 days) — and nothing else.
             if (typeof api.updateConfig === "function") {
                 try {
-                    api.updateConfig({
-                        SESSION_TIMEOUT: sessionTimeoutMs,
-                        PIN_TIMEOUT:     pinTimeoutMs,
-                    });
+                    api.updateConfig({ SESSION_TIMEOUT: sessionTimeoutMs });
                 } catch (e) {
                     console.warn("[CreateAccountDialog] api.updateConfig failed (non-fatal):", e);
                 }
@@ -4481,9 +4488,8 @@ class CreateAccountDialog extends React.PureComponent {
                 userAgent,
             });
 
-            // Step 4: no session id — at least let the UI know, as LoginDialog.
-            if (!(result && (result.sessionId || result.eventEmitted)) && api.eventEmitter?.emit) {
-                api.eventEmitter.emit("session_created", { account: _username });
+            if (!(result && result.success)) {
+                throw new Error(t("components.create_account_dialog.could_not_start_a_session_please_try_again"));
             }
 
             // Offer the browser the master password for "save password?"

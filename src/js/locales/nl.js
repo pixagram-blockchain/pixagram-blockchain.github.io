@@ -694,6 +694,11 @@ export default {
             "trade": "Handelen",
         },
         "login_dialog": {
+            "master_password_works_too": "Je masterwachtwoord werkt ook.",
+            "master_password_derives_key": "Masterwachtwoord — je {{requiredKeyType}}-sleutel wordt ervan afgeleid",
+            "master_password_lacks_key": "De {{requiredKeyType}}-sleutel van @{{name}} is on-chain gewijzigd: dit masterwachtwoord levert hem niet meer op. Voer de {{requiredKeyType}}-sleutel zelf in.",
+            "add_account_button": "ACCOUNT TOEVOEGEN",
+            "add_another_account": "Voeg nog een account toe — ingelogde accounts blijven ingelogd",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2046,6 +2051,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Weet je zeker dat je ‘{{deleteConfirmDraftTitle}}’ wilt verwijderen? Deze actie kan niet ongedaan worden gemaakt."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "De {{t}} van @{{username}} is on-chain gewijzigd: dit masterwachtwoord levert hem niet meer op. Voer de {{t}} zelf in.",
+            "attempts_remaining_before_logout": "Nog %n {{{_plurals.attempt}}} voordat @{{account}} op dit apparaat wordt uitgelogd",
             "toggle_pin_visibility": "zichtbaarheid van de pincode wisselen",
             "enter_your_pin_to_unlock_the_requested": "Voer je pincode in om de gevraagde sleutel te ontgrendelen.",
             "hint": "Hint: {{vaultHint}}",
@@ -2177,6 +2184,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Wanneer anderen met je content interageren, zie je dat hier"
         },
         "menu_content": {
+            "add_account": "Account toevoegen",
+            "add_account_hint": "Inloggen met een ander account",
+            "switch_account": "Account wisselen",
+            "session_tab_only": "Alleen dit tabblad",
+            "session_locked": "Vergrendeld",
+            "switch_failed": "Overschakelen naar @{{account}} mislukt",
+            "session_time_left_dh": "Nog {{days}} d {{hours}} u",
+            "session_time_left_h": "Nog {{hours}} u",
+            "session_time_left_soon": "Nog minder dan 1 u",
             "notifications": "Meldingen",
             "feed": "Feed",
             "apps": "Apps",
@@ -2267,6 +2283,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Boek een afspraak met ons team om te starten met een Simple Agreement for Future Token (SAFT)."
         },
         "index": {
+            "switched_to_account": "Overgeschakeld naar @{{account}}",
+            "logged_out_switched": "Uitgelogd bij @{{from}} — je gebruikt nu @{{to}}",
+            "session_expired_switched": "De sessie van @{{from}} is verlopen — je gebruikt nu @{{to}}",
+            "logged_out_elsewhere_switched": "@{{from}} is in een ander tabblad uitgelogd — je gebruikt nu @{{to}}",
+            "pin_wipe_switched": "@{{from}} is uitgelogd na te veel verkeerde wachtwoorden — je gebruikt nu @{{to}}",
+            "session_expired": "Je sessie voor @{{account}} is verlopen — log opnieuw in",
+            "logged_out_elsewhere": "@{{account}} is in een ander tabblad uitgelogd",
             "users": "Gebruikers",
             "communities": "Communities",
             "exclusive_discount_for_a_limited_time_only": "Exclusieve korting, alleen voor beperkte tijd!",
@@ -3149,6 +3172,14 @@ export default {
             "stored_on_arweave": "Opgeslagen op Arweave"
         },
         "logout_modal": {
+            "title_account": "@{{account}} uitloggen?",
+            "title": "Wil je echt uitloggen?",
+            "please_wait": "Even geduld terwijl we je sessie veilig beëindigen…",
+            "forgotten_on_device": "De webbrowser van dit apparaat vergeet je account. Vertrouw je dit apparaat niet, gebruik dan privé browsen of log altijd uit om de toegang tot je account af te sluiten.",
+            "others_stay_logged_in": "Je andere accounts blijven ingelogd.",
+            "logout_failed": "Uitloggen mislukt",
+            "retry": "Opnieuw proberen",
+            "logout": "Uitloggen",
             "logging_out": "Uitloggen…"
         },
         "members_list_dialog": {

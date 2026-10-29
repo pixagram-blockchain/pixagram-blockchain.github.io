@@ -694,6 +694,11 @@ export default {
             "trade": "Käy kauppaa",
         },
         "login_dialog": {
+            "master_password_works_too": "Myös master-salasanasi käy.",
+            "master_password_derives_key": "Master-salasana — {{requiredKeyType}}-avaimesi johdetaan siitä",
+            "master_password_lacks_key": "Tilin @{{name}} {{requiredKeyType}}-avain on vaihdettu lohkoketjussa: tämä master-salasana ei enää tuota sitä. Syötä itse {{requiredKeyType}}-avain.",
+            "add_account_button": "LISÄÄ TILI",
+            "add_another_account": "Lisää toinen tili — kirjautuneet tilit pysyvät kirjautuneina",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2046,6 +2051,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Haluatko varmasti poistaa luonnoksen ”{{deleteConfirmDraftTitle}}”? Tätä toimintoa ei voi perua."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "Tilin @{{username}} {{t}} on vaihdettu lohkoketjussa: tämä master-salasana ei enää tuota sitä. Syötä itse avain.",
+            "attempts_remaining_before_logout": "%n {{{_plurals.attempt}}} jäljellä, ennen kuin @{{account}} kirjataan ulos tällä laitteella",
             "toggle_pin_visibility": "vaihda PIN-koodin näkyvyyttä",
             "enter_your_pin_to_unlock_the_requested": "Anna PIN-koodisi avataksesi pyydetyn avaimen.",
             "hint": "Vihje: {{vaultHint}}",
@@ -2177,6 +2184,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Kun ihmiset ovat vuorovaikutuksessa sisältösi kanssa, näet sen täällä"
         },
         "menu_content": {
+            "add_account": "Lisää tili",
+            "add_account_hint": "Kirjaudu toisella tilillä",
+            "switch_account": "Vaihda tiliä",
+            "session_tab_only": "Vain tämä välilehti",
+            "session_locked": "Lukittu",
+            "switch_failed": "Vaihto tiliin @{{account}} epäonnistui",
+            "session_time_left_dh": "{{days}} pv {{hours}} t jäljellä",
+            "session_time_left_h": "{{hours}} t jäljellä",
+            "session_time_left_soon": "Alle 1 t jäljellä",
             "notifications": "Ilmoitukset",
             "feed": "Syöte",
             "apps": "Sovellukset",
@@ -2267,6 +2283,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Varaa tapaaminen tiimimme kanssa aloittaaksesi Simple Agreement for Future Token (SAFT) -sopimuksella."
         },
         "index": {
+            "switched_to_account": "Vaihdettu tiliin @{{account}}",
+            "logged_out_switched": "Kirjauduttu ulos tililtä @{{from}} — käytössä nyt @{{to}}",
+            "session_expired_switched": "Tilin @{{from}} istunto vanheni — käytössä nyt @{{to}}",
+            "logged_out_elsewhere_switched": "@{{from}} kirjattiin ulos toisessa välilehdessä — käytössä nyt @{{to}}",
+            "pin_wipe_switched": "@{{from}} kirjattiin ulos liian monen väärän salasanan jälkeen — käytössä nyt @{{to}}",
+            "session_expired": "Istuntosi tilillä @{{account}} vanheni — kirjaudu uudelleen sisään",
+            "logged_out_elsewhere": "@{{account}} kirjattiin ulos toisessa välilehdessä",
             "users": "Käyttäjät",
             "communities": "Yhteisöt",
             "exclusive_discount_for_a_limited_time_only": "Eksklusiivinen alennus vain rajoitetun ajan!",
@@ -3149,6 +3172,14 @@ export default {
             "stored_on_arweave": "Tallennettu Arweaveen"
         },
         "logout_modal": {
+            "title_account": "Kirjataanko @{{account}} ulos?",
+            "title": "Haluatko varmasti kirjautua ulos?",
+            "please_wait": "Odota, kun lopetamme istuntosi turvallisesti…",
+            "forgotten_on_device": "Tämän laitteen selain unohtaa tilisi. Jos et luota tähän laitteeseen, käytä yksityistä selausta tai kirjaudu aina ulos, jotta pääsy tiliisi suljetaan.",
+            "others_stay_logged_in": "Muut tilisi pysyvät kirjautuneina.",
+            "logout_failed": "Uloskirjautuminen epäonnistui",
+            "retry": "Yritä uudelleen",
+            "logout": "Kirjaudu ulos",
             "logging_out": "Kirjaudutaan ulos…"
         },
         "members_list_dialog": {

@@ -697,6 +697,11 @@ export default {
             "trade": "Tranzacționează",
         },
         "login_dialog": {
+            "master_password_works_too": "Funcționează și parola ta master.",
+            "master_password_derives_key": "Parolă master — cheia ta {{requiredKeyType}} va fi derivată din ea",
+            "master_password_lacks_key": "Cheia {{requiredKeyType}} a lui @{{name}} a fost schimbată on-chain: această parolă master nu o mai generează. Introdu chiar cheia {{requiredKeyType}}.",
+            "add_account_button": "ADAUGĂ CONT",
+            "add_another_account": "Adaugă încă un cont — cele conectate rămân conectate",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2049,6 +2054,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Sigur vrei să ștergi „{{deleteConfirmDraftTitle}}”? Acțiunea nu poate fi anulată."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "{{t}} a lui @{{username}} a fost schimbată on-chain: această parolă master nu o mai generează. Introdu chiar această cheie.",
+            "attempts_remaining_before_logout": "Încă %n {{{_plurals.attempt}}} și @{{account}} va fi deconectat de pe acest dispozitiv",
             "toggle_pin_visibility": "arată sau ascunde PIN-ul",
             "enter_your_pin_to_unlock_the_requested": "Introdu PIN-ul pentru a debloca cheia solicitată.",
             "hint": "Indiciu: {{vaultHint}}",
@@ -2180,6 +2187,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Când cineva interacționează cu conținutul tău, le vei vedea aici"
         },
         "menu_content": {
+            "add_account": "Adaugă cont",
+            "add_account_hint": "Conectează-te cu alt cont",
+            "switch_account": "Schimbă contul",
+            "session_tab_only": "Doar această filă",
+            "session_locked": "Blocat",
+            "switch_failed": "Nu s-a putut trece la @{{account}}",
+            "session_time_left_dh": "Timp rămas: {{days}} z {{hours}} h",
+            "session_time_left_h": "Timp rămas: {{hours}} h",
+            "session_time_left_soon": "Timp rămas: sub 1 h",
             "notifications": "Notificări",
             "feed": "Feed",
             "apps": "Aplicații",
@@ -2270,6 +2286,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Programează o întâlnire cu echipa noastră pentru a începe cu un Simple Agreement for Future Token (SAFT)."
         },
         "index": {
+            "switched_to_account": "Ai trecut la @{{account}}",
+            "logged_out_switched": "Te-ai deconectat de la @{{from}} — acum folosești @{{to}}",
+            "session_expired_switched": "Sesiunea pentru @{{from}} a expirat — acum folosești @{{to}}",
+            "logged_out_elsewhere_switched": "@{{from}} a fost deconectat într-o altă filă — acum folosești @{{to}}",
+            "pin_wipe_switched": "@{{from}} a fost deconectat după prea multe parole greșite — acum folosești @{{to}}",
+            "session_expired": "Sesiunea ta pentru @{{account}} a expirat — conectează-te din nou",
+            "logged_out_elsewhere": "@{{account}} a fost deconectat într-o altă filă",
             "users": "Utilizatori",
             "communities": "Comunități",
             "exclusive_discount_for_a_limited_time_only": "Reducere exclusivă, doar pentru timp limitat!",
@@ -3152,6 +3175,14 @@ export default {
             "stored_on_arweave": "Stocat pe Arweave"
         },
         "logout_modal": {
+            "title_account": "Deconectezi @{{account}}?",
+            "title": "Sigur vrei să te deconectezi?",
+            "please_wait": "Așteaptă cât închidem sesiunea în siguranță…",
+            "forgotten_on_device": "Browserul acestui dispozitiv îți va uita contul. Dacă nu ai încredere în acest dispozitiv, folosește navigarea privată sau deconectează-te mereu pentru a închide accesul la cont.",
+            "others_stay_logged_in": "Celelalte conturi ale tale rămân conectate.",
+            "logout_failed": "Deconectarea a eșuat",
+            "retry": "Reîncearcă",
+            "logout": "Deconectează-te",
             "logging_out": "Se deconectează…"
         },
         "members_list_dialog": {

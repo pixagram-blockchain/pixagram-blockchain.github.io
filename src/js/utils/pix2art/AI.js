@@ -69,7 +69,7 @@ const PRESETS_TRANSFORM = {
     lora_style: "retroart",
     identitynet_strength: 0.85,
     ip_adapter_scale: 0.85,
-    resolution: 1408,
+    resolution: 1600,
     aspect_ratio: "1:1",
     use_tiled: false,
     tile_size: 768,

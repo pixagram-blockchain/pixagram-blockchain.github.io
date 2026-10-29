@@ -694,6 +694,11 @@ export default {
             "trade": "Handle",
         },
         "login_dialog": {
+            "master_password_works_too": "Masterpassordet ditt fungerer også.",
+            "master_password_derives_key": "Masterpassord — {{requiredKeyType}}-nøkkelen din blir avledet fra det",
+            "master_password_lacks_key": "{{requiredKeyType}}-nøkkelen til @{{name}} er endret på kjeden: dette masterpassordet gir den ikke lenger. Skriv inn selve {{requiredKeyType}}-nøkkelen.",
+            "add_account_button": "LEGG TIL KONTO",
+            "add_another_account": "Legg til en konto til — de som er logget inn, forblir logget inn",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2046,6 +2051,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Er du sikker på at du vil slette «{{deleteConfirmDraftTitle}}»? Denne handlingen kan ikke angres."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "Dette masterpassordet gir ikke lenger {{t}} for @{{username}} — den er endret på kjeden. Skriv inn selve nøkkelen.",
+            "attempts_remaining_before_logout": "%n {{{_plurals.attempt}}} igjen før @{{account}} logges ut på denne enheten",
             "toggle_pin_visibility": "vis eller skjul PIN-koden",
             "enter_your_pin_to_unlock_the_requested": "Skriv inn PIN-koden din for å låse opp den forespurte nøkkelen.",
             "hint": "Hint: {{vaultHint}}",
@@ -2177,6 +2184,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Når folk samhandler med innholdet ditt, ser du det her"
         },
         "menu_content": {
+            "add_account": "Legg til konto",
+            "add_account_hint": "Logg inn med en annen konto",
+            "switch_account": "Bytt konto",
+            "session_tab_only": "Bare denne fanen",
+            "session_locked": "Låst",
+            "switch_failed": "Kunne ikke bytte til @{{account}}",
+            "session_time_left_dh": "{{days}} d {{hours}} t igjen",
+            "session_time_left_h": "{{hours}} t igjen",
+            "session_time_left_soon": "Under 1 t igjen",
             "notifications": "Varsler",
             "feed": "Feed",
             "apps": "Apper",
@@ -2267,6 +2283,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Book et møte med teamet vårt for å komme i gang med en Simple Agreement for Future Token (SAFT)."
         },
         "index": {
+            "switched_to_account": "Byttet til @{{account}}",
+            "logged_out_switched": "Logget ut av @{{from}} — bruker nå @{{to}}",
+            "session_expired_switched": "Økten for @{{from}} er utløpt — bruker nå @{{to}}",
+            "logged_out_elsewhere_switched": "@{{from}} ble logget ut i en annen fane — bruker nå @{{to}}",
+            "pin_wipe_switched": "@{{from}} ble logget ut etter for mange feil passord — bruker nå @{{to}}",
+            "session_expired": "Økten din for @{{account}} er utløpt — logg inn på nytt",
+            "logged_out_elsewhere": "@{{account}} ble logget ut i en annen fane",
             "users": "Brukere",
             "communities": "Fellesskap",
             "exclusive_discount_for_a_limited_time_only": "Eksklusiv rabatt — kun i begrenset tid!",
@@ -3149,6 +3172,14 @@ export default {
             "stored_on_arweave": "Lagret på Arweave"
         },
         "logout_modal": {
+            "title_account": "Logge ut @{{account}}?",
+            "title": "Vil du virkelig logge ut?",
+            "please_wait": "Vent mens vi avslutter økten din på en sikker måte …",
+            "forgotten_on_device": "Nettleseren på denne enheten glemmer kontoen din. Hvis du ikke stoler på denne enheten, bruk privat nettlesing eller logg alltid ut for å stenge tilgangen til kontoen din.",
+            "others_stay_logged_in": "De andre kontoene dine forblir logget inn.",
+            "logout_failed": "Utlogging mislyktes",
+            "retry": "Prøv igjen",
+            "logout": "Logg ut",
             "logging_out": "Logger ut …"
         },
         "members_list_dialog": {

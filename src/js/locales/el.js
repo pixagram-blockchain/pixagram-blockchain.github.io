@@ -704,6 +704,11 @@ export default {
             "trade": "Συναλλαγές",
         },
         "login_dialog": {
+            "master_password_works_too": "Λειτουργεί και ο κύριος κωδικός σας.",
+            "master_password_derives_key": "Κύριος κωδικός — το κλειδί {{requiredKeyType}} σας θα προκύψει από αυτόν",
+            "master_password_lacks_key": "Το κλειδί {{requiredKeyType}} του @{{name}} άλλαξε on-chain: αυτός ο κύριος κωδικός δεν το παράγει πλέον. Εισαγάγετε απευθείας το κλειδί {{requiredKeyType}}.",
+            "add_account_button": "ΠΡΟΣΘΗΚΗ ΛΟΓΑΡΙΑΣΜΟΥ",
+            "add_another_account": "Προσθέστε άλλον έναν λογαριασμό — όσοι είναι συνδεδεμένοι παραμένουν συνδεδεμένοι",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2056,6 +2061,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Είστε βέβαιοι ότι θέλετε να διαγράψετε το «{{deleteConfirmDraftTitle}}»; Αυτή η ενέργεια δεν αναιρείται."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "Το {{t}} του @{{username}} άλλαξε on-chain: αυτός ο κύριος κωδικός δεν το παράγει πλέον. Εισαγάγετε απευθείας το κλειδί.",
+            "attempts_remaining_before_logout": "Ακόμη %n {{{_plurals.attempt}}} και το @{{account}} θα αποσυνδεθεί από αυτή τη συσκευή",
             "toggle_pin_visibility": "εμφάνιση ή απόκρυψη του PIN",
             "enter_your_pin_to_unlock_the_requested": "Εισαγάγετε το PIN σας για να ξεκλειδώσετε το ζητούμενο κλειδί.",
             "hint": "Υπόδειξη: {{vaultHint}}",
@@ -2187,6 +2194,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Όταν κάποιος αλληλεπιδρά με το περιεχόμενό σας, θα το βλέπετε εδώ"
         },
         "menu_content": {
+            "add_account": "Προσθήκη λογαριασμού",
+            "add_account_hint": "Σύνδεση με άλλον λογαριασμό",
+            "switch_account": "Αλλαγή λογαριασμού",
+            "session_tab_only": "Μόνο αυτή η καρτέλα",
+            "session_locked": "Κλειδωμένος",
+            "switch_failed": "Δεν ήταν δυνατή η εναλλαγή στο @{{account}}",
+            "session_time_left_dh": "Υπόλοιπο: {{days}} ημ. {{hours}} ώρ.",
+            "session_time_left_h": "Υπόλοιπο: {{hours}} ώρ.",
+            "session_time_left_soon": "Υπόλοιπο: λιγότερο από 1 ώρα",
             "notifications": "Ειδοποιήσεις",
             "feed": "Ροή",
             "apps": "Εφαρμογές",
@@ -2277,6 +2293,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Κλείστε συνάντηση με την ομάδα μας για να ξεκινήσετε με ένα Simple Agreement for Future Token (SAFT)."
         },
         "index": {
+            "switched_to_account": "Έγινε εναλλαγή στο @{{account}}",
+            "logged_out_switched": "Αποσυνδεθήκατε από το @{{from}} — τώρα χρησιμοποιείτε το @{{to}}",
+            "session_expired_switched": "Η συνεδρία του @{{from}} έληξε — τώρα χρησιμοποιείτε το @{{to}}",
+            "logged_out_elsewhere_switched": "Το @{{from}} αποσυνδέθηκε σε άλλη καρτέλα — τώρα χρησιμοποιείτε το @{{to}}",
+            "pin_wipe_switched": "Το @{{from}} αποσυνδέθηκε μετά από πάρα πολλούς λανθασμένους κωδικούς πρόσβασης — τώρα χρησιμοποιείτε το @{{to}}",
+            "session_expired": "Η συνεδρία σας για το @{{account}} έληξε — συνδεθείτε ξανά",
+            "logged_out_elsewhere": "Το @{{account}} αποσυνδέθηκε σε άλλη καρτέλα",
             "users": "Χρήστες",
             "communities": "Κοινότητες",
             "exclusive_discount_for_a_limited_time_only": "Αποκλειστική έκπτωση για περιορισμένο χρόνο!",
@@ -3158,6 +3181,14 @@ export default {
             "stored_on_arweave": "Αποθηκεύεται στο Arweave"
         },
         "logout_modal": {
+            "title_account": "Αποσύνδεση του @{{account}};",
+            "title": "Θέλετε σίγουρα να αποσυνδεθείτε;",
+            "please_wait": "Περιμένετε όσο τερματίζουμε με ασφάλεια τη συνεδρία σας…",
+            "forgotten_on_device": "Το πρόγραμμα περιήγησης αυτής της συσκευής θα ξεχάσει τον λογαριασμό σας. Αν δεν εμπιστεύεστε αυτή τη συσκευή, χρησιμοποιείτε ιδιωτική περιήγηση ή αποσυνδέεστε πάντα, ώστε να κλείνει η πρόσβαση στον λογαριασμό σας.",
+            "others_stay_logged_in": "Οι άλλοι λογαριασμοί σας παραμένουν συνδεδεμένοι.",
+            "logout_failed": "Η αποσύνδεση απέτυχε",
+            "retry": "Επανάληψη",
+            "logout": "Αποσύνδεση",
             "logging_out": "Αποσύνδεση…"
         },
         "members_list_dialog": {

@@ -113,14 +113,92 @@
  * executions 0 (or a zero amount) there, so callers that followed the old
  * contract now cancel instead of failing.
  *
- * @version 4.7.2
+ * v4.8.0: Multi-account sessions (session-manager v7) and a 7-day login.
+ *   - Several accounts can be logged in at once; one is active. New:
+ *     listAccounts(), switchAccount(account), getSessionInfo(). A login for
+ *     another account ADDS it (the active one is parked, not orphaned).
+ *     logout() logs out the active account and switches to the most recently
+ *     used remaining one; logout({ account }) logs out a parked account,
+ *     logout({ all: true }) everyone; with nobody logged in it does nothing.
+ *     Events: `account_switched`, `accounts_changed`, `session_refreshed`,
+ *     `session_deactivated` (session-manager AccountEvents).
+ *   - CONFIG.SESSION_TIMEOUT 30 min → 7 days, CONFIG.MIN_SESSION_TIMEOUT
+ *     3 days (floor applied by SessionManager); the window slides on user
+ *     presence under the 30-day absolute cap.
+ *   - When the active account leaves — logout, expiry, a logout in another
+ *     tab, the PIN wipe — the most recently used other logged-in account
+ *     takes over. SessionManager decides it inside its operation queue and
+ *     announces `session_ended` { reason, next, switching } then
+ *     `account_switched` { reason, replaces }; with nobody left,
+ *     `session_ended` { reason } reaches the UI (it never listened to
+ *     `session_expired`). Decided here, outside that queue, a switch landing
+ *     in between made logout() end the wrong account.
+ *   - A logged-out account's PIN hint (`vault_hint:<account>`, and the
+ *     single `vault_hint` record when it is theirs) is deleted.
+ *   - Cross-account safety: unlockWithPin({ account }) refuses an account
+ *     that is not the active one (it used to unlock the ACTIVE account and
+ *     cache its keys under the other name — reachable from KeyManager's
+ *     pin_required path); KeyManager only raises a PIN prompt for the active
+ *     account and holds the active account's keys only.
+ *   - PIN lockout and the PIN_WIPE_LIMIT wipe are per account: the wipe used
+ *     to clear EVERY stored session, and did not touch the in-memory
+ *     session, so the right PIN still unlocked until the next reload. The
+ *     counters are read from IndexedDB, not LacertaDB's per-tab document
+ *     cache (each open tab counted on its own, multiplying the attempts
+ *     before a lockout or the wipe), and a new login of the account starts
+ *     them afresh (a lockout is kept in memory only when it could not be
+ *     written: a copy there outlived that reset in the other tabs).
+ *   - unlockWithPin() pins the account it means: a switch queued first no
+ *     longer gets the PIN tried on (and counted against) the wrong account.
+ *     A wrong PIN reports `attemptsRemaining` (before the next lockout or
+ *     the wipe, whichever comes first) and `wipeNext` (that limit is the
+ *     wipe); the wrong PIN that starts a lockout returns PIN_LOCKED
+ *     { remainingSec } (it said AUTH_FAILED).
+ *   - unlockWithPin() on a session that has no PIN (tab-only, or the PIN
+ *     was removed in another tab) succeeds when the keys are there, and
+ *     counts nothing.
+ *   - restoreSession() and the KeyManager key sync re-check the active
+ *     account after their awaits: a logout in another tab during a reload
+ *     left the logged-out account's keys in KeyManager and announced it
+ *     (session_restored) after the account that took over.
+ *   - logout() emitted Session.ENDED twice, unlockWithPin() PIN.UNLOCKED
+ *     twice (SessionManager already emits both).
+ *   - quickLogin(): when the persistent session cannot be written, the login
+ *     continues as a tab-only session instead of reporting success with no
+ *     session behind it.
+ *   - requiresUnlock() asks SessionManager first (it reported 'key' for an
+ *     active persistent account whose keys KeyManager had not synced yet).
+ *   - Offline queue (broadcast-queue v2.1): a queued operation records its
+ *     signer and goes out only while that account is the active one — after
+ *     a switch, login, resume or unlock to it, or when the page becomes
+ *     visible; a drain never asks for a parked account's key (it signed with
+ *     the active account's key, or prompted for the other's from the
+ *     background), nor for any key in a hidden tab; a logout drops the
+ *     account's queued operations.
+ *   - logout() also resolves `wasActive` (Session.ENDED followed).
+ *
+ * v4.8.1: Keys from a master password, and a key entered again.
+ *   - A master-password login caches only the roles whose derived key is
+ *     still the account's (validateCredentials' matchedTypes, which every
+ *     login passed and addAccountWithMasterKey ignored). A role whose key
+ *     was changed on chain is asked for when needed, instead of signed with
+ *     a key the chain rejects.
+ *   - quickLogin() with a role key: the key given replaces the session's key
+ *     of that role (the session's old key used to win), and only the stored
+ *     session's keys are carried into the new session — not keys added to
+ *     the tab's memory alone (UnlockKeyDialog).
+ *
+ * @version 4.8.1
  *
  * API Groups and Methods:
  *
  * PixaProxyAPI (Main Class):
  *   - initialize(config)
  *   - restoreSession()
- *   - logout()
+ *   - logout(options)                 // { account?, all?, switchToNext? }
+ *   - listAccounts()                  // every logged-in account + expiry
+ *   - switchAccount(account)
+ *   - getSessionInfo()                // active account, sync, + expiry
  *   - initializeVault(pin, options)
  *   - isVaultInitialized()
  *   - unlockWithPin(pin, options)
@@ -463,7 +541,7 @@ import JSLoader from '../JSLoader';
 import EventEmitter from 'events';
 import { CryptoUtils } from './crypto-utils.js';
 import { PixaEvents }  from './events.js';
-import { SessionManager, SessionMode, SessionExpiredError, SessionNotFoundError, PinRequiredError } from './session-manager.js';
+import { SessionManager, SessionMode, SessionExpiredError, SessionNotFoundError, PinRequiredError, AccountEvents } from './session-manager.js';
 import { ConnectivityMonitor } from './connectivity-monitor.js';
 import { BroadcastQueue, OfflineNotQueueableError, OfflineError } from './broadcast-queue.js';
 import { YOLOBuffer } from './yolo-buffer.js';
@@ -540,7 +618,14 @@ const CONFIG = {
     ARGON2_MEMORY_KIB: 32768,
     ARGON2_ITERATIONS: 2,
     ARGON2_AUTOTUNE_TTL: 7 * 24 * 60 * 60 * 1000, // re-benchmark after 7 days
-    SESSION_TIMEOUT: 30 * 60 * 1000,
+    // v4.8: a login lasts 7 days without activity (was 30 minutes — and the
+    // window only slid on reload/unlock, so active users were logged out and
+    // their stored keys deleted). The window now slides on user presence;
+    // MAX_SESSION_LIFETIME below still caps it.
+    SESSION_TIMEOUT: 7 * 24 * 60 * 60 * 1000,
+    // v4.8: floor for any session, whatever a caller asks for (SessionManager
+    // clamps; older rows are lifted on their next refresh).
+    MIN_SESSION_TIMEOUT: 3 * 24 * 60 * 60 * 1000,
     PIN_TIMEOUT: 5 * 60 * 1000,
     // SECURITY (v4.3 — M1): Raised from 6 to 8. A 6-char PIN has at most
     // ~36 bits of entropy — brute-forcible with Argon2id in ~175 days on
@@ -1686,34 +1771,10 @@ export class PixaProxyAPI {
                     this.eventEmitter,
                     { maxRetries: 3, maxAge: 24 * 60 * 60 * 1000 }
                 );
+                // Wired before initialize(): its connectivity listener can
+                // start a drain.
+                this._wireBroadcastQueue(this.broadcastQueue);
                 await this.broadcastQueue.initialize();
-
-                // Wire the actual broadcast function
-                this.broadcastQueue.broadcastFn = async (opType, operations, meta) => {
-                    const account = meta.account || this.sessionManager?.getCurrentAccountSync();
-                    if (!account) throw new PixaAPIError('No active account for broadcast', 'NO_ACCOUNT');
-
-                    const keyType = meta.keyType || this._inferKeyType(opType);
-                    // v6.3: no touchActivity() here — a queue drain is not user
-                    // presence and must not extend the PIN window. isLockedFn
-                    // (below) keeps a locked session from draining at all.
-
-                    // Key as a YOLOBuffer. SessionManager only when it holds THIS
-                    // account (it used to be asked regardless of meta.account and
-                    // would sign with the current account's key); KeyManager's
-                    // encrypted cache otherwise.
-                    let keyBuf = null;
-                    if (this.sessionManager?.currentAccount === account) {
-                        try { keyBuf = this.sessionManager.getKeyAsYOLO(keyType); } catch (_) { keyBuf = null; }
-                    }
-                    if (!keyBuf) keyBuf = await this.keyManager.requestKeyBuffer(account, keyType);
-
-                    return this._broadcastOperations(operations, keyBuf);
-                };
-
-                // FIX (v5.0): Inject session lock checker so drain can detect
-                // PIN-locked state and prompt the user instead of failing silently.
-                this.broadcastQueue.isLockedFn = () => this.sessionManager?.isLocked ?? false;
             } catch (e) {
                 console.warn('[PixaProxyAPI] BroadcastQueue initialization failed:', e.message);
                 this.broadcastQueue = null;
@@ -1726,64 +1787,225 @@ export class PixaProxyAPI {
                 console.warn('[PixaProxyAPI] Vault pre-load deferred:', pqErr.message || pqErr);
             });
 
-            // Wire KeyManager ↔ SessionManager
-            this.keyManager.setSessionManager(this.sessionManager);
-            this.keyManager._unlockWithPin = this.unlockWithPin.bind(this);
+            this._wireSessionEvents();
 
-            // v6.3: a SessionManager lock (timer or wall-clock deadline) must
-            // reach KeyManager's encrypted cache too — it used to keep serving
-            // keys via requestKey()/getKeyIfAvailable() after the PIN "expired".
-            // Same for logout and session expiry, which never touched KeyManager.
-            const lockKeyManager = () => { try { this.keyManager.lock(); } catch (_) {} };
-            this.eventEmitter.on(PixaEvents.PIN.LOCKED, ({ account } = {}) => {
-                console.debug(`[PixaProxyAPI] PIN locked for ${account}`);
-                lockKeyManager();
-            });
-            this.eventEmitter.on(PixaEvents.Session.ENDED, lockKeyManager);
-            this.eventEmitter.on(PixaEvents.Session.EXPIRED, lockKeyManager);
-
-            // FIX (v4.2 — timer desync): When SessionManager resets its PIN
-            // timer via touchActivity(), also reset KeyManager's passive
-            // timestamp-based timer. Without this, user activity keeps the
-            // SessionManager alive but KeyManager's isPINValid() silently
-            // expires and destroys all cached keys.
-            this.eventEmitter.on('pin_activity', () => {
-                if (this.keyManager.pinVerified) {
-                    this.keyManager.resetPinTimer();
-                }
-            });
-
-            // FIX (v4.2 — switchAccount key sync): When switching to a
-            // persist-mode account, SessionManager loads plaintext_keys into
-            // _cachedKeys, but KeyManager.sessionKeys (an in-memory Map) is
-            // not synced. Without this, requestKey() finds nothing in
-            // KeyManager and falls through to key_required.
-            // FIX (v4.5 — key zeroing): Previous code passed raw Uint8Array
-            // references from SessionManager.getKeys() into cacheKeys(), which
-            // calls _encryptForCache(). That method zeros its input via
-            // plainBytes.fill(0) — but when the input IS SessionManager's
-            // internal #cachedKeys buffer (same reference), this silently
-            // destroys the canonical key material. Any later re-sync
-            // (e.g. after PIN timeout → re-unlock) would cache null bytes.
-            //
-            // _syncKeysToKeyManager() is safe: it calls exportKeysForSealing()
-            // (v6.2) which returns NEW byte clones, so the fill(0) inside
-            // _encryptForCache targets a disposable copy instead of SM internals.
-            this.eventEmitter.on('account_switched', async ({ account, mode }) => {
-                if (mode === SessionMode.PERSIST && this.keyManager && this.sessionManager) {
-                    try {
-                        await this._syncKeysToKeyManager(account);
-                        this.keyManager.setActiveAccount(account);
-                    } catch (_) {}
-                }
-            });
-
-            console.log('[PixaProxyAPI] Initialized successfully v4.2.0');
+            console.log('[PixaProxyAPI] Initialized successfully v4.8.1');
             return this;
         } catch (error) {
             console.error('[PixaProxyAPI] Initialization failed:', error);
             throw new PixaAPIError('Initialization failed', 'INIT_FAILED', { message: error.message });
         }
+    }
+
+    /**
+     * Wire the offline broadcast queue to this API: how a queued entry is
+     * signed and sent, whether the session is locked, and (v4.8,
+     * broadcast-queue v2.1) which account is active — only its entries are
+     * drained. Called by initialize(); split out so it can be exercised alone.
+     * @param {BroadcastQueue} queue
+     * @private
+     */
+    _wireBroadcastQueue(queue) {
+        // Wire the actual broadcast function
+        queue.broadcastFn = async (opType, operations, meta) => {
+            // v4.8: released (a node switch replaced this instance): its keys
+            // are gone, and a prompt from here would reach no listener — the
+            // entry waits for the new instance (no retry used up).
+            if (this._released) throw new PixaAPIError('This API instance was released', 'KEY_NOT_AVAILABLE');
+            const active = this.sessionManager?.getCurrentAccountSync() || null;
+            const account = normalizeAccount(meta.account) || active;
+            if (!account) throw new PixaAPIError('No active account for broadcast', 'NO_ACCOUNT');
+
+            const keyType = meta.keyType || this._inferKeyType(opType);
+            // v6.3: no touchActivity() here — a queue drain is not user
+            // presence and must not extend the PIN window. isLockedFn
+            // (below) keeps a locked session from draining at all.
+
+            // Key as a YOLOBuffer. SessionManager only when it holds THIS
+            // account (it used to be asked regardless of meta.account and
+            // would sign with the current account's key); KeyManager's
+            // encrypted cache otherwise.
+            let keyBuf = null;
+            if (account === active) {
+                try { keyBuf = this.sessionManager.getKeyAsYOLO(keyType); } catch (_) { keyBuf = null; }
+                if (!keyBuf) keyBuf = await this.keyManager.getKeyIfAvailableAsBuffer(account, keyType);
+                if (!keyBuf) {
+                    // Not at hand (an active-key operation after a reload,
+                    // say): ask only where the user can see it. In a hidden
+                    // tab the prompt waited unseen for a minute — holding the
+                    // queue's lock (broadcast-queue v2.1) — then used up a
+                    // retry; the entry waits for a drain in a visible tab.
+                    if (globalThis.document?.visibilityState === 'hidden') {
+                        throw new PixaAPIError(`The ${keyType} key of @${account} is not at hand in this tab`, 'KEY_NOT_AVAILABLE', { account, keyType });
+                    }
+                    keyBuf = await this.keyManager.requestKeyBuffer(account, keyType);
+                }
+            } else {
+                // v4.8: another account (parked, or logged out). A drain
+                // runs in the background: never ask for that account's
+                // key from here — only a key already at hand is used
+                // (one entered for this account in this tab). Otherwise
+                // the entry waits for its account (broadcast-queue
+                // v2.1 keeps it pending, no retry used up).
+                keyBuf = await this.keyManager.getKeyIfAvailableAsBuffer(account, keyType);
+                if (!keyBuf) throw new PixaAPIError(`@${account} is not the active account`, 'ACCOUNT_NOT_ACTIVE', { account });
+            }
+
+            return this._broadcastOperations(operations, keyBuf);
+        };
+
+        // FIX (v5.0): Inject session lock checker so drain can detect
+        // PIN-locked state and prompt the user instead of failing silently.
+        queue.isLockedFn = () => this.sessionManager?.isLocked ?? false;
+        // v4.8: a drain sends the active account's entries only
+        // (broadcast-queue v2.1); each entry records its signer.
+        if ('activeAccountFn' in Object.getPrototypeOf(queue)) {
+            queue.activeAccountFn = () => this.sessionManager?.currentAccount || null;
+        }
+        // v4.8: what waited in a hidden tab — a confirmation, a key to ask
+        // for — goes out once the user is back on the page.
+        const doc = globalThis.document;
+        if (!this._onPageVisible && doc && typeof doc.addEventListener === 'function') {
+            this._onPageVisible = () => {
+                if (doc.visibilityState === 'visible') this._drainQueueFor(this.sessionManager?.currentAccount);
+            };
+            doc.addEventListener('visibilitychange', this._onPageVisible);
+        }
+    }
+
+    /**
+     * Wire KeyManager ↔ SessionManager and the session lifecycle listeners.
+     * Called once by initialize(); split out (v4.8) so the session layer can be
+     * exercised without the sanitizer/dpixa bootstrap.
+     * @private
+     */
+    _wireSessionEvents() {
+        // Wire KeyManager ↔ SessionManager
+        this.keyManager.setSessionManager(this.sessionManager);
+        this.keyManager._unlockWithPin = this.unlockWithPin.bind(this);
+
+        // v6.3: a SessionManager lock (timer or wall-clock deadline) must
+        // reach KeyManager's encrypted cache too — it used to keep serving
+        // keys via requestKey()/getKeyIfAvailable() after the PIN "expired".
+        // Same for logout and session expiry, which never touched KeyManager.
+        // v4.8: KeyManager holds the ACTIVE account's keys. When an account
+        // leaves, its keys go; if another account is already active by the
+        // time the event arrives (an expiry settled after a switch), only the
+        // departed account's entries go, not the new active account's.
+        const dropKeys = (account) => {
+            const km = this.keyManager;
+            if (!km) return;
+            const gone = normalizeAccount(account);
+            const active = this.sessionManager?.currentAccount || null;
+            if (gone && active && active !== gone && km.activeAccount !== gone) {
+                try { km.forgetAccount(gone); } catch (_) {}
+                return;
+            }
+            try { km.lock(); } catch (_) {}
+        };
+        this.eventEmitter.on(PixaEvents.PIN.LOCKED, ({ account } = {}) => {
+            console.debug(`[PixaProxyAPI] PIN locked for ${account}`);
+            dropKeys(account);
+        });
+        // Who takes over when the active account leaves (logout, expiry, a
+        // logout in another tab, a PIN wipe) is decided inside SessionManager
+        // (session-manager v7): Session.ENDED { reason, next, switching } and
+        // then `account_switched` { reason, replaces } — the listener below
+        // loads the newcomer's keys. This class used to pick the successor
+        // itself, outside SessionManager's queue, where a switch landing in
+        // between made logout() end the wrong account.
+        this.eventEmitter.on(PixaEvents.Session.ENDED, (data) => dropKeys(data?.account));
+        this.eventEmitter.on(PixaEvents.Session.EXPIRED, (data) => dropKeys(data?.account));
+        // Keys gone from SessionManager without a call from here (deadline,
+        // another tab): KeyManager's copy goes at once, not when the outcome
+        // has been read back from IndexedDB.
+        this.eventEmitter.on(AccountEvents.DEACTIVATED, (data) => dropKeys(data?.account));
+        // ... and comes back if the session turned out to be alive (another
+        // tab had kept it in use: 'refreshed'), or was reloaded from its row
+        // (re-login or PIN removed in another tab: 'replaced').
+        this.eventEmitter.on(PixaEvents.Session.RESUMED, (data) => {
+            if (!data?.account || (data.reason !== 'refreshed' && data.reason !== 'replaced')) return;
+            this._accountSync = this._onAccountSwitched({ account: data.account, locked: false }).catch(() => {});
+        });
+        // v4.8: a login for another account parks the previous one; its
+        // keys leave KeyManager (which holds the ACTIVE account's only).
+        // A new session also starts with clean PIN counters: wrong PINs
+        // typed against a session that is gone are not this session's (four
+        // of them before a logout made the next login's first typo wipe it).
+        // A login proves the key, so this is no way around the wipe.
+        this.eventEmitter.on(PixaEvents.Session.CREATED, (data) => {
+            if (data && data.previous && data.previous !== data.account) {
+                try { this.keyManager.forgetAccount(data.previous); } catch (_) {}
+            }
+            if (data?.account) {
+                Promise.resolve(this.keyManager?._resetPinLockout?.(data.account)).catch(() => {});
+            }
+        });
+        // v4.8: a PIN hint describes a session; once that account is logged
+        // out here, its hint goes too (it names the account).
+        // ... and so do its queued offline operations (broadcast-queue v2.1):
+        // they could no longer be signed here, and must not go out after a
+        // later login of the account.
+        this.eventEmitter.on(AccountEvents.LIST_CHANGED, (data) => {
+            if (Array.isArray(data?.removed) && data.removed.length) {
+                this._forgetPinHints(data.removed).catch(() => {});
+                const q = this.broadcastQueue;
+                if (q && typeof q.cancelAccount === 'function') {
+                    for (const acc of data.removed) q.cancelAccount(acc).catch(() => {});
+                }
+            }
+        });
+
+        // FIX (v4.2 — timer desync): When SessionManager resets its PIN
+        // timer via touchActivity(), also reset KeyManager's passive
+        // timestamp-based timer. Without this, user activity keeps the
+        // SessionManager alive but KeyManager's isPINValid() silently
+        // expires and destroys all cached keys.
+        this.eventEmitter.on('pin_activity', () => {
+            if (this.keyManager.pinVerified) {
+                this.keyManager.resetPinTimer();
+            }
+        });
+
+        // v4.8 — account switch (SessionManager.switchTo, whoever called
+        // it). KeyManager drops every cached key (the outgoing account's
+        // included) and loads the incoming account's, unless it arrives
+        // PIN-locked. The v4.2 listener this replaces synced PERSIST-mode
+        // accounts only and nothing ever emitted the event.
+        // _syncKeysToKeyManager() stays the safe path: exportKeysForSealing()
+        // hands KeyManager disposable clones (v4.5 key-zeroing fix).
+        // switchAccount() awaits this._accountSync.
+        this.eventEmitter.on(AccountEvents.SWITCHED, (data) => {
+            this._accountSync = this._onAccountSwitched(data || {}).catch((e) => {
+                console.warn('[PixaProxyAPI] Key sync after switch failed:', e?.message || e);
+            }).then(() => this._drainQueueFor(data?.account));
+        });
+        // v4.8: an account that arrived PIN-locked sends its queued offline
+        // operations once it is unlocked (see _drainQueueFor) ...
+        this.eventEmitter.on(PixaEvents.PIN.UNLOCKED, (data) => this._drainQueueFor(data?.account));
+        // ... and so does one that became active without a switch: logged in
+        // again while parked, resumed after a reload.
+        this.eventEmitter.on(PixaEvents.Session.CREATED, (data) => this._drainQueueFor(data?.account));
+        this.eventEmitter.on(PixaEvents.Session.RESUMED, (data) => {
+            Promise.resolve(this._accountSync).catch(() => {}).then(() => this._drainQueueFor(data?.account));
+        });
+    }
+
+    /**
+     * @private v4.8: the account that just became active (a switch, a login,
+     * a resume) or was just unlocked may have offline operations waiting for
+     * it — broadcast-queue v2.1 drains the active account's entries only:
+     * send them, when online. Not while it is PIN-locked: the switch already
+     * asks for its PIN (PIN.LOCKED), and the drain's own PIN_REQUIRED would
+     * be a second prompt; the unlock drains. A drain already running (in
+     * this tab or another) is followed by this one, not replaced.
+     */
+    _drainQueueFor(account) {
+        const q = this.broadcastQueue;
+        if (!q || !account || !this.connectivity?.isOnline) return;
+        if (this.sessionManager?.currentAccount !== account) return;
+        if (this.sessionManager?.isLocked) return;
+        Promise.resolve().then(() => q.drain()).catch(() => {});
     }
 
     /**
@@ -1818,6 +2040,12 @@ export class PixaProxyAPI {
         // Keys are available — sync to KeyManager
         await this._syncKeysToKeyManager(account);
 
+        // v4.8: the account may have left during the sync (logged out in
+        // another tab, expired); whoever took over was announced by its own
+        // events — a late session_restored would put this one back on screen.
+        const now = this.sessionManager.currentAccount;
+        if (now !== account) return now || null;
+
         this.keyManager.setActiveAccount(account);
         this.eventEmitter.emit('session_restored', {
             account, pinEnabled: pinProtected, keysLoaded: true, needsPIN: false,
@@ -1832,7 +2060,11 @@ export class PixaProxyAPI {
      * @private
      */
     async _syncKeysToKeyManager(account) {
+        const acc = normalizeAccount(account);
         try {
+            // v4.8: SessionManager exports the ACTIVE account's keys; filed
+            // under any other name they would be another account's keys.
+            if (!acc || this.sessionManager?.currentAccount !== acc) return false;
             // v6.2: exportKeysForSealing returns byte CLONES (safe to zero,
             // not SessionManager's internal buffers — no v4.5-style aliasing).
             // _encryptForCache accepts Uint8Array and zeroes each clone after
@@ -1843,10 +2075,19 @@ export class PixaProxyAPI {
                 if (!this.keyManager._sessionCryptoKey) {
                     await this.keyManager._generateSessionCryptoKey();
                 }
-                await this.keyManager.cacheKeys(account, keys);
+                await this.keyManager.cacheKeys(acc, keys);
+                // v4.8: the account may have left during those awaits (a
+                // logout in another tab, an expiry, a switch): KeyManager
+                // must not go on serving its keys.
+                if (this.sessionManager?.currentAccount !== acc) {
+                    this.keyManager.forgetAccount(acc);
+                    return false;
+                }
             }
+            return !!keys;
         } catch (e) {
             console.warn('[restoreSession] Key sync to KeyManager failed:', e.message);
+            return false;
         }
     }
 
@@ -1974,12 +2215,12 @@ export class PixaProxyAPI {
         const requestPrivate = options.requestPrivate === true;
         if (requestPrivate && this.sessionManager?.isPinProtected
             && this.sessionManager.currentAccount === normalizedAccount) {
-            const lockout = await this.keyManager._checkPinLockout();
+            const lockout = await this.keyManager._checkPinLockout(normalizedAccount);
             if (lockout.locked) {
                 throw new PixaAPIError(`Too many failed attempts. Try again in ${lockout.remainingSec}s.`, 'PIN_LOCKED', { remainingSec: lockout.remainingSec });
             }
             if (typeof options.pin !== 'string' || !(await this.sessionManager.verifyPin(options.pin))) {
-                if (typeof options.pin === 'string') await this.keyManager._recordFailedPinAttempt();
+                if (typeof options.pin === 'string') await this.keyManager._recordFailedPinAttempt(normalizedAccount);
                 throw new PixaAPIError('PIN required to export private keys', 'PIN_REQUIRED', { account: normalizedAccount });
             }
         }
@@ -2035,15 +2276,159 @@ export class PixaProxyAPI {
         return { publicKeys, privateKeys, availableTypes };
     }
 
-    async logout() {
-        const account = this.sessionManager?.currentAccount;
+    /**
+     * Log out.
+     *   logout()                    — the active account; the most recently
+     *                                 used other logged-in account takes over
+     *                                 (Session.ENDED carries { next, switching })
+     *   logout({ switchToNext: false }) — the active account, nobody takes over
+     *   logout({ account })         — that account; a parked one leaves without
+     *                                 touching the active account
+     *   logout({ all: true })       — every logged-in account
+     * Resolves { account, removed, wasActive, switchedTo } (`accounts`
+     * instead of `removed` for `all`). With nobody logged in, logout() does
+     * nothing.
+     *
+     * The account is the one active when logout() is CALLED: a switch
+     * already in flight (menu, expiry) does not redirect the logout to the
+     * account it brings in. Who takes over is decided inside SessionManager's
+     * queue (removeSession({ handover })).
+     *
+     * v4.8: Session.ENDED is emitted once — SessionManager already emits it;
+     * this method emitted it a second time.
+     * @param {{account?: string, all?: boolean, switchToNext?: boolean}} [options]
+     */
+    async logout(options = {}) {
+        const sm = this.sessionManager;
+        if (!sm) return { account: null, removed: false, wasActive: false, switchedTo: null };
+        const current = sm.currentAccount || null;
+
+        if (options.all) {
+            try { await this.keyManager?.lock(); } catch (_) {}
+            const accounts = await sm.endAll();
+            return { account: current, accounts, switchedTo: null };
+        }
+
+        const target = normalizeAccount(options.account) || current;
+        // Nobody to log out. (v4.8 pre-release: this "logged out" by
+        // switching INTO a parked account.)
+        if (!target) return { account: null, removed: false, wasActive: false, switchedTo: null };
+
         // v6.3: KeyManager's encrypted cache used to outlive logout —
         // requestKey()/getWalletKeys() kept answering for the logged-out
         // account. (The Session.ENDED listener does this too; explicit here so
         // it holds even if the listeners were removed by release().)
-        try { await this.keyManager?.lock(); } catch (_) {}
-        await this.sessionManager?.endSession();
-        this.eventEmitter.emit(PixaEvents.Session.ENDED, { account });
+        try {
+            if (target === current) await this.keyManager?.lock();
+            else this.keyManager?.forgetAccount(target);
+        } catch (_) {}
+
+        const res = await sm.removeSession(target, {
+            handover: options.switchToNext !== false,
+            reason: 'logout',
+        });
+        // Resolve once KeyManager holds the newcomer's keys.
+        if (res?.switchedTo && this._accountSync) { try { await this._accountSync; } catch (_) {} }
+        // wasActive: it was the active account — Session.ENDED (and, after a
+        // hand-over, account_switched) followed; a parked account's logout
+        // only changes the list (accounts_changed).
+        return { account: target, removed: !!res?.removed, wasActive: !!res?.wasActive, switchedTo: res?.switchedTo ?? null };
+    }
+
+    /**
+     * Every logged-in account (session-manager v7 listSessions): active one
+     * first, then by most recent use —
+     *   { account, active, persistent, pinProtected, locked,
+     *     createdAt, lastActive, expiresAt, remainingMs, loginType }
+     * expiresAt/remainingMs are null for a tab-only session. Re-read on
+     * `accounts_changed`, `account_switched`, `session_created`,
+     * `session_ended`, `session_refreshed`.
+     * @returns {Promise<object[]>}
+     */
+    async listAccounts() {
+        if (!this.sessionManager) return [];
+        try { return await this.sessionManager.listSessions(); }
+        catch (e) { console.warn('[PixaProxyAPI] listAccounts failed:', e?.message || e); return []; }
+    }
+
+    /**
+     * The active account's session, synchronously (same shape as a
+     * listAccounts() entry), or null. For a live "time left".
+     * @returns {object|null}
+     */
+    getSessionInfo() {
+        try { return this.sessionManager?.getSessionInfo?.() ?? null; } catch (_) { return null; }
+    }
+
+    /**
+     * Make another logged-in account the active one. A PIN-protected account
+     * arrives locked (its PIN is asked for on the first signature, like after
+     * a reload). Resolves once KeyManager holds the new account's keys.
+     * Rejects with PixaAPIError — SESSION_EXPIRED, SESSION_NOT_FOUND,
+     * DEVICE_MISMATCH, DEVICE_UNWRAP_FAILED — leaving the active account as is.
+     * @param {string} account
+     * @param {{reason?: string, replaces?: string}} [options] — carried by `account_switched`
+     * @returns {Promise<{account, locked, persistent, pinProtected}>}
+     */
+    async switchAccount(account, options = {}) {
+        if (!this.sessionManager) throw new PixaAPIError('API not initialized', 'NOT_INITIALIZED');
+        const target = normalizeAccount(account);
+        if (!target) throw new PixaAPIError('Invalid account parameter', 'INVALID_ACCOUNT');
+
+        // A PIN account needs the vault for its unlock right after the switch.
+        if (!this.vault) { try { await this._ensureVault(); } catch (_) {} }
+        if (this.vault) this.sessionManager.vault = this.vault;
+
+        let result;
+        try {
+            result = await this.sessionManager.switchTo(target, {
+                reason: options.reason || 'user',
+                replaces: options.replaces || null,
+            });
+        } catch (e) {
+            throw new PixaAPIError(e?.message || 'Account switch failed', e?.code || 'SWITCH_FAILED', { account: target, ...(e?.data || {}) });
+        }
+        if (this._accountSync) { try { await this._accountSync; } catch (_) {} }
+        return result;
+    }
+
+    /** @private KeyManager follows SessionManager's active account (see initialize). */
+    async _onAccountSwitched({ account, locked } = {}) {
+        const km = this.keyManager;
+        if (!km) return;
+        await km.lock();
+        km.setActiveAccount(account || null);
+        if (account && !locked && this.sessionManager?.currentAccount === account) {
+            await this._syncKeysToKeyManager(account);
+            // A newer switch landed while these keys were being cached: they
+            // are no longer the active account's.
+            if (this.sessionManager?.currentAccount !== account) km.forgetAccount(account);
+        }
+    }
+
+    /**
+     * @private Delete the PIN hints of accounts logged out here
+     * (`vault_hint:<account>` in pq_vault_config, and the single `vault_hint`
+     * record LoginDialog also writes when it is theirs). Skipped for an
+     * account that is logged in again meanwhile (another tab).
+     * @param {string[]} accounts
+     */
+    async _forgetPinHints(accounts) {
+        const db = this.settingsDb;
+        const sm = this.sessionManager;
+        if (!db || !Array.isArray(accounts) || !accounts.length) return;
+        let col;
+        try { col = await db.getCollection('pq_vault_config'); } catch (_) { return; }
+        for (const raw of accounts) {
+            const acc = normalizeAccount(raw);
+            if (!acc) continue;
+            try { if (sm && await sm.isSessionValid(acc)) continue; } catch (_) { continue; }
+            try { await col.delete('vault_hint:' + acc); } catch (_) { /* none */ }
+            try {
+                const legacy = await col.get('vault_hint');
+                if (legacy && normalizeAccount(legacy.account) === acc) await col.delete('vault_hint');
+            } catch (_) { /* none */ }
+        }
     }
 
     /**
@@ -2206,15 +2591,23 @@ export class PixaProxyAPI {
     async unlockWithPin(pin, options = {}) {
         const { account } = options;
 
-        let normalizedAccount = normalizeAccount(account);
-        if (!normalizedAccount && this.sessionManager) {
-            normalizedAccount = normalizeAccount(
-                this.sessionManager.currentAccount ||
-                (await this.sessionManager.getActiveAccount())
-            );
-        }
+        const active = this.sessionManager
+            ? normalizeAccount(this.sessionManager.currentAccount || (await this.sessionManager.getActiveAccount()))
+            : null;
+        const normalizedAccount = normalizeAccount(account) || active;
         if (!normalizedAccount) {
             return { success: false, error: 'No account specified', code: 'NO_ACCOUNT' };
+        }
+        // v4.8: SessionManager unlocks the ACTIVE account. An unlock "for"
+        // another account used to unlock the active one and then cache its
+        // keys under the other account's name (_syncKeysToKeyManager below) —
+        // reachable from KeyManager's pin_required callback. Switch first
+        // (switchAccount / loginWithPin). Not a failed attempt.
+        if (normalizedAccount !== active) {
+            return {
+                success: false, code: 'ACCOUNT_NOT_ACTIVE', account: normalizedAccount,
+                error: `@${normalizedAccount} is not the active account`,
+            };
         }
 
         // FIX (v6.2): Enforce the persistent lockout. _recordFailedPinAttempt
@@ -2222,7 +2615,8 @@ export class PixaProxyAPI {
         // but nothing ever read them — _checkPinLockout had zero call sites, so
         // backoff was never applied. Check it here, before the (expensive)
         // vault load and Argon2 derivation.
-        const lockout = await this.keyManager._checkPinLockout();
+        // v4.8: per account (each account's PIN seals its own blob).
+        const lockout = await this.keyManager._checkPinLockout(normalizedAccount);
         if (lockout.locked) {
             return {
                 success: false,
@@ -2246,31 +2640,49 @@ export class PixaProxyAPI {
         }
 
         try {
-            // Delegate to SessionManager — one path, no fallback cascade
-            const success = await this.sessionManager.unlockWithPin(pin);
+            // Delegate to SessionManager — one path, no fallback cascade.
+            // v4.8: pinned to this account — the call is queued, and a switch
+            // landing first would have this PIN tried on (and a failure
+            // counted against) the wrong account.
+            const success = await this.sessionManager.unlockWithPin(pin, { account: normalizedAccount });
 
             if (!success) {
                 // Wrong PIN (key commitment mismatch)
-                const result = await this.keyManager._recordFailedPinAttempt();
+                const result = await this.keyManager._recordFailedPinAttempt(normalizedAccount);
                 if (result.wiped) {
+                    // That account's session is gone; another logged-in account
+                    // (if any) has taken over, as after a logout
+                    // (account_switched { reason: 'wiped' }).
                     return { success: false, error: 'Too many failed attempts. Re-login required.', code: 'VAULT_WIPED' };
                 }
-                return { success: false, error: 'Authentication failed', code: 'AUTH_FAILED' };
+                if (result.locked) {
+                    // That wrong PIN started a lockout window.
+                    return {
+                        success: false, code: 'PIN_LOCKED', remainingSec: result.remainingSec,
+                        error: `Too many failed attempts. Try again in ${result.remainingSec}s.`,
+                    };
+                }
+                return {
+                    success: false, error: 'Authentication failed', code: 'AUTH_FAILED',
+                    attemptsRemaining: result.attemptsRemaining ?? null,
+                    wipeNext: !!result.wipeNext,
+                };
             }
 
-            // Success — sync keys to KeyManager
-            await this._syncKeysToKeyManager(normalizedAccount);
+            // Success — sync keys to KeyManager (only while this account is
+            // still the active one: the export reads SessionManager's CURRENT
+            // keys and files them under the name given here).
+            if (this.sessionManager.currentAccount === normalizedAccount) {
+                await this._syncKeysToKeyManager(normalizedAccount);
+            }
 
             // Reset lockout state
-            this.keyManager._pinAttempts = 0;
-            this.keyManager._pinLockoutUntil = 0;
+            await this.keyManager._resetPinLockout(normalizedAccount);
             this.keyManager.pinVerified = true;
             this.keyManager.pinVerificationTime = Date.now();
-            if (this.keyManager._pinLockoutStore) {
-                try { await this.keyManager._pinLockoutStore.delete('state'); } catch (_) {}
-            }
 
-            this.eventEmitter.emit(PixaEvents.PIN.UNLOCKED, { account: normalizedAccount });
+            // v4.8: PIN.UNLOCKED is emitted by SessionManager.unlockWithPin();
+            // this method used to emit it a second time.
             return { success: true, account: normalizedAccount };
         } catch (error) {
             if (error?.code === 'DEVICE_UNWRAP_FAILED') {
@@ -2278,6 +2690,29 @@ export class PixaProxyAPI {
                 // wrong PIN — deliberately NOT counted as a failed attempt.
                 console.error('[unlockWithPin] Device-key unwrap failed:', error.message);
                 return { success: false, error: 'Stored keys could not be read on this device. Retry, or log in again with your key.', code: 'VAULT_ERROR' };
+            }
+            if (error?.code === 'SESSION_EXPIRED') {
+                return { success: false, error: 'This session has expired. Log in again.', code: 'SESSION_EXPIRED' };
+            }
+            if (error?.code === 'SESSION_NOT_FOUND') {
+                return { success: false, error: 'No active session for this account.', code: 'NO_SESSION' };
+            }
+            if (error?.code === 'ACCOUNT_NOT_ACTIVE') {
+                // A switch landed first (see above) — not a wrong PIN.
+                return {
+                    success: false, code: 'ACCOUNT_NOT_ACTIVE', account: normalizedAccount,
+                    error: `@${normalizedAccount} is not the active account`,
+                };
+            }
+            if (error?.code === 'NOT_PIN') {
+                // The PIN was removed in another tab and this tab has followed
+                // (session-manager v7 reloads the row): the keys are there,
+                // nothing to unlock. A pending PIN prompt can just go on.
+                const sm = this.sessionManager;
+                if (sm.currentAccount === normalizedAccount && sm.hasKeysInMemory) {
+                    await this._syncKeysToKeyManager(normalizedAccount);
+                    return { success: true, account: normalizedAccount };
+                }
             }
             console.error('[unlockWithPin] Error:', error);
             return { success: false, error: 'Authentication failed', code: 'AUTH_FAILED' };
@@ -2296,32 +2731,29 @@ export class PixaProxyAPI {
         }
 
         const normalizedAccount = normalizeAccount(account);
+        const sm = this.sessionManager;
+
+        // v4.8: SessionManager first — it is the authority for the active
+        // account, and KeyManager is synced asynchronously after a restore or
+        // a switch (asking KeyManager first answered 'key' for keys that were
+        // in memory). v6.3: a presence check, not requestKey() — that minted a
+        // WIF string and, on a miss, emitted pin_required/key_required as a
+        // side effect of asking "do I need to unlock?".
+        if (sm && sm.currentAccount === normalizedAccount) {
+            let smHasKey = false;
+            try { smHasKey = !!sm.getKeys()[keyType]; } catch (_) { smHasKey = false; }   // throws when locked/expired
+            if (smHasKey) return { needsUnlock: false, unlockType: null, account: normalizedAccount };
+            if (sm.currentAccount === normalizedAccount && sm.isLocked) {
+                return { needsUnlock: true, unlockType: 'pin', account: normalizedAccount };
+            }
+        }
 
         if (this.keyManager.hasKey(normalizedAccount, keyType)) {
             return { needsUnlock: false, unlockType: null, account: normalizedAccount };
         }
 
-        // FIX (v4.2): Use SessionManager.currentMode (v2 canonical source)
-        // instead of session.pinEnabled (v1 compat field). The v1 field can
-        // mismatch on v2 sessions where pinEnabled wasn't explicitly set,
-        // causing persist-mode sessions to be misidentified as PIN sessions.
-        const isPinMode = this.sessionManager?.currentMode === SessionMode.PIN;
-
-        if (isPinMode) {
-            // v6.3: a presence check, not requestKey() — that minted a WIF
-            // string and, on a cache miss, emitted pin_required/key_required
-            // as a side effect of asking "do I need to unlock?".
-            let smHasKey = false;
-            try {
-                smHasKey = this.sessionManager.currentAccount === normalizedAccount
-                    && !!this.sessionManager.getKeys()[keyType];   // throws when locked/expired
-            } catch (_) { smHasKey = false; }
-            if (smHasKey && this.keyManager.isPINValid()) {
-                return { needsUnlock: false, unlockType: null, account: normalizedAccount };
-            }
-            return { needsUnlock: true, unlockType: 'pin', account: normalizedAccount };
-        }
-
+        // Unlocked (or no PIN) but this key type was never provided: only the
+        // key itself helps — a PIN prompt would unlock nothing new.
         return { needsUnlock: true, unlockType: 'key', account: normalizedAccount };
     }
 
@@ -2477,22 +2909,31 @@ export class PixaProxyAPI {
         } else {
             await this.keyManager.addIndividualKey(normalizedAccount, keyType, key, { storeInVault: false });
 
-            // FIX (v4.2 — Bug B): Collect ALL currently cached keys for this
-            // account, not just the new one. When logging in with multiple
-            // individual keys (e.g. posting then active), each quickLogin call
-            // creates/upserts the session. If we only pass { [keyType]: key },
-            // the upsert overwrites plaintext_keys and the previous key is lost.
-            // By collecting every key currently in KeyManager's cache, the
-            // session record always contains the full set.
+            // FIX (v4.2 — Bug B): the keys this account's session already
+            // holds stay in the new one: logging in with posting, then with
+            // active, ends with both.
+            // v4.8.1: the stored session's keys only (SessionManager, while
+            // this account is the active one) — a key added to this tab's
+            // memory alone (UnlockKeyDialog, "asked again after a reload") is
+            // not written into the stored session by a later login. And the
+            // key just given replaces the session's key of its role: the
+            // session's used to win (it was read first and the new key only
+            // filled a gap), so entering an account's new key after it was
+            // changed on chain kept the old one.
             sessionKeys = {};
-            for (const type of ['posting', 'active', 'owner', 'memo']) {
-                try {
-                    const cached = await this.keyManager.getKeyIfAvailable(normalizedAccount, type);
-                    if (cached) sessionKeys[type] = cached;
-                } catch (_) {}
+            const sm = this.sessionManager;
+            if (sm && sm.currentAccount === normalizedAccount && sm.hasKeysInMemory) {
+                for (const type of ['posting', 'active', 'owner', 'memo']) {
+                    if (type === keyType) continue;
+                    let bytes = null;
+                    try {
+                        bytes = sm.getKey(type);
+                        sessionKeys[type] = new TextDecoder().decode(bytes);
+                    } catch (_) { /* not in the session */ }
+                    finally { if (bytes) bytes.fill(0); }
+                }
             }
-            // Ensure the new key is always included (defense in depth)
-            if (!sessionKeys[keyType]) sessionKeys[keyType] = key;
+            sessionKeys[keyType] = key;
         }
 
         // v6: SessionManager.createSession handles ALL encryption (device-wrap + optional PIN seal).
@@ -2528,13 +2969,29 @@ export class PixaProxyAPI {
                 // here would leave the user believing their keys are PIN-protected
                 // when they are not (or not stored at all).
                 if (options.pin) {
+                    // v4.8: the keys cached above belong to a login that did
+                    // not happen (the active account, if any, is unchanged).
+                    if (this.sessionManager.currentAccount !== normalizedAccount) {
+                        try { this.keyManager.forgetAccount(normalizedAccount); } catch (_) {}
+                    }
                     throw new PixaAPIError(
                         'PIN-protected session creation failed: ' + (e.message || e),
                         'PIN_SESSION_FAILED'
                     );
                 }
-                console.warn('[quickLogin] Session creation error:', e);
-                this.eventEmitter.emit(PixaEvents.Session.CREATED, { account: normalizedAccount });
+                // v4.8: the persistent write failed (IndexedDB quota, private
+                // mode…). Continue as a tab-only session: it used to report
+                // success with NO session behind it — the UI showed the account
+                // while getActiveAccount() answered null.
+                console.warn('[quickLogin] Persistent session failed, continuing for this tab only:', e?.message || e);
+                try {
+                    sessionId = await this.sessionManager.createSession(normalizedAccount, {
+                        keys: sessionKeys, persistent: false, login_type: keyType,
+                    });
+                } catch (e2) {
+                    console.warn('[quickLogin] Session creation error:', e2);
+                    this.eventEmitter.emit(PixaEvents.Session.CREATED, { account: normalizedAccount });
+                }
             }
         } else if (options.skipSession === true) {
             this.eventEmitter.emit(PixaEvents.Session.CREATED, { account: normalizedAccount });
@@ -2566,6 +3023,12 @@ export class PixaProxyAPI {
             if (!result) {
                 throw new PixaAPIError('No session found. Use quickLogin first.', 'NO_SESSION');
             }
+        }
+
+        // v4.8: another logged-in account → make this one the active one first
+        // (unlockWithPin only ever unlocks the active account).
+        if (this.sessionManager.currentAccount !== normalizedAccount) {
+            await this.switchAccount(normalizedAccount);
         }
 
         // Now unlock with PIN
@@ -2613,6 +3076,10 @@ export class PixaProxyAPI {
         this.initialized = false;
         try { this.connectivity?.destroy(); } catch (_) {}
         try { this.broadcastQueue?.destroy(); } catch (_) {}
+        if (this._onPageVisible) {
+            try { globalThis.document?.removeEventListener?.('visibilitychange', this._onPageVisible); } catch (_) {}
+            this._onPageVisible = null;
+        }
         try { Promise.resolve(this.keyManager?.lock()).catch(() => {}); } catch (_) {}
         // SessionManager.dispose() (v6.3) zeros the in-memory keys, stops the
         // PIN timer and removes the page listeners WITHOUT ending the
@@ -5582,11 +6049,17 @@ class BroadcastAPI {
         // SECURITY: checked *before* deriving the PrivateKey. The queue resolves
         // its own key when it drains, so deriving one here would leave a live
         // 32-byte secret on the heap for a value that is never used.
+        // v4.8: the queued entry names its signer — the active account when
+        // the caller named none — so it is only ever drained by that account.
+        const queueMeta = () => ({
+            ...meta, keyType,
+            account: meta.account || this.proxy.sessionManager?.currentAccount || undefined,
+        });
         if (this.proxy.broadcastQueue && this.proxy.connectivity && !this.proxy.connectivity.isOnline) {
             // The queue re-resolves the key at drain time; release ours now.
             if (key instanceof YOLOBuffer) key.destroy();
             const opType = operations[0]?.[0] || 'unknown';
-            return this.proxy.broadcastQueue.enqueue(opType, operations, { ...meta, keyType });
+            return this.proxy.broadcastQueue.enqueue(opType, operations, queueMeta());
         }
 
         // ── Online: sign + broadcast. Key handling lives in
@@ -5607,7 +6080,7 @@ class BroadcastAPI {
                 if (!stillOnline) {
                     // Actually went offline — try to queue for later
                     const opType = operations[0]?.[0] || 'unknown';
-                    return this.proxy.broadcastQueue.enqueue(opType, operations, { ...meta, keyType });
+                    return this.proxy.broadcastQueue.enqueue(opType, operations, queueMeta());
                 }
             }
             throw e; // Genuine chain/validation error — propagate
@@ -10880,6 +11353,8 @@ class KeyManager {
         this._pinAttempts = 0;
         /** @type {number} Timestamp of lockout start (0 = not locked) */
         this._pinLockoutUntil = 0;
+        /** @type {Map<string, number>} v4.8: lockout end per account (in-memory mirror of pin_lockout) */
+        this._pinLockoutByAccount = new Map();
         /** @type {Promise|null} Active PIN unlock promise (prevents double-dialog) */
         this._pendingPinUnlock = null;
         this.unencrypted = null;
@@ -10950,18 +11425,33 @@ class KeyManager {
      * - After PIN_WIPE_LIMIT total failed attempts, the sealed vault is destroyed
      *   entirely — forces re-login with actual private key
      *
+     * v4.8 — per account. Each account's PIN seals its own blob, so attempts
+     * are counted per account (`state:<account>` in pin_lockout), and the
+     * wipe removes THAT account's session through SessionManager. It used to
+     * clear the whole sessions collection — every logged-in account — while
+     * leaving the in-memory session (and its cached sealed blob) in place,
+     * so the right PIN still unlocked until the next reload.
+     * The counters are read from IndexedDB, not LacertaDB's per-tab document
+     * cache (_freshLockoutStore): through the cache each tab counted on its
+     * own, so N open tabs allowed about N times the attempts, and a lockout
+     * recorded in one tab was not enforced in the others.
+     *
+     * @param {string} [account] — defaults to the active account
      * @returns {Promise<{ locked: boolean, remainingSec: number, wiped: boolean }>}
      */
-    async _recordFailedPinAttempt() {
+    async _recordFailedPinAttempt(account = null) {
         const MAX_PER_WINDOW = this.config.PIN_MAX_ATTEMPTS || 10;
         const BASE_LOCKOUT = this.config.PIN_LOCKOUT_MS || 300000;
         const WIPE_LIMIT = this.config.PIN_WIPE_LIMIT || 50;
+        const acc = normalizeAccount(account) || this._sessionManager?.currentAccount || null;
+        const docId = this._lockoutDocId(acc);
 
         // Load persistent state
         let state = { attempts: 0, totalAttempts: 0, consecutiveLockouts: 0, lockoutUntil: 0 };
+        this._freshLockoutStore();
         if (this._pinLockoutStore) {
             try {
-                const doc = await this._pinLockoutStore.get('state');
+                const doc = await this._pinLockoutStore.get(docId);
                 if (doc) state = { ...state, ...doc };
             } catch (_) {}
         }
@@ -10972,28 +11462,36 @@ class KeyManager {
         // Also update in-memory for immediate checks (backward compat)
         this._pinAttempts = state.attempts;
 
-        // Hard wipe limit: destroy vault after too many total failed attempts
+        // Hard wipe limit: destroy this account's sealed session — forces a
+        // re-login with the actual private key. If it was the active account,
+        // the most recently used other logged-in account takes over
+        // (account_switched { reason: 'wiped' }).
         if (state.totalAttempts >= WIPE_LIMIT) {
-            // Nuclear option — force complete re-login
-            // v6: sealed_keys collection no longer exists.
-            // Wipe the sessions collection instead (encrypted_keys live there).
-            if (this._settingsDb) {
-                try {
-                    const sealedCol = await this._settingsDb.getCollection('sealed_keys');
-                    await sealedCol.clear({ force: true });
-                } catch (_) { /* collection may not exist in v6 */ }
+            const sm = this._sessionManager;
+            if (acc && sm && typeof sm.removeSession === 'function') {
+                try { await sm.removeSession(acc, { handover: true, reason: 'wiped' }); } catch (_) {}
+            } else if (this._settingsDb) {
+                // No SessionManager / account to target: the v6 behaviour.
                 try {
                     const sessCol = await this._settingsDb.getCollection('sessions');
                     await sessCol.clear({ force: true });
                 } catch (_) {}
             }
-
-            // Reset lockout state
-            state = { attempts: 0, totalAttempts: 0, consecutiveLockouts: 0, lockoutUntil: 0 };
-            if (this._pinLockoutStore) {
-                try { await this._pinLockoutStore.delete('state'); } catch (_) {}
+            this.forgetAccount(acc);
+            // Pre-v6 PIN-sealed keys (collection no longer written): dead data
+            // that the wipe always destroyed — keep doing so.
+            if (this._settingsDb) {
+                try {
+                    const sealedCol = await this._settingsDb.getCollection('sealed_keys');
+                    await sealedCol.clear({ force: true });
+                } catch (_) { /* collection may not exist in v6 */ }
             }
 
+            // Reset lockout state
+            if (this._pinLockoutStore) {
+                try { await this._pinLockoutStore.delete(docId); } catch (_) {}
+            }
+            if (acc) this._pinLockoutByAccount.delete(acc);
             this._pinAttempts = 0;
             this._pinLockoutUntil = 0;
             return { locked: true, remainingSec: 0, wiped: true };
@@ -11007,12 +11505,18 @@ class KeyManager {
             state.lockoutUntil = Date.now() + lockoutMs;
             state.attempts = 0; // Reset window counter; lockout timer takes over
 
-            this._pinLockoutUntil = state.lockoutUntil;
             this._pinAttempts = 0;
 
-            // Persist
+            // Persist. v4.8: kept in memory only when the shared record could
+            // not be written — the store is authoritative, and a copy here
+            // would outlive a reset made in another tab (a new login).
+            let saved = false;
             if (this._pinLockoutStore) {
-                try { await this._pinLockoutStore.upsert('state', state); } catch (_) {}
+                try { await this._pinLockoutStore.upsert(docId, state); saved = true; } catch (_) {}
+            }
+            if (!saved) {
+                if (acc) this._pinLockoutByAccount.set(acc, state.lockoutUntil);
+                else this._pinLockoutUntil = state.lockoutUntil;
             }
 
             return { locked: true, remainingSec: Math.ceil(lockoutMs / 1000), wiped: false };
@@ -11020,35 +11524,91 @@ class KeyManager {
 
         // Persist updated counter
         if (this._pinLockoutStore) {
-            try { await this._pinLockoutStore.upsert('state', state); } catch (_) {}
+            try { await this._pinLockoutStore.upsert(docId, state); } catch (_) {}
         }
 
-        return { locked: false, remainingSec: 0, wiped: false };
+        // v4.8: how many more wrong PINs before the next lockout or the wipe,
+        // whichever comes first (UnlockKeyDialog warns below 5; it read this
+        // field, but nothing ever set it); `wipeNext`: that limit is the wipe
+        // (the session is deleted: log in again with the key), not a wait.
+        const untilLockout = MAX_PER_WINDOW - state.attempts;
+        const untilWipe = WIPE_LIMIT - state.totalAttempts;
+        const attemptsRemaining = Math.max(0, Math.min(untilLockout, untilWipe));
+        return { locked: false, remainingSec: 0, wiped: false, attemptsRemaining, wipeNext: untilWipe <= untilLockout };
     }
 
     /**
      * SECURITY (v4.3 — H3): Check persistent lockout state.
      * Called at the start of unlockWithPin to enforce lockout across reloads.
+     * v4.8: per account; a lockout recorded by an older build (the global
+     * `state` document) still applies to every account until it ends.
+     * @param {string} [account] — defaults to the active account
      * @returns {Promise<{ locked: boolean, remainingSec: number }>}
      */
-    async _checkPinLockout() {
-        // Check in-memory first (fast path)
-        if (this._pinLockoutUntil > Date.now()) {
-            return { locked: true, remainingSec: Math.ceil((this._pinLockoutUntil - Date.now()) / 1000) };
-        }
+    async _checkPinLockout(account = null) {
+        const acc = normalizeAccount(account) || this._sessionManager?.currentAccount || null;
+        const now = Date.now();
+        const locked = (until) => ({ locked: true, remainingSec: Math.ceil((until - now) / 1000) });
 
-        // Check persistent state (survives reload)
+        // In memory: only lockouts this tab could not write to the store.
+        const mem = Math.max(this._pinLockoutUntil, acc ? (this._pinLockoutByAccount.get(acc) || 0) : 0);
+        if (mem > now) return locked(mem);
+
+        // Persistent state (survives reload, shared by every tab — v4.8:
+        // read from IndexedDB every time, not from this tab's document cache,
+        // which never saw a lockout another tab recorded; and not copied into
+        // memory, where it would outlive a reset made in another tab).
         if (this._pinLockoutStore) {
-            try {
-                const doc = await this._pinLockoutStore.get('state');
-                if (doc?.lockoutUntil > Date.now()) {
-                    this._pinLockoutUntil = doc.lockoutUntil; // Sync to memory
-                    return { locked: true, remainingSec: Math.ceil((doc.lockoutUntil - Date.now()) / 1000) };
-                }
-            } catch (_) {}
+            this._freshLockoutStore();
+            const ids = acc ? [this._lockoutDocId(acc), 'state'] : ['state'];
+            for (const id of ids) {
+                try {
+                    const doc = await this._pinLockoutStore.get(id);
+                    if (doc?.lockoutUntil > now) return locked(doc.lockoutUntil);
+                } catch (_) { /* no document */ }
+            }
         }
 
         return { locked: false, remainingSec: 0 };
+    }
+
+    /** @private The pin_lockout counters are shared by every tab: read them from IndexedDB, not this tab's document cache. */
+    _freshLockoutStore() {
+        try { this._pinLockoutStore?.clearCache?.(); } catch (_) { /* no cache */ }
+    }
+
+    /** v4.8: a correct PIN clears that account's counters (and a legacy global record). */
+    async _resetPinLockout(account = null) {
+        const acc = normalizeAccount(account) || this._sessionManager?.currentAccount || null;
+        this._pinAttempts = 0;
+        this._pinLockoutUntil = 0;
+        if (acc) this._pinLockoutByAccount.delete(acc);
+        if (this._pinLockoutStore) {
+            for (const id of acc ? [this._lockoutDocId(acc), 'state'] : ['state']) {
+                try { await this._pinLockoutStore.delete(id); } catch (_) { /* none */ }
+            }
+        }
+    }
+
+    /** @private pin_lockout document id: per account since v4.8, `state` before. */
+    _lockoutDocId(account) {
+        return account ? `state:${account}` : 'state';
+    }
+
+    /**
+     * v4.8: drop one account's cached keys (KeyManager holds the ACTIVE
+     * account's keys only; a parked or logged-out account's entries go).
+     * Cache ids are `${account}_${type}`; chain names cannot contain '_'.
+     * @param {string} account
+     */
+    forgetAccount(account) {
+        const acc = normalizeAccount(account);
+        if (!acc) return;
+        const prefix = acc + '_';
+        for (const id of Array.from(this.sessionKeys.keys())) {
+            if (id.startsWith(prefix)) this.sessionKeys.delete(id);
+        }
+        if (this.activeAccount === acc) this.activeAccount = null;
     }
 
     async _generateSessionCryptoKey() {
@@ -11355,7 +11915,14 @@ class KeyManager {
 
         // If the session is PIN-protected and locked, request a PIN unlock
         // instead of asking for the raw private key.
-        const hasPinVault = !!(this._sessionManager && this._sessionManager.currentMode === 'pin');
+        // v4.8: only for the ACTIVE account — the PIN callback unlocks the
+        // active session, so a prompt raised for another account (an offline
+        // broadcast queued before a switch) used to unlock the active account
+        // and cache its keys under the other account's name. Any other account
+        // goes to key_required below.
+        const hasPinVault = !!(this._sessionManager
+            && this._sessionManager.currentAccount === normalizedAccount
+            && this._sessionManager.currentMode === 'pin');
         if (hasPinVault && !this.isPINValid()) {
             // SECURITY FIX (v3.5.2): Queue concurrent PIN requests to prevent
             // double-dialog. If a PIN prompt is already active, wait for it.
@@ -11506,9 +12073,17 @@ class KeyManager {
         // normal operations: voting, posting, transfers, memo encryption).
         const defaultTypes = ['posting', 'active', 'memo'];
         const allTypes = options.includeOwner ? [...defaultTypes, 'owner'] : defaultTypes;
+        // v4.8.1: with validateCredentials' matchedTypes, only the roles whose
+        // derived key is still the account's. The option was passed by every
+        // login and ignored: a role whose key was changed on chain was cached
+        // anyway, so its operations signed with a key the chain rejects
+        // ("missing authority") instead of asking for the right one.
+        const types = Array.isArray(options.matchedTypes)
+            ? allTypes.filter((type) => options.matchedTypes.includes(type))
+            : allTypes;
 
         const derivedKeys = {};
-        for (const type of allTypes) {
+        for (const type of types) {
             const pk = PrivateKey.fromLogin(normalizedAccount, masterPassword, type);
             derivedKeys[type] = pk.toString();   // WIF strings: unavoidable at login (createSession consumes them)
             zeroPrivateKey(pk);

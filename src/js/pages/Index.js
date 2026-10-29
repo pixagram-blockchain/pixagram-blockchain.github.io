@@ -31,6 +31,10 @@ import {
     splitMetaPath, parseMeta, formatMeta, isHomePath, parseFeedFocusHash,
     BROWSE_PATH, entryMeta, HELP_TELEGRAM_URL, DEFAULT_NODES,
 } from "../utils/constants";
+// The sort tag links open on: trending until the reader picks another on the
+// feed. Imported here, at boot, so it follows the address from the first
+// navigation on.
+import { feedTagPath } from "../utils/feedSort";
 
 import LogoutModal from "../components/LogoutModal";
 import MenuContent from "../components/MenuContent";
@@ -74,6 +78,18 @@ import HomeEager from "./Home";
 import { t, setLanguage, subscribe as subscribe_language, useLanguage } from "../utils/text";
 
 const pixaLogoWhite = getIT();
+
+// Multi-account strings (components.index.*: switched_to_account,
+// logged_out_switched, session_expired_switched, logged_out_elsewhere_switched,
+// pin_wipe_switched, session_expired, logged_out_elsewhere), with an English
+// fallback for a build whose locale files predate them.
+const tr = (key, fallback, params) => {
+    let s = null;
+    try { s = t(key, params); } catch (e) { s = null; }
+    // utils/text.js renders a missing key as its last segment ("title_account").
+    const last = key.slice(key.lastIndexOf(".") + 1);
+    return typeof s === "string" && s && s !== key && s !== last ? s : fallback;
+};
 
 // ── Boot hint (written by utils/settings on every emitted settings bag) ──────
 // The app renders BEFORE the async settings load completes, which means
@@ -1000,7 +1016,11 @@ function usePageRouter(history, settingsRef, apiRef) {
                     // /hot/, …) have no match[2], and "#" + undefined used
                     // to coin the truthy string "#undefined" — which then
                     // polluted historyTags and the search placeholder.
-                    if (match[2]) value = "#" + match[2];
+                    // The capture carries the slash before the tag
+                    // ("/gaming"): kept, it made the entry "#/gaming", which
+                    // the History list showed as is and opened as
+                    // "/trending//gaming" — an address no route matches.
+                    if (match[2]) value = "#" + match[2].replace(/^\//, "");
                     break;
                 case "profile":
                     if (match[1]) value = "@" + match[1];
@@ -1638,6 +1658,10 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl, onNo
 
                     pixaAPI.askVote = settingsRef.current?._askvote !== false;
                     pixaAPI.defaultVotingPower = parseInt(settingsRef.current?._voting, 10) || 100;
+                    // Key-backup PDFs print in the chosen locale and page size
+                    // (read at generation time — see backupPdfOptions in BackUpWallet3).
+                    pixaAPI.pdfLocale = settingsRef.current?._selected_locales_code;
+                    pixaAPI.pdfPageSize = settingsRef.current?._pdf_page_size;
 
                     on("pin_required", (data) => {
                         openDialog("unlock", {
@@ -1733,6 +1757,43 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl, onNo
                         }), 3000);
                     });
 
+                    // Multi-account (pixaproxyapi v4.8): one toast per switch,
+                    // whatever caused it — the Accounts menu, a logout handing
+                    // over to the next logged-in account, an expired session,
+                    // a logout in another tab, a PIN wipe.
+                    on("account_switched", (data) => {
+                        const to = data && data.account;
+                        if (!to) return;
+                        const from = data.replaces || "";
+                        let msg = tr("components.index.switched_to_account", "Switched to @" + to, { account: to });
+                        if (from) {
+                            switch (data.reason) {
+                                case "logout":
+                                    msg = tr("components.index.logged_out_switched", "Logged out of @" + from + " — now using @" + to, { from, to }); break;
+                                case "expired":
+                                    msg = tr("components.index.session_expired_switched", "@" + from + "'s session expired — now using @" + to, { from, to }); break;
+                                case "remote":
+                                    msg = tr("components.index.logged_out_elsewhere_switched", "@" + from + " was logged out in another tab — now using @" + to, { from, to }); break;
+                                case "wiped":
+                                    msg = tr("components.index.pin_wipe_switched", "@" + from + " was logged out after too many wrong passwords — now using @" + to, { from, to }); break;
+                                default: break;
+                            }
+                        }
+                        showSnackbar(msg, 3500);
+                    });
+                    // The active session ended on its own and nobody took over.
+                    // (`switching`: another account takes over in the same
+                    // breath — the account_switched toast above covers it.)
+                    on("session_ended", (data) => {
+                        const account = data && data.account;
+                        if (!account || data.switching) return;
+                        if (data.reason === "expired") {
+                            showSnackbar(tr("components.index.session_expired", "Your session for @" + account + " expired — log in again", { account }), 5000);
+                        } else if (data.reason === "remote") {
+                            showSnackbar(tr("components.index.logged_out_elsewhere", "@" + account + " was logged out in another tab", { account }), 4000);
+                        }
+                    });
+
                     // The node stopped answering mid-session (pixaproxyapi
                     // _installNodeWatch). The failover decides what to do;
                     // this instance is torn down by the nodeUrl change.
@@ -1755,17 +1816,16 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl, onNo
                     // resolved sessionState here was producing a second
                     // "Session active" snackbar that the event-driven one
                     // had already covered, so we no longer show it.
-                    if (sessionState?.needsPIN) {
-                        openDialog("unlock", {
-                            mode: "pin",
-                            username: sessionState.account,
-                            actionDescription: "Unlock your secure vault to restore session",
-                            onUnlock: async (result) => {
-                                await pixaAPI.initializeVault(result.pin || result);
-                                await pixaAPI.restoreSession();
-                            },
-                        });
-                    }
+                    //
+                    // A session restored behind its PIN is unlocked on demand:
+                    // the first operation that needs a key raises pin_required
+                    // (handled above). The boot-time unlock dialog that used to
+                    // sit here tested `sessionState?.needsPIN` on the STRING
+                    // restoreSession() answers, so it never opened — and its
+                    // onUnlock (initializeVault + restoreSession) would not have
+                    // unlocked anything. Removed rather than revived: a dialog on
+                    // every load of a PIN session is a behaviour change to decide
+                    // on, not a fix (it would call pixaAPI.unlockWithPin(pin)).
                 } catch (e) {
                     if (cancelled) return;
                     console.error("API Init failed", e);
@@ -1855,12 +1915,15 @@ function useSessionAvatar(apiRef, apiReady, apiGeneration) {
         const accountOf = (data) => data?.account || data?.session?.account || (typeof data === "string" ? data : null);
 
         const onSession = (data) => resolve(accountOf(data), false);
-        const onEnded = () => clear();
+        // A logout handing over to another account (session_ended
+        // { switching }) keeps the avatar until `account_switched` replaces it.
+        const onEnded = (data) => { if (!(data && data.switching)) clear(); };
         // Own profile edited (avatar changed): refetch the same row.
         const onProfile = (data) => { if (data?.account && data.account === account) resolve(data.account, true); };
 
         api.eventEmitter.on("session_created", onSession);
         api.eventEmitter.on("session_restored", onSession);
+        api.eventEmitter.on("account_switched", onSession);
         api.eventEmitter.on("session_ended", onEnded);
         api.eventEmitter.on("profile_updated", onProfile);
 
@@ -1874,6 +1937,7 @@ function useSessionAvatar(apiRef, apiReady, apiGeneration) {
             cancelled = true;
             api.eventEmitter.off("session_created", onSession);
             api.eventEmitter.off("session_restored", onSession);
+            api.eventEmitter.off("account_switched", onSession);
             api.eventEmitter.off("session_ended", onEnded);
             api.eventEmitter.off("profile_updated", onProfile);
         };
@@ -2048,7 +2112,8 @@ function useSignedOut(apiRef, apiReady, apiGeneration, restored) {
         };
         const onSignedIn = () => { token += 1; settle(false); };
         // Another account may still be active after one session ends.
-        const onEnded = () => { check(null); };
+        // (`switching`: one takes over at once — its account_switched follows.)
+        const onEnded = (data) => { if (!(data && data.switching)) check(null); };
 
         SIGN_IN_EVENTS.forEach((ev) => api.eventEmitter.on(ev, onSignedIn));
         api.eventEmitter.on("session_ended", onEnded);
@@ -3283,6 +3348,10 @@ function Index({ classes, history, settings: rawSettings }) {
         if (!api || !processedSettings._know_the_settings) return;
         api.askVote = processedSettings._askvote !== false;
         api.defaultVotingPower = parseInt(processedSettings._voting, 10) || 100;
+        // Locale and page size of the key-backup PDFs (AddAccount, CreateAccount,
+        // CreateBulkAccount and PixaWalletKeys dialogs all read them off the api).
+        api.pdfLocale = processedSettings._selected_locales_code;
+        api.pdfPageSize = processedSettings._pdf_page_size;
     }, [processedSettings]);
 
     // ── Signal app initialization complete ───────────────────────────────
@@ -3618,12 +3687,34 @@ function Index({ classes, history, settings: rawSettings }) {
 
     // ── Logout ────────────────────────────────────────────────────────────
     const [logoutOpen, setLogoutOpen] = useState(false);
-    const openLogout = useCallback(() => setLogoutOpen(true), []);
+    // The account active when the user asked to log out is the one logged
+    // out — not whichever account took over while the dialog was open (an
+    // expired session handing over, say). The ref drives the logout, the
+    // state the dialog's title ("Log out @alice?").
+    const logoutAccountRef = useRef(null);
+    const [logoutAccount, setLogoutAccount] = useState(null);
+    const openLogout = useCallback(() => {
+        let account = null;
+        try { account = apiRef.current?.sessionManager?.currentAccount || null; }
+        catch (e) { account = null; }
+        logoutAccountRef.current = account;
+        setLogoutAccount(account);
+        setLogoutOpen(true);
+    }, []);
     const closeLogout = useCallback(() => { setLogoutOpen(false); actions.trigger_sfx("labactive"); }, []);
+    // LogoutModal's onConfirm: the whole logout (pixaproxyapi logout(): every
+    // tab, KeyManager, queued operations, hand-over). Returns the promise —
+    // the modal waits for it; a failure stays in the modal with "Retry".
     const doLogout = useCallback(() => {
-        apiRef.current?.logout().then(() => {
+        const api = apiRef.current;
+        if (!api) { closeLogout(); return Promise.resolve(); }
+        const account = logoutAccountRef.current;
+        return api.logout(account ? { account } : {}).then((res) => {
+            logoutAccountRef.current = null;
             closeLogout();
-            showSnackbar(t("components.index.logged_out_successfully"), 2000);
+            // Handed over to another logged-in account: the account_switched
+            // toast already says "Logged out of @a — now using @b".
+            if (!(res && res.switchedTo)) showSnackbar(t("components.index.logged_out_successfully"), 2000);
         });
     }, [closeLogout, showSnackbar]);
 
@@ -3654,8 +3745,10 @@ function Index({ classes, history, settings: rawSettings }) {
         history.push("/@" + cleaned);
         searchReset();
     }, [history, searchReset]);
+    // A tag (a search row, a History entry) opens in the sort the reader is
+    // browsing: trending until they pick another on the feed (utils/feedSort).
     const goToTag = useCallback((n) => {
-        history.push("/trending/" + n.replaceAll("#", ""));
+        history.push(feedTagPath(n));
         searchReset();
     }, [history, searchReset]);
     const goToCommunity = useCallback((name) => {
@@ -3678,7 +3771,7 @@ function Index({ classes, history, settings: rawSettings }) {
         flushSearchAddress();
         const shown = readMeta();
         const suffix = shown && shown.kind === "search" ? "+" + formatMeta(shown) : "";
-        history.push("/trending/" + tagname + suffix);
+        history.push(feedTagPath(tagname) + suffix);
     }, [history, readMeta, flushSearchAddress]);
 
     // ── Trade ─────────────────────────────────────────────────────────────
@@ -4036,7 +4129,9 @@ function Index({ classes, history, settings: rawSettings }) {
 
                     <LogoutModal
                         open={logoutOpen}
+                        account={logoutAccount}
                         onConfirm={doLogout}
+                        onClose={closeLogout}
                         api={apiRef.current}
                         onLogoutComplete={goHome}
                     />

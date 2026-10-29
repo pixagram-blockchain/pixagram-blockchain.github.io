@@ -695,6 +695,11 @@ export default {
             "trade": "Berdagang",
         },
         "login_dialog": {
+            "master_password_works_too": "Kata sandi master Anda juga bisa dipakai.",
+            "master_password_derives_key": "Kata sandi master — kunci {{requiredKeyType}} Anda akan diturunkan darinya",
+            "master_password_lacks_key": "Kunci {{requiredKeyType}} milik @{{name}} telah diubah di blockchain: kata sandi master ini tidak lagi menghasilkannya. Masukkan langsung kunci {{requiredKeyType}}.",
+            "add_account_button": "TAMBAH AKUN",
+            "add_another_account": "Tambahkan akun lain — akun yang sudah masuk tetap masuk",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2048,6 +2053,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Yakin ingin menghapus \"{{deleteConfirmDraftTitle}}\"? Tindakan ini tidak dapat dibatalkan."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "{{t}} milik @{{username}} telah diubah di blockchain: kata sandi master ini tidak lagi menghasilkannya. Masukkan langsung kunci tersebut.",
+            "attempts_remaining_before_logout": "Tersisa %n {{{_plurals.attempt}}} sebelum @{{account}} dikeluarkan dari perangkat ini",
             "toggle_pin_visibility": "tampilkan atau sembunyikan PIN",
             "enter_your_pin_to_unlock_the_requested": "Masukkan PIN Anda untuk membuka kunci yang diminta.",
             "hint": "Petunjuk: {{vaultHint}}",
@@ -2179,6 +2186,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Saat orang berinteraksi dengan konten Anda, Anda akan melihatnya di sini"
         },
         "menu_content": {
+            "add_account": "Tambah akun",
+            "add_account_hint": "Masuk dengan akun lain",
+            "switch_account": "Ganti akun",
+            "session_tab_only": "Hanya tab ini",
+            "session_locked": "Terkunci",
+            "switch_failed": "Tidak dapat beralih ke @{{account}}",
+            "session_time_left_dh": "Sisa {{days}} hari {{hours}} jam",
+            "session_time_left_h": "Sisa {{hours}} jam",
+            "session_time_left_soon": "Sisa kurang dari 1 jam",
             "notifications": "Notifikasi",
             "feed": "Beranda",
             "apps": "Aplikasi",
@@ -2269,6 +2285,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Jadwalkan pertemuan dengan tim kami untuk memulai dengan Simple Agreement for Future Token (SAFT)."
         },
         "index": {
+            "switched_to_account": "Beralih ke @{{account}}",
+            "logged_out_switched": "Keluar dari @{{from}} — sekarang menggunakan @{{to}}",
+            "session_expired_switched": "Sesi @{{from}} berakhir — sekarang menggunakan @{{to}}",
+            "logged_out_elsewhere_switched": "@{{from}} dikeluarkan di tab lain — sekarang menggunakan @{{to}}",
+            "pin_wipe_switched": "@{{from}} dikeluarkan setelah terlalu banyak kata sandi yang salah — sekarang menggunakan @{{to}}",
+            "session_expired": "Sesi Anda untuk @{{account}} berakhir — masuk lagi",
+            "logged_out_elsewhere": "@{{account}} dikeluarkan di tab lain",
             "users": "Pengguna",
             "communities": "Komunitas",
             "exclusive_discount_for_a_limited_time_only": "Diskon eksklusif, waktu terbatas!",
@@ -3151,6 +3174,14 @@ export default {
             "stored_on_arweave": "Tersimpan di Arweave"
         },
         "logout_modal": {
+            "title_account": "Keluar dari @{{account}}?",
+            "title": "Yakin ingin keluar?",
+            "please_wait": "Harap tunggu sementara kami mengakhiri sesi Anda dengan aman…",
+            "forgotten_on_device": "Browser di perangkat ini akan melupakan akun Anda. Jika Anda tidak memercayai perangkat ini, gunakan penjelajahan pribadi atau selalu keluar untuk menutup akses ke akun Anda.",
+            "others_stay_logged_in": "Akun Anda yang lain tetap masuk.",
+            "logout_failed": "Gagal keluar",
+            "retry": "Coba lagi",
+            "logout": "Keluar",
             "logging_out": "Keluar…"
         },
         "members_list_dialog": {

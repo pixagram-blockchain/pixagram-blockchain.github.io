@@ -694,6 +694,11 @@ export default {
             "trade": "Handla",
         },
         "login_dialog": {
+            "master_password_works_too": "Ditt masterlösenord fungerar också.",
+            "master_password_derives_key": "Masterlösenord — din {{requiredKeyType}}-nyckel härleds från det",
+            "master_password_lacks_key": "{{requiredKeyType}}-nyckeln för @{{name}} har ändrats på kedjan: det här masterlösenordet ger den inte längre. Ange själva {{requiredKeyType}}-nyckeln.",
+            "add_account_button": "LÄGG TILL KONTO",
+            "add_another_account": "Lägg till ett konto till — de som är inloggade förblir inloggade",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2046,6 +2051,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Är du säker på att du vill radera ”{{deleteConfirmDraftTitle}}”? Den här åtgärden kan inte ångras."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "Det här masterlösenordet ger inte längre {{t}} för @{{username}} — den har ändrats på kedjan. Ange själva nyckeln.",
+            "attempts_remaining_before_logout": "%n {{{_plurals.attempt}}} kvar innan @{{account}} loggas ut på den här enheten",
             "toggle_pin_visibility": "visa eller dölj PIN-koden",
             "enter_your_pin_to_unlock_the_requested": "Ange din PIN-kod för att låsa upp den begärda nyckeln.",
             "hint": "Ledtråd: {{vaultHint}}",
@@ -2177,6 +2184,15 @@ export default {
             "when_people_interact_with_your_content_youll": "När folk interagerar med ditt innehåll ser du det här"
         },
         "menu_content": {
+            "add_account": "Lägg till konto",
+            "add_account_hint": "Logga in med ett annat konto",
+            "switch_account": "Byt konto",
+            "session_tab_only": "Bara den här fliken",
+            "session_locked": "Låst",
+            "switch_failed": "Kunde inte byta till @{{account}}",
+            "session_time_left_dh": "{{days}} d {{hours}} tim kvar",
+            "session_time_left_h": "{{hours}} tim kvar",
+            "session_time_left_soon": "Mindre än 1 tim kvar",
             "notifications": "Aviseringar",
             "feed": "Flöde",
             "apps": "Appar",
@@ -2267,6 +2283,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Boka ett möte med vårt team för att komma igång med en Simple Agreement for Future Token (SAFT)."
         },
         "index": {
+            "switched_to_account": "Bytte till @{{account}}",
+            "logged_out_switched": "Utloggad från @{{from}} — använder nu @{{to}}",
+            "session_expired_switched": "Sessionen för @{{from}} har gått ut — använder nu @{{to}}",
+            "logged_out_elsewhere_switched": "@{{from}} loggades ut i en annan flik — använder nu @{{to}}",
+            "pin_wipe_switched": "@{{from}} loggades ut efter för många felaktiga lösenord — använder nu @{{to}}",
+            "session_expired": "Din session för @{{account}} har gått ut — logga in igen",
+            "logged_out_elsewhere": "@{{account}} loggades ut i en annan flik",
             "users": "Användare",
             "communities": "Gemenskaper",
             "exclusive_discount_for_a_limited_time_only": "Exklusiv rabatt — endast under begränsad tid!",
@@ -3149,6 +3172,14 @@ export default {
             "stored_on_arweave": "Lagrad på Arweave"
         },
         "logout_modal": {
+            "title_account": "Logga ut @{{account}}?",
+            "title": "Vill du verkligen logga ut?",
+            "please_wait": "Vänta medan vi avslutar din session säkert …",
+            "forgotten_on_device": "Webbläsaren på den här enheten glömmer ditt konto. Om du inte litar på den här enheten, använd privat surfning eller logga alltid ut för att stänga åtkomsten till ditt konto.",
+            "others_stay_logged_in": "Dina andra konton förblir inloggade.",
+            "logout_failed": "Utloggningen misslyckades",
+            "retry": "Försök igen",
+            "logout": "Logga ut",
             "logging_out": "Loggar ut …"
         },
         "members_list_dialog": {

@@ -13,7 +13,7 @@
 //        MainView, CommunityItem, TagChip, TagChipIcon, ProfileImage,
 //        ActionButtons, ProfileHeader, CTASection, ProposalsTile, PortalIconTile,
 //        FriendTile, FeedTile, LoginView, LoggedOutHeader, LoadingView, NotificationsLayer,
-//        AppsMenu, AppsMenuEntry.
+//        AppsMenu, AppsMenuEntry, AccountsMenu, AccountsMenuEntry.
 //      Each one re-renders only when its own slice of state changes - chips,
 //      communities, notif badge, profile header, etc. are skipped entirely.
 //   4. Per-item leaves (TagChip, CommunityItem) bind their click handler with
@@ -28,6 +28,17 @@
 //      paint/layout work.
 //   8. Per-render allocations (the outer container's style, the isMobile-
 //      dependent height) are memoized.
+//
+// Multi-account (pixaproxyapi v4.8 / session-manager v7):
+//   - A third header button sits under Notifications and Apps: "Add account"
+//     (PersonAdd) while one account is logged in — it opens the log-in for
+//     another account — and "Switch account" (SupervisorAccount) once several
+//     are: a menu of the OTHER logged-in accounts, each with its session's
+//     time left as secondary text, and "Add account" at the bottom.
+//   - The active session's time left (days + hours) is shown under @username.
+//   - The header follows `account_switched`, and a logout that hands over to
+//     another account (session_ended { switching }) no longer flashes the
+//     logged-out header.
 // ============================================================================
 
 import * as React from "preact/compat";
@@ -40,6 +51,7 @@ import ExitToApp from "@material-ui/icons/ExitToApp";
 import Tooltip from "@material-ui/core/Tooltip";
 import * as actions from "../actions/utils";
 import { HISTORY, PROPOSALS_PORTAL, COMMUNITY_PORTALS, buildFeedFocusHash } from "../utils/constants";
+import { feedTagPath } from "../utils/feedSort";
 import NewspaperVariant from "../icons/NewspaperVariant";
 import Chip from "@material-ui/core/Chip";
 import Typography from "@material-ui/core/Typography";
@@ -80,6 +92,12 @@ import FavoriteRounded from "@material-ui/icons/FavoriteRounded";
 import Menu from "@material-ui/core/Menu";
 import MenuItem from "@material-ui/core/MenuItem";
 import ListItemIcon from "@material-ui/core/ListItemIcon";
+import Divider from "@material-ui/core/Divider";
+import PersonAddRounded from "@material-ui/icons/PersonAddRounded";
+import SupervisorAccountRounded from "@material-ui/icons/SupervisorAccountRounded";
+import TimerOutlined from "@material-ui/icons/TimerOutlined";
+import LockRounded from "@material-ui/icons/LockRounded";
+import dispatcher from "../dispatcher";
 import { cssBackgroundImage } from "../utils/safeUrl";
 import { readFeedSeen, isFeedPostSeen, subscribeFeedSeen, toMs } from "../utils/feedSeen";
 
@@ -101,7 +119,7 @@ const styles = theme => ({
         "& > div": { borderRadius: "32px", width: "100%", height: "100%", backgroundPosition: "50% 50%", backgroundSize: "cover" }
     },
     menuButtons: { margin: "0px 0px 0px 8px", alignContent: "space-around" },
-    menuButton: { color: theme.palette.primary.contrastText, display: "block" },
+    menuButton: { color: "#888", display: "block" },
     badge: { "& .MuiBadge-colorPrimary": { color: "#ffffff75", backgroundColor: "#ffffff21" } },
     menuProfileTextContainer: { position: "relative", display: "flex", lineHeight: "48px" },
     menuProfileText: {
@@ -262,7 +280,19 @@ const styles = theme => ({
         "& .MuiListItemIcon-root": { minWidth: 44, color: "#bbb" }
     },
     appsMenuTitle: { display: "block", fontSize: "14px", fontWeight: 600, color: "#fff", lineHeight: "20px" },
-    appsMenuSub: { display: "block", fontSize: "12px", color: "#888", lineHeight: "16px" }
+    appsMenuSub: { display: "block", fontSize: "12px", color: "#888", lineHeight: "16px" },
+    // ── Accounts menu (behind the third header button) + session time left ─
+    accountsMenuAvatar: { width: 32, height: 32, borderRadius: "10px", backgroundColor: "#333", fontSize: "14px", color: "#bbb" },
+    accountsMenuDivider: { backgroundColor: "#ffffff14", margin: "6px 0px" },
+    accountsMenuSub: {
+        display: "flex", alignItems: "center", gap: "4px", fontSize: "12px", color: "#888", lineHeight: "16px",
+        "& svg": { width: 12, height: 12 }
+    },
+    sessionTimeLeft: {
+        display: "flex", alignItems: "center", gap: "6px", margin: "-6px 24px 4px 24px",
+        fontSize: "12px", lineHeight: "16px", color: "#8a8a8a",
+        "& svg": { width: 14, height: 14, color: "#6f6f6f" }
+    }
 });
 
 // ============================================================================
@@ -329,6 +359,43 @@ const MENU_APPS = [
 // Popover geometry hoisted so the <Menu> props keep a stable identity.
 const APPS_MENU_ANCHOR_ORIGIN = { vertical: "bottom", horizontal: "right" };
 const APPS_MENU_TRANSFORM_ORIGIN = { vertical: "top", horizontal: "right" };
+
+// ── Multi-account ────────────────────────────────────────────────────────────
+// Session events after which the list of logged-in accounts (and their time
+// left) is read again from api.listAccounts().
+const ACCOUNT_LIST_EVENTS = [
+    "accounts_changed", "account_switched", "session_created", "session_restored",
+    "session_ended", "session_refreshed", "pin_locked", "pin_unlocked",
+];
+// The time-left labels move by the hour; a minute tick is plenty.
+const TIME_LEFT_TICK_MS = 60 * 1000;
+
+// Multi-account strings (components.menu_content.*: add_account,
+// add_account_hint, switch_account, session_time_left_dh, session_time_left_h,
+// session_time_left_soon, session_tab_only, session_locked, switch_failed),
+// with an English fallback for a build whose locale files predate them.
+const tr = (key, fallback, params) => {
+    let s = null;
+    try { s = t(key, params); } catch (e) { s = null; }
+    // utils/text.js renders a missing key as its last segment ("title_account").
+    const last = key.slice(key.lastIndexOf(".") + 1);
+    return typeof s === "string" && s && s !== key && s !== last ? s : fallback;
+};
+
+// The time-left line of one session (listAccounts() entry) at `now`, in days
+// and hours: "6d 23h left", "5h left", "Less than 1h left" — the units are in
+// the locale strings.
+const sessionTimeLabel = (session, now) => {
+    if (!session) return null;
+    if (!session.persistent || !session.expiresAt) return tr("components.menu_content.session_tab_only", "This tab only");
+    const ms = session.expiresAt - now;
+    const hours = ms > 0 ? Math.floor(ms / 3600000) : 0;
+    const days = Math.floor(hours / 24);
+    const h = hours % 24;
+    if (days > 0) return tr("components.menu_content.session_time_left_dh", days + "d " + h + "h left", { days, hours: h });
+    if (h > 0) return tr("components.menu_content.session_time_left_h", h + "h left", { hours: h });
+    return tr("components.menu_content.session_time_left_soon", "Less than 1h left");
+};
 
 const FRIENDS_ROW_COLUMNS = 4;  // the Friends grid (discoverGrid): the feed
                                 // tile plus up to FRIENDS_MAX author tiles;
@@ -485,32 +552,67 @@ const NotificationBadge = React.memo(React.forwardRef(({ classes, onClick, count
 }), (prev, next) => prev.count === next.count && prev.onClick === next.onClick);
 NotificationBadge.displayName = "NotificationBadge";
 
-const ActionButtons = React.memo(React.forwardRef(({ classes, onWalletClick, onNotificationClick, onAppsClick, appsButtonRef, notificationCount }, notifRef) => {
+const ActionButtons = React.memo(React.forwardRef(({
+                                                       classes, onWalletClick, onNotificationClick, onAppsClick, appsButtonRef, notificationCount,
+                                                       accountCount, onAccountsClick, accountsButtonRef
+                                                   }, notifRef) => {
     useLanguage();
+    // Under Notifications and Apps: "Add account" while one account is logged
+    // in (opens the log-in straight away), "Switch account" once several are
+    // (opens AccountsMenu).
+    const several = accountCount > 1;
     return (
         (<div className={classes.menuButtons}>
             <NotificationBadge ref={notifRef} classes={classes} onClick={onNotificationClick} count={notificationCount} />
             <Tooltip title={t("components.menu_content.apps")}>
                 <IconButton ref={appsButtonRef} className={classes.menuButton} onClick={onAppsClick}><AppsRounded /></IconButton>
             </Tooltip>
+            <Tooltip title={several
+                ? tr("components.menu_content.switch_account", "Switch account")
+                : tr("components.menu_content.add_account", "Add account")}>
+                <IconButton
+                    ref={accountsButtonRef}
+                    className={classes.menuButton}
+                    onClick={onAccountsClick}
+                    aria-haspopup={several ? "menu" : undefined}
+                >
+                    {several ? <SupervisorAccountRounded /> : <PersonAddRounded />}
+                </IconButton>
+            </Tooltip>
         </div>)
-        // appsButtonRef / notifRef are stable ref objects — skipped by the
-        // comparator on purpose, same as `classes`.
+        // appsButtonRef / accountsButtonRef / notifRef are stable ref objects —
+        // skipped by the comparator on purpose, same as `classes`.
         // The feed button moved out of the header: it now leads the "Friends"
         // row in MainView (see FeedTile).
     );
-}), cmpKeys(["notificationCount", "onWalletClick", "onNotificationClick", "onAppsClick"]));
+}), cmpKeys(["notificationCount", "onWalletClick", "onNotificationClick", "onAppsClick", "accountCount", "onAccountsClick"]));
 ActionButtons.displayName = "ActionButtons";
 
-const ProfileHeader = React.memo(({ classes, onProfileClick, onLogoutClick, username }) => {
+// `timeLeft`: the active session's remaining lifetime ("6d 23h left", or
+// "This tab only"), printed under @username; `locked` adds the lock mark of a
+// PIN-protected session whose keys are not unlocked.
+const ProfileHeader = React.memo(({ classes, onProfileClick, onLogoutClick, username, timeLeft, locked }) => {
     useLanguage();
     return (
-        <div className={classes.menuProfileTextContainer}>
-            <Typography style={PROFILE_TEXT_STYLE} component="h2" variant="h6" onClick={onProfileClick} className={classes.menuProfileText}>@{username}</Typography>
-            <Tooltip title={t("components.menu_content.logging_out")}><IconButton className={classes.exitButton} onClick={onLogoutClick}><ExitToApp /></IconButton></Tooltip>
+        <div>
+            <div className={classes.menuProfileTextContainer}>
+                <Typography style={PROFILE_TEXT_STYLE} component="h2" variant="h6" onClick={onProfileClick} className={classes.menuProfileText}>@{username}</Typography>
+                <Tooltip title={t("components.menu_content.logging_out")}><IconButton className={classes.exitButton} onClick={onLogoutClick}><ExitToApp /></IconButton></Tooltip>
+            </div>
+            {timeLeft && (
+                <Typography component="div" className={classes.sessionTimeLeft}>
+                    <TimerOutlined />
+                    <span>{timeLeft}</span>
+                    {locked && (
+                        <Tooltip title={tr("components.menu_content.session_locked", "Locked")}>
+                            <LockRounded />
+                        </Tooltip>
+                    )}
+                </Typography>
+            )}
         </div>
     );
-}, cmpKeys(["username", "onProfileClick", "onLogoutClick"]));
+}, cmpKeys(["username", "onProfileClick", "onLogoutClick", "timeLeft", "locked"]));
 ProfileHeader.displayName = "ProfileHeader";
 
 const CTASection = React.memo(({ classes, closed, onLinkedInClick, onClose, bannerUrl }) => {
@@ -861,14 +963,94 @@ const AppsMenu = React.memo(({ classes, open, anchorEl, onClose, onSelect }) => 
 ), cmpKeys(["open", "anchorEl", "onClose", "onSelect"]));
 AppsMenu.displayName = "AppsMenu";
 
+// ----- One logged-in account in the Accounts menu: avatar, @name, and the
+// session's time left as secondary text (plus a lock while its PIN is
+// needed). forwardRef + prop spread for MenuList focus management, like
+// AppsMenuEntry. `now` is the menu's minute tick.
+const AccountsMenuEntry = React.memo(React.forwardRef(({ classes, session, image, now, disabled, onSelect, ...other }, ref) => {
+    useLanguage();
+    const handleClick = useCallback(() => onSelect(session.account), [session.account, onSelect]);
+    return (
+        <MenuItem ref={ref} className={classes.appsMenuItem} onClick={handleClick} disabled={disabled} {...other}>
+            <ListItemIcon>
+                <Avatar src={image || undefined} className={"pixelated " + classes.accountsMenuAvatar}>
+                    {!image && "@"}
+                </Avatar>
+            </ListItemIcon>
+            <ListItemText
+                disableTypography
+                primary={<span className={classes.appsMenuTitle}>@{session.account}</span>}
+                secondary={
+                    <span className={classes.accountsMenuSub}>
+                        <span>{sessionTimeLabel(session, now)}</span>
+                        {session.locked && <LockRounded aria-label={tr("components.menu_content.session_locked", "Locked")} />}
+                    </span>
+                }
+            />
+        </MenuItem>
+    );
+}));
+AccountsMenuEntry.displayName = "AccountsMenuEntry";
+
+// ----- "Add account", the last row of the Accounts menu.
+const AddAccountMenuEntry = React.memo(React.forwardRef(({ classes, onSelect, ...other }, ref) => {
+    useLanguage();
+    return (
+        <MenuItem ref={ref} className={classes.appsMenuItem} onClick={onSelect} {...other}>
+            <ListItemIcon><PersonAddRounded /></ListItemIcon>
+            <ListItemText
+                disableTypography
+                primary={<span className={classes.appsMenuTitle}>{tr("components.menu_content.add_account", "Add account")}</span>}
+                secondary={<span className={classes.appsMenuSub}>{tr("components.menu_content.add_account_hint", "Log in with another account")}</span>}
+            />
+        </MenuItem>
+    );
+}));
+AddAccountMenuEntry.displayName = "AddAccountMenuEntry";
+
+// ----- The Accounts popover (header button while several accounts are logged
+// in): the OTHER logged-in accounts, most recently used first, then "Add
+// account". Isolated like AppsMenu. Children are a flat array — MUI's Menu
+// does not accept a Fragment child.
+const AccountsMenu = React.memo(({ classes, open, anchorEl, onClose, accounts, images, now, switching, onSwitch, onAdd }) => {
+    const others = accounts.filter(a => !a.active);
+    const items = others.map(a => (
+        <AccountsMenuEntry
+            key={"acc-" + a.account}
+            classes={classes}
+            session={a}
+            image={images[a.account] || ""}
+            now={now}
+            disabled={!!switching}
+            onSelect={onSwitch}
+        />
+    ));
+    if (items.length > 0) items.push(<Divider key="acc-divider" className={classes.accountsMenuDivider} />);
+    items.push(<AddAccountMenuEntry key="acc-add" classes={classes} onSelect={onAdd} />);
+    return (
+        <Menu
+            open={open}
+            anchorEl={anchorEl}
+            onClose={onClose}
+            getContentAnchorEl={null}
+            anchorOrigin={APPS_MENU_ANCHOR_ORIGIN}
+            transformOrigin={APPS_MENU_TRANSFORM_ORIGIN}
+            classes={{ paper: classes.appsMenuPaper }}
+        >
+            {items}
+        </Menu>
+    );
+}, cmpKeys(["open", "anchorEl", "onClose", "accounts", "images", "now", "switching", "onSwitch", "onAdd"]));
+AccountsMenu.displayName = "AccountsMenu";
+
 // ----- Notifications + logout modal isolated so opening/closing them doesn't
 // repaint the main tree.
 const NotificationsLayer = React.memo(({
-                                           logoutModalOpen, pixaAPI, onLogoutModalClose, onLogoutConfirm,
+                                           logoutModalOpen, logoutAccount, pixaAPI, onLogoutModalClose, onLogoutConfirm,
                                            notifOpen, notifAnchor, onNotificationClose, accountName, onUnreadCountChange
                                        }) => (
     <React.Fragment>
-        <LogoutModal open={logoutModalOpen} api={pixaAPI} onClose={onLogoutModalClose} onConfirm={onLogoutConfirm} />
+        <LogoutModal open={logoutModalOpen} account={logoutAccount} api={pixaAPI} onClose={onLogoutModalClose} onConfirm={onLogoutConfirm} />
         <NotificationsDialog
             open={notifOpen}
             anchorEl={notifAnchor}
@@ -879,7 +1061,7 @@ const NotificationsLayer = React.memo(({
         />
     </React.Fragment>
 ), cmpKeys([
-    "logoutModalOpen", "pixaAPI", "onLogoutModalClose", "onLogoutConfirm",
+    "logoutModalOpen", "logoutAccount", "pixaAPI", "onLogoutModalClose", "onLogoutConfirm",
     "notifOpen", "notifAnchor", "onNotificationClose", "accountName", "onUnreadCountChange"
 ]));
 NotificationsLayer.displayName = "NotificationsLayer";
@@ -888,6 +1070,7 @@ NotificationsLayer.displayName = "NotificationsLayer";
 const LoggedInHeader = React.memo(({
                                        classes, profileImage, onProfileClick, notifAnchorRef, appsButtonRef,
                                        onWalletOpen, onNotificationOpen, onAppsOpen, notifCount,
+                                       accountCount, onAccountsOpen, accountsButtonRef, sessionTimeLeft, sessionLocked,
                                        username, onLogoutClick, closedMenuAds, onLinkedInClick, onCloseMenuAds, bannerUrl
                                    }) => (
     <div style={TOP_CONTAINER_STYLE}>
@@ -901,14 +1084,18 @@ const LoggedInHeader = React.memo(({
                 onAppsClick={onAppsOpen}
                 appsButtonRef={appsButtonRef}
                 notificationCount={notifCount}
+                accountCount={accountCount}
+                onAccountsClick={onAccountsOpen}
+                accountsButtonRef={accountsButtonRef}
             /></Fade>
         </div>
-        <Fade in timeout={500}><ProfileHeader classes={classes} onProfileClick={onProfileClick} onLogoutClick={onLogoutClick} username={username} /></Fade>
+        <Fade in timeout={500}><ProfileHeader classes={classes} onProfileClick={onProfileClick} onLogoutClick={onLogoutClick} username={username} timeLeft={sessionTimeLeft} locked={sessionLocked} /></Fade>
         <Fade in timeout={600}><CTASection classes={classes} closed={closedMenuAds} onLinkedInClick={onLinkedInClick} onClose={onCloseMenuAds} bannerUrl={bannerUrl} /></Fade>
     </div>
 ), cmpKeys([
     "profileImage", "onProfileClick",
     "onWalletOpen", "onNotificationOpen", "onAppsOpen", "notifCount",
+    "accountCount", "onAccountsOpen", "sessionTimeLeft", "sessionLocked",
     "username", "onLogoutClick", "closedMenuAds", "onLinkedInClick", "onCloseMenuAds", "bannerUrl"
 ]));
 LoggedInHeader.displayName = "LoggedInHeader";
@@ -949,6 +1136,14 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
     const [notifOpen, setNotifOpen] = useState(false);
     const [notifCount, setNotifCount] = useState(0);
     const [appsOpen, setAppsOpen] = useState(false);
+    // Multi-account: every logged-in account (api.listAccounts()), the
+    // Accounts menu, the account being switched to, avatars of the listed
+    // accounts, and a minute tick for the time-left labels.
+    const [accounts, setAccounts] = useState([]);
+    const [accountsOpen, setAccountsOpen] = useState(false);
+    const [switchingTo, setSwitchingTo] = useState(null);
+    const [accountImages, setAccountImages] = useState({});
+    const [now, setNow] = useState(() => Date.now());
 
     // ---- Refs (no re-renders) ----
     // debugMsg was state - now a ref. It never rendered, so it was causing
@@ -963,6 +1158,9 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
     const accountDataRef = useRef(null);
     const notifAnchorRef = useRef(null);
     const appsButtonRef = useRef(null);
+    const accountsButtonRef = useRef(null);
+    const accountsToken = useRef(0);           // retires a superseded listAccounts()
+    const switchingRef = useRef(null);         // the account a switch is under way to (guards double clicks)
     // Friends row (see fetchFriends / applyFriends below):
     const feedScanRef = useRef(null);          // { account, head, posts: [{ author, permlink, created }] }
     const friendsScanToken = useRef(0);        // retires a superseded scan
@@ -1298,8 +1496,20 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
             console.log("[MenuContent] session_restored event received:", account);
             handleSessionEvent("Session restored", account);
         };
-        const onSessionEnded = () => {
+        // Another account takes over (pixaproxyapi logout → switch): stay on
+        // the loader until its `account_switched`, instead of flashing the
+        // logged-out header in between.
+        const onAccountSwitched = (data) => {
+            const account = data?.account || data;
+            console.log("[MenuContent] account_switched event received:", account);
+            handleSessionEvent("Account switched", account);
+        };
+        const onSessionEnded = (data) => {
             if (debounceTimeout) clearTimeout(debounceTimeout);
+            if (data && data.switching && data.next) {
+                if (isMounted.current) setLoading(true);
+                return;
+            }
             console.log("[MenuContent] Session ended");
             setDebugMsg("Session ended");
             loggedOutRef.current = true;
@@ -1319,6 +1529,7 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
 
         pixaAPI.eventEmitter.on("session_created", onSessionCreated);
         pixaAPI.eventEmitter.on("session_restored", onSessionRestored);
+        pixaAPI.eventEmitter.on("account_switched", onAccountSwitched);
         pixaAPI.eventEmitter.on("session_ended", onSessionEnded);
 
         const onProfileUpdated = async (data) => {
@@ -1332,10 +1543,65 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
             if (debounceTimeout) clearTimeout(debounceTimeout);
             pixaAPI.eventEmitter.off("session_created", onSessionCreated);
             pixaAPI.eventEmitter.off("session_restored", onSessionRestored);
+            pixaAPI.eventEmitter.off("account_switched", onAccountSwitched);
             pixaAPI.eventEmitter.off("session_ended", onSessionEnded);
             pixaAPI.eventEmitter.off("profile_updated", onProfileUpdated);
         };
     }, [pixaAPI, fetchAccountDetails, fetchCommunities, fetchTags, fetchFriends, setDebugMsg]);
+
+    // ---- Logged-in accounts (multi-account) ----
+    // api.listAccounts() is read at mount and after every session event that
+    // can change the set or an expiry; the labels are re-derived each minute
+    // from `expiresAt`, without a read.
+    const refreshAccounts = useCallback(async () => {
+        if (!pixaAPI || typeof pixaAPI.listAccounts !== "function") return;
+        const token = ++accountsToken.current;
+        let list = [];
+        try { list = await pixaAPI.listAccounts(); } catch (e) { list = []; }
+        if (!isMounted.current || token !== accountsToken.current) return;
+        setAccounts(Array.isArray(list) ? list : []);
+        setNow(Date.now());
+    }, [pixaAPI]);
+
+    useEffect(() => {
+        if (!pixaAPI || !pixaAPI.eventEmitter) return undefined;
+        let timer = null;
+        const onChange = () => {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => { timer = null; refreshAccounts(); }, 50);
+        };
+        ACCOUNT_LIST_EVENTS.forEach(ev => pixaAPI.eventEmitter.on(ev, onChange));
+        refreshAccounts();
+        return () => {
+            if (timer) clearTimeout(timer);
+            ACCOUNT_LIST_EVENTS.forEach(ev => pixaAPI.eventEmitter.off(ev, onChange));
+        };
+    }, [pixaAPI, refreshAccounts]);
+
+    const hasAccounts = accounts.length > 0;
+    useEffect(() => {
+        if (!hasAccounts) return undefined;
+        const id = setInterval(() => setNow(Date.now()), TIME_LEFT_TICK_MS);
+        return () => clearInterval(id);
+    }, [hasAccounts]);
+
+    // Avatars of the other accounts, fetched when the menu opens (one
+    // getAccounts for the names not seen yet; kept for the component's life).
+    const accountImagesRef = useRef({});
+    useEffect(() => {
+        if (!accountsOpen || !pixaAPI || !pixaAPI.accounts) return;
+        const missing = accounts.map(a => a.account).filter(n => !(n in accountImagesRef.current));
+        if (missing.length === 0) return;
+        let cancelled = false;
+        pixaAPI.accounts.getAccounts(missing, true).then(rows => {
+            const next = { ...accountImagesRef.current };
+            (rows || []).forEach(a => { if (a && a.name) next[a.name] = (a._profile && a._profile.profile_image) || ""; });
+            missing.forEach(n => { if (!(n in next)) next[n] = ""; });
+            accountImagesRef.current = next;
+            if (!cancelled && isMounted.current) setAccountImages(next);
+        }).catch(() => {});
+        return () => { cancelled = true; };
+    }, [accountsOpen, accounts, pixaAPI]);
 
     // ---- Deferred session retry ----
     useEffect(() => {
@@ -1368,22 +1634,90 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
     }, [pixaAPI, accountData, fetchAccountDetails, fetchCommunities, fetchTags, fetchFriends, setDebugMsg]);
 
     // ---- Handlers (all stable) ----
-    const handleTagNavigation = useCallback((tag) => HISTORY.push("/created/" + tag), []);
+    // A tag chip (the home chip passes "") opens the feed in the sort the
+    // reader is browsing: trending until they pick another on the feed, then
+    // that one — the chip changes the tag, never the sort (utils/feedSort).
+    const handleTagNavigation = useCallback((tag) => HISTORY.push(feedTagPath(tag)), []);
     const handleProfileClick = useCallback(() => {
         if (accountDataRef.current) HISTORY.push("/@" + accountDataRef.current.name);
     }, []);
     const handleLogin = useCallback(() => actions.trigger_login(), []);
     const handleSignup = useCallback(() => actions.trigger_account(), []);
-    const handleLogoutClick = useCallback(() => setLogoutModalOpen(true), []);
+    // The account shown when "log out" was clicked is the one logged out —
+    // not one that took over while the dialog was open (an expiry, a logout
+    // in another tab). The modal names it.
+    const logoutAccountRef = useRef(null);
+    const [logoutAccount, setLogoutAccount] = useState(null);
+    const handleLogoutClick = useCallback(() => {
+        let account = accountDataRef.current?.name || null;
+        if (!account) { try { account = pixaAPI?.sessionManager?.currentAccount || null; } catch (e) { account = null; } }
+        logoutAccountRef.current = account;
+        setLogoutAccount(account);
+        setLogoutModalOpen(true);
+    }, [pixaAPI]);
     const handleLogoutModalClose = useCallback(() => setLogoutModalOpen(false), []);
+    // LogoutModal waits for this: the whole logout is pixaproxyapi's (the
+    // modal used to end the session a second time, which defeated the
+    // hand-over to another logged-in account). A failure goes back to the
+    // modal, which shows it with "Retry".
     const handleLogoutConfirm = useCallback(async () => {
-        setLogoutModalOpen(false);
+        if (!pixaAPI) { setLogoutModalOpen(false); return; }
+        const account = logoutAccountRef.current;
         setLoading(true);
-        if (pixaAPI) await pixaAPI.logout();
+        let res = null;
+        try {
+            res = await pixaAPI.logout(account ? { account } : {});
+        } catch (e) {
+            if (isMounted.current) setLoading(false);
+            throw e;
+        }
+        if (isMounted.current) {
+            setLogoutModalOpen(false);
+            // Not the active account by then (already logged out elsewhere,
+            // or parked by a switch a moment before): no session event
+            // follows to end the loader. The active one's logout is followed
+            // by session_ended, or by account_switched after a hand-over.
+            if (!(res && res.wasActive)) setLoading(false);
+        }
     }, [pixaAPI]);
     const handleWalletOpen = useCallback(() => actions.trigger_account(), []);
     const handleAppsOpen = useCallback(() => setAppsOpen(true), []);
     const handleAppsClose = useCallback(() => setAppsOpen(false), []);
+    // ── Accounts button / menu ──
+    // The log-in, flagged as adding an account (LoginDialog `addingAccount`):
+    // the account logged in now is kept and becomes switchable.
+    const handleAddAccount = useCallback(() => {
+        setAccountsOpen(false);
+        dispatcher.dispatch({ type: "LOGIN", data: { addingAccount: true } });
+    }, []);
+    const accountsRef = useRef(accounts);
+    accountsRef.current = accounts;
+    const handleAccountsOpen = useCallback(() => {
+        // One account: the button IS "Add account". Several: the menu.
+        if (accountsRef.current.filter(a => !a.active).length === 0) { handleAddAccount(); return; }
+        setAccountsOpen(true);
+    }, [handleAddAccount]);
+    const handleAccountsClose = useCallback(() => setAccountsOpen(false), []);
+    const handleSwitchAccount = useCallback(async (account) => {
+        if (!pixaAPI || typeof pixaAPI.switchAccount !== "function" || switchingRef.current) return;
+        switchingRef.current = account;
+        setSwitchingTo(account);
+        try {
+            await pixaAPI.switchAccount(account);
+            if (isMounted.current) setAccountsOpen(false);
+            // The "Switched to @…" toast is Index's (account_switched), so it
+            // covers every way a switch happens.
+        } catch (e) {
+            actions.trigger_snackbar(
+                tr("components.menu_content.switch_failed", "Couldn't switch to @" + account, { account }) +
+                (e && e.message ? " — " + e.message : "")
+            );
+            refreshAccounts();
+        } finally {
+            switchingRef.current = null;
+            if (isMounted.current) setSwitchingTo(null);
+        }
+    }, [pixaAPI, refreshAccounts]);
     // One dispatcher for every Apps-menu row. New tools plug in as new cases;
     // rows flagged `comingSoon` short-circuit into the shared snackbar
     // (mirrors the unlinked governance tiles).
@@ -1448,6 +1782,13 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
     const isLoggedIn = !!accountData;
     const accountName = accountData?.name || null;
     const username = accountData?.name || "user";
+    // The active session as listAccounts() reported it (time left, lock).
+    const activeSession = useMemo(
+        () => accounts.find(a => a.active && a.account === accountName) || null,
+        [accounts, accountName]
+    );
+    const sessionTimeLeft = activeSession ? sessionTimeLabel(activeSession, now) : null;
+    const sessionLocked = !!(activeSession && activeSession.locked);
 
     // Memoize the outer container style so its identity is stable across renders
     // when isMobile is unchanged.
@@ -1548,6 +1889,11 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
                         onAppsOpen={handleAppsOpen}
                         appsButtonRef={appsButtonRef}
                         notifCount={notifCount}
+                        accountCount={accounts.length}
+                        onAccountsOpen={handleAccountsOpen}
+                        accountsButtonRef={accountsButtonRef}
+                        sessionTimeLeft={sessionTimeLeft}
+                        sessionLocked={sessionLocked}
                         username={username}
                         onLogoutClick={handleLogoutClick}
                         closedMenuAds={closed_menu_ads}
@@ -1577,6 +1923,7 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
 
             <NotificationsLayer
                 logoutModalOpen={logoutModalOpen}
+                logoutAccount={logoutAccount}
                 pixaAPI={pixaAPI}
                 onLogoutModalClose={handleLogoutModalClose}
                 onLogoutConfirm={handleLogoutConfirm}
@@ -1593,6 +1940,19 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
                 anchorEl={appsButtonRef.current}
                 onClose={handleAppsClose}
                 onSelect={handleAppSelect}
+            />
+
+            <AccountsMenu
+                classes={classes}
+                open={accountsOpen && isLoggedIn}
+                anchorEl={accountsButtonRef.current}
+                onClose={handleAccountsClose}
+                accounts={accounts}
+                images={accountImages}
+                now={now}
+                switching={switchingTo}
+                onSwitch={handleSwitchAccount}
+                onAdd={handleAddAccount}
             />
         </React.Fragment>
     );

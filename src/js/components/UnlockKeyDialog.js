@@ -37,6 +37,17 @@ import { t, useLanguage } from "../utils/text";
 import { withLanguage } from "../utils/withLanguage";
 const QRScannerDialog = lazyDialog(() => import("./QrScanner"), { name: "QRScanner" });
 
+// components.unlock_key_dialog.attempts_remaining_before_logout and
+// master_password_lacks_key, with an English fallback for a build whose locale
+// files predate them.
+const tr = (key, fallback, params) => {
+    let s = null;
+    try { s = t(key, params); } catch (e) { s = null; }
+    // utils/text.js renders a missing key as its last segment ("title_account").
+    const last = key.slice(key.lastIndexOf(".") + 1);
+    return typeof s === "string" && s && s !== key && s !== last ? s : fallback;
+};
+
 const styles = theme => ({
     backdrop: {
         zIndex: "1301",
@@ -247,6 +258,8 @@ const PinUnlockMode = memo(function PinUnlockMode({
                                                       showPin,
                                                       pinError,
                                                       attemptsRemaining,
+                                                      wipeNext,
+                                                      account,
                                                       vaultHint,
                                                       onPinChange,
                                                       onToggleShowPin,
@@ -289,8 +302,8 @@ const PinUnlockMode = memo(function PinUnlockMode({
             {/* FIX (v4.1): Display the PIN hint if one was set during login */}
             {vaultHint ? (
                 <Typography style={{ fontSize: 13, color: "#7b7b7b", marginTop: 8 }}>{t("components.unlock_key_dialog.hint", {
-                        vaultHint: vaultHint
-                    })}</Typography>
+                    vaultHint: vaultHint
+                })}</Typography>
             ) : null}
             {pinError && (
                 <Typography style={{ fontSize: 13, color: "#7b7b7b", marginTop: 8, textAlign: "right" }}>
@@ -300,7 +313,15 @@ const PinUnlockMode = memo(function PinUnlockMode({
             {attemptsRemaining !== null && attemptsRemaining < 5 && (
                 <div className={classes.attemptsWarning}>
                     <ErrorRounded style={{ fontSize: 18 }} />
-                    <span>{t("components.unlock_key_dialog.attempt_remaining_before_lockout", {
+                    {/* wipeNext: those attempts end with the session deleted
+                        (pixaproxyapi PIN wipe — log in again with the key), not
+                        a wait. */}
+                    <span>{wipeNext
+                        ? tr("components.unlock_key_dialog.attempts_remaining_before_logout",
+                            (attemptsRemaining === 1 ? "Last attempt" : attemptsRemaining + " attempts left")
+                            + " before " + (account ? "@" + account : "this account") + " is logged out on this device",
+                            { attempt: { attempt: attemptsRemaining }, account: account || "" })
+                        : t("components.unlock_key_dialog.attempt_remaining_before_lockout", {
                             attempt: { attempt: attemptsRemaining },
                         })}</span>
                 </div>
@@ -309,9 +330,9 @@ const PinUnlockMode = memo(function PinUnlockMode({
     );
 });
 
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ────────────────────────────────────────────────────────────────────────────
 // Mode: Add Missing Key
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ────────────────────────────────────────────────────────────────────────────
 const AddKeyMode = memo(function AddKeyMode({
                                                 classes,
                                                 keyType,
@@ -335,12 +356,12 @@ const AddKeyMode = memo(function AddKeyMode({
                 <CircularProgress size={20} color="secondary" />
             ) : keyValue.length > 0 ? (
                 <Tooltip title={
-                    keyIsWif
-                        ? "Valid WIF key format"
-                        : keyValid
-                            ? "Looks like a master password — will be checked against the account"
-                            : "Too short — enter your master password or a WIF key"
-                }>
+                             keyIsWif
+                                 ? "Valid WIF key format"
+                                 : keyValid
+                                     ? "Looks like a master password — will be checked against the account"
+                                     : "Too short — enter your master password or a WIF key"
+                         }>
                     <IconButton edge="end" disabled className={classes.buttonNotDisabled}>
                         {keyIsWif
                             ? <CheckRounded style={{ color: "#ffffff" }} />
@@ -391,8 +412,8 @@ const AddKeyMode = memo(function AddKeyMode({
                 />
             </FormControl>
             <Typography style={{ fontSize: 12, color: "#7b7b7b", marginTop: 8, textAlign: "right" }}>{t("components.unlock_key_dialog.accepts_master_password_or_wif", {
-                    description: t(config.description)
-                })}</Typography>
+                description: t(config.description)
+            })}</Typography>
             {keyError && (
                 <Typography style={{ fontSize: 13, color: "#a1a1a1", marginTop: 8, textAlign: "right" }}>
                     {keyError}
@@ -407,6 +428,9 @@ class UnlockKeyDialog extends React.PureComponent {
         super(props);
 
         this._keyValidationTimer = null;
+        // A submission's ticket: a reset (opened again, or for another
+        // account) makes the answers still on their way stale.
+        this._ticket = 0;
 
         this.state = {
             _mode: props.mode || (props.keyMissing ? 'addKey' : 'pin'),
@@ -414,6 +438,7 @@ class UnlockKeyDialog extends React.PureComponent {
             _show_pin: false,
             _pin_error: null,
             _attempts_remaining: null,
+            _wipe_next: false,
             _key_value: "",
             _show_key: false,
             _key_valid: false,
@@ -428,16 +453,38 @@ class UnlockKeyDialog extends React.PureComponent {
         };
     }
 
-    async _loadHint() {
-        const { api } = this.props;
+    /**
+     * The PIN hint of the account being unlocked (`props.username`).
+     *
+     * Multi-account (session-manager v7): each account has its own PIN, and
+     * LoginDialog saves its hint as `vault_hint:<account>`. The single
+     * `vault_hint` record (last PIN login wins) is only used when it is this
+     * account's, or predates multi-account (no `account` field: one account
+     * per device then) — it showed one account's hint on another's prompt.
+     * Reads the props it is given: on open, componentWillReceiveProps runs
+     * before this.props holds the new account.
+     */
+    async _loadHint(props = this.props) {
+        const { api, username } = props;
+        const account = String(username || "").replace(/^@+/, "").trim().toLowerCase();
+        this._hintFor = account;               // a late answer for another account is dropped
+        if (this.state._vault_hint) this.setState({ _vault_hint: "" });
         if (!api?.settingsDb) return;
+        let hint = "";
         try {
             const col = await api.settingsDb.getCollection('pq_vault_config');
-            const doc = await col.get('vault_hint');
-            if (doc?.hint) {
-                this.setState({ _vault_hint: doc.hint });
+            if (account) {
+                try { const own = await col.get('vault_hint:' + account); hint = own?.hint || ""; } catch (_) { /* none */ }
             }
-        } catch (_) {}
+            if (!hint) {
+                try {
+                    const legacy = await col.get('vault_hint');
+                    const owner = String(legacy?.account || "").toLowerCase();
+                    if (legacy?.hint && (!owner || !account || owner === account)) hint = legacy.hint;
+                } catch (_) { /* none */ }
+            }
+        } catch (_) { /* collection missing */ }
+        if (this._hintFor === account && hint) this.setState({ _vault_hint: hint });
     }
 
     componentDidMount() {
@@ -456,7 +503,15 @@ class UnlockKeyDialog extends React.PureComponent {
             // Will be set by _determineMode after async check
             this._determineMode(nextProps);
             // FIX (v4.1): Reload hint each time dialog opens (may have changed)
-            this._loadHint();
+            this._loadHint(nextProps);
+        } else if (nextProps.open && nextProps.username !== this.props.username) {
+            // Reused for another account while open: as if opened for it —
+            // the PIN typed for the previous account, its error and attempts
+            // warning must not carry over (submitting would try that PIN on
+            // this account, and count it toward this account's lockout).
+            this._resetState();
+            this._determineMode(nextProps);
+            this._loadHint(nextProps);
         }
     }
 
@@ -496,10 +551,13 @@ class UnlockKeyDialog extends React.PureComponent {
     }
 
     _resetState = () => {
+        this._ticket++;
         this.setState({
             _pin: "",
             _show_pin: false,
             _pin_error: null,
+            _attempts_remaining: null,
+            _wipe_next: false,
             _key_value: "",
             _show_key: false,
             _key_valid: false,
@@ -631,23 +689,34 @@ class UnlockKeyDialog extends React.PureComponent {
             _status_message: _mode === 'pin' ? 'Verifying PIN...' : 'Validating key...',
             _backdrop_opened: true,
         });
+        // The dialog may be reset for another account before the answer
+        // comes: that answer is the previous account's — not shown here, and
+        // it does not close the prompt now on screen.
+        const ticket = ++this._ticket;
+        const stale = () => ticket !== this._ticket;
 
         try {
             if (_mode === 'pin') {
                 const result = await api.unlockWithPin(_pin, { keyType: requiredKeyType, account: username });
+                if (stale()) return;
                 if (!result.success) {
                     this.setState({
                         _status: 'error',
                         _pin_error: result.error || 'Invalid PIN',
                         _status_message: null,
                         _backdrop_opened: false,
-                        _attempts_remaining: result.attemptsRemaining || null,
+                        // Wrong PINs left before the next lockout or the wipe
+                        // (pixaproxyapi v4.8; nothing set it before, so the
+                        // warning never showed). Any number is kept: `|| null`
+                        // turned a 0 into "unknown".
+                        _attempts_remaining: typeof result.attemptsRemaining === "number" ? result.attemptsRemaining : null,
+                        _wipe_next: !!result.wipeNext,
                     });
                     return;
                 }
                 this.setState({ _status: 'success', _status_message: 'Key unlocked!', _backdrop_opened: false });
                 if (onUnlock) onUnlock({ keyType: requiredKeyType, username: username });
-                setTimeout(() => { if (onClose) onClose(); }, 800);
+                setTimeout(() => { if (!stale() && onClose) onClose(); }, 800);
             } else {
                 // ── Resolve `_key_value` to a WIF for `requiredKeyType` ──
                 //
@@ -663,52 +732,81 @@ class UnlockKeyDialog extends React.PureComponent {
                 let isMasterDerived = false;
                 const auth = this._getAuth();
                 const looksLikeWif = !!(auth && auth.isWif && auth.isWif(_key_value));
+                // The account as the chain spells it. The master-password
+                // derivation hashes the name, so "@Alice" would give keys of
+                // no account (validateCredentials normalizes; auth.toWif
+                // does not).
+                const account = String(username || '').replace(/^@/, '').toLowerCase().trim();
+                // Set when the input IS the account's master password but the
+                // key it gives for this role is no longer the account's.
+                let masterLacksKey = false;
+                // A check that failed for another reason than a key mismatch
+                // (network, account not found): shown as is — it says
+                // nothing about the key.
+                let checkError = null;
+                const mismatch = (v) => /does not match|Invalid key format/i.test((v && v.error) || '');
 
                 const tryAsSpecificKey = async () => {
                     if (!api.validateCredentials) return _key_value; // can't check, assume valid
-                    const v = await api.validateCredentials(username, _key_value, requiredKeyType);
+                    const v = await api.validateCredentials(account, _key_value, requiredKeyType);
                     if (v.valid) return _key_value;
+                    if (!mismatch(v)) checkError = v.error || null;
                     return null;
                 };
 
+                // Derive this role's key from the master password and check
+                // THAT key on chain, like a pasted one. Only this role's key
+                // matters here: the master login's own test (the posting key
+                // must match) used to gate it, and the derived key itself was
+                // never checked.
                 const tryAsMaster = async () => {
-                    if (!api.validateCredentials) return null;
-                    const v = await api.validateCredentials(username, _key_value, 'master');
-                    if (!v.valid) return null;
-                    // Master matched at least posting; check the required type also matches
-                    const matched = Array.isArray(v.matchedTypes) ? v.matchedTypes : [];
-                    if (!matched.includes(requiredKeyType)) return null;
-                    // Derive the specific WIF
-                    if (auth && auth.toWif) {
-                        try {
-                            return auth.toWif(username, _key_value, requiredKeyType);
-                        } catch (_) { return null; }
-                    }
+                    if (!api.validateCredentials || !auth || typeof auth.toWif !== 'function') return null;
+                    let derived = null;
+                    try { derived = auth.toWif(account, _key_value, requiredKeyType); } catch (_) { derived = null; }
+                    if (!derived) return null;
+                    const v = await api.validateCredentials(account, derived, requiredKeyType);
+                    if (v.valid) return derived;
+                    if (!mismatch(v)) { checkError = v.error || null; return null; }
+                    // The account's master password, whose key for this role
+                    // was changed on chain? Say so rather than "not valid".
+                    try {
+                        const m = await api.validateCredentials(account, _key_value, 'master');
+                        if (m && m.valid) masterLacksKey = true;
+                    } catch (_) { /* keep the generic message */ }
                     return null;
                 };
 
                 if (looksLikeWif) {
                     resolvedWif = await tryAsSpecificKey();
                     if (!resolvedWif) {
-                        // Unusual: WIF-shaped but didn't match. Try master as a last resort.
+                        // WIF-shaped but not this role's key: pixa_bip39 master
+                        // keys are valid WIFs too — try it as the master password.
                         resolvedWif = await tryAsMaster();
                         if (resolvedWif) isMasterDerived = true;
                     }
                 } else {
                     resolvedWif = await tryAsMaster();
                     if (resolvedWif) isMasterDerived = true;
-                    // If master failed and the input wasn't WIF-shaped, try as
-                    // WIF anyway in case isWif missed an edge case.
-                    if (!resolvedWif) resolvedWif = await tryAsSpecificKey();
+                    // Without auth.isWif the shape is unknown: try it as a
+                    // role key too. With it, a non-WIF can't be one.
+                    if (!resolvedWif && !(auth && auth.isWif)) resolvedWif = await tryAsSpecificKey();
                 }
 
+                if (stale()) return;
                 if (!resolvedWif) {
+                    const keyLabel = t(KEY_TYPES[requiredKeyType]?.label) || 'key';
                     this.setState({
                         _status: 'error',
-                        _key_error: t("components.unlock_key_dialog.not_a_valid_or_master_password_for", {
-                            t: t(KEY_TYPES[requiredKeyType]?.label) || 'key',
-                            username: username
-                        }),
+                        _key_error: masterLacksKey
+                            ? tr("components.unlock_key_dialog.master_password_lacks_key",
+                                `@${account}'s ${keyLabel} was changed on-chain: this master password no longer gives it. Enter the ${keyLabel} itself.`,
+                                { t: keyLabel, username: account })
+                            : checkError
+                                ? checkError
+                                : t("components.unlock_key_dialog.not_a_valid_or_master_password_for", {
+                                    t: keyLabel,
+                                    username: username
+                                }),
                         _status_message: null,
                         _backdrop_opened: false,
                     });
@@ -719,12 +817,12 @@ class UnlockKeyDialog extends React.PureComponent {
                 if (api.keyManager && !api.keyManager._sessionCryptoKey) {
                     await api.keyManager._generateSessionCryptoKey();
                 }
-                // Cache the (derived or direct) WIF for the required key type.
-                // Also persist to vault if vault is initialized, so future PIN
-                // unlocks can recover it.
-                const vaultReady = api.isVaultInitialized && api.isVaultInitialized();
+                // Cache the (derived or direct) WIF for the required key type —
+                // in this tab's memory only (KeyManager; `storeInVault` has been
+                // ignored since pixaproxyapi v4.6): the stored session is not
+                // changed, so the key is asked again after a reload or a lock.
                 if (api.keyManager && api.keyManager.addIndividualKey) {
-                    await api.keyManager.addIndividualKey(username, requiredKeyType, resolvedWif, { storeInVault: vaultReady });
+                    await api.keyManager.addIndividualKey(username, requiredKeyType, resolvedWif);
                 } else if (api.keyManager && api.keyManager.sessionKeys) {
                     // Last resort fallback: store directly (should not happen)
                     api.keyManager.sessionKeys.set(`${username}_${requiredKeyType}`, resolvedWif);
@@ -733,21 +831,23 @@ class UnlockKeyDialog extends React.PureComponent {
                 if (api.keyManager) {
                     api.keyManager.resetPinTimer();
                 }
+                if (stale()) return;
                 this.setState({
                     _status: 'success',
                     _status_message: isMasterDerived
                         ? t("components.unlock_key_dialog.derived_from_master_and_added", {
-                        t: t(KEY_TYPES[requiredKeyType]?.label) || 'Key'
-                    })
+                            t: t(KEY_TYPES[requiredKeyType]?.label) || 'Key'
+                        })
                         : 'Key added successfully!',
                     _backdrop_opened: false,
                 });
                 // FIX: Include the resolved WIF in the callback so API can use it
                 if (onKeyAdded) onKeyAdded({ keyType: requiredKeyType, username: username, key: resolvedWif });
-                setTimeout(() => { if (onClose) onClose(); }, 800);
+                setTimeout(() => { if (!stale() && onClose) onClose(); }, 800);
             }
         } catch (error) {
             console.error('Unlock/Add key error:', error);
+            if (stale()) return;
             let errorMessage = error.message || 'Operation failed';
             if (error.code === 'INVALID_PIN') errorMessage = 'Invalid PIN';
             else if (error.code === 'VAULT_LOCKED') errorMessage = 'Vault is locked. Please log in again.';
@@ -858,6 +958,8 @@ class UnlockKeyDialog extends React.PureComponent {
                                 showPin={_show_pin}
                                 pinError={_pin_error}
                                 attemptsRemaining={_attempts_remaining}
+                                wipeNext={this.state._wipe_next}
+                                account={String(username || "").replace(/^@+/, "")}
                                 vaultHint={this.state._vault_hint}
                                 onPinChange={this._handlePinChange}
                                 onToggleShowPin={this._handleToggleShowPin}

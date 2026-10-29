@@ -694,6 +694,11 @@ export default {
             "trade": "Échanger",
         },
         "login_dialog": {
+            "master_password_works_too": "Votre mot de passe maître fonctionne aussi.",
+            "master_password_derives_key": "Mot de passe maître — votre clé {{requiredKeyType}} en sera dérivée",
+            "master_password_lacks_key": "La clé {{requiredKeyType}} de @{{name}} a été modifiée en chaîne : ce mot de passe maître ne la donne plus. Saisissez la clé {{requiredKeyType}} elle-même.",
+            "add_account_button": "AJOUTER LE COMPTE",
+            "add_another_account": "Ajoutez un autre compte — ceux déjà connectés le restent",
             "master": "Master",
             "posting": "Posting",
             "active": "Active",
@@ -2047,6 +2052,8 @@ export default {
             "are_you_sure_you_want_to_delete": "Voulez-vous vraiment supprimer « {{deleteConfirmDraftTitle}} » ? Cette action est irréversible."
         },
         "unlock_key_dialog": {
+            "master_password_lacks_key": "La {{t}} de @{{username}} a été modifiée en chaîne : ce mot de passe maître ne la donne plus. Saisissez la {{t}} elle-même.",
+            "attempts_remaining_before_logout": "Il reste %n {{{_plurals.attempt}}} avant que la session de @{{account}} soit fermée sur cet appareil",
             "toggle_pin_visibility": "afficher ou masquer le code PIN",
             "enter_your_pin_to_unlock_the_requested": "Saisissez votre code PIN pour déverrouiller la clé demandée.",
             "hint": "Indice : {{vaultHint}}",
@@ -2178,6 +2185,15 @@ export default {
             "when_people_interact_with_your_content_youll": "Quand d’autres interagiront avec vos contenus, vous le verrez ici"
         },
         "menu_content": {
+            "add_account": "Ajouter un compte",
+            "add_account_hint": "Se connecter avec un autre compte",
+            "switch_account": "Changer de compte",
+            "session_tab_only": "Cet onglet uniquement",
+            "session_locked": "Verrouillé",
+            "switch_failed": "Impossible de passer à @{{account}}",
+            "session_time_left_dh": "Temps restant : {{days}} j {{hours}} h",
+            "session_time_left_h": "Temps restant : {{hours}} h",
+            "session_time_left_soon": "Temps restant : moins d’1 h",
             "notifications": "Notifications",
             "feed": "Fil",
             "apps": "Applications",
@@ -2268,6 +2284,13 @@ export default {
             "book_a_meeting_with_our_team_to": "Prenez rendez-vous avec notre équipe pour démarrer avec un Simple Agreement for Future Token (SAFT)."
         },
         "index": {
+            "switched_to_account": "Vous utilisez maintenant @{{account}}",
+            "logged_out_switched": "Session de @{{from}} fermée — vous utilisez maintenant @{{to}}",
+            "session_expired_switched": "La session de @{{from}} a expiré — vous utilisez maintenant @{{to}}",
+            "logged_out_elsewhere_switched": "La session de @{{from}} a été fermée dans un autre onglet — vous utilisez maintenant @{{to}}",
+            "pin_wipe_switched": "La session de @{{from}} a été fermée après trop de mots de passe erronés — vous utilisez maintenant @{{to}}",
+            "session_expired": "Votre session pour @{{account}} a expiré — reconnectez-vous",
+            "logged_out_elsewhere": "La session de @{{account}} a été fermée dans un autre onglet",
             "users": "Utilisateurs",
             "communities": "Communautés",
             "exclusive_discount_for_a_limited_time_only": "Remise exclusive, pour une durée limitée !",
@@ -3150,6 +3173,14 @@ export default {
             "stored_on_arweave": "Stockée sur Arweave"
         },
         "logout_modal": {
+            "title_account": "Déconnecter @{{account}} ?",
+            "title": "Voulez-vous vraiment vous déconnecter ?",
+            "please_wait": "Veuillez patienter pendant que nous fermons votre session en toute sécurité…",
+            "forgotten_on_device": "Votre compte sera oublié par le navigateur de cet appareil. Si vous ne faites pas confiance à cet appareil, utilisez la navigation privée ou déconnectez-vous toujours pour fermer l’accès à votre compte.",
+            "others_stay_logged_in": "Vos autres comptes restent connectés.",
+            "logout_failed": "Échec de la déconnexion",
+            "retry": "Réessayer",
+            "logout": "Se déconnecter",
             "logging_out": "Déconnexion…"
         },
         "members_list_dialog": {
