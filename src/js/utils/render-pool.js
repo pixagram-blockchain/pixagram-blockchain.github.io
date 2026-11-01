@@ -29,6 +29,8 @@
  *   acquireCachedBitmap(id, algo, scale)  // consumer-owned bitmap for a cached render
  *   acquireBestCachedBitmap(id, algo)     // …at the largest cached scale for this id
  *   clearRenderCache()
+ *   dropRendersAbove(id, bytes)         // evicts one id's renders larger than `bytes`
+ *   cappedScale(algo, width, height, scale)  // the scale a render will really use
  *   configureRenderCache({maxEntries, maxBytes, maxBitmaps, maxBitmapBytes})
  *   configureGpuGuard({maxOutputPixels})
  *   window.__PIXA_RENDER_POOL_STATS__()
@@ -36,7 +38,22 @@
  * Render cache: the last MAX_CACHED_RENDERS (default 40) finished
  * upscales are retained as ImageData in a global LRU and survive card
  * unmount, so scrolling back repaints without re-decoding or
- * re-upscaling.
+ * re-upscaling. The byte budgets scale with navigator.deviceMemory, a
+ * render larger than half the budget is handed out but not cached, and
+ * the cache is emptied on pagehide.
+ *
+ * Cold tier: a render evicted from the LRU (up to 4 MiB of pixels, CRT
+ * excluded) is PNG-encoded at idle time into a Blob (ColdStore, 64 MiB).
+ * Blob bytes live outside the renderer heap, so a scroll-back decodes the
+ * PNG instead of re-running the decode + upscale.
+ *
+ * Release: the xBRZ worker pool (at most 4 workers) is disposed after
+ * 30 s without jobs, the shared WebGL render target and backbuffer are
+ * freed (trimMemory) after 30 s without a GPU render or when the page is
+ * hidden, and every scratch canvas is shrunk to 1×1 once its pixels have
+ * been read. Outputs are capped at 16 MP: the scale is lowered to fit
+ * (cappedScale), and an image already too large to double is returned
+ * as is.
  *
  * Master-bitmap layer: repeat serves of a cached render used to pay a
  * full ImageData→ImageBitmap raster every time (bitmaps are
@@ -62,14 +79,19 @@
  * instead of resetting the driver.
  */
 
-import createSVG from "./vtracer";
+// vtracer is imported on demand (only the xBRZ > 8x path uses it): a static
+// import instantiated its WebAssembly module, whose heap can never shrink,
+// on every feed visit.
 import {
     CrtGpuRenderer,
     HexGpuRenderer,
     XbrzGpuRenderer,
     XBRZ_PRESETS,
     WasmXbrzPool,
+    trimMemory,
 } from '@pixagram/upscaler';
+import { idle } from "./idle";
+import { ColdStore, imageDataToBlob, blobToImageData } from "./memory-kit";
 // The WASM module is its own entry point: the package root exports only the
 // GPU renderers, presets and helpers, so importing init / *_upscale_config
 // from '@pixagram/upscaler' resolves to undefined.
@@ -146,12 +168,23 @@ function wasmResultToImageData(r) {
 // free for scrolling, and the result is byte-identical to
 // xbrz_upscale_config. Created on first use; if the workers can't start
 // (CSP, unsupported browser) CPU xBRZ stays on the main thread.
+//
+// Memory: every worker is its own JS isolate with its own WebAssembly heap,
+// and a heap only grows, so each worker keeps the largest band it ever
+// rendered. The pool is therefore capped at 4 workers and terminated after
+// XBRZ_POOL_IDLE_MS without a job; the next CPU render starts a new one.
 let xbrzPoolPromise = null;
 let xbrzPoolInstance = null; // for the stats panel
+let xbrzPoolBusy = 0;        // jobs in flight (or about to use the pool)
+let xbrzPoolIdleTimer = 0;
+const XBRZ_POOL_MAX_WORKERS = 4;
+const XBRZ_POOL_IDLE_MS = 30000;
 
 function getXbrzPool() {
     if (!xbrzPoolPromise) {
-        xbrzPoolPromise = WasmXbrzPool.create().then(
+        const cores = (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 2;
+        const workers = Math.max(1, Math.min(XBRZ_POOL_MAX_WORKERS, cores - 1));
+        xbrzPoolPromise = WasmXbrzPool.create({ workers }).then(
             (pool) => (xbrzPoolInstance = pool),
             (err) => {
                 logOnce("warn", "xBRZ worker pool unavailable; CPU xBRZ runs on the main thread:", err);
@@ -162,16 +195,40 @@ function getXbrzPool() {
     return xbrzPoolPromise;
 }
 
+function disposeXbrzPoolWhenIdle() {
+    clearTimeout(xbrzPoolIdleTimer);
+    xbrzPoolIdleTimer = setTimeout(async () => {
+        if (xbrzPoolBusy > 0) return;
+        const pending = xbrzPoolPromise;
+        xbrzPoolPromise = null;
+        xbrzPoolInstance = null;
+        const pool = pending && (await pending);
+        if (pool) {
+            try { pool.dispose(); } catch (e) {}
+        }
+    }, XBRZ_POOL_IDLE_MS);
+}
+
 const XBRZ_CPU = XBRZ_PRESETS.smooth; // same preset as the GPU path
 
 async function xbrzCpu(imgd, scale) {
     // The pool clamps scales to 2..8; the WASM call clamps to 1..8. Above 1x
     // both give identical output, so only scale < 2 stays on the main thread.
-    const pool = scale >= 2 ? await getXbrzPool() : null;
-    if (pool) {
-        // The pool returns fresh, caller-owned pixels: wrap without a copy.
-        const o = await pool.upscale(imgd, { ...XBRZ_CPU, scale });
-        return new ImageData(o.data, o.width, o.height);
+    if (scale >= 2) {
+        // Count the job BEFORE awaiting the pool, so a pending idle dispose
+        // can never terminate a pool that this job is about to use.
+        xbrzPoolBusy++;
+        clearTimeout(xbrzPoolIdleTimer);
+        try {
+            const pool = await getXbrzPool();
+            if (pool) {
+                // The pool returns fresh, caller-owned pixels: wrap without a copy.
+                const o = await pool.upscale(imgd, { ...XBRZ_CPU, scale });
+                return new ImageData(o.data, o.width, o.height);
+            }
+        } finally {
+            if (--xbrzPoolBusy === 0) disposeXbrzPoolWhenIdle();
+        }
     }
     await ensureUpscalerReady();
     const r = xbrz_upscale_config(imgd.data, imgd.width, imgd.height, scale,
@@ -368,6 +425,22 @@ function ensureXbrzScratch() {
     xbrzContext2 = xbrzCanvas2.getContext("2d", { willReadFrequently: true, powerPreference: "high-performance", desynchronized: "true" });
 }
 
+// The scratch canvases are software-backed (willReadFrequently), so their
+// pixels live in the renderer process, outside the JS heap. Sized for one
+// job, they used to keep that size for the rest of the session (a 16x
+// dialog render left 2048² = 16 MiB, or far more for large sources):
+// shrink them as soon as the result has been read. Reusing the canvas
+// objects still saves the allocation; resizing is cheap.
+function releaseXbrzScratch() {
+    if (xbrzCanvas) { xbrzCanvas.width = 1; xbrzCanvas.height = 1; }
+    if (xbrzCanvas2) { xbrzCanvas2.width = 1; xbrzCanvas2.height = 1; }
+    if (xbrzImg) {
+        xbrzImg.onload = null;
+        xbrzImg.onerror = null;
+        xbrzImg.removeAttribute("src"); // drop the decoded SVG raster too
+    }
+}
+
 async function xbrzUpscale(imgd, scale, tempCallback, processN = 1, mode = "GPU") {
     let imgd2 = null;
     // 8x is included in the GPU gate: the size guard, not the scale
@@ -387,11 +460,19 @@ async function xbrzUpscale(imgd, scale, tempCallback, processN = 1, mode = "GPU"
 
     // scale > 8: hand the 8x result over immediately, then refine through
     // the vtracer SVG path and resolve with the composited final image.
+    // The preview is cached under the final key until the composite
+    // replaces it; it must never be kept in the cold tier under that key.
+    xbrzPreviews.add(imgd2);
     tempCallback(imgd2);
     ensureXbrzScratch();
     let svg_url;
     try {
-        svg_url = await createSVG(imgd2, "blob", processN);
+        const { default: createSVG } = await import("./vtracer");
+        // vtracer's prepareCanvas rewrites its input's pixels in place, and
+        // imgd2 has already been delivered and cached as the 8x preview:
+        // give it a copy, which only lives while the SVG is traced.
+        const tracerInput = new ImageData(new Uint8ClampedArray(imgd2.data), imgd2.width, imgd2.height);
+        svg_url = await createSVG(tracerInput, "blob", processN);
     } catch (e) {
         // vtracer failed — keep the 8x result instead of hanging the pipeline.
         console.warn("[render-pool] createSVG failed; keeping 8x xbrz result:", e);
@@ -409,13 +490,16 @@ async function xbrzUpscale(imgd, scale, tempCallback, processN = 1, mode = "GPU"
             xbrzContext2.putImageData(imgd2, 0, 0);
             xbrzContext.drawImage(xbrzCanvas2, 0, 0, xbrzCanvas2.width, xbrzCanvas2.height, 0, 0, xbrzCanvas.width, xbrzCanvas.height);
             xbrzContext.drawImage(xbrzImg, 0, 0, xbrzImg.naturalWidth || xbrzImg.width, xbrzImg.naturalHeight || xbrzImg.height, 0, 0, xbrzCanvas.width, xbrzCanvas.height);
-            resolve(xbrzContext.getImageData(0, 0, xbrzCanvas.width, xbrzCanvas.height));
+            const out = xbrzContext.getImageData(0, 0, xbrzCanvas.width, xbrzCanvas.height);
+            releaseXbrzScratch();
             URL.revokeObjectURL(svg_url);
+            resolve(out);
         };
         // If the SVG fails to decode, don't hang the pipeline (the old code
         // left the promise pending and leaked the blob URL): release the URL
         // and settle with the 8x result the consumer already received.
         xbrzImg.onerror = () => {
+            releaseXbrzScratch();
             URL.revokeObjectURL(svg_url);
             resolve(imgd2);
         };
@@ -452,7 +536,12 @@ function upscale_square(imgd, scale) {
     sqrContext2.imageSmoothingEnabled = false;
     sqrContext2.putImageData(imgd, 0, 0);
     sqrContext.drawImage(sqrCanvas2, 0, 0, sqrCanvas2.width, sqrCanvas2.height, 0, 0, sqrCanvas.width, sqrCanvas.height);
-    return sqrContext.getImageData(0, 0, sqrCanvas.width, sqrCanvas.height);
+    const out = sqrContext.getImageData(0, 0, sqrCanvas.width, sqrCanvas.height);
+    // Shrink right after the read (see releaseXbrzScratch): a 512² source
+    // at 6x otherwise pins a 3072² (36 MiB) software canvas for the session.
+    sqrCanvas.width = 1; sqrCanvas.height = 1;
+    sqrCanvas2.width = 1; sqrCanvas2.height = 1;
+    return out;
 }
 
 // ── Worker manager ────────────────────────────────────────────────────
@@ -602,6 +691,94 @@ let bitmapCount = 0;
 let MAX_CACHED_BITMAPS = 16;
 let MAX_CACHED_BITMAP_BYTES = 64 * 1024 * 1024;
 
+// Size both budgets to the device instead of 128 + 64 MiB everywhere.
+// navigator.deviceMemory is a rounded GB value that only Chromium reports;
+// elsewhere 4 GB is assumed.
+{
+    const gb = (typeof navigator !== "undefined" && navigator.deviceMemory) || 4;
+    MAX_CACHED_BYTES = (gb <= 2 ? 24 : gb <= 4 ? 48 : 96) * 1024 * 1024;
+    MAX_CACHED_BITMAP_BYTES = (gb <= 4 ? 16 : 32) * 1024 * 1024;
+}
+// Leaving the page: nothing in the render cache is worth keeping.
+if (typeof addEventListener === "function") {
+    addEventListener("pagehide", () => clearRenderCache());
+}
+
+// A single render bigger than half the byte budget is served but not
+// cached: inserting it would evict every card render, then itself.
+function cacheableBytes(bytes) {
+    return bytes <= MAX_CACHED_BYTES / 2;
+}
+
+// ── Cold tier ────────────────────────────────────────────────────────
+// Card-size renders evicted from the cache above are PNG-encoded in idle
+// time and kept as Blobs, whose bytes live in the browser process (paged
+// to disk when its Blob pool fills), not in this page. A re-show decodes
+// the PNG instead of decoding the source and upscaling again. Pixel art
+// compresses well (about 15x for xBRZ, 58x hex, 116x nearest-neighbour at
+// 8x); CRT scanlines barely compress (about 3x), so CRT is skipped.
+const COLD_MAX_ENTRY_BYTES = 4 * 1024 * 1024; // card-size renders only
+const COLD_MAX_QUEUED = 4;                     // evicted ImageData waiting to encode
+const coldRenders = new ColdStore({ maxBytes: 64 * 1024 * 1024 });
+// 8x previews of xBRZ renders above 8x (see xbrzUpscale). Evicted while
+// vtracer still runs, a preview would otherwise be kept under the final
+// render's key, and every later scroll-back would show it instead.
+const xbrzPreviews = new WeakSet();
+let coldEncodeChain = Promise.resolve();
+let coldEncodesQueued = 0;
+
+function keepCold(algorithm, key, imgd) {
+    if (algorithm === "crt" || !imgd || !imgd.data || xbrzPreviews.has(imgd)) return;
+    if (imgd.data.byteLength > COLD_MAX_ENTRY_BYTES) return;
+    if (coldEncodesQueued >= COLD_MAX_QUEUED || coldRenders.has(key)) return;
+    if (typeof OffscreenCanvas === "undefined" && typeof document === "undefined") return;
+    coldEncodesQueued++;
+    idle(() => {
+        // One encode at a time; each holds one full-size canvas while it runs.
+        coldEncodeChain = coldEncodeChain
+            .then(() => imageDataToBlob(imgd))
+            .then((blob) => coldRenders.put(key, blob))
+            .catch(() => {})
+            .finally(() => { coldEncodesQueued--; });
+    });
+}
+
+/** A render kept in the cold tier, decoded back to ImageData; null on a
+ *  miss, or when the Blob no longer decodes (the entry is then dropped). */
+async function loadCold(fullId) {
+    let blob = null;
+    try { blob = await coldRenders.getBlob(fullId); } catch (e) { return null; }
+    if (!blob) return null;
+    try {
+        return await blobToImageData(blob);
+    } catch (e) {
+        coldRenders.delete(fullId).catch(() => {});
+        return null;
+    }
+}
+
+// ── GPU memory ───────────────────────────────────────────────────────
+// In GPU mode the shared WebGL context keeps its framebuffer texture at the
+// last output size (up to 64 MiB). Give it back when the page is hidden and
+// after GPU_TRIM_IDLE_MS without a render; it is re-created on the next one.
+const GPU_TRIM_IDLE_MS = 30000;
+let gpuTrimTimer = 0;
+
+function trimGpuMemory() {
+    try { trimMemory(); } catch (e) {}
+}
+
+function trimGpuWhenIdle() {
+    clearTimeout(gpuTrimTimer);
+    gpuTrimTimer = setTimeout(trimGpuMemory, GPU_TRIM_IDLE_MS);
+}
+
+if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") trimGpuMemory();
+    });
+}
+
 /** Tune render-cache bounds at runtime (e.g. lower on constrained devices). */
 export function configureRenderCache({ maxEntries, maxBytes, maxBitmaps, maxBitmapBytes } = {}) {
     if (Number.isFinite(maxEntries) && maxEntries >= 0) MAX_CACHED_RENDERS = maxEntries | 0;
@@ -630,6 +807,7 @@ function dropEntry(algorithm, key) {
     dropMaster(algorithm, key); // a master never outlives its ImageData
     const entry = state.data[key];
     if (entry === undefined) return;
+    keepCold(algorithm, key, entry);
     workerStateSize -= (entry && entry.data && entry.data.byteLength) | 0;
     workerStateCount -= 1;
     delete state.data[key];
@@ -780,6 +958,24 @@ export function clearRenderCache() {
 }
 
 /**
+ * Drop this id's cached renders larger than `bytes`, at any scale and for
+ * every algorithm. Dialogs call it when they close: a dialog-size render
+ * (16-36 MiB) is rarely shown again, while card-size ones are.
+ */
+export function dropRendersAbove(id, bytes) {
+    if (id == null) return;
+    for (const algo of ALGORITHMS) {
+        const data = workerState[algo].data;
+        const prefix = id + "-" + algo + "-";
+        for (const k in data) {
+            if (!k.startsWith(prefix)) continue;
+            const d = data[k];
+            if (d && d.data && d.data.byteLength > bytes) dropEntry(algo, k);
+        }
+    }
+}
+
+/**
  * Cache-first lookup. Returns the finished upscaled ImageData for
  * id+algorithm+scale and bumps its recency, or undefined on a miss.
  * A consumer that hits here can skip the ENTIRE source pipeline for this
@@ -862,11 +1058,20 @@ async function received(r, id2, algorithm2) {
         // old pixels would serve stale content, so it dies with them.
         dropMaster(algorithm2, id2);
     }
-    state.data[id2] = r;
-    state.timestamp[id2] = ++lruTick;
-    workerStateSize += (r.data && r.data.byteLength) | 0;
-    workerStateCount += 1;
-    trimRenderCache();
+    const rBytes = (r.data && r.data.byteLength) | 0;
+    if (cacheableBytes(rBytes)) {
+        state.data[id2] = r;
+        state.timestamp[id2] = ++lruTick;
+        workerStateSize += rBytes;
+        workerStateCount += 1;
+        trimRenderCache();
+    } else {
+        // Too big to share the cache with card renders: serve it uncached.
+        // (The accounting for any previous entry under this key was undone
+        // above, so the stale pixels must go too.)
+        delete state.data[id2];
+        delete state.timestamp[id2];
+    }
 
     // 2) Serve the live consumer, if any, with a bitmap of its own.
     const cb = state.callbacks[id2];
@@ -893,7 +1098,56 @@ async function received(r, id2, algorithm2) {
 }
 
 // ── Main entry ────────────────────────────────────────────────────────
+// Every render is capped at MAX_OUTPUT_PIXELS (64 MiB of RGBA), on the CPU
+// path too: dialogs ask for at least 6x, so a 2000×2000 photo used to
+// become a 12000² render (549 MiB), and a 40 MP artwork far more. A source
+// too large to upscale at least 2x within the cap is shown as is.
+const MAX_OUTPUT_PIXELS = 16 * 1024 * 1024;
+
+/** Largest integer scale whose output fits MAX_OUTPUT_PIXELS. */
+function fitScale(width, height) {
+    return Math.floor(Math.sqrt(MAX_OUTPUT_PIXELS / Math.max(1, width * height)));
+}
+
+/**
+ * The scale a render will actually use for a `width` × `height` source:
+ * the requested one, lowered so the output fits MAX_OUTPUT_PIXELS. xBRZ
+ * above 8x renders 8x and composites an SVG at 8 × ceil(scale / 8), so that
+ * composite is what must fit. 1 means the source is served as is (too large
+ * to double within the cap). Callers that wait for the final pass of a
+ * progressive xBRZ render size their target with this, not with the scale
+ * they asked for, or the pass they wait for never comes.
+ */
+export function cappedScale(algorithm, width, height, scale) {
+    const fit = fitScale(width, height);
+    if (fit < 2) return 1;
+    let s = Math.min(scale, fit);
+    if (algorithm === "xbrz" && s > 8 && 8 * Math.ceil(s / 8) > fit) {
+        s = fit >= 16 ? Math.floor(fit / 8) * 8 : 8;
+    }
+    return s;
+}
+
 async function processWorker(algorithm, image_data, scale, callback, terminate = false, id, mode = "GPU") {
+    if (fitScale(image_data.width, image_data.height) < 2) {
+        // Too large to upscale within the cap: serve the source as is,
+        // uncached (it is the decoder's own ImageData), with a bitmap of its
+        // own, since consumers transfer the bitmap they get (PostDialog).
+        // Registered like a render so releaseId() still cancels it.
+        const asIsId = id + "-" + algorithm + "-1";
+        workerState[algorithm].callbacks[asIsId] = callback;
+        let bmp;
+        try { bmp = await createImageBitmap(image_data); } catch (e) { bmp = undefined; }
+        const cb = workerState[algorithm].callbacks[asIsId];
+        if (typeof cb !== "function") {
+            if (bmp) { try { bmp.close(); } catch (e) {} }
+            return;
+        }
+        try { cb(image_data, bmp); } catch (err) { logOnce("error", `${algorithm} consumer failed:`, err); }
+        return;
+    }
+    scale = cappedScale(algorithm, image_data.width, image_data.height, scale); // before fullId, so cache keys match the real scale
+
     const fullId = id + "-" + algorithm + "-" + scale;
     terminateOtherWorkers(algorithm);
     workerState[algorithm].callbacks[fullId] = callback;
@@ -923,6 +1177,16 @@ async function processWorker(algorithm, image_data, scale, callback, terminate =
                     try { cb(cached, undefined); } catch (e) {}
                 }
             });
+        return;
+    }
+
+    // Cold tier: a card render evicted earlier, kept as a PNG Blob. Only a
+    // miss falls through to a fresh render; an error thrown by the consumer
+    // must not, or it would be called a second time.
+    const fromCold = await loadCold(fullId);
+    if (fromCold) {
+        try { await received(fromCold, fullId, algorithm); }
+        catch (err) { logOnce("error", `${algorithm} consumer failed:`, err); }
         return;
     }
 
@@ -976,6 +1240,7 @@ async function processWorker(algorithm, image_data, scale, callback, terminate =
         // error is reported instead of escaping as an unhandled rejection.
         logOnce("error", `${algorithm} render failed:`, err);
     }
+    if (isGpuMode(mode)) trimGpuWhenIdle();
 }
 
 // ── Public API: per-algorithm shortcuts ──────────────────────────────
@@ -1055,8 +1320,10 @@ if (typeof window !== 'undefined') {
                 maxOutputPixels: MAX_GPU_OUTPUT_PIXELS,
             },
             // 0 until the first CPU xBRZ render starts the pool (or if it
-            // could not start and CPU xBRZ runs on the main thread).
+            // could not start and CPU xBRZ runs on the main thread), and
+            // again after the pool is ended for being idle.
             cpuXbrzWorkers: xbrzPoolInstance ? xbrzPoolInstance.size : 0,
+            coldBytes: coldRenders.bytesInMemory,
             algorithms: {},
         };
         for (const a of ALGORITHMS) {

@@ -121,11 +121,13 @@ const styles = theme => ({
             animationDelay: "1s", animationIterationCount: "infinite",
             boxShadow: "0 0 8px #ffffff88, 0 0 16px #ffffffcc",
             "@global": {
+                // transform only: the compositor runs it. Animating the glow
+                // (boxShadow) repainted the button on every frame, forever.
                 "@keyframes bounce-feed": {
-                    "0%": { boxShadow: "0 0 8px #ffffff88, 0 0 16px #ffffffcc", transform: "scale(1)" },
-                    "3%": { boxShadow: "0 0 12px #ffffff88, 0 0 24px #ffffffcc", transform: "scale(1.05)" },
-                    "6%": { boxShadow: "0 0 4px #ffffff88, 0 0 8px #ffffffcc", transform: "scale(0.975)" },
-                    "9%": { boxShadow: "0 0 8px #ffffff88, 0 0 16px #ffffffcc", transform: "scale(1)" },
+                    "0%": { transform: "scale(1)" },
+                    "3%": { transform: "scale(1.05)" },
+                    "6%": { transform: "scale(0.975)" },
+                    "9%": { transform: "scale(1)" },
                 },
             },
             transition: `background 225ms ${EASE} 75ms`,
@@ -147,8 +149,9 @@ const styles = theme => ({
     masonry: {
         overflow: "hidden overlay !important", contain: "style layout",
         "& > .ReactVirtualized__Masonry": {
+            // No will-change: scroll-position: Chrome composites scrollers anyway.
             zIndex: 0, position: "absolute", margin: 0, scrollBehavior: "smooth",
-            willChange: "scroll-position !important", overscrollBehavior: "none",
+            overscrollBehavior: "none",
             contentVisibility: "auto", boxSizing: "content-box !important",
             touchAction: "pan-y", overflow: "hidden overlay !important",
             padding: "86px 12px 32px 16px", contain: "style layout size",
@@ -157,7 +160,10 @@ const styles = theme => ({
                 overflow: "initial !important", position: "absolute !important",
                 paddingBottom: "160px", boxSizing: "content-box",
                 contain: "style layout size",
-                "& div": { contain: "style layout" },
+                // Cell wrappers only. On every div it made each element of
+                // every card a stacking context, which can promote extra
+                // layers where they overlap the positioned cells.
+                "& > div": { contain: "style layout" },
             },
         },
     },
@@ -566,14 +572,12 @@ const fetchAndEnrichPosts = async (api, sort, tag, existingPosts, pagination, on
         return enriched;
     };
 
-    // Author + voter names needed for avatars / vote-list profile images.
-    const collectNames = () => {
-        const allVotes = posts.flatMap(p => p.active_votes || []);
-        return [...new Set([
-            ...allVotes.map(v => v?.voter).filter(Boolean),
-            ...posts.map(p => p.author).filter(Boolean),
-        ])];
-    };
+    // Author names needed for avatars. Voters are no longer fetched here: the
+    // page used to load the account of EVERY voter of every post (~150 per
+    // 20-post page) and keep each avatar in the card list (0.75-2.25 MB per
+    // page, kept again by viewCache), only for the voting list, which already
+    // fetches the voters it is missing when it opens (VotingListModal).
+    const collectNames = () => [...new Set(posts.map(p => p.author).filter(Boolean))];
     const buildMaps = (accs) => {
         const voterProfiles = {}, accountsMap = {};
         if (Array.isArray(accs)) {

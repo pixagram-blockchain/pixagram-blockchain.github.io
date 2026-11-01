@@ -45,7 +45,7 @@ import FavoriteBorderRounded from "@material-ui/icons/FavoriteBorderRounded";
 import InfoOutlined from "@material-ui/icons/InfoOutlined";
 import useLiveTimeAgo from "../hooks/useLiveTimeAgo";
 import { HISTORY, getPostState, POST_STATE, parsePostDrawerHash, POST_DRAWER_HASH_TABS, parseCommentFocusHash } from "../utils/constants";
-import CommentInList from "./CommentInList";
+import CommentInList, { applyCommentEdit, withCommentEdits } from "./CommentInList";
 import { ToxicityWatcher } from "./ToxicityHint";
 import * as toxicity from "../utils/toxicity";
 import PaperCardActions from "./PaperCardActions";
@@ -616,7 +616,11 @@ const LazyTextEditorDialog = React.lazy(loadTextEditorDialog);
 const styles = theme => ({
     backdrop: {
         zIndex: theme.zIndex.drawer + 1,
-        backdropFilter: "blur(9px) grayscale(1)",
+        // Solid scrim instead of a viewport-wide backdrop-filter blur, which
+        // kept extra full-screen GPU textures alive while the dialog was
+        // open. The compound selector outranks the global .MuiBackdrop-root
+        // tint in theme/overrides.js whatever order the sheets load in.
+        "&.MuiBackdrop-root": { backgroundColor: "rgba(0, 0, 0, 0.85)" },
         overflow: "hidden",
         // No userSelect: "none" here — it cascaded over the whole dialog and
         // made the title, article body and comments impossible to copy.
@@ -1637,6 +1641,8 @@ class BlogPostDialog extends React.PureComponent {
         this._favUnsub = null;    // favorites store subscription (live heart sync)
         this._contentWrapperRef = null;
         this._commentRefreshTimer = null;
+        this._threadKey = null;           // "author/permlink" whose thread this opening requested
+        this._repliesSeq = 0;             // newest replies request — older answers are dropped
         this._commentsColumnRef = null;   // "#replies" scroll target (comments column)
         this._focusSeekTimer = null;      // short-lived polls: portal mount + async thread
         this._focusToken = 0;             // invalidates stale seeks / path walks
@@ -1695,10 +1701,13 @@ class BlogPostDialog extends React.PureComponent {
         this._favUnsub = favorites.subscribe(this._check_favorite);
         // A first opening can be a MOUNT with open=true (see
         // setScrollContainerRef) — componentWillReceiveProps never fires for
-        // it, so URL-hash intents ("#replies", "&focus=<b64>") are adopted
-        // here as well; the seeks poll, which tolerates the portal's late
-        // mount and the thread's async arrival.
-        if (this.st4te.open) this._adopt_url_hash();
+        // it, so the thread fetch and the URL-hash intents ("#replies",
+        // "&focus=<b64>") are started here as well; the seeks poll, which
+        // tolerates the portal's late mount and the thread's async arrival.
+        if (this.st4te.open) {
+            this._ensure_comments();
+            this._adopt_url_hash();
+        }
     }
 
     componentWillUnmount() {
@@ -1826,7 +1835,7 @@ class BlogPostDialog extends React.PureComponent {
                 }
                 this.setSt4te({ _scrollTop: 0 });
                 requestAnimationFrame(() => this._measureTitleHeight());
-                this._fetch_comments(data);
+                this._reset_thread();   // refetched by _ensure_comments below
                 this._cacheOwnProfile();
                 this._check_favorite();
                 this._backfill_portal_title();
@@ -1877,13 +1886,19 @@ class BlogPostDialog extends React.PureComponent {
                 this._teardown_lightbox();   // the source <img> is about to be replaced
                 this._toc_pinned = false;
                 this._toc_hover = false;
-                this._fetch_comments(data);
+                this._reset_thread();   // refetched by _ensure_comments below
                 this._check_favorite();
                 this._backfill_portal_title();
                 // The new post's URL carries its own (or no) hash intents; the
                 // previous post's focus never survives the switch.
                 this._adopt_url_hash();
             }
+
+            // The thread is fetched once the open post is READY — whenever
+            // that happens: at the opening itself, on a post swap, or later,
+            // when a URL stub hydrates in place (same id, so `dataChanged`
+            // never sees it) or the api arrives after the post.
+            if (new_props.open) this._ensure_comments();
         });
     }
 
@@ -2424,14 +2439,19 @@ class BlogPostDialog extends React.PureComponent {
     _fetch_replies_for = (author, permlink, silent) => {
         const api = this.st4te.api;
         if (!api || !api.content) return;
+        // Only the newest request may write _comments: a slow answer for the
+        // previous post (or the previous reply level) must not land on this one.
+        const seq = ++this._repliesSeq;
+        const stale = () => seq !== this._repliesSeq;
         if (!silent) this.setSt4te({ _comments_loading: true });
 
         api.content.getContentReplies(author, permlink)
             .then((replies) => {
+                if (stale()) return;
                 if (!replies || !Array.isArray(replies) || replies.length === 0) {
                     const surviving = (this.st4te._comments || [])
                         .filter(c => c._optimistic && c.parent_author === author && c.parent_permlink === permlink);
-                    this.setSt4te({ _comments: surviving, _comments_loading: false });
+                    this.setSt4te({ _comments: withCommentEdits(surviving), _comments_loading: false });
                     return;
                 }
                 const uniqueAuthors = [...new Set(replies.map(r => r.author).filter(Boolean))];
@@ -2439,6 +2459,7 @@ class BlogPostDialog extends React.PureComponent {
                     ? api.accounts.getAccounts(uniqueAuthors).catch(() => []) : Promise.resolve([]);
 
                 accsP.then((accounts) => {
+                    if (stale()) return;
                     const { comments, profileMap } = buildReplyComments(replies, accounts, this.st4te._authors, author, permlink);
 
                     const chainPermlinks = new Set(comments.map(c => c.permlink));
@@ -2446,18 +2467,24 @@ class BlogPostDialog extends React.PureComponent {
                         .filter(c => c._optimistic && !chainPermlinks.has(c.permlink)
                             && c.parent_author === author && c.parent_permlink === permlink);
 
+                    // Replay live edits: a fetch that lands before the chain
+                    // serves an edit (e.g. the poll after posting) still
+                    // carries the old body.
+                    const next = withCommentEdits(surviving.concat(comments));
+
                     // Also cache own profile if found in fetched profiles
                     const ownAccount = this.st4te.account;
                     if (ownAccount && profileMap[ownAccount] && !(this.st4te._accounts || {})[ownAccount]) {
                         const cached = { ...this.st4te._accounts };
                         cached[ownAccount] = profileMap[ownAccount];
-                        this.setSt4te({ _comments: surviving.concat(comments), _comments_loading: false, _accounts: cached });
+                        this.setSt4te({ _comments: next, _comments_loading: false, _accounts: cached });
                     } else {
-                        this.setSt4te({ _comments: surviving.concat(comments), _comments_loading: false });
+                        this.setSt4te({ _comments: next, _comments_loading: false });
                     }
                 });
             })
             .catch((e) => {
+                if (stale()) return;
                 console.warn('[BlogPostDialog] Failed to fetch comments:', e.message);
                 this.setSt4te({ _comments_loading: false });
             });
@@ -2473,6 +2500,40 @@ class BlogPostDialog extends React.PureComponent {
         const authorUsername = (typeof author === 'object') ? (author.username || '') : (author || '');
         const permlink = d.permlink;
         if (authorUsername && permlink) this._fetch_replies_for(authorUsername, permlink, silent);
+    }
+
+    // "author/permlink" of a READY post — the identity of its thread — else null.
+    _thread_key = (d) => {
+        if (!d || getPostState(d) !== POST_STATE.READY) return null;
+        const a = d.author;
+        const author = (a && typeof a === "object") ? (a.username || "") : (a || "");
+        return (author && d.permlink) ? author + "/" + d.permlink : null;
+    }
+
+    // Start the top-level thread fetch for the open post unless this opening
+    // already requested it. The open/close edge alone can't drive it: a first
+    // opening can be a MOUNT with open=true (no componentWillReceiveProps), and
+    // a URL stub skips the fetch (not READY) and may then hydrate under the
+    // same id. So this runs from componentDidMount and from every props update
+    // while open, and fires as soon as the post is READY and the api is up.
+    _ensure_comments = () => {
+        if (!this.st4te.open) return;
+        const key = this._thread_key(this.st4te.data);
+        if (!key || key === this._threadKey) return;
+        const api = this.st4te.api;
+        if (!api || !api.content) return;   // retried on the next props update
+        this._threadKey = key;
+        this._fetch_comments();
+    }
+
+    // A new opening or post: forget the requested thread and orphan any
+    // replies request still in flight — an orphaned request never clears the
+    // skeleton, so clear it here. No forceUpdate: only componentWillReceiveProps
+    // calls this, and the update it is part of renders the change.
+    _reset_thread = () => {
+        this._threadKey = null;
+        this._repliesSeq++;
+        this.st4te._comments_loading = false;
     }
 
     // Lazy loader handed to CommentInList so each top-level comment can render
@@ -2876,12 +2937,16 @@ class BlogPostDialog extends React.PureComponent {
                 .then(() => {
                     let sanitized = body;
                     try { sanitized = rawSanitizeComment(body).html || body; } catch (e) {}
-                    const updated = (this.st4te._comments || []).map(x =>
-                        (x.permlink === cpl && (x.username || (x.author || {}).username) === ca)
-                            ? { ...x, body: sanitized }
-                            : x
-                    );
-                    this.setSt4te({ _comments: updated, _comment_sending: false, _edit_target: null });
+                    // Report it to CommentInList's live-edit registry: mounted
+                    // threads swap it into the inline reply showing it (those
+                    // are out of our reach), and it's replayed over refetches
+                    // until the chain serves it. Our own lists are patched here.
+                    applyCommentEdit(ca, cpl, sanitized);
+                    this.setSt4te({
+                        _comments: withCommentEdits(this.st4te._comments || []),
+                        _current_comments: withCommentEdits(this.st4te._current_comments || []),
+                        _comment_sending: false, _edit_target: null,
+                    });
                     this._set_comment_field("");
                     actions.trigger_snackbar(t("words.comment_updated"));
                 })

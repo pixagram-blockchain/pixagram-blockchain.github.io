@@ -219,7 +219,9 @@ const styles = (theme) => ({
         },
         "& .MuiBackdrop-root": {
             zIndex: theme.zIndex.drawer + 1,
-            backdropFilter: "blur(9px) grayscale(1)",
+            // Solid scrim instead of a viewport-wide backdrop-filter blur
+            // (extra full-screen GPU textures while the editor is open).
+            backgroundColor: "rgba(0, 0, 0, 0.85)",
             overflow: "hidden",
             userSelect: "none",
         },

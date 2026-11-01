@@ -848,6 +848,78 @@ const safeRevokeURL = (url) => {
     }
 };
 
+// ── Mobile upload hardening ─────────────────────────────────────────────
+// On phones the File handed over by <input type="file"> is not always a
+// readable picture:
+//  - Android (Google Photos / Drive / Files picker) can return a File backed
+//    by a content provider: still downloading (0 bytes), or no longer
+//    readable a moment later (NotReadableError) — the picker's grant is
+//    short-lived and resetting the input's value can drop it.
+//  - iOS can hand over a HEIC original, or a picture too large to decode.
+// Previously the zone accepted it anyway: the <img> stayed blank / broken
+// ("a preview, but not the picture") and "Next" then failed in the probe
+// with a generic "please try again later", so the user never reached the AI
+// question. Now the bytes are copied into memory at pick time and the
+// picture must actually decode before it is placed in the zone.
+
+const UPLOAD_DECODE_TIMEOUT_MS = 20000;
+const PROBE_TIMEOUT_MS = 20000;
+
+// Reject after `ms` so a decode/probe that never settles can't leave the
+// wizard spinning forever.
+const withTimeout = (promise, ms, label) => new Promise((resolve, reject) => {
+    const id = setTimeout(() => reject(new Error(label + " timed out")), ms);
+    promise.then(
+        (v) => { clearTimeout(id); resolve(v); },
+        (e) => { clearTimeout(id); reject(e); }
+    );
+});
+
+// Read the whole file now, while the picker's permission is still valid,
+// and wrap the bytes in an in-memory File (same name / type, so HEIC
+// detection by name or MIME keeps working).
+const materializeFile = async (file) => {
+    let buffer;
+    if (typeof file.arrayBuffer === "function") {
+        buffer = await file.arrayBuffer();
+    } else {
+        // Older WebViews without Blob.arrayBuffer()
+        buffer = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(reader.error || new Error("FileReader failed"));
+            reader.readAsArrayBuffer(file);
+        });
+    }
+    if (!buffer || buffer.byteLength === 0) {
+        throw new Error("EMPTY_FILE");
+    }
+    const name = file.name || "upload";
+    const type = file.type || "";
+    try {
+        return new File([buffer], name, { type, lastModified: file.lastModified || Date.now() });
+    } catch (e) {
+        // Very old WebViews without the File constructor
+        const blob = new Blob([buffer], { type });
+        try { blob.name = name; } catch (_) { /* read-only on some engines */ }
+        return blob;
+    }
+};
+
+// Resolve with the picture's natural size once the browser has decoded it
+// from `url`; reject when it can't (unsupported format, corrupt, too big).
+const verifyDecodable = (url) => new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+        const width = img.naturalWidth || img.width || 0;
+        const height = img.naturalHeight || img.height || 0;
+        if (width > 0 && height > 0) resolve({ width, height });
+        else reject(new Error("DECODE_EMPTY"));
+    };
+    img.onerror = () => reject(new Error("DECODE_FAILED"));
+    img.src = url;
+});
+
 // Check if image is already optimal for pixel art
 const checkIfImageIsOptimal = (preview, maxDimension = 160, maxColors = 64) => {
     if (!preview || !preview.width || !preview.height || !preview.data) {
@@ -955,6 +1027,17 @@ const extractImageFile = (event) => {
 // manager, which browsers often hand over untyped (the file input's accept
 // list names .heic/.heif explicitly for the same reason).
 const IMAGE_FILE_NAME_PATTERN = /\.(png|jpe?g|gif|webp|bmp|avif|svg|heic|heif)$/i;
+
+// File-picker filter. On iOS, a picker limited to image/* gets HEIC photos
+// already converted to JPEG by the system; naming .heic/.heif makes it hand
+// over the HEIC original, which must then be decoded in WASM (slow and
+// memory-hungry for a 24–48 MP photo). Desktop pickers still need the
+// extensions to show untyped .heic files, so they keep them.
+const IS_IOS = typeof navigator !== "undefined" && (
+    /iPad|iPhone|iPod/.test(navigator.userAgent || "") ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) // iPadOS
+);
+const UPLOAD_ACCEPT = IS_IOS ? "image/*" : "image/*,.heic,.heif";
 
 const isImageFile = (file) => !!file && (
     (typeof file.type === 'string' && file.type.startsWith('image/')) ||
@@ -1369,7 +1452,8 @@ const UploadZone = memo(({
                              message,
                              onFileUpload,
                              onEdit,
-                             onRemove
+                             onRemove,
+                             onImageError
                          }) => {
     useLanguage();
     const inputRef = useRef(null);
@@ -1443,6 +1527,7 @@ const UploadZone = memo(({
                             alt={t("words.input_image")}
                             draggable={false}
                             onLoad={handleImageLoad}
+                            onError={onImageError}
                         />
                     </Fade>
                 )}
@@ -1475,7 +1560,7 @@ const UploadZone = memo(({
                 <Input
                     inputRef={inputRef}
                     onChange={onFileUpload}
-                    inputProps={{ accept: "image/*,.heic,.heif" }}
+                    inputProps={{ accept: UPLOAD_ACCEPT }}
                     style={{ display: "none", position: "absolute" }}
                     id="button-file-dialog-secondary"
                     type="file"
@@ -1618,7 +1703,8 @@ const UploadZone = memo(({
     prev.loadingPercent === next.loadingPercent &&
     prev.message === next.message &&
     prev.onEdit === next.onEdit &&
-    prev.onRemove === next.onRemove
+    prev.onRemove === next.onRemove &&
+    prev.onImageError === next.onImageError
 ));
 
 // Aspect Ratio Selector Component
@@ -2400,6 +2486,11 @@ function NewPost(props) {
     const preloadTimeoutRef = useRef(null);
     const mountedRef = useRef(true);
     const previousInputUrlRef = useRef(null);
+    // Bumped on every pick / removal so a slow, superseded upload can't land
+    // in the zone after a newer one (see processFileUpload).
+    const uploadTokenRef = useRef(0);
+    // Same idea for the "Next" probe (see handleContinueWithUpload).
+    const probeTokenRef = useRef(0);
     const dragCounterRef = useRef(0);
     const currentStepRef = useRef(0);
     const inputFileRef = useRef(null);
@@ -2839,15 +2930,32 @@ function NewPost(props) {
     const processFileUpload = useCallback(async (imageFile) => {
         if (!imageFile) return;
 
-        try {
-            // HEIC (iPhone) uploads are converted once here, so the preview
-            // <img>, the editor, the probe and the AI/pipeline paths (which
-            // get `upload` via inputFile) all see a file the browser can
-            // decode. Anything else passes through untouched.
-            const upload = await normalizeUpload(imageFile);
-            if (!mountedRef.current) return;
+        // A newer pick (or paste / drop) supersedes this one: only the latest
+        // may land in the zone, however the async steps below interleave.
+        const token = ++uploadTokenRef.current;
+        const isStale = () => !mountedRef.current || token !== uploadTokenRef.current;
 
-            const url = URL.createObjectURL(upload);
+        let url = null;
+        try {
+            // 1. Copy the bytes into memory right away (see materializeFile):
+            //    a cloud-backed / still-downloading Android file fails HERE,
+            //    with a clear message, instead of later in the probe.
+            const local = await materializeFile(imageFile);
+            if (isStale()) return;
+
+            // 2. HEIC (iPhone) uploads are converted once here, so the preview
+            //    <img>, the editor, the probe and the AI/pipeline paths (which
+            //    get `upload` via inputFile) all see a file the browser can
+            //    decode. Anything else passes through untouched.
+            const upload = await normalizeUpload(local);
+            if (isStale()) return;
+
+            // 3. The picture must actually decode before it goes in the zone —
+            //    never show a blank "loaded" zone the wizard can't continue from.
+            url = URL.createObjectURL(upload);
+            await withTimeout(verifyDecodable(url), UPLOAD_DECODE_TIMEOUT_MS, "Image decode");
+            if (isStale()) { safeRevokeURL(url); return; }
+
             dispatch({
                 type: actionTypes.SET_MULTIPLE,
                 payload: {
@@ -2858,14 +2966,30 @@ function NewPost(props) {
                 }
             });
         } catch (error) {
-            console.error('Error processing file:', error);
-            actions.trigger_snackbar(t("components.new_post.please_try_again_later"));
+            safeRevokeURL(url);
+            if (isStale()) return;
+            console.error('Error processing file:', error, {
+                name: imageFile?.name, type: imageFile?.type, size: imageFile?.size
+            });
+            const unreadable = error?.message === "EMPTY_FILE" || error?.name === "NotReadableError";
+            actions.trigger_snackbar(unreadable
+                ? "This picture couldn't be read from your phone. If it's in the cloud, download it to the device first (or take a screenshot of it), then try again."
+                : "This picture can't be opened on this device. Try a JPEG or PNG — a screenshot of it works too.");
             dispatch({
                 type: actionTypes.SET_FIELD,
                 field: 'message',
                 value: "We don't store uploaded images"
             });
         }
+    }, []);
+
+    // Safety net: the zone's <img> still failed to render a picture that
+    // decoded at pick time (e.g. memory pressure on a phone). Empty the zone
+    // rather than leave a blank "loaded" state the user can't continue from.
+    const handlePreviewImageError = useCallback(() => {
+        uploadTokenRef.current++;
+        dispatch({ type: actionTypes.RESET_UPLOAD, keepInput: false });
+        actions.trigger_snackbar("This picture can't be displayed on this device. Try a smaller JPEG or PNG.");
     }, []);
 
     // "Next" on the Create step with a picked picture: probe it, then either
@@ -2877,9 +3001,16 @@ function NewPost(props) {
 
         dispatch({ type: actionTypes.SET_FIELD, field: 'isProbing', value: true });
 
+        const token = ++probeTokenRef.current;
+        const isStale = () => !mountedRef.current || token !== probeTokenRef.current;
+
         try {
-            const pixelartImagedata = await isArtworkPixelart(inputFile, 512, 512, 160);
-            if (!mountedRef.current) return;
+            const pixelartImagedata = await withTimeout(
+                isArtworkPixelart(inputFile, 512, 512, 160),
+                PROBE_TIMEOUT_MS,
+                "Pixel-art probe"
+            );
+            if (isStale()) return;
 
             if (pixelartImagedata instanceof ImageData) {
                 dispatch({
@@ -2906,12 +3037,18 @@ function NewPost(props) {
                 dispatch({ type: actionTypes.SET_FIELD, field: 'useAiOpen', value: true });
             }
         } catch (error) {
-            console.error('Error probing file:', error);
-            if (mountedRef.current) {
-                actions.trigger_snackbar(t("components.new_post.please_try_again_later"));
+            // The probe is only a shortcut ("is this already pixel art?").
+            // A failure or timeout there — typically a large phone photo the
+            // probe can't sample — must not dead-end the wizard on step 1:
+            // treat the picture as a regular one and ask the AI question. If
+            // the conversion itself then fails, processImage reports it and
+            // returns to this step with the picture kept.
+            console.warn('Pixel-art probe failed, continuing as a regular picture:', error);
+            if (!isStale()) {
+                dispatch({ type: actionTypes.SET_FIELD, field: 'useAiOpen', value: true });
             }
         } finally {
-            if (mountedRef.current) {
+            if (!isStale()) {
                 dispatch({ type: actionTypes.SET_FIELD, field: 'isProbing', value: false });
             }
         }
@@ -3148,6 +3285,9 @@ function NewPost(props) {
     // Reset all state
     const resetProps = useCallback(() => {
         safeRevokeURL(inputFileUrl);
+        // Drop any upload / probe still in flight for the old draft.
+        uploadTokenRef.current++;
+        probeTokenRef.current++;
 
         if (preloadTimeoutRef.current) clearTimeout(preloadTimeoutRef.current);
         if (debounceTimeoutRef.current) clearTimeout(debounceTimeoutRef.current);
@@ -3169,7 +3309,11 @@ function NewPost(props) {
     // edit) in the zone — "Back" from Adjust; without it the zone is emptied
     // — the remove button on the picture.
     const resetUploadState = useCallback((keepInput = false) => {
-        if (!keepInput) safeRevokeURL(inputFileUrl);
+        if (!keepInput) {
+            safeRevokeURL(inputFileUrl);
+            uploadTokenRef.current++;
+        }
+        probeTokenRef.current++;
 
         if (preloadTimeoutRef.current) clearTimeout(preloadTimeoutRef.current);
         if (debounceTimeoutRef.current) clearTimeout(debounceTimeoutRef.current);
@@ -3734,6 +3878,7 @@ function NewPost(props) {
                                 onFileUpload={handleFileUpload}
                                 onEdit={handleOpenImageEditor}
                                 onRemove={handleRemoveUpload}
+                                onImageError={handlePreviewImageError}
                             />
                             <GenerationParameters
                                 classes={classes}

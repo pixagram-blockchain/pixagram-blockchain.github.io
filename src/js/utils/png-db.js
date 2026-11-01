@@ -4,6 +4,7 @@ import { default as decodeWEBP } from '@jsquash/webp/decode';
 import { default as decodePNG } from '@jsquash/png/decode';
 import { base64ToBytes } from './b64';
 import { probeImageSync } from './image-probe';
+import { ByteLRU, budgetBytes } from './memory-kit';
 
 // Warm up the WASM hasher during module load so the first hash doesn't wait on
 // instantiation. `ready()` is memoized, so awaiting this promise later is free.
@@ -13,21 +14,32 @@ const hashReady = ready();
 const DATA_IMG_PREFIX = "data:image/";
 const WEBP_PREFIX = "data:image/webp;base64,";
 const PNG_PREFIX = "data:image/png;base64,";
-// Entry cache capacity. Each entry holds the raw payload bytes, the probed
-// size, and — once the background decode lands — the SOURCE-resolution
-// ImageData, all keyed together under one content hash. Sources are pixel
-// art, so entries are small (a 128×128 RGBA source is 64 KiB of ImageData);
-// 400 entries covers a long feed session for low tens of MB. Upscaled output
-// is deliberately NOT stored here — that lives in render-pool's LRU.
+// Entry cache budget, in BYTES. Each entry holds the raw payload bytes, the
+// probed size, and — once the background decode lands — the SOURCE-resolution
+// ImageData, all keyed together under one content hash. Upscaled output is
+// deliberately NOT stored here — that lives in render-pool's LRU.
+//
+// The cache used to be a 400-entry ring: fine for 128×128 sources (64 KiB of
+// ImageData each, ~33 MB in all), but 512×512 sources are 1 MiB each, so the
+// same ring could hold ~430 MB. It is now a least-recently-used cache with a
+// byte budget scaled to the device (48 MiB on 8 GB, 24 MiB when the memory is
+// unknown or 4 GB): about 300 entries of 128×128 art at 24 MiB.
 //
 // Why not a WeakMap/WeakSet: weak collections can't do this job. Keys here
 // are content-hash strings (WeakMap keys must be objects), and weak
-// collections are non-enumerable and unbounded — "keep exactly the last 400"
-// is impossible to express, and an ImageData referenced only by a weak cache
-// is collectable immediately, turning hit rates into GC-timing roulette. A
-// bounded strong ring gives the same intent (small, capped, auto-evicting)
-// deterministically.
-const CACHE_SIZE = 400;
+// collections are non-enumerable and unbounded — a byte budget is impossible
+// to express, and an ImageData referenced only by a weak cache is
+// collectable immediately, turning hit rates into GC-timing roulette.
+const CACHE_BYTES = budgetBytes(48 * 1024 * 1024);
+// String → hash fast path. Its keys are the data-URI strings themselves, so
+// every entry keeps a base64 artwork alive (24 KB typical, up to 133 KB);
+// a short ring is enough for re-renders of the cards on screen.
+const KEY_CACHE_SIZE = 64;
+// Background ("warm") decodes are only worth it for cards likely to be drawn.
+// Large images decode on demand only, and warm-ups stop when the cache is
+// mostly full, since each one would evict an entry that may be in use.
+const WARM_MAX_PIXELS = 1024 * 1024;
+const WARM_MAX_FILL = 0.75;
 // Width of the content-id hash. 64 bits → ~11-char base58 ids, with collision
 // probability negligible for a content cache of this size.
 const HASH_BITS = 32;
@@ -145,12 +157,16 @@ export const pngdb = () => {
     // first (header probe); `decoded` (ImageData) is filled in by the
     // background decode. Both live in the SAME entry so "base64 → size" and
     // "base64 → ImageData" are one lookup with one eviction policy.
-    const imgCache = new FixedSizeCache(CACHE_SIZE);
+    const imgCache = new ByteLRU({
+        maxBytes: CACHE_BYTES,
+        sizeOf: (e) => (e.data ? e.data.byteLength : 0) + (e.decoded && e.decoded.data ? e.decoded.data.byteLength : 0),
+    });
     // Fast path: exact input string → hash. Skips the base64 decode + hash on
     // repeated lookups of the same data URI (the common case when feed tiles
-    // re-render). Bounded like imgCache; keys are references to strings the
-    // caller already holds, so no copies are made.
-    const keyCache = new FixedSizeCache(CACHE_SIZE);
+    // re-render). Keys are references to strings the caller already holds, so
+    // no copies are made — but they stay alive while cached, hence the small
+    // ring (see KEY_CACHE_SIZE).
+    const keyCache = new FixedSizeCache(KEY_CACHE_SIZE);
     // Track permanently failed hashes so we never re-attempt them (bounded).
     const failedSet = new Set();
     // In-flight decodes, keyed by hash — concurrent calls for the same image
@@ -197,17 +213,21 @@ export const pngdb = () => {
             // decoder ever disagrees, the pixels win.
             entry.width = decoded.width;
             entry.height = decoded.height;
-            // Re-pin if the ring evicted the entry while the decode ran; if
+            // Re-pin if the cache evicted the entry while the decode ran; if
             // a REPLACEMENT entry for the same id was created in the
             // meantime (evicted-then-reprobed race), hydrate that one too so
-            // the shared result isn't decoded a second time.
-            const live = imgCache.get(entry.id);
-            if (live === undefined) {
-                imgCache.set(entry.id, entry);
-            } else if (live !== entry) {
+            // the shared result isn't decoded a second time. Either way the
+            // entry is set() again so its byte size includes the pixels (an
+            // entry larger than the whole budget is simply not kept; the
+            // caller still gets its ImageData).
+            const live = imgCache.peek(entry.id);
+            if (live !== undefined && live !== entry) {
                 live.decoded = decoded;
                 live.width = decoded.width;
                 live.height = decoded.height;
+                imgCache.set(entry.id, live);
+            } else {
+                imgCache.set(entry.id, entry);
             }
             return decoded;
         })();
@@ -229,6 +249,12 @@ export const pngdb = () => {
         if (warming) return;
         warming = true;
         while (warmQueue.length > 0) {
+            // A mostly-full cache means every further warm decode evicts an
+            // entry that may be on screen: stop and let cards decode on demand.
+            if (imgCache.bytes > WARM_MAX_FILL * CACHE_BYTES) {
+                warmQueue.length = 0;
+                break;
+            }
             const entry = warmQueue.shift();
             if (entry.decoded || failedSet.has(entry.id)) continue;
             try { await decodeEntry(entry); } catch { /* absorbed */ }
@@ -238,6 +264,10 @@ export const pngdb = () => {
         warming = false;
     };
     const warmEntry = (entry) => {
+        // Large images (over 1 MP, i.e. 4 MiB of pixels) decode on demand
+        // only: a 40 MP post used to be decoded (153 MiB) for every visitor
+        // as soon as the feed measured it, on screen or not.
+        if ((entry.width | 0) * (entry.height | 0) > WARM_MAX_PIXELS) return;
         warmQueue.push(entry);
         drainWarmQueue();
     };
@@ -323,10 +353,16 @@ export const pngdb = () => {
      */
     const get_new_img_data = async (img_obj) => {
         if (!img_obj || !img_obj.id) return null;
-        if (failedSet.has(img_obj.id)) return null;
+        // Entries are keyed by CONTENT HASH. A snapshot from get_new_img_obj
+        // carries it as `id`; ImageMeasurer's cached copy carries the post id
+        // as `id` and the content hash as `hash`. Looking the post id up used
+        // to miss every time, so each drawn card was decoded a second time
+        // into a second cache slot.
+        const key = img_obj.hash || img_obj.id;
+        if (failedSet.has(key)) return null;
 
-        if (imgCache.has(img_obj.id)) {
-            const cached = imgCache.get(img_obj.id);
+        const cached = imgCache.get(key);
+        if (cached !== undefined) {
             if (cached.decoded) return cached.decoded;
             // Priority lane: joins the in-flight warm decode if there is
             // one, otherwise starts the decode immediately (ahead of any
@@ -338,8 +374,9 @@ export const pngdb = () => {
         // the snapshot (it carries type + payload bytes) and decode once,
         // shared. Re-inserting means a post-eviction re-decode is paid at
         // most once instead of on every call.
+        if (!img_obj.data) return null;
         const entry = {
-            id: img_obj.id,
+            id: key,
             type: img_obj.type,
             data: img_obj.data,
             width: img_obj.width | 0,

@@ -169,9 +169,6 @@ export const overrides = {
                 backgroundPosition: "0% 50%",
                 transition: "background-position cubic-bezier(0.4, 0, 0.2, 1) 175ms",
             },
-            ".speed:, .speed: *, .speed:not(a), .speed:not(a) *": {
-                imageRendering: "optimizeSpeed",
-            },
             ".pixelated, .pixelated *, .pixelated:not(a), .pixelated:not(a) *": {
                 imageRendering: "-moz-crisp-edges",
             },
@@ -205,38 +202,6 @@ export const overrides = {
                         "100%": {filter: "opacity(1)", animationTimingFunction: "cubic-bezier(0.280, 0.840, 0.420, 1)"},
                     }
                 },
-            },
-            "div.arrival":{
-                background: "linear-gradient(180deg, #00000078 -25%, #00000061 0%, #00000045 35%, #0000001a 90%, transparent)",
-            },
-            "div.arrival::after":{
-                content: "''",
-                contain: "style size layout",
-                position: "fixed",
-                width: "100%",
-                zIndex: 9999999,
-                top: 5,
-                height: "95%",
-                background: "radial-gradient(#00000000 27%, #002bffb5 35%, #00000000 40%, #1000ffab 42.5%, #00000000 45%)",
-                left: 0,
-                backgroundSize: "600% 400%",
-                animationIterationCount: "infinite",
-                animationDelay: "250ms !important",
-                animationFillMode: "both !important",
-                animationTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1) !important",
-                animationName: "$arrival !important",
-                animationDuration: "1500ms !important",
-                backgroundPosition: "50% 50%",
-                mixBlendMode: "color",
-                "@global": {
-                    "@keyframes arrival": {
-                        "0%": {display: "block", transform: "translateY(150%)", opacity: .7},
-                        "25%": {display: "block", transform: "translateY(50%)", opacity: 0.9},
-                        "50%": {display: "block", transform: "translateY(0%)", opacity: 0},
-                        "75%": {display: "block", transform: "translateY(-50%)", opacity: 0},
-                        "100%": {display: "none", transform: "translateY(-100%)", opacity: 0},
-                    }
-                }
             },
             ".fade-in-500-500": {
                 verticalAlign: "inherit",
@@ -417,9 +382,6 @@ export const overrides = {
             },
             ".MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline": {
                 borderColor: "#666"
-            },
-            ".scroll-will-change": {
-                willChange: "scroll"
             },
             "span > span.MuiSwitch-colorPrimary + .MuiSwitch-track": {
                 opacity: 0.15

@@ -69,9 +69,11 @@ const styles = theme => ({
         width: '100%',
         marginTop: '24px',
         userSelect: 'none',
+        // No translateZ(0): it gave every card in view and overscan a
+        // permanent GPU layer. contain: layout already makes the card a
+        // stacking context and the containing block of its positioned
+        // children, which is all the transform was providing for layout.
         contain: 'style layout',
-        willChange: 'auto',
-        transform: 'translateZ(0)',
         '&.MuiCard-root': {
             overflow: 'hidden',
             backgroundColor: '#101010',

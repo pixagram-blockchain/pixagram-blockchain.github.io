@@ -22,7 +22,7 @@ import ChevronRightCircleOutlined from "../icons/ChevronRightCircleOutlined";
 import PixaSupra from "../icons/PixaSupra";
 import AutoSizer from '@pixagram/virtualized/dist/es/AutoSizer';
 import VirtualizedList from '@pixagram/virtualized/dist/es/List';
-import {crtF, hexF, sqrF, triF, xbrzF, acquireBestCachedBitmap} from "../utils/render-pool";
+import {crtF, hexF, sqrF, triF, xbrzF, acquireBestCachedBitmap, dropRendersAbove, cappedScale} from "../utils/render-pool";
 
 import ArrowForwardIosIcon from "@material-ui/icons/ArrowForwardIos";
 import InfoOutlined from "@material-ui/icons/InfoOutlined";
@@ -38,7 +38,6 @@ import ListSubheader from "@material-ui/core/ListSubheader";
 import Grid from "@material-ui/core/Grid";
 import Info from "@material-ui/icons/Info";
 import License from "../icons/License";
-import LicenseDialog from "./LicenseDialog";
 import {PIXA_LICENSE_BASE as baseLicenseData} from "../utils/pixa_license";
 import { sanitizeComment as rawSanitizeComment, safeHTML } from "../utils/api/sanitizer";
 import CloudDownload from "@material-ui/icons/CloudDownload";
@@ -49,7 +48,7 @@ import SendRounded from "@material-ui/icons/SendRounded";
 import VisibilityRounded from "@material-ui/icons/VisibilityRounded";
 import VisibilityOffRounded from "@material-ui/icons/VisibilityOffRounded";
 import CircularProgress from "@material-ui/core/CircularProgress";
-import CommentInList from "./CommentInList";
+import CommentInList, { applyCommentEdit, withCommentEdits } from "./CommentInList";
 import { ToxicityWatcher } from "./ToxicityHint";
 import * as toxicity from "../utils/toxicity";
 import Tabs from "@material-ui/core/Tabs";
@@ -1759,14 +1758,23 @@ const DownloadOverlay = React.memo(function DownloadOverlay({ classes, filename,
 /* Shallow-compared boundaries around the imported dialogs: every prop they
  * take is a stable callback, a memoized object or a value that only moves
  * when the dialog's own state does. */
-const LicenseDialogMemo = React.memo(LicenseDialog);
+/* LicenseDialog is loaded the first time it is opened. A static import made
+ * every artwork open load licensePDF (pdf-lib, fontkit) and the PNG/WebP
+ * encoders it uses: 16 chunks, about 2.9 MB. */
+const loadLicenseDialog = () => import("./LicenseDialog");
+const LicenseDialogMemo = React.memo(React.lazy(loadLicenseDialog));
 const EditPostDialogMemo = React.memo(EditPostDialog);
 const DeleteCommentModalMemo = React.memo(DeleteCommentModal);
 
 const styles = (theme) => ({
     backdrop: {
         zIndex: theme.zIndex.drawer + 1,
-        backdropFilter: "blur(9px) grayscale(1)",
+        /* A solid scrim instead of backdropFilter: blur(9px) grayscale(1).
+         * The viewport-wide filter kept extra full-screen GPU textures
+         * alive while the dialog was open and re-blurred the feed behind
+         * it. The compound selector outranks the global .MuiBackdrop-root
+         * tint in theme/overrides.js whatever order the sheets load in. */
+        "&.MuiBackdrop-root": { backgroundColor: "rgba(0, 0, 0, 0.85)" },
         overflow: "hidden",
         userSelect: "none",
     },
@@ -2352,11 +2360,11 @@ const styles = (theme) => ({
      * display:block matches the div's computed default — purely a hook. */
     downloadWrap: { display: "block" },
     /* Reverse-hero close. Applied on the Backdrop root while the artwork
-     * flies back onto its masonry card: the tint + blur clear so the feed
+     * flies back onto its masonry card: the scrim clears so the feed
      * shows through behind the flying image, and every other layer of the
      * dialog (drawer, arrows, download control) fades out of its way and
-     * stops catching clicks. blur(0)/grayscale(0) rather than `none` so the
-     * backdrop-filter interpolates instead of snapping. The transition is
+     * stops catching clicks. Only background-color animates (the scrim
+     * has no backdrop-filter to re-run each frame). The transition is
      * !important AND keeps `opacity` in the list because MUI's Fade writes
      * an inline `transition: opacity ...` on this node (handleEnter) that
      * would otherwise win over the class — opacity at 195ms preserves the
@@ -2366,7 +2374,6 @@ const styles = (theme) => ({
      * identical pixels of the card beneath. */
     closingChrome: {
         backgroundColor: "transparent !important",
-        backdropFilter: "blur(0px) grayscale(0) !important",
         /* Click-through for the WHOLE dialog from the first frame of the
          * flight. The artwork needs 440 ms to land and the Backdrop's own
          * fade-out runs after that — for all of it this Portal was still
@@ -2392,7 +2399,7 @@ const styles = (theme) => ({
         "& canvas": {
             pointerEvents: "none !important",
         },
-        transition: "background-color 300ms cubic-bezier(0.4, 0, 0.2, 1), backdrop-filter 300ms cubic-bezier(0.4, 0, 0.2, 1), opacity 195ms cubic-bezier(0.4, 0, 0.2, 1) !important",
+        transition: "background-color 300ms cubic-bezier(0.4, 0, 0.2, 1), opacity 195ms cubic-bezier(0.4, 0, 0.2, 1) !important",
         // The arrows sit inside MUI <Fade> wrappers, and an entered Fade
         // leaves INLINE `opacity: 1` (plus its own 900 ms inline
         // transition) on its child — inline style beats any normal class
@@ -3573,11 +3580,15 @@ function PostDialog(props) {
             if (inst.renderedKey !== renderedKey) {
                 try {
                     if (imgd && imgd.data && imgd.data.length) {
-                        inst.renderedImageData = new ImageData(new Uint8ClampedArray(imgd.data), imgd.width, imgd.height);
+                        // A reference, not a copy: the pool never mutates its
+                        // output and the download path only reads it. The copy
+                        // cost 16-36 MiB for every open dialog.
+                        inst.renderedImageData = imgd;
                     } else {
                         const cap = createCanvas(b.width, b.height);
                         cap.ctx.drawImage(b, 0, 0);
                         inst.renderedImageData = cap.ctx.getImageData(0, 0, b.width, b.height, { colorSpace: "srgb" });
+                        cap.width = 1; cap.height = 1; // release the readback canvas now
                     }
                     inst.renderedKey = renderedKey;
                 } catch (e) { inst.renderedImageData = null; inst.renderedKey = null; }
@@ -3888,7 +3899,7 @@ function PostDialog(props) {
                 if (!replies || !Array.isArray(replies) || replies.length === 0) {
                     const surviving = (stateRef.current._comments || [])
                         .filter(c => c._optimistic && c.parent_author === author && c.parent_permlink === permlink);
-                    dispatch({ _comments: surviving, _comments_loading: false });
+                    dispatch({ _comments: withCommentEdits(surviving), _comments_loading: false });
                     return;
                 }
                 const uniqueAuthors = [...new Set(replies.map(r => r.author).filter(Boolean))];
@@ -3900,7 +3911,10 @@ function PostDialog(props) {
                     const chainPermlinks = new Set(comments.map(c => c.permlink));
                     const surviving = (stateRef.current._comments || [])
                         .filter(c => c._optimistic && !chainPermlinks.has(c.permlink) && c.parent_author === author && c.parent_permlink === permlink);
-                    dispatch({ _comments: surviving.concat(comments), _comments_loading: false });
+                    // Replay live edits: a fetch that lands before the chain
+                    // serves an edit (e.g. the poll after posting) still
+                    // carries the old body.
+                    dispatch({ _comments: withCommentEdits(surviving.concat(comments)), _comments_loading: false });
                 });
             })
             .catch(() => dispatch({ _comments_loading: false }));
@@ -4329,16 +4343,29 @@ function PostDialog(props) {
                 if (b && typeof ImageBitmap !== "undefined" && b instanceof ImageBitmap) {
                     const c = createCanvas(b.width, b.height);
                     c.ctx.drawImage(b, 0, 0);
-                    return c.ctx.getImageData(0, 0, b.width, b.height, { colorSpace: "srgb" });
+                    const out = c.ctx.getImageData(0, 0, b.width, b.height, { colorSpace: "srgb" });
+                    c.width = 1; c.height = 1; // release the readback canvas now
+                    return out;
                 }
                 return (d && d.data && d.data.length) ? d : null;
             };
+            // The bitmaps handed over are ours: close each once read, or
+            // when it is not the pass we wait for.
+            const closeBitmap = (b) => { if (b) { try { b.close(); } catch (e) {} } };
             let done = false;
-            const onRendered = (d, b) => { if (done) return; done = true; stampAndSave(toImageData(d, b)); };
+            const onRendered = (d, b) => {
+                if (done) { closeBitmap(b); return; }
+                done = true;
+                const imgd = toImageData(d, b);
+                closeBitmap(b);
+                stampAndSave(imgd);
+            };
             const id = "" + st.data.id;
             const sized = (mult, min) => Math.max(Math.min(32, Math.ceil((st._size?.width || 0) / (st.metadata?.width || 1)) * mult), min);
             if (st.renderer === "hexagon") hexF(src, sized(2, 3), onRendered, true, id, st.mode);
-            else if (st.renderer === "xbrz") { const s = sized(4, 2), target = src.width * s; xbrzF(src, s, (d, b) => { if (!d || target - 128 < (d.width || b?.width || 0)) onRendered(d, b); }, true, id, st.mode); }
+                // xBRZ reports progressively: wait for the pass at the scale the
+            // pool really renders (it caps outputs at 16 MP), not the one asked.
+            else if (st.renderer === "xbrz") { const s = sized(4, 2), target = src.width * cappedScale("xbrz", src.width, src.height, s); xbrzF(src, s, (d, b) => { if (!d || target - 128 < (d.width || b?.width || 0)) onRendered(d, b); else closeBitmap(b); }, true, id, st.mode); }
             else if (st.renderer === "crt") crtF(src, sized(4, 2), onRendered, true, id, st.mode);
             else if (st.renderer === "tri") triF(src, sized(4, 2), onRendered, true, id, st.mode);
             else sqrF(src, sized(4, 2), onRendered, true, id, st.mode);
@@ -4389,6 +4416,7 @@ function PostDialog(props) {
         const license = meta.license || {};
         const hr = license.rightsConfiguration?.holderRights || {};
         const vr = license.rightsConfiguration?.visitorRights || {};
+        loadLicenseDialog().catch(() => {}); // start the chunk now; the render below joins it
         dispatch({
             _license_dialog_opened: true,
             _license_customization: {
@@ -4525,12 +4553,17 @@ function PostDialog(props) {
                 .then(() => {
                     let sanitized = body;
                     try { sanitized = rawSanitizeComment(body).html || body; } catch (e) {}
-                    const updated = (stateRef.current._comments || []).map(x =>
-                        (x.permlink === cpl && (x.username || (x.author || {}).username) === ca)
-                            ? { ...x, body: sanitized }
-                            : x
-                    );
-                    dispatch({ _comments: updated, _comment_sending: false, _edit_target: null });
+                    // Report it to CommentInList's live-edit registry: mounted
+                    // threads swap it into the inline reply showing it (those
+                    // are out of our reach), and it's replayed over refetches
+                    // until the chain serves it. Our own lists are patched here.
+                    applyCommentEdit(ca, cpl, sanitized);
+                    const s = stateRef.current;
+                    dispatch({
+                        _comments: withCommentEdits(s._comments || []),
+                        _current_comments: withCommentEdits(s._current_comments || []),
+                        _comment_sending: false, _edit_target: null,
+                    });
                     setTextFieldValue("comment-textfield", "");
                     actions.trigger_snackbar(t("words.comment_updated"));
                 })
@@ -5045,6 +5078,10 @@ function PostDialog(props) {
                 // the blur DOM would never reattach the src after a remount).
                 inst.committedImage = null;
                 inst.renderedImageData = null; inst.renderedKey = null;
+                // The dialog-size render (16-36 MiB) is rarely shown again;
+                // the card-size renders of this post stay cached for the feed.
+                const closedId = stateRef.current.data && stateRef.current.data.id;
+                if (closedId != null) dropRendersAbove("" + closedId, 8 * 1024 * 1024);
                 // Clear our "previous props" snapshots too. Without this,
                 // reopening the SAME post after a close compares the new
                 // props against the cached old props, finds `isNewImage`
@@ -5378,6 +5415,11 @@ function PostDialog(props) {
         width: _view_right_mobile_enabled ? "100%" : "calc(100% - 16px)"
     }), [_view_right_mobile_enabled]);
 
+    /* The lazy LicenseDialog mounts the first time it opens and then stays
+     * mounted, so its close transition still plays. */
+    const licenseMountedRef = useRef(false);
+    if (_license_dialog_opened) licenseMountedRef.current = true;
+
     /* PERF: Stable _data for LicenseDialog — only recalculated when post changes */
     const _data = useMemo(
         () => ({ image: data.image, title: data.title, author: favoriteAuthor }),
@@ -5582,8 +5624,12 @@ function PostDialog(props) {
                             setMenuCardRefCb={setMenuCardRefCb} />
                     </div>}
                 </div>
-                <LicenseDialogMemo open={_license_dialog_opened} onClose={closeLicenseDialog}
-                                   licenseBase={_license_base} customization={_license_customization} data={_data} />
+                {licenseMountedRef.current && (
+                    <React.Suspense fallback={null}>
+                        <LicenseDialogMemo open={_license_dialog_opened} onClose={closeLicenseDialog}
+                                           licenseBase={_license_base} customization={_license_customization} data={_data} />
+                    </React.Suspense>
+                )}
                 {/* Post metadata editor — owner only (Manage → Edit post details) */}
                 {isOwner && (
                     <EditPostDialogMemo

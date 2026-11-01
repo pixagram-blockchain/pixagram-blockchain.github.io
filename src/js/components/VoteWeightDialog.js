@@ -1,13 +1,9 @@
 import React from "react";
 import withStyles from "@material-ui/core/styles/withStyles";
 import Dialog from "@material-ui/core/Dialog";
-import DialogContent from "@material-ui/core/DialogContent";
-import DialogActions from "@material-ui/core/DialogActions";
 import Typography from "@material-ui/core/Typography";
-import Button from "@material-ui/core/Button";
+import ButtonBase from "@material-ui/core/ButtonBase";
 import CircularProgress from "@material-ui/core/CircularProgress";
-import CloseIcon from "@material-ui/icons/Close";
-import IconButton from "@material-ui/core/IconButton";
 import {DoneRounded} from "@material-ui/icons";
 import { withPrices } from "../hooks/usePrices";
 import {
@@ -16,18 +12,34 @@ import {
     getVoterAccount, getVoterAccountSync,
 } from "../utils/voteValue";
 
-// ─── Arc Geometry ────────────────────────────────────────────────────────────
-// Single fixed viewBox — the SVG scales responsively via CSS width + viewBox.
-const VB_W = 310;
-const VB_H = 220;
-const CX = VB_W / 2;
-const CY = 190;
-const R = 120;
-const STROKE_W = 36;
-const THUMB_R = 21;
-const TICK_OUTER = R + STROKE_W / 2 + 2;
-const TICK_INNER = R + STROKE_W / 2 - 4;
-const LABEL_R = R + STROKE_W / 2 + 16;
+// ─── Dial Geometry ───────────────────────────────────────────────────────────
+// The dialog is a disc. One square viewBox covers the whole disc and the arc
+// is concentric with it (watch-bezel style); the SVG scales with the disc.
+const VB = 320;
+const VB_W = VB;
+const VB_H = VB;
+const CX = VB / 2;
+const CY = VB / 2;
+const R = 122;
+const STROKE_W = 34;
+const THUMB_R = 20;
+// Margin between the track's outer edge and the disc's rim: 160 − (R + 17) = 21.
+// Ticks sit on the INNER edge of the track, pointing towards the centre.
+const TICK_OUTER = R - STROKE_W / 2 + 4;
+const TICK_INNER = R - STROKE_W / 2 - 2;
+// Labels sit inside the arc, just past the ticks.
+const LABEL_R = R - STROKE_W / 2 - 16;
+
+// Disc diameter: 340px max, otherwise whatever fits the screen with a 20px
+// margin on each side. `svh` = the viewport with the mobile browser bars
+// shown, so the disc never ends up under them; `vh` is the fallback for
+// browsers without small-viewport units.
+const discSize = (vh) => "min(340px, calc(100vw - 40px), calc(100" + vh + " - 40px))";
+const DISC = discSize("svh");
+const DISC_FALLBACK = discSize("vh");
+// Base font size of the HTML overlays, scaled with the disc (14px at 340px)
+// so the button content keeps its proportions when the disc shrinks.
+const discFont = (disc) => "calc(" + disc + " * 14 / 340)";
 
 /** Math-convention angle → SVG point (y-down). */
 function toSvg(angle, radius) {
@@ -87,102 +99,118 @@ function initialWeight(weight, defaultPower, isUpvote) {
     return -Math.max(100, Math.min(10000, base));
 }
 
+/**
+ * Anchoring for labels drawn INSIDE the arc: the text grows away from the
+ * track, towards the centre of the dial (left half → start, right → end).
+ */
 function labelAnchor(angle) {
     const deg = (angle * 180) / Math.PI;
-    if (deg > 135) return { textAnchor: "end",    dx: -2, dy: 5 };
-    if (deg > 100) return { textAnchor: "end",    dx: 0,  dy: -2 };
-    if (deg > 80)  return { textAnchor: "middle",  dx: 0,  dy: -6 };
-    if (deg > 45)  return { textAnchor: "start",   dx: 0,  dy: -2 };
-    return             { textAnchor: "start",   dx: 2,  dy: 5 };
+    if (deg > 100) return { textAnchor: "start" };
+    if (deg >= 80) return { textAnchor: "middle" };
+    return { textAnchor: "end" };
 }
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
+const TRANSITION = "filter 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,box-shadow 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,border 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms";
+
 const styles = () => ({
+    // The paper IS the disc.
     paper: {
+        fallbacks: [{ width: DISC_FALLBACK, height: DISC_FALLBACK, fontSize: discFont(DISC_FALLBACK) }],
+        position: "relative",
         backgroundColor: "#fff !important",
-        borderRadius: "48px !important",
+        borderRadius: "50% !important",
+        width: DISC,
+        height: DISC,
+        fontSize: discFont(DISC),
+        maxWidth: "none !important",
+        maxHeight: "none !important",
+        margin: "16px !important",
         overflow: "visible !important",
         color: "#000 !important",
     },
-    dialogContent: {
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        padding: "4px 8px 0 8px",
-        overflow: "visible",
-        "&:first-child": { paddingTop: 4 },
+    svg: {
+        position: "absolute",
+        top: 0,
+        left: 0,
+        display: "block",
+        width: "100%",
+        height: "100%",
     },
     errorText: {
-        color: "#666",
-        marginTop: 4,
-        textAlign: "center",
-    },
-    actions: {
-        justifyContent: "center",
-        padding: "4px 16px 16px",
-        gap: 12,
-    },
-    // Live estimate of what the vote at the selected weight is worth (HIVE
-    // estimate_upvote recipe, utils/voteValue). Sits under the confirm
-    // button: the button itself is pulled 56px up into the arc, so the
-    // bottom-centre of the SVG is not available for text.
-    estimateWrap: {
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        marginTop: -6,
-        padding: "0 24px 18px",
-        minHeight: 20,
-        lineHeight: 1.25,
-        fontVariantNumeric: "tabular-nums",
-        userSelect: "none",
-    },
-    estimatePxs: {
-        color: "#000",
-        fontFamily: "'Geist Mono', monospace",
-        fontSize: 15,
-        fontWeight: 500,
-    },
-    estimateFiat: {
-        color: "#666",
-        fontFamily: "'Geist Mono', monospace",
-        fontSize: 12,
-        marginTop: 2,
-    },
-    closeIcon: {
-        color: "#000000",
         position: "absolute",
-        top: 16,
-        right: 16
+        top: "60%",
+        left: "50%",
+        transform: "translateX(-50%)",
+        width: "62%",
+        color: "#666",
+        fontSize: "0.86em",
+        lineHeight: 1.2,
+        textAlign: "center",
+        pointerEvents: "none",
     },
-    svgWrapper: {
-        width: "100%",
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    svg: {
-        display: "block",
-        maxWidth: "min(320px, calc(100vw - 120px))",
-        width: "100%",
-        height: "auto",
-    },
+    // Confirm button: bowl shape (flat-ish top with rounded corners, deep
+    // elliptical bottom) that follows the curve of the disc, like a watch
+    // face's primary action.
     blackButton: {
-        width: "160px",
-        height: "64px",
-        borderRadius: "100px !important",
-        marginTop: "-56px",
-        backgroundColor: "#171717 !important",
-        color: "#fff !important",
+        position: "absolute",
+        left: "50%",
+        bottom: "10%",
+        transform: "translateX(-50%)",
+        width: "60%",
+        height: "21%",
+        borderRadius: "16% 16% 50% 50% / 42% 42% 58% 58%",
+        paddingBottom: "3%",
+        boxSizing: "border-box",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "0.7em",
+        fontSize: "inherit",
+        backgroundColor: "#171717",
+        color: "#fff",
         filter: "drop-shadow(0px 0px 0px #00000000)",
-        transition: "filter 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,box-shadow 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,border 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
+        transition: TRANSITION,
         "&:hover": {
             backgroundColor: "#000",
-            color: "#fff",
             filter: "drop-shadow(0px 0px 6px #00000088)",
-            transition: "filter 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,box-shadow 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,border 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms"
-        }
+        },
+        "&.Mui-focusVisible": {
+            filter: "drop-shadow(0px 0px 6px #00000088)",
+        },
+    },
+    buttonIcon: {
+        flex: "0 0 auto",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "1.7em",
+        height: "1.7em",
+        fontSize: "inherit",
+        color: "#fff",
+    },
+    buttonValues: {
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "flex-start",
+        minWidth: 0,
+        lineHeight: 1.2,
+        fontVariantNumeric: "tabular-nums",
+        userSelect: "none",
+        whiteSpace: "nowrap",
+    },
+    buttonPxs: {
+        color: "#fff",
+        fontFamily: "'Geist Mono', monospace",
+        fontSize: "1em",
+        fontWeight: 500,
+    },
+    buttonFiat: {
+        color: "#a3a3a3",
+        fontFamily: "'Geist Mono', monospace",
+        fontSize: "0.79em",
+        marginTop: "0.07em",
     },
 });
 
@@ -236,7 +264,7 @@ class VoteWeightDialog extends React.PureComponent {
     // ── Vote value estimate ──────────────────────────────────────────────
     // Needs `api` (reward fund / dgp / feed reads) and `voter` (the account
     // whose vesting shares and mana decide the rshares) — both optional props;
-    // without them the dialog renders exactly as before. Fetches are RAM-
+    // without them the confirm button shows only its icon. Fetches are RAM-
     // cached and deduped in utils/voteValue, so re-opening is instant.
 
     _loadPricing = () => {
@@ -270,29 +298,39 @@ class VoteWeightDialog extends React.PureComponent {
         return { pxs: value.pxs, fiat: fiat.amount, currency: fiat.currency, ready };
     };
 
-    _renderEstimate = () => {
-        const { classes, api, voter } = this.props;
+    /** Estimate shown inside the confirm button → { pxsText, fiatText } or null. */
+    _estimateTexts = () => {
+        const { api, voter } = this.props;
         if (!api || !voter) return null;
         const est = this._estimate(this.state.weight);
-        if (!est.ready) {
-            return <div className={classes.estimateWrap}><span className={classes.estimateFiat}>…</span></div>;
-        }
+        if (!est.ready) return { pxsText: "…", fiatText: "" };
         const sign = est.pxs > 0 ? "+" : est.pxs < 0 ? "−" : "";
-        return (
-            <div className={classes.estimateWrap}>
-                <span className={classes.estimatePxs}>≈ {sign}{formatPxs(Math.abs(est.pxs))} PXS</span>
-                <span className={classes.estimateFiat}>{Math.abs(est.fiat).toFixed(2)} {est.currency}</span>
-            </div>
-        );
+        return {
+            pxsText: "≈ " + sign + formatPxs(Math.abs(est.pxs)) + " PXS",
+            fiatText: Math.abs(est.fiat).toFixed(2) + " " + est.currency,
+        };
     };
 
     // ── Pointer handling ─────────────────────────────────────────────────
 
+    _toViewBox = (e) => {
+        const rect = this._svgRef.getBoundingClientRect();
+        return {
+            px: ((e.clientX - rect.left) / rect.width) * VB_W,
+            py: ((e.clientY - rect.top) / rect.height) * VB_H,
+        };
+    };
+
     _onPointerDown = (e) => {
-        if (this.state.broadcasting) return;
+        if (this.state.broadcasting || !this._svgRef) return;
+        // The lower half of the disc holds the confirm button: a press there
+        // must not snap the weight to ±100 %. Only presses on the upper half
+        // (the dial) start a drag; once started, a drag may go anywhere.
+        const { py } = this._toViewBox(e);
+        if (py > CY + STROKE_W / 2) return;
         e.preventDefault();
         this._dragging = true;
-        if (this._svgRef && this._svgRef.setPointerCapture) {
+        if (this._svgRef.setPointerCapture) {
             try { this._svgRef.setPointerCapture(e.pointerId); } catch (_) {}
         }
         this._updateFromPointer(e);
@@ -313,12 +351,8 @@ class VoteWeightDialog extends React.PureComponent {
     };
 
     _updateFromPointer = (e) => {
-        const svg = this._svgRef;
-        if (!svg) return;
-        const rect = svg.getBoundingClientRect();
-        // Map screen → viewBox
-        const px = ((e.clientX - rect.left) / rect.width) * VB_W;
-        const py = ((e.clientY - rect.top) / rect.height) * VB_H;
+        if (!this._svgRef) return;
+        const { px, py } = this._toViewBox(e);
         // Math-convention angle from centre
         const dx = px - CX;
         const dy = -(py - CY);
@@ -371,189 +405,188 @@ class VoteWeightDialog extends React.PureComponent {
         const curAngle = valueToAngle(weight);
         const fillPath = weight === 0 ? "" : arcPath(zeroAngle, curAngle);
         const thumb = toSvg(curAngle);
+        const est = this._estimateTexts();
 
         return (
             <Dialog
                 open={open}
-                maxWidth="xs"
-                fullWidth
+                maxWidth={false}
                 onClose={broadcasting ? undefined : this._handleCancel}
                 keepMounted={false}
                 PaperProps={{ className: classes.paper }}
             >
-                <IconButton onClick={broadcasting ? undefined : this._handleCancel} className={classes.closeIcon}><CloseIcon/></IconButton>
-                <DialogContent className={classes.dialogContent}>
-                    <div className={classes.svgWrapper}>
-                        <svg
-                            ref={(el) => { this._svgRef = el; }}
-                            viewBox={"0 0 " + VB_W + " " + VB_H}
-                            className={classes.svg}
-                            style={{
-                                overflow: "visible",
-                                touchAction: "none",
-                                userSelect: "none",
-                                WebkitUserSelect: "none",
-                                cursor: broadcasting ? "default" : "pointer",
-                            }}
-                            onPointerDown={broadcasting ? undefined : this._onPointerDown}
-                            onPointerMove={broadcasting ? undefined : this._onPointerMove}
-                            onPointerUp={broadcasting ? undefined : this._onPointerUp}
-                        >
-                            {/* ── Track ─────────────────────────────── */}
-                            <path
-                                d={TRACK_PATH}
-                                stroke="#fff"
-                                strokeWidth={STROKE_W}
-                                fill="none"
-                                strokeLinecap="round"
+                <svg
+                    ref={(el) => { this._svgRef = el; }}
+                    viewBox={"0 0 " + VB_W + " " + VB_H}
+                    className={classes.svg}
+                    style={{
+                        overflow: "visible",
+                        touchAction: "none",
+                        userSelect: "none",
+                        WebkitUserSelect: "none",
+                        cursor: broadcasting ? "default" : "pointer",
+                    }}
+                    onPointerDown={broadcasting ? undefined : this._onPointerDown}
+                    onPointerMove={broadcasting ? undefined : this._onPointerMove}
+                    onPointerUp={broadcasting ? undefined : this._onPointerUp}
+                    onPointerCancel={broadcasting ? undefined : this._onPointerUp}
+                >
+                    {/* ── Track ─────────────────────────────── */}
+                    <path
+                        d={TRACK_PATH}
+                        stroke="#fff"
+                        strokeWidth={STROKE_W}
+                        fill="none"
+                        strokeLinecap="round"
+                    />
+
+                    {/* ── Track inner edge highlight ───────────────── */}
+                    <path
+                        d={TRACK_PATH}
+                        stroke="#eee"
+                        strokeWidth={STROKE_W - 6}
+                        fill="none"
+                        strokeLinecap="round"
+                    />
+
+                    {/* ── Tick marks ────────────────────────────────── */}
+                    {TICKS.map((v) => {
+                        const a = valueToAngle(v);
+                        const outer = toSvg(a, TICK_OUTER);
+                        const inner = toSvg(a, TICK_INNER);
+                        return (
+                            <line
+                                key={v}
+                                x1={inner.x.toFixed(2)}
+                                y1={inner.y.toFixed(2)}
+                                x2={outer.x.toFixed(2)}
+                                y2={outer.y.toFixed(2)}
+                                stroke="#999"
+                                strokeWidth={v % 5000 === 0 ? 2 : 1}
                             />
+                        );
+                    })}
 
-                            {/* ── Track inner edge highlight ───────────────── */}
-                            <path
-                                d={TRACK_PATH}
-                                stroke="#eee"
-                                strokeWidth={STROKE_W - 6}
-                                fill="none"
-                                strokeLinecap="round"
-                            />
+                    {/* ── Fill arc ─────────────────────────── */}
+                    {fillPath && (
+                        <path
+                            d={fillPath}
+                            stroke="#aaa"
+                            strokeWidth={STROKE_W - 8}
+                            fill="none"
+                            strokeLinecap="round"
+                        />
+                    )}
 
-                            {/* ── Tick marks ────────────────────────────────── */}
-                            {TICKS.map((v) => {
-                                const a = valueToAngle(v);
-                                const outer = toSvg(a, TICK_OUTER);
-                                const inner = toSvg(a, TICK_INNER);
-                                return (
-                                    <line
-                                        key={v}
-                                        x1={inner.x.toFixed(2)}
-                                        y1={inner.y.toFixed(2)}
-                                        x2={outer.x.toFixed(2)}
-                                        y2={outer.y.toFixed(2)}
-                                        stroke="#999"
-                                        strokeWidth={v % 5000 === 0 ? 2 : 1}
-                                    />
-                                );
-                            })}
-
-                            {/* ── Fill arc ─────────────────────────── */}
-                            {fillPath && (
-                                <path
-                                    d={fillPath}
-                                    stroke="#aaa"
-                                    strokeWidth={STROKE_W - 8}
-                                    fill="none"
-                                    strokeLinecap="round"
-                                />
-                            )}
-
-                            {/* ── Labels ────────────────────────────────────── */}
-                            {LABELS.map((m) => {
-                                const a = valueToAngle(m.value);
-                                const p = toSvg(a, LABEL_R);
-                                const props = labelAnchor(a);
-                                return (
-                                    <text
-                                        key={m.value}
-                                        x={p.x.toFixed(2)}
-                                        y={p.y.toFixed(2)}
-                                        textAnchor={props.textAnchor}
-                                        dx={props.dx}
-                                        dy={props.dy}
-                                        fill="#333"
-                                        fontSize="10"
-                                        fontFamily={`'Industry Book'`}
-                                        fontWeight="500"
-                                    >
-                                        {m.label}
-                                    </text>
-                                );
-                            })}
-
-                            {/* ── Centre percent display ───────────────────── */}
+                    {/* ── Labels (inside the arc) ───────────────────── */}
+                    {LABELS.map((m) => {
+                        const a = valueToAngle(m.value);
+                        const p = toSvg(a, LABEL_R);
+                        const props = labelAnchor(a);
+                        return (
                             <text
-                                x={CX}
-                                y={CY - R * 0.42 - 8}
-                                textAnchor="middle"
+                                key={m.value}
+                                x={p.x.toFixed(2)}
+                                y={p.y.toFixed(2)}
+                                textAnchor={props.textAnchor}
                                 dominantBaseline="central"
-                                fill="#000"
-                                fontSize="40"
-                                fontFamily={"'Geist Mono', monospace"}
-                                fontWeight="400"
-                                style={{ fontVariantNumeric: "tabular-nums" }}
-                            >
-                                {pctStr}
-                            </text>
-                            <text
-                                x={CX}
-                                y={CY - R * 0.42 + 28 - 2}
-                                textAnchor="middle"
-                                dominantBaseline="central"
-                                fill="#444"
-                                fontSize="16"
+                                fill="#333"
+                                fontSize="10"
                                 fontFamily={`'Industry Book'`}
                                 fontWeight="500"
-                                letterSpacing="2"
                             >
-                                {isUpvote ? "UPVOTE" : "DOWNVOTE"}
+                                {m.label}
                             </text>
+                        );
+                    })}
 
-                            {/* ── 0 % marker (subtle dot at top) ───────────── */}
-                            <circle
-                                cx={CX}
-                                cy={CY - R}
-                                r={6}
-                                fill={weight === 0 ? "#000" : "#fff"}
-                            />
-
-                            {/* ── Thumb ─────────────────────────────────────── */}
-                            <circle
-                                cx={thumb.x.toFixed(2)}
-                                cy={thumb.y.toFixed(2)}
-                                r={THUMB_R + 10}
-                                fill="transparent"
-                            />
-                            <circle
-                                cx={thumb.x.toFixed(2)}
-                                cy={thumb.y.toFixed(2)}
-                                r={THUMB_R}
-                                fill="#777"
-                                stroke="#eee"
-                                strokeWidth="2.5"
-                            />
-                            <circle
-                                cx={thumb.x.toFixed(2)}
-                                cy={thumb.y.toFixed(2)}
-                                r={THUMB_R - 6}
-                                fill="none"
-                                stroke="#777"
-                                strokeWidth="1"
-                            />
-                        </svg>
-                    </div>
-
-                    {error && (
-                        <Typography className={classes.errorText} variant="body2">
-                            {error}
-                        </Typography>
-                    )}
-                </DialogContent>
-
-                <DialogActions className={classes.actions}>
-                    <IconButton
-                        onClick={this._handleConfirm}
-                        disabled={broadcasting}
-                        variant="contained"
-                        className={classes.blackButton}
-                        size={"large"}
+                    {/* ── Centre percent display ───────────────────── */}
+                    <text
+                        x={CX}
+                        y={CY - 30}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fill="#000"
+                        fontSize="40"
+                        fontFamily={"'Geist Mono', monospace"}
+                        fontWeight="400"
+                        style={{ fontVariantNumeric: "tabular-nums" }}
                     >
+                        {pctStr}
+                    </text>
+                    <text
+                        x={CX}
+                        y={CY + 6}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fill="#444"
+                        fontSize="16"
+                        fontFamily={`'Industry Book'`}
+                        fontWeight="500"
+                        letterSpacing="2"
+                    >
+                        {isUpvote ? "UPVOTE" : "DOWNVOTE"}
+                    </text>
+
+                    {/* ── 0 % marker (subtle dot at top) ───────────── */}
+                    <circle
+                        cx={CX}
+                        cy={CY - R}
+                        r={6}
+                        fill={weight === 0 ? "#000" : "#fff"}
+                    />
+
+                    {/* ── Thumb ─────────────────────────────────────── */}
+                    <circle
+                        cx={thumb.x.toFixed(2)}
+                        cy={thumb.y.toFixed(2)}
+                        r={THUMB_R + 10}
+                        fill="transparent"
+                    />
+                    <circle
+                        cx={thumb.x.toFixed(2)}
+                        cy={thumb.y.toFixed(2)}
+                        r={THUMB_R}
+                        fill="#777"
+                        stroke="#eee"
+                        strokeWidth="2.5"
+                    />
+                    <circle
+                        cx={thumb.x.toFixed(2)}
+                        cy={thumb.y.toFixed(2)}
+                        r={THUMB_R - 6}
+                        fill="none"
+                        stroke="#777"
+                        strokeWidth="1"
+                    />
+                </svg>
+
+                {error && (
+                    <Typography className={classes.errorText} variant="body2">
+                        {error}
+                    </Typography>
+                )}
+
+                <ButtonBase
+                    onClick={this._handleConfirm}
+                    disabled={broadcasting}
+                    className={classes.blackButton}
+                    aria-label={"Confirm vote " + pctStr + (est && est.fiatText ? ", " + est.pxsText + ", " + est.fiatText : "")}
+                >
+                    <span className={classes.buttonIcon}>
                         {broadcasting ? (
-                            <CircularProgress size={18} style={{ color: "#fff" }} />
+                            <CircularProgress size="1.3em" style={{ color: "#fff" }} />
                         ) : (
-                            <DoneRounded style={{color: "#fff"}}/>
+                            <DoneRounded style={{ color: "#fff", fontSize: "1.7em" }} />
                         )}
-                    </IconButton>
-                </DialogActions>
-                {this._renderEstimate()}
+                    </span>
+                    {est && (
+                        <span className={classes.buttonValues}>
+                            <span className={classes.buttonPxs}>{est.pxsText}</span>
+                            {est.fiatText && <span className={classes.buttonFiat}>{est.fiatText}</span>}
+                        </span>
+                    )}
+                </ButtonBase>
             </Dialog>
         );
     }

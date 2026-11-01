@@ -100,7 +100,9 @@ function renderFrame(pool, renderer, src, scale, id, mode) {
         };
         // xBRZ reports progressively: take the pass that reaches the target
         // size (PostDialog's download filter) and drop the ones before it.
-        const target = src.width * scale;
+        // The target uses the scale the pool will really render at: it caps
+        // outputs at 16 MP, so a large artwork never reaches width × scale.
+        const target = src.width * pool.cappedScale("xbrz", src.width, src.height, scale);
         const onRendered = renderer !== "xbrz" ? take : (d, b) => {
             if (!d || target - 128 < (d.width || (b && b.width) || 0)) take(d, b);
             else closeBitmap(b);

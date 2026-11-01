@@ -75,6 +75,7 @@ class DraftManager {
             // into it — seed the cache so even the FIRST autosave of the
             // session skips the existence read.
             if (recent && recent._id != null) this._knownIds.add(recent._id);
+            this._releaseDocCache();
             return recent;
         } catch (error) {
             console.error('Get recent failed:', error);
@@ -106,9 +107,20 @@ class DraftManager {
             for (const d of drafts) {
                 if (d && d._id != null) this._knownIds.add(d._id);
             }
+            this._releaseDocCache();
             return drafts;
         } catch (error) {
             return [];
+        }
+    }
+
+    // A sorted query is a full scan, and LacertaDB parks every scanned draft
+    // (embedded images included) in its per-collection document cache, on
+    // top of the results the caller keeps. Release those cached copies.
+    _releaseDocCache() {
+        const col = this.collection;
+        if (col && typeof col.clearCache === "function") {
+            try { col.clearCache(); } catch (_) { /* cache only */ }
         }
     }
 

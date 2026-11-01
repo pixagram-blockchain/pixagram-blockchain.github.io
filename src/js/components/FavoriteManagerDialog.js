@@ -83,8 +83,11 @@ const styles = (theme) => ({
             margin: 0,
         },
     },
+    // Solid scrim instead of a viewport-wide backdrop-filter blur (extra
+    // full-screen GPU textures while open); the compound selector outranks
+    // the global .MuiBackdrop-root tint in theme/overrides.js.
     backdrop: {
-        backdropFilter: "blur(9px) grayscale(1)",
+        "&.MuiBackdrop-root": { backgroundColor: "rgba(0, 0, 0, 0.85)" },
     },
     header: {
         display: "flex",

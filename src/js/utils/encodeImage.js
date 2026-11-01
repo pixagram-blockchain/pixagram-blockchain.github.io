@@ -51,6 +51,11 @@ encWEBP.encodeImageData = async function (rawImageData, lossless = false) {
 const canvas = document.createElement("canvas");
 canvas.context = canvas.getContext("2d");
 
+// The canvas above is shared and lives for the whole session: shrink it as soon
+// as it has been read, or it keeps the last image's full size (a watermarked
+// 3072×3379 download left ~41 MiB behind).
+const releaseSharedCanvas = () => { canvas.width = 1; canvas.height = 1; };
+
 encPNG.encodeImageData = async function(rawImageData, lossless = false) {
 
     return await new Promise((resolve, reject) => {
@@ -58,10 +63,13 @@ encPNG.encodeImageData = async function(rawImageData, lossless = false) {
         canvas.width = rawImageData.width;
         canvas.height = rawImageData.height;
         canvas.context.putImageData(rawImageData, 0, 0);
+        const pngDataUrl = canvas.toDataURL("image/png");
+        releaseSharedCanvas();
 
-        encPNG(canvas.toDataURL("image/png"), lossless ? 100: 40, lossless ? 100: 80, lossless ? 1: 9, (base64url) => {
+        // width/height let png_quant size its heap to the image instead of 336 MiB.
+        encPNG(pngDataUrl, lossless ? 100: 40, lossless ? 100: 80, lossless ? 1: 9, (base64url) => {
             resolve(base64url);
-        })
+        }, rawImageData.width, rawImageData.height);
     });
 }
 
@@ -70,7 +78,9 @@ encJPEG.encodeImageData = async function(rawImageData, lossless = false) {
         canvas.width = rawImageData.width;
         canvas.height = rawImageData.height;
         canvas.context.putImageData(rawImageData, 0, 0);
-        resolve(canvas.toDataURL("image/jpeg", {quality: lossless ? 100: 80}));
+        const jpegDataUrl = canvas.toDataURL("image/jpeg", {quality: lossless ? 100: 80});
+        releaseSharedCanvas();
+        resolve(jpegDataUrl);
     });
 }
 export async function encodeIMG(data, type, lossless){
@@ -91,7 +101,9 @@ export async function encodeIMG(data, type, lossless){
         [canvas.width, canvas.height] = [img.width, img.height];
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0);
-        return ctx.getImageData(0, 0, img.width, img.height);
+        const imageData = ctx.getImageData(0, 0, img.width, img.height);
+        canvas.width = canvas.height = 1; // free the pixels now rather than at GC
+        return imageData;
     }
 
 

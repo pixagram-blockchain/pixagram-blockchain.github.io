@@ -194,11 +194,13 @@ const styles = (theme) => ({
             animationDelay: "1s", animationIterationCount: "infinite",
             boxShadow: "0 0 8px #ffffff88, 0 0 16px #ffffffcc",
             "@global": {
+                // transform only: the compositor runs it. Animating the glow
+                // (boxShadow) repainted the button on every frame, forever.
                 "@keyframes bounce-feed": {
-                    "0%":  { boxShadow: "0 0 8px #ffffff88, 0 0 16px #ffffffcc", transform: "scale(1)" },
-                    "3%":  { boxShadow: "0 0 12px #ffffff88, 0 0 24px #ffffffcc", transform: "scale(1.05)" },
-                    "6%":  { boxShadow: "0 0 4px #ffffff88, 0 0 8px #ffffffcc", transform: "scale(0.975)" },
-                    "9%":  { boxShadow: "0 0 8px #ffffff88, 0 0 16px #ffffffcc", transform: "scale(1)" },
+                    "0%":  { transform: "scale(1)" },
+                    "3%":  { transform: "scale(1.05)" },
+                    "6%":  { transform: "scale(0.975)" },
+                    "9%":  { transform: "scale(1)" },
                 },
             },
             transition: `background ${TRANSITION_MEDIUM}`,
@@ -307,7 +309,7 @@ const styles = (theme) => ({
         "& > .ReactVirtualized__Masonry": {
             zIndex: 0, position: "absolute", margin: 0, scrollBehavior: "smooth",
             overscrollBehavior: "none", boxSizing: "content-box !important", touchAction: "pan-y",
-            willChange: "scroll-position !important", overflow: "hidden overlay !important",
+            overflow: "hidden overlay !important", // no will-change: scroll-position (Chrome composites scrollers anyway)
             padding: "66px 16px 32px 412px", height: "100%",
             [theme.breakpoints.down("sm")]: { padding: "80px 16px 32px 16px", width: "calc(100% - 32px)" },
             "& > .ReactVirtualized__Masonry__innerScrollContainer": {
@@ -643,13 +645,9 @@ const enrichPostsList = async (posts, api, onAvatars) => {
         const buildEnriched = (accountsMap, voterProfiles) =>
             safePosts.map(p => enrichPostForBlogCard(p, accountsMap[p.author] || { name: p.author || '', _profile: {} }, voterProfiles))
                 .filter(p => !p.deleted);
-        const collectNames = () => {
-            const allVotes = safePosts.flatMap(p => p.active_votes || []);
-            return [...new Set([
-                ...allVotes.map(v => v?.voter).filter(Boolean),
-                ...safePosts.map(p => p.author).filter(Boolean),
-            ])];
-        };
+        // Authors only: voter avatars are fetched by the voting list when it
+        // opens (see Feed.js collectNames).
+        const collectNames = () => [...new Set(safePosts.map(p => p.author).filter(Boolean))];
         const buildMaps = (accs) => {
             const voterProfiles = {}, accountsMap = {};
             if (Array.isArray(accs)) {

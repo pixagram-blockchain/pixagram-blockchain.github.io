@@ -142,6 +142,11 @@ function normalizeProfile(k, acc) {
 
 function writeEntry(s, k, account) {
     if (s.cache.has(k)) s.cache.delete(k); // refresh insertion order
+    // With TTL_MS = 0 a found account is never served from here (readFresh
+    // returns undefined), and getProfiles normalizes on the fly when the
+    // entry is missing. Storing them anyway kept up to 2,000 full accounts,
+    // avatars and covers twice each, for the whole session.
+    if (account && TTL_MS <= 0) return;
     s.cache.set(k, {
         account,
         profile: normalizeProfile(k, account),

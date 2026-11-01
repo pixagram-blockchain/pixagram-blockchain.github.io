@@ -32,9 +32,7 @@ import CircularProgress from "@material-ui/core/CircularProgress";
 import ImageMeasurer from "../components/ImageMeasurer";
 import PaperCardComment from "../components/PaperCardComment";
 import PaperCardReply from "../components/PaperCardReply";
-import FollowListModal from "../components/FollowListModal";
 import timeAgo from "../utils/TimeAgo";
-import CreateCommunityDialog from "../components/CreateCommunityDialog";
 import ProfileTabs from "../components/ProfileTabs";
 import ProfileMobileCard from "../components/ProfileMobileCard";
 import ProfileSidebar from "../components/ProfileSidebar";
@@ -93,6 +91,14 @@ const LazyPictureDialog = React.lazy(loadPictureDialog);
 // once the History tab is shown, so the first click isn't gated on a fetch.
 const loadTxInspector = () => import("../components/TransactionInspector");
 const LazyTxInspector = React.lazy(loadTxInspector);
+
+// ── Deferred follower list and community creation ──────────────────────
+// Both were static imports, so every profile visit (and the idle page
+// prefetch) loaded them. CreateCommunityDialog chained in BackUpWallet3:
+// the bip39 WebAssembly module, svg2pdf and the base64 fonts. Each loads on
+// first open and stays mounted afterwards, like the dialogs above.
+const LazyFollowListModal = React.lazy(() => import("../components/FollowListModal"));
+const LazyCreateCommunityDialog = React.lazy(() => import("../components/CreateCommunityDialog"));
 
 // The transaction inspector closed, and the timeline dot's colours (see the
 // timelineDot style): the inspector draws its icon like the dot it opened from.
@@ -170,11 +176,12 @@ const styles = theme => ({
             animationName: "$bounce-feed", animationTimingFunction: E, animationDuration: "3.2s",
             animationFillMode: "both", animationDelay: "1s", animationIterationCount: "infinite",
             boxShadow: "0 0 8px #ffffff88, 0 0 16px #ffffffcc",
+            // transform only (compositor); an animated boxShadow repainted every frame
             "@global": { "@keyframes bounce-feed": {
-                    "0%": { boxShadow: "0 0 8px #ffffff88, 0 0 16px #ffffffcc", transform: "scale(1)" },
-                    "3%": { boxShadow: "0 0 12px #ffffff88, 0 0 24px #ffffffcc", transform: "scale(1.05)" },
-                    "6%": { boxShadow: "0 0 4px #ffffff88, 0 0 8px #ffffffcc", transform: "scale(0.975)" },
-                    "9%": { boxShadow: "0 0 8px #ffffff88, 0 0 16px #ffffffcc", transform: "scale(1)" },
+                    "0%": { transform: "scale(1)" },
+                    "3%": { transform: "scale(1.05)" },
+                    "6%": { transform: "scale(0.975)" },
+                    "9%": { transform: "scale(1)" },
                 }},
             transition: `background ${TM}`,
             "& .MuiTouchRipple-root": { filter: "opacity(1)", "& .MuiTouchRipple-child": { backgroundImage: `radial-gradient(circle at 50% 50%, magenta 0%, blue 20%, cyan 40%, green 60%, yellow 80%, red 100%)` } },
@@ -235,7 +242,7 @@ const styles = theme => ({
     walletButtons: { position: "relative", flex: "0 0 42px", width: 42, margin: "16px 0px 16px 16px" },
     walletMobileButtons: { height: 0, padding: "0px 16px", backgroundColor: "transparent", borderRadius: "0px 0px 16px 16px", textAlign: "center" },
     masonryTimeline: { paddingTop: "16px !important", "& > .ReactVirtualized__Masonry": { paddingLeft: "0px !important", paddingRight: "396px !important", [theme.breakpoints.down("sm")]: { paddingRight: "0px !important" }, "& > .ReactVirtualized__Masonry__innerScrollContainer": { "& div": { textAlign: "end", zIndex: "1" }, "& .MuiPaper-root": { zIndex: 1 }, "& .MuiTimelineSeparator-root": { zIndex: 0 }, "& .MuiTimelineOppositeContent-root": { flex: "0" }, [theme.breakpoints.down("sm")]: { "& .MuiTimelineOppositeContent-root": { display: "none" } } } } },
-    masonry: { overflow: "hidden overlay !important", contain: "style layout", "& > .ReactVirtualized__Masonry": { zIndex: 0, position: "absolute", margin: 0, scrollBehavior: "smooth", overscrollBehavior: "none", boxSizing: "content-box !important", willChange: "scroll-position !important", touchAction: "pan-y", overflow: "hidden overlay !important", padding: "86px 380px 32px 16px", [theme.breakpoints.down("sm")]: { padding: "100px 16px 32px 16px", width: "calc(100% - 32px)" }, contain: "style layout size", "& > .ReactVirtualized__Masonry__innerScrollContainer": { top: "auto !important", left: "auto !important", overflow: "initial !important", position: "absolute !important", paddingBottom: "144px", boxSizing: "content-box", contain: "style layout size", "& div": { contain: "style layout" } } } },
+    masonry: { overflow: "hidden overlay !important", contain: "style layout", "& > .ReactVirtualized__Masonry": { zIndex: 0, position: "absolute", margin: 0, scrollBehavior: "smooth", overscrollBehavior: "none", boxSizing: "content-box !important", touchAction: "pan-y", overflow: "hidden overlay !important", padding: "86px 380px 32px 16px", [theme.breakpoints.down("sm")]: { padding: "100px 16px 32px 16px", width: "calc(100% - 32px)" }, contain: "style layout size", "& > .ReactVirtualized__Masonry__innerScrollContainer": { top: "auto !important", left: "auto !important", overflow: "initial !important", position: "absolute !important", paddingBottom: "144px", boxSizing: "content-box", contain: "style layout size", "& > div": { contain: "style layout" } } } }, // containment on the cell wrappers only (see Feed.js); no will-change: scroll-position
     inline: { display: 'inline' },
     emptyState: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", fallbacks: { minHeight: "calc(100vh - 200px)" }, minHeight: "calc(100dvh - 200px)", padding: "48px 24px", textAlign: "center", userSelect: "none", animation: `$fadeIn 600ms ${E} 0ms`, "@global": { "@keyframes fadeIn": { "0%": { filter: "opacity(0)", transform: "translateY(24px)" }, "100%": { filter: "opacity(1)", transform: "translateY(0px)" } } } },
     emptyStateIcon: { width: 96, height: 96, borderRadius: "32px", backgroundColor: "#1a1a1a", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 24, "& svg": { width: 48, height: 48, color: "#444" } },
@@ -702,13 +709,13 @@ const parseAccountHistoryToTimeline = (historyOps, username) => {
     });
 };
 
+// Only the profile owner's own avatar is seeded. Every voter's account used
+// to be fetched here and its avatar kept in the card list for the whole visit,
+// only for the voting list, which already fetches the voters it is missing
+// when it opens (VotingListModal). Kept async with the same signature so the
+// call sites stay as they are.
 const fetchVoterProfiles = async (items, account, api) => {
-    const allVotes = items.flatMap(item => item.active_votes || []);
-    const uniqueVoters = [...new Set(allVotes.map(v => v?.voter).filter(Boolean))];
     const profiles = {}; if (account?.name) profiles[account.name] = account.image;
-    if (uniqueVoters.length > 0 && api?.accounts) {
-        try { const accs = await api.accounts.getAccounts(uniqueVoters); if (Array.isArray(accs)) accs.forEach(a => { if (!a) return; const n = a.name||a._entity_id; if (n) profiles[n] = a._profile?.profile_image||''; }); } catch {}
-    }
     return profiles;
 };
 
@@ -2822,6 +2829,11 @@ const Profile = ({ classes, settings, pathname, api }) => {
     const [createCommunityOpen, setCreateCommunityOpen] = useState(false);
     const [followListOpened, setFollowListOpened] = useState(parsed.modal === 'followers' ? 'FOLLOWERS' : parsed.modal === 'following' ? 'FOLLOWING' : '');
     const [createArtworkOpen, setCreateArtworkOpen] = useState(false);
+    // The two lazy dialogs below mount on first open and stay mounted.
+    const [followListMounted, setFollowListMounted] = useState(followListOpened.length > 0);
+    useEffect(() => { if (followListOpened) setFollowListMounted(true); }, [followListOpened]);
+    const [createCommunityMounted, setCreateCommunityMounted] = useState(false);
+    useEffect(() => { if (createCommunityOpen) setCreateCommunityMounted(true); }, [createCommunityOpen]);
     const [menuCardXY, setMenuCardXY] = useState([]);
     const [menuCardData, setMenuCardData] = useState({});
 
@@ -3440,7 +3452,11 @@ const Profile = ({ classes, settings, pathname, api }) => {
                 </React.Suspense>
             )}
 
-            <FollowListModal open={followListOpened.length > 0} isFollowing={followListOpened === "FOLLOWING"} account={profile.account} api={api} onClose={closeFollowListModal} onCountsUpdated={profile.onFollowCountsUpdated} />
+            {followListMounted && (
+                <React.Suspense fallback={DIALOG_FALLBACK}>
+                    <LazyFollowListModal open={followListOpened.length > 0} isFollowing={followListOpened === "FOLLOWING"} account={profile.account} api={api} onClose={closeFollowListModal} onCountsUpdated={profile.onFollowCountsUpdated} />
+                </React.Suspense>
+            )}
 
             {/* Deferred wallet: only loaded when first opened */}
             {walletOpen && (
@@ -3449,7 +3465,11 @@ const Profile = ({ classes, settings, pathname, api }) => {
                 </React.Suspense>
             )}
 
-            <CreateCommunityDialog api={api} open={createCommunityOpen} locales={locales} onClose={closeCreateCommunity} />
+            {createCommunityMounted && (
+                <React.Suspense fallback={DIALOG_FALLBACK}>
+                    <LazyCreateCommunityDialog api={api} open={createCommunityOpen} locales={locales} onClose={closeCreateCommunity} />
+                </React.Suspense>
+            )}
             <EditProfileDialog api={api} open={editOpen} account={profile.account} locales={locales} onClose={handleEditClose} />
             {/* Deferred create-post: chunk loads on first open (or the idle prefetch above) */}
             {newPostMounted && (

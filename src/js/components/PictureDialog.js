@@ -3,7 +3,7 @@ import { useReducer, useRef, useCallback, useEffect, useLayoutEffect, useMemo } 
 import withStyles from "@material-ui/core/styles/withStyles";
 import Backdrop from "@material-ui/core/Backdrop";
 import Portal from "@material-ui/core/Portal";
-import { crtF, hexF, sqrF, triF, xbrzF, acquireBestCachedBitmap } from "../utils/render-pool";
+import { crtF, hexF, sqrF, triF, xbrzF, acquireBestCachedBitmap, dropRendersAbove } from "../utils/render-pool";
 import { pngdby } from "../utils/png-db";
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -108,6 +108,34 @@ function createCanvas(width, height) {
 // no CORS header taints the canvas — in that case we keep the decoded
 // bitmap and paint it directly, unrendered (the only thing that CAN be
 // shown for it).
+//
+// Photos are shown as decoded too (`photo: true`, smooth scaling): upscaling
+// a photo adds nothing, and the dialog's 6x xBRZ floor turned a 2000×2000
+// profile picture into a 12000×12000 render (549 MiB). A picture is a photo
+// when it is over 512×512 (the app's own uploads are pixel art of at most
+// 512×512) and a nearest-neighbour sample of it has PHOTO_COLORS colours or
+// more, so large pixel art (a GIF, an external URL) still gets the renderer.
+// A tainted picture can't be sampled: over 512×512 it is taken as a photo.
+const PHOTO_PIXELS = 512 * 512;
+const PHOTO_COLORS = 256;
+const PHOTO_SAMPLE = 128;
+
+// Throws when the image taints the canvas (cross-origin without CORS).
+function hasManyColors(img, w, h) {
+    const sw = Math.min(w, PHOTO_SAMPLE), sh = Math.min(h, PHOTO_SAMPLE);
+    const c = createCanvas(sw, sh);
+    c.ctx.imageSmoothingEnabled = false; // sample pixels, don't blend new colours
+    c.ctx.drawImage(img, 0, 0, sw, sh);
+    const data = c.ctx.getImageData(0, 0, sw, sh).data;
+    c.width = 1; c.height = 1;
+    const seen = new Set();
+    for (let i = 0; i < data.length; i += 4) {
+        seen.add((data[i] << 16) | (data[i + 1] << 8) | data[i + 2]);
+        if (seen.size >= PHOTO_COLORS) return true;
+    }
+    return false;
+}
+
 function loadViaImage(src) {
     return new Promise((resolve) => {
         let done = false;
@@ -119,16 +147,21 @@ function loadViaImage(src) {
         img.onload = () => {
             const w = img.naturalWidth, h = img.naturalHeight;
             if (!w || !h) return finish(null);
+            const keepBitmap = (photo) => {
+                if (typeof createImageBitmap !== "function") return finish(null);
+                createImageBitmap(img)
+                    .then((bitmap) => finish({ imgd: null, width: w, height: h, bitmap, photo }))
+                    .catch(() => finish(null));
+            };
             try {
+                if (w * h > PHOTO_PIXELS && hasManyColors(img, w, h)) return keepBitmap(true);
                 const c = createCanvas(w, h);
                 c.ctx.drawImage(img, 0, 0);
                 const imgd = c.ctx.getImageData(0, 0, w, h);
+                c.width = 1; c.height = 1; // software canvas (willReadFrequently): free it now
                 finish({ imgd, width: w, height: h, bitmap: null });
             } catch (e) {
-                if (typeof createImageBitmap !== "function") return finish(null);
-                createImageBitmap(img)
-                    .then((bitmap) => finish({ imgd: null, width: w, height: h, bitmap }))
-                    .catch(() => finish(null));
+                keepBitmap(w * h > PHOTO_PIXELS);
             }
         };
         img.src = src;
@@ -152,7 +185,9 @@ async function decodeSource(src) {
 const styles = (theme) => ({
     backdrop: {
         zIndex: theme.zIndex.drawer + 1,
-        backdropFilter: "blur(9px) grayscale(1)",
+        // Solid scrim instead of a viewport-wide backdrop-filter blur; see
+        // PostDialog's backdrop class for why, and for the selector.
+        "&.MuiBackdrop-root": { backgroundColor: "rgba(0, 0, 0, 0.85)" },
         overflow: "hidden",
         userSelect: "none",
     },
@@ -208,14 +243,13 @@ const styles = (theme) => ({
     },
     /* Reverse-hero close (PostDialog's closingChrome, minus the chrome it no
      * longer has). Applied on the Backdrop root while the picture flies back
-     * onto its element: the tint + blur clear so the page shows through
+     * onto its element: the scrim clears so the page shows through
      * behind the flying image, and the whole dialog stops catching clicks
      * from the first frame of the flight. The transition keeps `opacity`
      * with !important because MUI's Fade writes an inline opacity
      * transition on this node that would otherwise win. */
     closingChrome: {
         backgroundColor: "transparent !important",
-        backdropFilter: "blur(0px) grayscale(0) !important",
         pointerEvents: "none",
         // The canvas opts back in to hit-testing on itself (pointer-events:
         // initial inline) — an ancestor's `none` does not beat that, and
@@ -223,7 +257,7 @@ const styles = (theme) => ({
         "& canvas": {
             pointerEvents: "none !important",
         },
-        transition: "background-color 300ms cubic-bezier(0.4, 0, 0.2, 1), backdrop-filter 300ms cubic-bezier(0.4, 0, 0.2, 1), opacity 195ms cubic-bezier(0.4, 0, 0.2, 1) !important",
+        transition: "background-color 300ms cubic-bezier(0.4, 0, 0.2, 1), opacity 195ms cubic-bezier(0.4, 0, 0.2, 1) !important",
     },
     // Top-level scoped keyframes: a keyframes rule nested under @global inside
     // a class never enters the sheet's keyframes registry, so its `$ref`
@@ -297,6 +331,7 @@ function createInst() {
 
         // Undecodable-for-the-pool fallback (tainted cross-origin image)
         rawBitmap: null,
+        rawIsPhoto: false, // the raw bitmap is a photo: smooth scaling, not pixelated
     };
 }
 
@@ -534,6 +569,7 @@ function PictureDialog(props) {
     const releaseRawBitmap = useCallback(() => {
         const b = inst.rawBitmap;
         inst.rawBitmap = null;
+        inst.rawIsPhoto = false;
         if (b) { try { b.close && b.close(); } catch (e) {} }
     }, []);
 
@@ -1059,6 +1095,9 @@ function PictureDialog(props) {
                 if (inst.heroTransitionTimer) { clearTimeout(inst.heroTransitionTimer); inst.heroTransitionTimer = null; }
                 if (inst.closingHeroTimer) { clearTimeout(inst.closingHeroTimer); inst.closingHeroTimer = null; }
                 inst.committedImage = null;
+                // The dialog-size render (16-36 MiB) is rarely shown again;
+                // smaller renders of this picture stay cached.
+                dropRendersAbove(inst.pictureId, 8 * 1024 * 1024);
                 // Both "previous props" snapshots must go, or reopening the
                 // same picture compares equal and skips the whole pipeline.
                 prevPropsRef.current = {};
@@ -1123,7 +1162,7 @@ function PictureDialog(props) {
                             onCloseRef.current?.();
                             return;
                         }
-                        if (result.bitmap) inst.rawBitmap = result.bitmap;
+                        if (result.bitmap) { inst.rawBitmap = result.bitmap; inst.rawIsPhoto = !!result.photo; }
                         inst.currentZoom = 1.33;
                         dispatch({ metadata: { imgd: result.imgd, width: result.width, height: result.height }, zoom: 1.33 });
                         computeSize();
@@ -1161,7 +1200,8 @@ function PictureDialog(props) {
 
     // Nearest-neighbour CSS scaling for the square renderer and for the raw
     // (unrendered) bitmap fallback; the smoothing renderers paint their own.
-    const pixelated = renderer === "square" || (!metadata.imgd && !!inst.rawBitmap);
+    // A photo shown raw keeps the browser's smooth scaling.
+    const pixelated = renderer === "square" || (!metadata.imgd && !!inst.rawBitmap && !inst.rawIsPhoto);
 
     return (
         <Portal>

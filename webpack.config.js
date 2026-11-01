@@ -4,6 +4,21 @@ var TerserPlugin = require('terser-webpack-plugin');
 var BundleAnalyzerPlugin = require('webpack-bundle-analyzer').BundleAnalyzerPlugin;
 var HtmlWebpackPlugin = require("html-webpack-plugin");
 
+// Modules every lazy page and dialog shares. Below splitChunks.minSize a
+// shared group is not split out but copied into each async chunk that uses
+// it: with minSize at 96 KB, MUI and the Buffer shim (buffer-lite) were
+// copied into many chunks. These two groups split from 5 KB. With no floor
+// at all, single-module chunks used up maxAsyncRequests and left more
+// duplicated code elsewhere. Function tests on the resolved path avoid
+// path-separator differences.
+var NODE_SHIMS = /[\\/]node_modules[\\/](buffer-lite|buffer|process|events|util|assert|inherits|safe-buffer|readable-stream|string_decoder|stream-browserify|path-browserify|vm-browserify)[\\/]/;
+function isMui(module) {
+    return (module.resource || "").indexOf("@material-ui") !== -1;
+}
+function isNodeShim(module) {
+    return NODE_SHIMS.test(module.resource || "");
+}
+
 // Plugins shared between development and production builds.
 var commonPlugins = [
     // Rewrite `node:<builtin>` imports (e.g. `node:fs/promises`) to their bare
@@ -25,8 +40,9 @@ module.exports = {
     mode: process.env.NODE_ENV,
     target: "web",
     experiments: {
+        // syncWebAssembly removed: no rule uses the webassembly/sync type, and
+        // every .wasm in the app goes through asyncWebAssembly.
         asyncWebAssembly: true,
-        syncWebAssembly: true,
         topLevelAwait: true,
     },
     optimization: process.env.NODE_ENV === 'production' ? {
@@ -69,7 +85,7 @@ module.exports = {
         chunkIds: 'natural',
         splitChunks: {
             chunks: 'async',
-            minSize: 96 * 1024,
+            minSize: 20000,
             maxSize: 480 * 1024,
             minChunks: 2,
             maxAsyncRequests: 30,
@@ -77,6 +93,20 @@ module.exports = {
             automaticNameDelimiter: '_',
             name: false,
             cacheGroups: {
+                mui: {
+                    test: isMui,
+                    minChunks: 2,
+                    minSize: 5000,
+                    priority: 0,
+                    reuseExistingChunk: true,
+                },
+                nodeShims: {
+                    test: isNodeShim,
+                    minChunks: 2,
+                    minSize: 5000,
+                    priority: 0,
+                    reuseExistingChunk: true,
+                },
                 vendors: {
                     test: /[\\/]node_modules[\\/]/,
                     priority: -10
@@ -100,18 +130,34 @@ module.exports = {
                     loader: 'babel-loader',
                     options: {
                         cacheDirectory: true,
+                        // Targets come from "browserslist" in package.json: the
+                        // browsers that can already parse the boot bundle (the
+                        // webpack runtime and the dependencies in it ship
+                        // optional chaining and BigInt literals untranspiled).
+                        // Transpiling the app's own code for older browsers
+                        // only added polyfills and an inlined regenerator
+                        // runtime in over 100 modules. preset-env applies ?.
+                        // and ?? itself when a target needs them, so the two
+                        // proposal plugins are gone, and proposals: false
+                        // stops core-js installing non-standard methods on
+                        // built-in prototypes. The core-js version is read
+                        // from the installed package, so the polyfills Babel
+                        // references always exist.
+                        //
+                        // const/let are still compiled to var, as before. Some
+                        // code reads a binding before its declaration has run
+                        // (EditProfileDialog.js reads processFile in a
+                        // dependency array above its useCallback). With var
+                        // that reads undefined; with native const it throws a
+                        // ReferenceError and takes the whole Profile page down.
                         presets: [
                             ['@babel/preset-env', {
                                 useBuiltIns: "usage",
-                                shippedProposals: true,
-                                corejs: {version: "3.8", proposals: true}
+                                corejs: {version: require("core-js/package.json").version, proposals: false},
+                                include: ["@babel/plugin-transform-block-scoping"],
                             }],
                             '@babel/preset-react', // For JSX and React
                         ],
-                        plugins: [
-                            '@babel/plugin-proposal-nullish-coalescing-operator', // Optional chaining
-                            '@babel/plugin-proposal-optional-chaining',
-                        ]
                     },
                 }
             }

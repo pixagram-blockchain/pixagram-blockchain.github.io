@@ -104,8 +104,14 @@ const useWindowDimensions = () => {
     //                          gets there.
     //
     //   1920×1080: unit ≈ 608 px → mount 4 860 · artwork 2 430 · fetch 3 645
-    //    390×844:  unit ≈ 1 827 px → mount 14 610 · artwork 7 310 · fetch 10 960
-    const lookAheadUnit = dims.height * (dims.height / dims.width);
+    //    390×844:  unit ≈ 633 px → mount 5 064 · artwork 2 532 · fetch 3 798
+    //
+    // The unit is capped at ¾ of the viewport height. Uncapped, a portrait
+    // phone got h²/w ≈ 2.16 h (1 827 px at 390×844): ±14 600 px of mounted
+    // cards and ±7 300 px of drawn artwork, about 60 card canvases kept alive
+    // on the devices with the least memory. Landscape and desktop windows are
+    // below the cap (1920×1080 is 0.56 h) and unchanged.
+    const lookAheadUnit = Math.min(dims.height * (dims.height / dims.width), dims.height * 0.75);
     const overscanByPixels = lookAheadUnit * 8;
     const artworkAheadPx = lookAheadUnit * 4;
     const loadMoreThreshold = lookAheadUnit * 6;

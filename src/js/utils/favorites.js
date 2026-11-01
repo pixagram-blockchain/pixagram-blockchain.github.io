@@ -302,6 +302,13 @@ export async function getFavorites(api, type) {
         }
 
         out.sort((a, b) => (b.bookmarked_at || 0) - (a.bookmarked_at || 0));
+        // Each col.get() above also parked the doc (artwork and avatar data
+        // URIs included) in LacertaDB's per-collection document cache (an LRU
+        // of 200), on top of the list returned here. The caller holds what it
+        // needs; release the cached copies.
+        if (typeof col.clearCache === "function") {
+            try { col.clearCache(); } catch (_) { /* cache only */ }
+        }
         return out;
     } catch (e) {
         console.warn("[favorites] getFavorites failed:", e && e.message);

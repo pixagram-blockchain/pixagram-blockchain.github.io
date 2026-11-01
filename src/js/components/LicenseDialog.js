@@ -20,8 +20,8 @@ import CloudDownload from "@material-ui/icons/CloudDownload";
 import Cancel from "../icons/Cancel";
 import SubdirectoryArrowRight from "@material-ui/icons/SubdirectoryArrowRight";
 
-import generateLicensePdf from "../utils/licensePDF";
-import {encodeIMG} from "../utils/encodeImage";
+// licensePDF (pdf-lib, fontkit) and the PNG encoder load when a PDF is
+// requested, not when the license text is shown.
 import { safeHTML } from "../utils/api/sanitizer";
 
 import { t } from "../utils/text";
@@ -87,6 +87,10 @@ const LicenseDialog = ({ classes, open, onClose, licenseBase, customization, dat
 
         try {
             const imageSource = data?.image;
+            const [{ default: generateLicensePdf }, { encodeIMG }] = await Promise.all([
+                import("../utils/licensePDF"),
+                import("../utils/encodeImage"),
+            ]);
 
             const t1 = performance.now();
             const pdfBytes = await generateLicensePdf(licenseBase, customization, {

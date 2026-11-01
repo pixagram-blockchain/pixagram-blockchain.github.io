@@ -34,6 +34,19 @@
 
 // Adjust the specifier if you vendor the package under a different name/path.
 import { NsfwDetector } from "@pixagram/nsfw-lite";
+import { ByteLRU } from "./memory-kit";
+
+// --- Memory bounds -----------------------------------------------------------
+// Verdicts kept in memory (the rest are read from IndexedDB on a miss), and
+// verdicts kept in IndexedDB (older ones are pruned when the cache is primed).
+// Both used to be unbounded: every verdict this device ever stored was loaded
+// into memory at warm-up.
+const MEM_CACHE_ENTRIES = 5000;
+const IDB_MAX_RECORDS = 20000;
+// The detector runs ONNX Runtime and the model in a worker. Ending the worker
+// after this long without a classification gives back its whole heap; the
+// next classification starts a new one.
+const DETECTOR_IDLE_MS = 2 * 60 * 1000;
 // --- IndexedDB verdict cache ----------------------------------------------
 // The model changed (old 5-class EfficientNet -> binary MobileNetV4), and the
 // cache key is the IMAGE content hash, not the model — so a verdict cached by
@@ -89,6 +102,22 @@ async function idbPut(record) {
     });
 }
 
+// Delete the given verdicts in one transaction (pruning). Best-effort.
+async function idbDeleteMany(ids) {
+    const db = await openDB();
+    if (!db || !ids.length) return;
+    return new Promise((resolve) => {
+        try {
+            const tx = db.transaction(STORE, "readwrite");
+            const store = tx.objectStore(STORE);
+            for (const id of ids) store.delete(id);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => resolve();
+            tx.onabort = () => resolve();
+        } catch (e) { resolve(); }
+    });
+}
+
 // Read EVERY persisted verdict in one transaction (used to prime the in-memory
 // mirror at warmup). Resolves to [] when IDB is unavailable.
 async function idbGetAll() {
@@ -105,7 +134,8 @@ async function idbGetAll() {
 }
 
 // --- In-memory mirror (fast synchronous reads for the render path) --------
-const memCache = new Map();   // id -> { nsfw, score, ... }
+// Least-recently-used, MEM_CACHE_ENTRIES at most; a miss falls back to IDB.
+const memCache = new ByteLRU({ maxEntries: MEM_CACHE_ENTRIES });   // id -> { nsfw, score, ... }
 const inflight = new Map();   // id -> Promise<boolean>  (dedupes concurrent calls)
 
 // Debug-gated logger (see config.debug). Centralised so every call site is
@@ -267,12 +297,25 @@ let _primePromise = null;
 // verdict is known again. Priming makes those reads hit immediately — no
 // re-classification, and (paired with warmup) no flash of un-blurred content
 // for posts this device already judged NSFW. Runs at most once; one getAll.
+//
+// Only the newest MEM_CACHE_ENTRIES verdicts are loaded, and IndexedDB is
+// pruned to the newest IDB_MAX_RECORDS (the store is keyed by id, so "newest"
+// comes from sorting the getAll result by `ts`; records without one sort last).
 export function primeCache() {
     if (_primePromise) return _primePromise;
     _primePromise = idbGetAll().then((rows) => {
+        const valid = rows.filter((rec) => rec && rec.id != null);
+        valid.sort((a, b) => (b.ts || 0) - (a.ts || 0)); // newest first
+        if (valid.length > IDB_MAX_RECORDS) {
+            idbDeleteMany(valid.slice(IDB_MAX_RECORDS).map((rec) => rec.id));
+        }
+        // Insert the oldest of the kept set first, so the newest end up as the
+        // most recently used entries of the LRU.
+        const keep = valid.slice(0, MEM_CACHE_ENTRIES);
         let n = 0;
-        for (const rec of rows) {
-            if (rec && rec.id != null && !memCache.has(rec.id)) {
+        for (let i = keep.length - 1; i >= 0; i--) {
+            const rec = keep[i];
+            if (!memCache.has(rec.id)) {
                 memCache.set(rec.id, rec);
                 n++;
             }
@@ -281,6 +324,23 @@ export function primeCache() {
         return n;
     }).catch(() => 0);
     return _primePromise;
+}
+
+// End the detector's worker after DETECTOR_IDLE_MS without a classification.
+// Unlike dispose(), this leaves in-flight bookkeeping alone and re-arms itself
+// while calls are pending; getDetector() recreates the worker on demand.
+let _idleTimer = 0;
+function endDetectorWhenIdle() {
+    clearTimeout(_idleTimer);
+    _idleTimer = setTimeout(() => {
+        if (inflight.size > 0) { endDetectorWhenIdle(); return; }
+        if (_detectorPromise) {
+            const p = _detectorPromise;
+            _detectorPromise = null;
+            p.then((d) => d.dispose()).catch(() => {});
+            log("detector ended after", DETECTOR_IDLE_MS / 1000, "s idle");
+        }
+    }, DETECTOR_IDLE_MS);
 }
 
 /**
@@ -298,7 +358,11 @@ export function warmup() {
         getDetector().then(() => {}).catch(() => {}),
         primeCache(),
         pixelatedResizeWorks(),
-    ]).then(() => {});
+    ]).then(() => {
+        // Armed here too: when every verdict comes from the cache, no
+        // classification ever runs, and the warmed worker would live forever.
+        endDetectorWhenIdle();
+    });
 }
 
 // --- Verdict from a cached record ------------------------------------------
@@ -438,6 +502,7 @@ export async function ensureNsfw({ id, getImgData, alreadyFlagged }) {
             // We own the bitmap and the package has finished reading it once
             // classify() settles, so release its memory now.
             try { bitmap.close && bitmap.close(); } catch (e) {}
+            endDetectorWhenIdle();
         }
 
         const verdict = score >= config.thresholds.nsfw;
@@ -458,6 +523,7 @@ export async function ensureNsfw({ id, getImgData, alreadyFlagged }) {
 
 /** Tear down the detector (e.g. when filtering is turned off for the session). */
 export function dispose() {
+    clearTimeout(_idleTimer);
     if (_detectorPromise) {
         const p = _detectorPromise;
         _detectorPromise = null;

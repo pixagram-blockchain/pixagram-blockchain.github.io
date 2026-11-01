@@ -97,6 +97,60 @@ const LiveTimeAgoSpan = React.forwardRef(function LiveTimeAgoSpan({ date, option
 // replies (level 3). Deeper levels are reached via "Show Replies".
 const MAX_VISIBLE_DEPTH = 3;
 
+/* ── Live comment edits ────────────────────────────────────────────────
+ * A host dialog patches its own top level after api.broadcast.updateComment,
+ * but the replies rendered inline below a comment live in that comment's
+ * _loadedReplies — out of the host's reach — so an edited reply kept its old
+ * text. Hosts report each edit through applyCommentEdit(): mounted nodes swap
+ * the new body into the replies they loaded, at once, and withCommentEdits()
+ * replays it over freshly fetched comments for LIVE_EDIT_TTL_MS, so a fetch
+ * that lands before the chain / indexer serves the edit (the comment poll
+ * after posting, a breadcrumb hop, an inline reload) can't put the old text
+ * back. Past that window the server is authoritative again.
+ * Keys are the global "author/permlink" identity.
+ */
+const LIVE_EDIT_TTL_MS = 2 * 60 * 1000;
+const liveEdits = new Map();            // "author/permlink" → { body, at }
+const liveEditListeners = new Set();    // one per mounted CommentInList
+
+function commentKeyOf(c) {
+    const d = c || {};
+    return (d.username || (d.author || {}).username || "") + "/" + (d.permlink || "");
+}
+
+function liveEditFor(key) {
+    const e = liveEdits.get(key);
+    if (!e) return null;
+    if (Date.now() - e.at > LIVE_EDIT_TTL_MS) { liveEdits.delete(key); return null; }
+    return e;
+}
+
+/** Record an edit that landed on chain. `body` is in the form the host keeps
+ *  in its comment objects (sanitized HTML). Updates every mounted thread. */
+export function applyCommentEdit(author, permlink, body) {
+    if (!author || !permlink || typeof body !== "string") return;
+    liveEdits.set(author + "/" + permlink, { body, at: Date.now() });
+    liveEditListeners.forEach((fn) => {
+        try { fn(); } catch (e) { console.warn("[CommentInList] live edit listener failed:", e && e.message); }
+    });
+}
+
+/** `comments` with live edits applied — the same array when none applies,
+ *  so memoized consumers keep their identity. */
+export function withCommentEdits(comments) {
+    if (!Array.isArray(comments) || liveEdits.size === 0) return comments;
+    let out = null;
+    for (let i = 0; i < comments.length; i++) {
+        const c = comments[i];
+        const e = c ? liveEditFor(commentKeyOf(c)) : null;
+        if (e && c.body !== e.body) {
+            if (!out) out = comments.slice();
+            out[i] = { ...c, body: e.body };
+        }
+    }
+    return out || comments;
+}
+
 const styles = theme => ({
     card: {
         width: "100%",
@@ -610,8 +664,22 @@ class CommentInList extends React.PureComponent {
     };
 
     componentDidMount() {
+        liveEditListeners.add(this._on_live_edit);
         this._maybe_load_replies();
     }
+
+    componentWillUnmount() {
+        liveEditListeners.delete(this._on_live_edit);
+    }
+
+    // A host reported an edit (applyCommentEdit): swap it into the replies
+    // this node loaded itself. Its own row is its parent's data — the host's
+    // list or the parent node's _loadedReplies — patched there and handed down.
+    _on_live_edit = () => {
+        const loaded = this.st4te._loadedReplies;
+        const patched = withCommentEdits(loaded);
+        if (patched !== loaded) this.setSt4te({ _loadedReplies: patched }, () => { this.forceUpdate(); });
+    };
 
     componentWillReceiveProps(new_props) {
         var must_init = !this.st4te._init;
@@ -717,10 +785,7 @@ class CommentInList extends React.PureComponent {
 
     // Global comment identity — the same "author/permlink" key the focus
     // deep-link encodes (see buildCommentFocusHash in utils/constants).
-    _comment_key = (d) => {
-        const c = d || {};
-        return ((c.username || (c.author || {}).username || "") + "/" + (c.permlink || ""));
-    };
+    _comment_key = (d) => commentKeyOf(d);
 
     _is_focused = () => !!this.props.focusKey && this._comment_key(this.st4te.data) === this.props.focusKey;
 
@@ -759,7 +824,8 @@ class CommentInList extends React.PureComponent {
         Promise.resolve(loader(data))
             .then((replies) => {
                 this.setSt4te(
-                    { _loadedReplies: Array.isArray(replies) ? replies : [], _repliesLoading: false },
+                    // A reload inside the edit window may still serve the old body.
+                    { _loadedReplies: withCommentEdits(Array.isArray(replies) ? replies : []), _repliesLoading: false },
                     () => { this.forceUpdate(); }
                 );
             })

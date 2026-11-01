@@ -89,8 +89,9 @@ const styles = theme => ({
         position: "fixed", right: 16, bottom: "calc(16px + env(safe-area-inset-bottom, 0px))",
         transition: `transform 225ms ${EASE} 75ms`,
         "& .MuiButtonBase-root": {
+            // Plain colour, no mixBlendMode: "overlay" (that blended the fixed
+            // button with the scrolling feed on every frame).
             borderRadius: "32px", background: "#f6f6f6", transition: `background 225ms ${EASE} 75ms`,
-            mixBlendMode: "overlay",
             "& .MuiTouchRipple-root": { filter: "opacity(1)", "& .MuiTouchRipple-child": { backgroundImage: `radial-gradient(circle at 50% 50%, magenta 0%, blue 20%, cyan 40%, green 60%, yellow 80%, red 100%)` } },
         },
         "& .MuiButtonBase-root:hover": { background: "white", transition: `background 225ms ${EASE} 5ms` },
@@ -102,7 +103,7 @@ const styles = theme => ({
         "& > .ReactVirtualized__Masonry": {
             zIndex: 0, position: "absolute", margin: 0, scrollBehavior: "smooth",
             overscrollBehavior: "none", boxSizing: "content-box !important", touchAction: "pan-y",
-            overflow: "hidden overlay !important", willChange: "scroll-position !important",
+            overflow: "hidden overlay !important", // no will-change: scroll-position (Chrome composites scrollers anyway)
             "& > .ReactVirtualized__Masonry__innerScrollContainer": {
                 top: "auto !important", left: "auto !important", contentVisibility: "auto",
                 overflow: "initial !important", position: "absolute !important",
@@ -456,10 +457,9 @@ const fetchAndEnrichPosts = async (api, loggedInUser, existingPosts, pagination,
         }
         return enriched;
     };
-    const collectNames = () => {
-        const allVotes = posts.flatMap(p => p.active_votes || []);
-        return [...new Set([...allVotes.map(v => v?.voter).filter(Boolean), ...posts.map(p => p.author).filter(Boolean)])];
-    };
+    // Authors only: voter avatars are fetched by the voting list when it opens
+    // (see Feed.js collectNames).
+    const collectNames = () => [...new Set(posts.map(p => p.author).filter(Boolean))];
     const buildMaps = (accs) => {
         const voterProfiles = {}, accountsMap = {};
         if (Array.isArray(accs)) accs.forEach(a => { if (!a) return; const n = a.name || a._entity_id; if (n) { const img = a._profile?.profile_image || ''; voterProfiles[n] = img; a.image = img; accountsMap[n] = a; } });

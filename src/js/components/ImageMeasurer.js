@@ -43,7 +43,7 @@ class ImageMeasurer extends React.PureComponent {
         super(props);
 
         // ── Persistent caches (survive across prop changes) ──────────
-        this._cache   = new Map();   // id → { width, height, id }
+        this._cache   = new Map();   // id → { width, height, type, data, hash, id }
         this._srcOf   = new Map();   // id → the image its cached size was measured from
         this._wantSrc = new Map();   // id → the item's current image
         // Failures and in-flight requests are per image, keyed `${id}\n${src}`:
@@ -144,6 +144,11 @@ class ImageMeasurer extends React.PureComponent {
                         if (this._wantSrc.get(id) !== src) return;
                         this._cache.set(id, {
                             ...size,
+                            // `id` becomes the post id (the masonry's key);
+                            // png-db keys its entries by the content hash, so
+                            // keep it, or every card's pixels are decoded a
+                            // second time under the post id.
+                            hash: size.id,
                             id,
                         });
                         this._srcOf.set(id, src);

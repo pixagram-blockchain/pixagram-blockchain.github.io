@@ -142,7 +142,13 @@
     "node": ">=22"
   },
   "browserslist": [
-    "cover 99%"
+    "chrome >= 80",
+    "edge >= 80",
+    "firefox >= 74",
+    "safari >= 14",
+    "ios_saf >= 14",
+    "samsung >= 13",
+    "opera >= 67"
   ],
   "author": "VIPERTECH (Matias Affolter)",
   "license": "MIT",

@@ -104,6 +104,19 @@ const BUNDLE_TTL_MS = 5 * 60 * 1000;
 const BUNDLE_CACHE_MAX = 200;
 const bundleCache = new Map(); // username → { at, bundle } | { at, promise }
 
+/* The card reads only display_name, about and profile_image. Caching the
+ * whole sanitized account also kept its cover image and both metadata JSON
+ * strings, which repeat the avatar and cover data URIs, for up to
+ * BUNDLE_CACHE_MAX authors. */
+function slimAccount(acc) {
+    if (!acc) return null;
+    const p = acc._profile || {};
+    return {
+        name: acc.name,
+        _profile: { display_name: p.display_name, about: p.about, profile_image: p.profile_image },
+    };
+}
+
 function fetchAuthorBundle(api, username) {
     const counts0 = { follower_count: 0, following_count: 0 };
     const accountsOk = api && api.accounts && typeof api.accounts.getAccounts === 'function';
@@ -112,7 +125,7 @@ function fetchAuthorBundle(api, username) {
         accountsOk ? api.accounts.getAccounts([username], true).catch(() => []) : Promise.resolve([]),
         countsOk ? api.follow.getFollowCount(username).catch(() => counts0) : Promise.resolve(counts0),
     ]).then(([accs, fc]) => ({
-        account: (Array.isArray(accs) && accs[0]) || null,
+        account: slimAccount((Array.isArray(accs) && accs[0]) || null),
         counts: {
             follower_count: (fc && fc.follower_count) || 0,
             following_count: (fc && fc.following_count) || 0,

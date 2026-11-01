@@ -36,7 +36,9 @@ import Box from "@material-ui/core/Box";
 import AccountCheck from "../icons/AccountCheck";
 import AccountAlert from "../icons/AccountAlert";
 import AccountQuestion from "../icons/AccountQuestion";
-import { generateMnemonic, generateMasterKey, generatePDF, backupPdfOptions } from "../utils/BackUpWallet3";
+// BackUpWallet3 (the bip39 WebAssembly module, svg2pdf and the embedded
+// fonts) is imported in _generateAndDownloadSprout, when the key sheet is
+// built, not when the dialog loads.
 import * as actions from "../actions/utils";
 import { HISTORY } from "../utils/constants";
 import { CONTENT_LANGUAGES, LANGUAGE_NAME } from "../utils/locale-status";
@@ -528,6 +530,8 @@ class CreateCommunityDialog extends React.PureComponent {
         const { _portal_username } = this.state;
 
         try {
+            const { generateMnemonic, generateMasterKey, generatePDF, backupPdfOptions } =
+                await import("../utils/BackUpWallet3");
             // Wordlist follows the active UI language (English fallback).
             const seed = await generateMnemonic(24, getLanguage());
             const masterKey = await generateMasterKey(seed, "");
