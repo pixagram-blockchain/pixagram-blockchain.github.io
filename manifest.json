@@ -7,13 +7,14 @@
   "dir": "ltr",
   "start_url": "/",
   "scope": "/",
-  "display": "fullscreen",
+  "display": "standalone",
   "display_override": [
     "window-controls-overlay",
     "tabbed",
     "fullscreen",
     "standalone",
-    "minimal-ui"
+    "minimal-ui",
+    "browser"
   ],
   "orientation": "any",
   "theme_color": "#000000",
