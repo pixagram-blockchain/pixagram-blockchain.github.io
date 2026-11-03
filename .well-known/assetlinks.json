@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "com.pixagram",
+        "sha256_cert_fingerprints": ["83:27:86:D0:07:54:49:8D:84:B3:CF:0E:81:10:41:2A:7D:09:14:9A:0E:3E:B0:54:7E:7E:5A:96:02:E7:07:90"]
+      }
+    }]
