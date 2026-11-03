@@ -1,6 +1,7 @@
 import * as React from "preact/compat";
 import ButtonBase from "@material-ui/core/ButtonBase";
 import { cssBackgroundImage } from "../utils/safeUrl";
+import { t, useLanguage } from "../utils/text";
 
 const RADIUS_MOBILE = { borderRadius: "12px" };
 const RADIUS_DESKTOP = { borderRadius: "0px 56px 56px 0px" };
@@ -24,6 +25,9 @@ const CommunityImage = React.memo(({
                                        className,
                                        style
                                    }) => {
+    // The comparator below skips prop-identical renders, so the alt text
+    // follows a language switch through its own subscription.
+    useLanguage();
     return (
         <ButtonBase style={className.includes("Mobile") ? RADIUS_MOBILE : RADIUS_DESKTOP}>
             <div
@@ -33,7 +37,7 @@ const CommunityImage = React.memo(({
                     backgroundColor: "#333",
                     ...style
                 }}
-                alt={`Portal / ${name}`}
+                alt={t("components.community_image.portal_name", { name })}
             />
         </ButtonBase>
     );

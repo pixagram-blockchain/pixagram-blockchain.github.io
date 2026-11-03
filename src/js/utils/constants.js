@@ -96,10 +96,16 @@ export const CURRENCY_COUNTRIES = {
 // Governance → Viability Management → Witnesses table marks that witness
 // "API available"; without it, the witness is matched when the host of its
 // on-chain `url` equals the node's host.
+// `name` is the English label. Shown elsewhere through utils/displayNames
+// nodeDisplayName(): `brand` stays as is, the place in brackets follows the UI
+// language — `city` through locales (components.default_nodes.<city>), else
+// the country `region` through Intl.DisplayNames.
 export const DEFAULT_NODES = [
     {
         id: "eu-east",
         name: "Pixagram (Poland)",
+        brand: "Pixagram",
+        region: "PL",
         url: "https://api.pixagram.com",
         location: [52.2297, 21.0122], // Warsaw, Poland
         network: "mainnet",
@@ -107,6 +113,8 @@ export const DEFAULT_NODES = [
     {
         id: "us-central",
         name: "Rex (USA)",
+        brand: "Rex",
+        region: "US",
         url: "https://pixarex.net",
         location: [41.2619, -95.8608], // Council Bluffs, Iowa, USA
         network: "mainnet",
@@ -114,6 +122,8 @@ export const DEFAULT_NODES = [
     {
         id: "asia-southeast",
         name: "Merlion (Singapore)",
+        brand: "Merlion",
+        region: "SG",
         url: "https://merlion.surf",
         location: [1.3521, 103.8198], // Singapore
         network: "mainnet",
@@ -121,6 +131,8 @@ export const DEFAULT_NODES = [
     {
         id: "eu-central",
         name: "Blockforge (France)",
+        brand: "Blockforge",
+        region: "FR",
         url: "https://blockforge.lol",
         location: [48.9747, 8.1742], // Lauterbourg, France
         network: "mainnet",
@@ -128,6 +140,9 @@ export const DEFAULT_NODES = [
     {
         id: "sa-east",
         name: "Boitata (Sao Paulo)",
+        brand: "Boitata",
+        region: "BR",
+        city: "sao_paulo",
         url: "https://boitata.quest",
         location: [-23.5505, -46.6333], // São Paulo, Brazil
         network: "mainnet",
@@ -135,6 +150,9 @@ export const DEFAULT_NODES = [
     {
         id: "me-central",
         name: "Matus (Dubai)",
+        brand: "Matus",
+        region: "AE",
+        city: "dubai",
         url: "https://pixa-dubai.xyz",
         location: [25.2048, 55.2708], // Dubai, UAE
         network: "mainnet",
@@ -142,6 +160,9 @@ export const DEFAULT_NODES = [
     {
         id: "eu-central-2",
         name: "Whale (Frankfurt)",
+        brand: "Whale",
+        region: "DE",
+        city: "frankfurt",
         url: "https://whaleapi.net",
         location: [50.1109, 8.6821], // Frankfurt, DE
         network: "mainnet",
@@ -159,6 +180,8 @@ export const CUSTOM_API_NODE_ID = "custom";
 // resolves on frankfurter.dev. `symbol` is for compact display; the wallet and
 // cards print the ISO code (e.g. "12.34 CHF") to stay unambiguous across the
 // many currencies that share "$", "kr" or "¥".
+// `name` is the English fallback; SettingsDialog shows Intl's name for `code`
+// in the UI language (utils/displayNames currencyName).
 export const CURRENCIES = [
     { code: "ARS", name: "Argentine Peso",      symbol: "$"   },
     { code: "AUD", name: "Australian Dollar",   symbol: "A$"  },

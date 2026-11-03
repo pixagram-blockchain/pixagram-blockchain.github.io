@@ -51,7 +51,7 @@ import Fade from "@material-ui/core/Fade";
 import { isArtworkPixelart, normalizeUpload, processImageFile, quantizeImageData } from "../utils/pix2art/file2imgd";
 import JSLoader from "../utils/JSLoader";
 
-import { t } from "../utils/text";
+import { t, tk, tx, useLanguage, getLocaleCode } from "../utils/text";
 import { T } from "../utils/T";
 
 // ============================================================================
@@ -124,7 +124,7 @@ const styles = theme => ({
     stage: {
         width: "100%",
         minHeight: "320px",
-        maxHeight: "60vh",
+        maxHeight: "calc(var(--app-h, 100vh) * 0.6)",
         border: "2px dashed #555",
         borderRadius: "21px",
         textAlign: "center",
@@ -140,7 +140,7 @@ const styles = theme => ({
         width: "100%",
         height: "100%",
         minHeight: "320px",
-        maxHeight: "60vh",
+        maxHeight: "calc(var(--app-h, 100vh) * 0.6)",
         objectFit: "contain",
         filter: "grayscale(1) contrast(.8) brightness(0.55) opacity(0.65) blur(8px)",
         transition: "filter 400ms cubic-bezier(0.4, 0, 0.2, 1) 25ms !important",
@@ -175,7 +175,7 @@ const styles = theme => ({
         borderRadius: "0px 0px 21px 21px",
         backgroundColor: "#101010",
         width: "100%",
-        maxHeight: "48vh",
+        maxHeight: "calc(var(--app-h, 100vh) * 0.48)",
         objectFit: "contain"
     },
     sliderContainer: {
@@ -323,25 +323,28 @@ const styles = theme => ({
 // ============================================================================
 // LOADER COPY & GEOMETRY — kept identical to NewPost for brand consistency
 // ============================================================================
+// The copy is NewPost's own translation keys (components.new_post.*), so the
+// two loaders cannot drift apart in any language. Deferred (tk) because the
+// table lives at module scope; resolved with tx() at render.
 
-const LOADER_TITLE = "PIXIFYING";
+const LOADER_TITLE = tk("components.new_post.pixifying", { TUC: true });
 
 const LOADER_QUIPS = [
-    "Teaching pixels some manners…",
-    "Summoning tiny squares…",
-    "Convincing the AI it went to art school…",
-    "Herding stray pixels…",
-    "Mixing the perfect palette…",
-    "Downscaling, but make it fashion…",
-    "Negotiating with the colour wheel…",
-    "Polishing every little square…",
-    "Sprinkling some 8-bit magic…",
-    "Adding a pinch of nostalgia…",
-    "Rounding up the right colours…",
-    "Asking the pixels very nicely…",
-    "Compressing reality, gently…",
-    "Buffing the retro shine…",
-    "Almost suspiciously pixel-perfect…"
+    tk("components.new_post.teaching_pixels_some_manners"),
+    tk("components.new_post.summoning_tiny_squares"),
+    tk("components.new_post.convincing_the_ai_it_went_to_art"),
+    tk("components.new_post.herding_stray_pixels"),
+    tk("components.new_post.mixing_the_perfect_palette"),
+    tk("components.new_post.downscaling_but_make_it_fashion"),
+    tk("components.new_post.negotiating_with_the_colour_wheel"),
+    tk("components.new_post.polishing_every_little_square"),
+    tk("components.new_post.sprinkling_some_8_bit_magic"),
+    tk("components.new_post.adding_a_pinch_of_nostalgia"),
+    tk("components.new_post.rounding_up_the_right_colours"),
+    tk("components.new_post.asking_the_pixels_very_nicely"),
+    tk("components.new_post.compressing_reality_gently"),
+    tk("components.new_post.buffing_the_retro_shine"),
+    tk("components.new_post.almost_suspiciously_pixel_perfect")
 ];
 const LOADER_QUIP_MS = 1900;
 
@@ -398,6 +401,12 @@ const stripDataUriPrefix = (b64) => {
 };
 
 const base64ToKb = (raw) => ((raw || "").length || 0) / 1000 * 3 / 4;
+
+// A weight shown to the user, with the app locale's decimal separator.
+const formatKb = (kb, digits) => Number(kb).toLocaleString(getLocaleCode(), {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits
+});
 
 const base64ToFile = (raw, filename) => {
     const bin = atob(raw);
@@ -471,9 +480,9 @@ const ConversionLoader = ({ classes, loadingPercent }) => {
                     )}
 
                     <div className={classes.loaderTextWrap}>
-                        <div className={classes.loaderTitle}>{LOADER_TITLE}</div>
+                        <div className={classes.loaderTitle}>{tx(LOADER_TITLE)}</div>
                         <Fade key={quipIndex} in appear timeout={450}>
-                            <div className={classes.loaderSubtitle}>{LOADER_QUIPS[quipIndex]}</div>
+                            <div className={classes.loaderSubtitle}>{tx(LOADER_QUIPS[quipIndex])}</div>
                         </Fade>
                     </div>
                 </div>
@@ -495,9 +504,11 @@ const ConversionLoader = ({ classes, loadingPercent }) => {
 //        "error"
 function ImageWizard(props) {
     const { classes, open, onClose, onComplete, file, maxKb = 48 } = props;
+    useLanguage();
 
     const [phase, setPhase] = useState("idle");
     const [inputFileUrl, setInputFileUrl] = useState("");
+    // A tk() descriptor (rendered with tx()) or "" when there is no error.
     const [errorMsg, setErrorMsg] = useState("");
 
     // Radio selection and Turbo checkbox in the AI dialog ("ask" phase)
@@ -609,7 +620,7 @@ function ImageWizard(props) {
             } catch (error) {
                 console.error('[ImageWizard] Error probing file:', error);
                 if (genRef.current !== gen) return;
-                setErrorMsg(t("components.image_wizard.could_not_read_this_image_please_try"));
+                setErrorMsg(tk("components.image_wizard.could_not_read_this_image_please_try"));
                 setPhase("error");
             }
         })();
@@ -696,7 +707,7 @@ function ImageWizard(props) {
         } catch (error) {
             console.error('[ImageWizard] Error processing image:', error);
             if (genRef.current !== gen) return;
-            setErrorMsg(t("components.image_wizard.the_conversion_failed_please_try_again_later"));
+            setErrorMsg(tk("components.image_wizard.the_conversion_failed_please_try_again_later"));
             setPhase("error");
         }
     }, [file]);
@@ -820,15 +831,15 @@ function ImageWizard(props) {
         try {
             const optimized = base64ToFile(raw, "pixagram-avatar.webp");
             if (optimized.size > maxBytes) {
-                setErrorMsg(t("components.image_wizard.still_kb_reduce_the_size_or_colors", {
-                    size: (optimized.size / 1000).toFixed(1)
+                setErrorMsg(tk("components.image_wizard.still_kb_reduce_the_size_or_colors", {
+                    size: formatKb(optimized.size / 1000, 1)
                 }));
                 return;
             }
             if (onComplete) onComplete(optimized);
         } catch (e) {
             console.error('[ImageWizard] Could not build the final file:', e);
-            setErrorMsg(t("components.image_wizard.could_not_build_the_final_file_please"));
+            setErrorMsg(tk("components.image_wizard.could_not_build_the_final_file_please"));
         }
     }, [onComplete, maxBytes]);
 
@@ -837,10 +848,11 @@ function ImageWizard(props) {
     }, [onClose]);
 
     // ── Step label for the footer ────────────────────────────────────────
+    // (upper-cased by the footer's CSS)
     const stepLabel =
-        phase === "adjust" ? "Adjust (2/2)" :
-            phase === "error" ? "Error" :
-                "Convert (1/2)";
+        phase === "adjust" ? t("components.new_post.adjust_step", { step: 2, total: 2 }) :
+            phase === "error" ? t("words.error") :
+                t("components.image_wizard.convert_step", { step: 1, total: 2 });
 
     // ── Views ─────────────────────────────────────────────────────────────
     let view = null;
@@ -848,7 +860,7 @@ function ImageWizard(props) {
         view = (
             <div className={classes.errorContainer}>
                 <Typography variant="h6" style={{ color: "#ccc" }}>{t("components.image_wizard.something_went_wrong")}</Typography>
-                <Typography variant="body2" style={{ color: "#888" }}>{errorMsg}</Typography>
+                <Typography variant="body2" style={{ color: "#888" }}>{tx(errorMsg)}</Typography>
             </div>
         );
     } else if (phase === "adjust") {
@@ -869,7 +881,7 @@ function ImageWizard(props) {
                     ) : (
                         <RadioGroup
                             row
-                            aria-label="size"
+                            aria-label={t("components.new_post.size")}
                             name="SIZE"
                             color="primary"
                             value={preferredSize}
@@ -933,7 +945,7 @@ function ImageWizard(props) {
 
                 {errorMsg && (
                     <Typography variant="caption" style={{ color: "#888", display: "block", textAlign: "center", marginTop: 8 }}>
-                        {errorMsg}
+                        {tx(errorMsg)}
                     </Typography>
                 )}
             </div>
@@ -993,13 +1005,17 @@ function ImageWizard(props) {
                         >
                             {phase === "adjust"
                                 ? encoding
-                                    ? "Weighing…"
+                                    ? t("components.image_wizard.weighing")
                                     : outKb !== null
-                                        ? `≈ ${outKb.toFixed(2)} kB — ${fitsBudget ? t("components.image_wizard.fits_the_kb_limit", {
-                                            maxKb: maxKb
-                                        }) : t("components.image_wizard.over_the_kb_limit_reduce_size_or", {
-                                            maxKb: maxKb
-                                        })}`
+                                        ? fitsBudget
+                                            ? t("components.image_wizard.size_kb_fits_the_kb_limit", {
+                                                size: formatKb(outKb, 2),
+                                                maxKb: maxKb
+                                            })
+                                            : t("components.image_wizard.size_kb_over_the_kb_limit_reduce_size_or_colors", {
+                                                size: formatKb(outKb, 2),
+                                                maxKb: maxKb
+                                            })
                                         : t("components.image_wizard.image_wizard_kb_budget", {
                                             maxKb: maxKb
                                         })
@@ -1044,7 +1060,7 @@ function ImageWizard(props) {
                     <FormControl component="fieldset" style={{ marginTop: 24, marginBottom: 8 }}>
                         <FormLabel component="legend">{t("words.style")}</FormLabel>
                         <RadioGroup
-                            aria-label="ai style"
+                            aria-label={t("components.new_post.ai_style")}
                             name="AI_STYLE"
                             value={aiStyle}
                             onChange={handleAiStyleChange}

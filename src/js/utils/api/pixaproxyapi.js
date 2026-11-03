@@ -691,7 +691,8 @@ const CONFIG = {
  * without adding a 400KB dependency.
  *
  * @param {string} pin
- * @returns {{ bits: number, feedback: string|null }}
+ * @returns {{ bits: number, feedback: string|null, feedbackKey: string|null }}
+ *          `feedback` is English (logs); `feedbackKey` is its translation key.
  */
 // Common weak PINs/passwords blacklist — module-level Set so
 // estimatePinEntropy doesn't re-allocate the list per call and the
@@ -707,11 +708,11 @@ const WEAK_PIN_SET = new Set([
 ]);
 
 function estimatePinEntropy(pin) {
-    if (!pin) return { bits: 0, feedback: 'PIN is empty' };
+    if (!pin) return { bits: 0, feedback: 'PIN is empty', feedbackKey: 'components.pixaproxyapi.pin_is_empty' };
 
     const lower = pin.toLowerCase();
     if (WEAK_PIN_SET.has(lower)) {
-        return { bits: 5, feedback: 'This is a commonly used password' };
+        return { bits: 5, feedback: 'This is a commonly used password', feedbackKey: 'components.pixaproxyapi.commonly_used_password' };
     }
 
     // Character class analysis
@@ -765,11 +766,19 @@ function estimatePinEntropy(pin) {
     bits = Math.round(bits * 10) / 10;
 
     let feedback = null;
-    if (bits < 20) feedback = 'PIN is very weak — add mixed character types and avoid patterns';
-    else if (bits < 30) feedback = 'PIN is weak — use a longer passphrase with mixed characters';
-    else if (bits < 40) feedback = 'PIN could be stronger — consider adding special characters';
+    let feedbackKey = null;
+    if (bits < 20) {
+        feedback = 'PIN is very weak — add mixed character types and avoid patterns';
+        feedbackKey = 'components.pixaproxyapi.pin_is_very_weak';
+    } else if (bits < 30) {
+        feedback = 'PIN is weak — use a longer passphrase with mixed characters';
+        feedbackKey = 'components.pixaproxyapi.pin_is_weak';
+    } else if (bits < 40) {
+        feedback = 'PIN could be stronger — consider adding special characters';
+        feedbackKey = 'components.pixaproxyapi.pin_could_be_stronger';
+    }
 
-    return { bits, feedback };
+    return { bits, feedback, feedbackKey };
 }
 
 // ============================================
@@ -2550,17 +2559,25 @@ export class PixaProxyAPI {
 
     async initializeVault(pin, options = {}) {
         if (pin.length < this.config.MIN_PIN_LENGTH) {
-            throw new PixaAPIError(`PIN must be at least ${this.config.MIN_PIN_LENGTH} characters`, 'PIN_TOO_SHORT');
+            throw Object.assign(
+                new PixaAPIError(`PIN must be at least ${this.config.MIN_PIN_LENGTH} characters`, 'PIN_TOO_SHORT'),
+                { errorKey: 'components.pixaproxyapi.pin_must_be_at_least_characters', errorVars: { min: this.config.MIN_PIN_LENGTH } }
+            );
         }
 
         // Reject low-entropy PINs even if they pass length check
         if (this.config.MIN_PIN_ENTROPY > 0 && !options.fastMode) {
             const strength = estimatePinEntropy(pin);
             if (strength.bits < this.config.MIN_PIN_ENTROPY) {
-                throw new PixaAPIError(
-                    strength.feedback || `PIN is too weak (${strength.bits} bits, need ${this.config.MIN_PIN_ENTROPY})`,
-                    'PIN_TOO_WEAK',
-                    { bits: strength.bits, required: this.config.MIN_PIN_ENTROPY, feedback: strength.feedback }
+                throw Object.assign(
+                    new PixaAPIError(
+                        strength.feedback || `PIN is too weak (${strength.bits} bits, need ${this.config.MIN_PIN_ENTROPY})`,
+                        'PIN_TOO_WEAK',
+                        { bits: strength.bits, required: this.config.MIN_PIN_ENTROPY, feedback: strength.feedback }
+                    ),
+                    strength.feedbackKey
+                        ? { errorKey: strength.feedbackKey }
+                        : { errorKey: 'components.pixaproxyapi.pin_is_too_weak', errorVars: { bits: strength.bits, required: this.config.MIN_PIN_ENTROPY } }
                 );
             }
         }
@@ -2595,8 +2612,11 @@ export class PixaProxyAPI {
             ? normalizeAccount(this.sessionManager.currentAccount || (await this.sessionManager.getActiveAccount()))
             : null;
         const normalizedAccount = normalizeAccount(account) || active;
+        // `error` stays English (logs, and callers that match on it); the UI
+        // shows `errorKey` (+ `errorVars`), a translation key, when present.
         if (!normalizedAccount) {
-            return { success: false, error: 'No account specified', code: 'NO_ACCOUNT' };
+            return { success: false, error: 'No account specified', code: 'NO_ACCOUNT',
+                errorKey: 'components.pixaproxyapi.no_account_specified' };
         }
         // v4.8: SessionManager unlocks the ACTIVE account. An unlock "for"
         // another account used to unlock the active one and then cache its
@@ -2607,6 +2627,8 @@ export class PixaProxyAPI {
             return {
                 success: false, code: 'ACCOUNT_NOT_ACTIVE', account: normalizedAccount,
                 error: `@${normalizedAccount} is not the active account`,
+                errorKey: 'components.pixaproxyapi.account_is_not_the_active_account',
+                errorVars: { account: normalizedAccount },
             };
         }
 
@@ -2623,6 +2645,8 @@ export class PixaProxyAPI {
                 error: `Too many failed attempts. Try again in ${lockout.remainingSec}s.`,
                 code: 'PIN_LOCKED',
                 remainingSec: lockout.remainingSec,
+                errorKey: 'components.pixa_wallet_keys_dialog.pin_locked_retry',
+                errorVars: { seconds: lockout.remainingSec },
             };
         }
 
@@ -2631,7 +2655,8 @@ export class PixaProxyAPI {
             await this._ensureVault();
             if (this.vault) this.sessionManager.vault = this.vault;
         } catch (e) {
-            return { success: false, error: 'Vault not available: ' + e.message, code: 'VAULT_ERROR' };
+            return { success: false, error: 'Vault not available: ' + e.message, code: 'VAULT_ERROR',
+                errorKey: 'components.pixaproxyapi.vault_not_available', errorVars: { message: e.message } };
         }
 
         // Ensure session CryptoKey for KeyManager
@@ -2653,17 +2678,21 @@ export class PixaProxyAPI {
                     // That account's session is gone; another logged-in account
                     // (if any) has taken over, as after a logout
                     // (account_switched { reason: 'wiped' }).
-                    return { success: false, error: 'Too many failed attempts. Re-login required.', code: 'VAULT_WIPED' };
+                    return { success: false, error: 'Too many failed attempts. Re-login required.', code: 'VAULT_WIPED',
+                        errorKey: 'components.pixaproxyapi.too_many_failed_attempts_relogin' };
                 }
                 if (result.locked) {
                     // That wrong PIN started a lockout window.
                     return {
                         success: false, code: 'PIN_LOCKED', remainingSec: result.remainingSec,
                         error: `Too many failed attempts. Try again in ${result.remainingSec}s.`,
+                        errorKey: 'components.pixa_wallet_keys_dialog.pin_locked_retry',
+                        errorVars: { seconds: result.remainingSec },
                     };
                 }
                 return {
                     success: false, error: 'Authentication failed', code: 'AUTH_FAILED',
+                    errorKey: 'components.pixaproxyapi.authentication_failed',
                     attemptsRemaining: result.attemptsRemaining ?? null,
                     wipeNext: !!result.wipeNext,
                 };
@@ -2689,19 +2718,24 @@ export class PixaProxyAPI {
                 // v6.3: infrastructure failure (device key / IndexedDB), not a
                 // wrong PIN — deliberately NOT counted as a failed attempt.
                 console.error('[unlockWithPin] Device-key unwrap failed:', error.message);
-                return { success: false, error: 'Stored keys could not be read on this device. Retry, or log in again with your key.', code: 'VAULT_ERROR' };
+                return { success: false, error: 'Stored keys could not be read on this device. Retry, or log in again with your key.', code: 'VAULT_ERROR',
+                    errorKey: 'components.pixaproxyapi.stored_keys_could_not_be_read' };
             }
             if (error?.code === 'SESSION_EXPIRED') {
-                return { success: false, error: 'This session has expired. Log in again.', code: 'SESSION_EXPIRED' };
+                return { success: false, error: 'This session has expired. Log in again.', code: 'SESSION_EXPIRED',
+                    errorKey: 'components.pixaproxyapi.session_expired_log_in_again' };
             }
             if (error?.code === 'SESSION_NOT_FOUND') {
-                return { success: false, error: 'No active session for this account.', code: 'NO_SESSION' };
+                return { success: false, error: 'No active session for this account.', code: 'NO_SESSION',
+                    errorKey: 'components.pixaproxyapi.no_active_session_for_this_account' };
             }
             if (error?.code === 'ACCOUNT_NOT_ACTIVE') {
                 // A switch landed first (see above) — not a wrong PIN.
                 return {
                     success: false, code: 'ACCOUNT_NOT_ACTIVE', account: normalizedAccount,
                     error: `@${normalizedAccount} is not the active account`,
+                    errorKey: 'components.pixaproxyapi.account_is_not_the_active_account',
+                    errorVars: { account: normalizedAccount },
                 };
             }
             if (error?.code === 'NOT_PIN') {
@@ -2715,7 +2749,8 @@ export class PixaProxyAPI {
                 }
             }
             console.error('[unlockWithPin] Error:', error);
-            return { success: false, error: 'Authentication failed', code: 'AUTH_FAILED' };
+            return { success: false, error: 'Authentication failed', code: 'AUTH_FAILED',
+                errorKey: 'components.pixaproxyapi.authentication_failed' };
         }
     }
 
@@ -2760,8 +2795,11 @@ export class PixaProxyAPI {
     async validateCredentials(account, key, keyType = 'master') {
         const normalizedAccount = normalizeAccount(account);
 
+        // `error` stays English: CreateAccountDialog and UnlockKeyDialog match
+        // on it. The UI shows `errorKey` (+ `errorVars`) when present.
         if (!normalizedAccount) {
-            return { valid: false, error: 'Invalid account parameter' };
+            return { valid: false, error: 'Invalid account parameter',
+                errorKey: 'components.pixaproxyapi.invalid_account_parameter' };
         }
 
         // SECURITY FIX (v3.5.2): Hash the key for deduplication instead of
@@ -2783,13 +2821,15 @@ export class PixaProxyAPI {
         const normalizedAccount = normalizeAccount(account);
 
         if (!normalizedAccount) {
-            return { valid: false, error: 'Invalid account parameter' };
+            return { valid: false, error: 'Invalid account parameter',
+                errorKey: 'components.pixaproxyapi.invalid_account_parameter' };
         }
 
         try {
             const accounts = await this.client.database.getAccounts([normalizedAccount]);
             if (!accounts || accounts.length === 0 || !accounts[0]) {
-                return { valid: false, error: 'Account not found' };
+                return { valid: false, error: 'Account not found',
+                    errorKey: 'components.login_dialog.account_not_found' };
             }
 
             const accountData = accounts[0];
@@ -2825,7 +2865,8 @@ export class PixaProxyAPI {
 
                 // Master password must match at least the posting key to be valid
                 if (!matchedTypes.includes('posting')) {
-                    return { valid: false, error: 'Master password does not match account keys' };
+                    return { valid: false, error: 'Master password does not match account keys',
+                        errorKey: 'components.pixaproxyapi.master_password_does_not_match' };
                 }
 
                 // SECURITY FIX (v3.5.2): Never return master password in result
@@ -2840,7 +2881,8 @@ export class PixaProxyAPI {
             } else {
                 let privateKey;
                 try { privateKey = PrivateKey.fromString(key); } catch (e) {
-                    return { valid: false, error: 'Invalid key format (not WIF)' };
+                    return { valid: false, error: 'Invalid key format (not WIF)',
+                        errorKey: 'components.pixaproxyapi.invalid_key_format_not_wif' };
                 }
 
                 const publicKey = privateKey.createPublic().toString();
@@ -2862,11 +2904,14 @@ export class PixaProxyAPI {
                         matches = publicKey === accountData.memo_key;
                         break;
                     default:
-                        return { valid: false, error: 'Invalid key type' };
+                        return { valid: false, error: 'Invalid key type',
+                            errorKey: 'components.pixaproxyapi.invalid_key_type' };
                 }
 
                 if (!matches) {
-                    return { valid: false, error: `Key does not match account's ${keyType} key` };
+                    return { valid: false, error: `Key does not match account's ${keyType} key`,
+                        errorKey: 'components.pixaproxyapi.key_does_not_match_accounts_key',
+                        errorVars: { keyType } };
                 }
                 return { valid: true, publicKey, account: normalizedAccount };
             }
@@ -2879,7 +2924,8 @@ export class PixaProxyAPI {
         const normalizedAccount = normalizeAccount(account);
 
         if (!normalizedAccount) {
-            throw new PixaAPIError('Invalid account parameter', 'INVALID_ACCOUNT');
+            throw Object.assign(new PixaAPIError('Invalid account parameter', 'INVALID_ACCOUNT'),
+                { errorKey: 'components.pixaproxyapi.invalid_account_parameter' });
         }
 
         // SECURITY FIX (v3.5.2): Always validate credentials against on-chain
@@ -2888,7 +2934,10 @@ export class PixaProxyAPI {
 
         if (!validation) {
             validation = await this.validateCredentials(normalizedAccount, key, keyType);
-            if (!validation.valid) throw new PixaAPIError(validation.error, 'VALIDATION_FAILED');
+            if (!validation.valid) {
+                throw Object.assign(new PixaAPIError(validation.error, 'VALIDATION_FAILED'),
+                    { errorKey: validation.errorKey, errorVars: validation.errorVars });
+            }
         }
 
         // SECURITY FIX (v3.5.2): Always ensure session CryptoKey exists so keys
@@ -11772,7 +11821,8 @@ class KeyManager {
         } catch (e) {
             this.pinVerified = false;
             this.pinVerificationTime = 0;
-            throw new Error("Invalid PIN or Vault Error");
+            throw Object.assign(new Error("Invalid PIN or Vault Error"),
+                { errorKey: 'components.pixaproxyapi.invalid_pin_or_vault_error' });
         }
     }
 
@@ -11949,6 +11999,9 @@ class KeyManager {
                     account: normalizedAccount,
                     type,
                     reason: `PIN required for ${type} operation`,
+                    // Translation key of `reason` (which stays English), for the UI.
+                    reasonKey: 'components.pixaproxyapi.pin_required_for_operation',
+                    reasonVars: { type },
                     callback: null, // pinCallback — set below
                     keyCallback: null // keyCallback — set below (Enter Key path)
                 };
@@ -11960,7 +12013,8 @@ class KeyManager {
                 const pinCallback = async (pin) => {
                     if (!this._unlockWithPin) {
                         clearTimeout(timeout);
-                        reject(new Error('PIN unlock not available'));
+                        reject(Object.assign(new Error('PIN unlock not available'),
+                            { errorKey: 'components.pixaproxyapi.pin_unlock_not_available' }));
                         return;
                     }
 
@@ -11972,7 +12026,10 @@ class KeyManager {
                     if (!unlockResult.success) {
                         // Wrong PIN — throw so the UI handler's catch shows "Incorrect PIN"
                         // snackbar. The dialog stays open and the user can retry.
-                        throw new Error(unlockResult.error || 'Incorrect PIN');
+                        throw Object.assign(new Error(unlockResult.error || 'Incorrect PIN'), {
+                            errorKey: unlockResult.errorKey || 'components.pixa_wallet_keys_dialog.pin_incorrect',
+                            errorVars: unlockResult.errorKey ? unlockResult.errorVars : undefined,
+                        });
                     }
 
                     // PIN verified and keys loaded — clear the timeout
@@ -12062,7 +12119,7 @@ class KeyManager {
 
     async addAccountWithMasterKey(account, masterPassword, options = {}) {
         const normalizedAccount = normalizeAccount(account);
-        if (!normalizedAccount) throw new Error('Invalid account');
+        if (!normalizedAccount) throw Object.assign(new Error('Invalid account'), { errorKey: 'components.pixaproxyapi.invalid_account' });
 
         // SECURITY (v4.3 — C2): Owner key is the root credential — it can
         // change all other keys, transfer account ownership, and is
@@ -12098,7 +12155,7 @@ class KeyManager {
 
     async addIndividualKey(account, type, key, options = {}) {
         const normalizedAccount = normalizeAccount(account);
-        if (!normalizedAccount) throw new Error('Invalid account');
+        if (!normalizedAccount) throw Object.assign(new Error('Invalid account'), { errorKey: 'components.pixaproxyapi.invalid_account' });
 
         // Ensure CryptoKey is ready (v4.4: no plaintext fallback)
         if (!this._sessionCryptoKey) {

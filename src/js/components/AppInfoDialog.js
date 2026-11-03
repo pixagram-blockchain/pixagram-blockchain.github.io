@@ -37,10 +37,10 @@ const styles = theme => ({
             }
         },
         "& .react-swipeable-view-container": {
-            height: "min(80vh, calc(-420px + 100vh)) !important"
+            height: "min(calc(var(--app-h, 100vh) * 0.8), calc(var(--app-h, 100vh) - 420px)) !important"
         },
         "& .react-swipeable-view-container > div": {
-            height: "min(80vh, calc(-420px + 100vh)) !important",
+            height: "min(calc(var(--app-h, 100vh) * 0.8), calc(var(--app-h, 100vh) - 420px)) !important",
             overflow: "hidden overlay !important"
         }
     },

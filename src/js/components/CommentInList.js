@@ -27,7 +27,7 @@ import { voteSign } from "../utils/voteValue";
 import { votesWithLocalVote } from "../utils/voteSync";
 import { safeHTML } from "../utils/api/sanitizer";
 
-import { t } from "../utils/text";
+import { t, tnode } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
 
@@ -42,6 +42,13 @@ const ST_C_DDD__FS_14 = { color: "#ddd", fontSize: 14 };
 const ST_LH_1REM__LS_0__D_BLOCK = { lineHeight: "1rem", letterSpacing: 0, display: "block" };
 const ST_C_888 = { color: '#888' };
 const ST_ML_8 = { marginLeft: 8 };
+
+// tnode() hands a sentence back as [text, element, text, …]. The words take
+// `style` (the muted colour the lone " said " span used to have); the
+// elements spliced in keep their own styles.
+const mutedWords = (parts, style) => (Array.isArray(parts)
+    ? parts.map((p, i) => (typeof p === "string" ? <span key={"w" + i} style={style}>{p}</span> : p))
+    : <span style={style}>{parts}</span>);
 
 /**
  * Render user-supplied markdown at the correct trust tier.
@@ -492,7 +499,9 @@ function VoteButton({
         <div className={classes.voteButtonWrapper}>
             <IconButton
                 className={getClassName()}
-                aria-label={`${direction === 'up' ? 'Up' : 'Down'}-Vote`}
+                aria-label={direction === 'up'
+                    ? t("components.comment_in_list.upvote")
+                    : t("components.comment_in_list.downvote")}
                 onClick={loggedOut ? undefined : onVote}
                 disabled={loggedOut || disabled || isLoading}
                 size="small"
@@ -1125,18 +1134,23 @@ class CommentInList extends React.PureComponent {
                                 color="textPrimary"
                                 style={ST_MB_4__D_BLOCK__FLEX_1}
                             >
-                                <Tooltip title={"@"+(author.username || "")}>
-                                    <span
-                                        className={classes.subheaderName}
-                                        onClick={this._open_comment_author}
-                                    >
-                                        {author.name && author.name !== author.username ? author.name : ("@" + (author.username || ""))}
-                                    </span>
-                                </Tooltip>
-                                <span style={ST_C_999}> said </span>
-                                <Tooltip arrow title={this._date_tooltip(data.date, locales)}>
-                                    <LiveTimeAgoSpan date={data.date} />
-                                </Tooltip>
+                                {mutedWords(tnode("components.comment_in_list.author_said_time", {
+                                    author: (
+                                        <Tooltip title={"@"+(author.username || "")}>
+                                            <span
+                                                className={classes.subheaderName}
+                                                onClick={this._open_comment_author}
+                                            >
+                                                {author.name && author.name !== author.username ? author.name : ("@" + (author.username || ""))}
+                                            </span>
+                                        </Tooltip>
+                                    ),
+                                    time: (
+                                        <Tooltip arrow title={this._date_tooltip(data.date, locales)}>
+                                            <LiveTimeAgoSpan date={data.date} />
+                                        </Tooltip>
+                                    ),
+                                }), ST_C_999)}
                             </Typography>
                             {showOwnerMenu && (
                                 <Tooltip arrow title={t("components.comment_in_list.comment_options")}>

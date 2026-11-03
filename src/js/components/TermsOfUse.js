@@ -8,8 +8,9 @@ import { withLanguage } from "../utils/withLanguage";
 // components.terms_of_use, one key per paragraph / bullet, in document order.
 // Rendered by AppInfoDialog (Terms tab) and by the agreement modal of
 // CreateAccountDialog. Structure mirrors the source document: numbered
-// sections as <h2>, prose as <p>, bullet lists as <ul>. Not translated —
-// the English text is the binding version (Section 20, Entire agreement).
+// sections as <h2>, prose as <p>, bullet lists as <ul>. Translated in every
+// locale; the English text is the binding version (Section 20, Entire
+// agreement), which the translations themselves state.
 const styles = theme => ({
 
 });
@@ -24,7 +25,10 @@ class TermsOfUse extends React.PureComponent {
     };
 
     shouldComponentUpdate(nextProps, nextState, nextContext) {
-        return false;
+        // Static text: re-render only when the translations change (a language
+        // switch, or a missing key's English fallback landing).
+        return nextProps.__i18nLang !== this.props.__i18nLang ||
+            nextProps.__i18nRev !== this.props.__i18nRev;
     }
 
     render() {

@@ -21,7 +21,7 @@ import PaperCardActions from './PaperCardActions';
 import ProfileHoverAnchor from './ProfileHoverCard';
 import FadeAvatar from './FadeAvatar';
 
-import { t, useLanguage } from "../utils/text";
+import { t, tnode, useLanguage } from "../utils/text";
 
 // Stable empty list for posts without tags — a fresh [] per render would
 // re-run the header's tag memo on every render.
@@ -574,6 +574,20 @@ function PaperCardBlog({
         [data.excerpt, data.content] // eslint-disable-line react-hooks/exhaustive-deps
     );
 
+    // The subheader sentence's two fixed parts (see the subheader below).
+    const dateNode = <DateLabel date={data.date} locales={locales} className={classes.subheaderDate} narrow />;
+    // Rich author hover card instead of the old raw-@username Tooltip. The
+    // anchor adds no element: it attaches its pointer listeners to this very
+    // span, and the card itself is the page's single <ProfileHoverCardLayer/>.
+    // Click behavior is unchanged.
+    const authorNode = (
+        <ProfileHoverAnchor api={api} author={author} onOpenProfile={openAuthor}>
+            <span className={classes.subheaderName} onClick={() => openAuthor(author.username)}>
+                {authorLabel}
+            </span>
+        </ProfileHoverAnchor>
+    );
+
     const renderImageContent = (isMobile = false) => (
         <>
             <img
@@ -619,7 +633,7 @@ function PaperCardBlog({
                             />
                         }
                         action={
-                            <IconButton aria-label="settings" onClick={handleMenuClick}>
+                            <IconButton aria-label={t('words.settings')} onClick={handleMenuClick}>
                                 <MoreVert />
                             </IconButton>
                         }
@@ -634,41 +648,42 @@ function PaperCardBlog({
                             /* PaperCard's line — "timeago by author" — followed by where
                                the post lives: "in Portal's Name" for a portal post, or
                                "in #tag1 #tag2 #tag3" for one that is in no portal. One
-                               ellipsized line; the reading time keeps the right edge. */
+                               ellipsized line; the reading time keeps the right edge.
+                               Each variant is one sentence (tnode), so a translation can
+                               reorder it; its words take subheaderBy's colour, the date,
+                               name, portal and tags keep their own classes. */
                             <>
-                                <span className={classes.subheaderLine}>
-                                    <DateLabel date={data.date} locales={locales} className={classes.subheaderDate} narrow />
-                                    <span className={classes.subheaderBy}> {t('words.by')} </span>
-                                    {/* Rich author hover card instead of the old raw-@username
-                                        Tooltip. The anchor adds no element: it attaches its
-                                        pointer listeners to this very span, and the card itself
-                                        is the page's single <ProfileHoverCardLayer/>. Click
-                                        behavior is unchanged. */}
-                                    <ProfileHoverAnchor api={api} author={author} onOpenProfile={openAuthor}>
-                                        <span className={classes.subheaderName} onClick={() => openAuthor(author.username)}>
-                                            {authorLabel}
-                                        </span>
-                                    </ProfileHoverAnchor>
-                                    {postPortal ? (postPortal.title !== '' && (
-                                        <>
-                                            <span className={classes.subheaderBy}> {t('words.in')} </span>
-                                            <span className={classes.subheaderName} onClick={() => openPortal(postPortal.name)}>
-                                                {postPortal.title}
-                                            </span>
-                                        </>
-                                    )) : headerTags.length > 0 && (
-                                        <>
-                                            <span className={classes.subheaderBy}> {t('words.in')} </span>
-                                            {headerTags.map((tag, i) => (
-                                                <React.Fragment key={i}>
-                                                    {i > 0 ? ' ' : null}
-                                                    <span className={classes.subheaderTag} onClick={() => openTag(tag)}>
-                                                        {'#' + tag}
-                                                    </span>
-                                                </React.Fragment>
-                                            ))}
-                                        </>
-                                    )}
+                                <span className={classes.subheaderLine + ' ' + classes.subheaderBy}>
+                                    {postPortal ? (postPortal.title !== ''
+                                        ? tnode('components.paper_card_blog.date_by_author_in_portal', {
+                                            date: dateNode,
+                                            author: authorNode,
+                                            portal: (
+                                                <span className={classes.subheaderName} onClick={() => openPortal(postPortal.name)}>
+                                                    {postPortal.title}
+                                                </span>
+                                            ),
+                                        })
+                                        // Portal title still loading: the segment waits.
+                                        : tnode('components.paper_card_blog.date_by_author', { date: dateNode, author: authorNode })
+                                    ) : headerTags.length > 0
+                                        ? tnode('components.paper_card_blog.date_by_author_in_tags', {
+                                            date: dateNode,
+                                            author: authorNode,
+                                            tags: (
+                                                <>
+                                                    {headerTags.map((tag, i) => (
+                                                        <React.Fragment key={i}>
+                                                            {i > 0 ? ' ' : null}
+                                                            <span className={classes.subheaderTag} onClick={() => openTag(tag)}>
+                                                                {'#' + tag}
+                                                            </span>
+                                                        </React.Fragment>
+                                                    ))}
+                                                </>
+                                            ),
+                                        })
+                                        : tnode('components.paper_card_blog.date_by_author', { date: dateNode, author: authorNode })}
                                 </span>
                                 <span className={classes.subheaderReadingTime}>
                                     {t("components.paper_card_blog.min_read", {

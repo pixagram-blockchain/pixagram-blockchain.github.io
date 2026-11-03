@@ -33,7 +33,7 @@ import DnsRoundedIcon from "@material-ui/icons/DnsRounded";
 
 import { withLanguage } from "../utils/withLanguage";
 import {
-    towerGet, towerSeries, PERIODS, nowSec, sumWindows, pivot, fmtCompact, fmtInt, fmtPct, fmtAgo
+    towerGet, towerSeries, PERIODS, nowSec, sumWindows, pivot, fmtCompact, fmtInt, fmtNum, fmtPct, fmtAgo
 } from "../utils/tower";
 import {
     tr, trf, Card, Tile, ChartTip, Legend, Pill, Switch, Empty, Skeleton, Meter, Visible,
@@ -472,9 +472,10 @@ class GDMetrics extends React.PureComponent {
             const d = period === this.state.period ? { ...this.state.d } : { funnel: this.state.d.funnel };
             keys.forEach((k, i) => (d[k] = values[i]));
             const ok = values.some((v) => v !== null);
+            // a flag, not the message: the message is translated where it is shown (_renderError)
             this.setState({
                 d, period, pending: null, loading: false, meta: d.status ? d.status.meta : this.state.meta,
-                error: ok ? null : tr(K + "unreachable", "The statistics service cannot be reached right now.")
+                error: !ok
             });
         });
         if (open === "chain") this.loadFunnel();
@@ -734,7 +735,7 @@ class GDMetrics extends React.PureComponent {
                                         </div>
                                         {p.controversy_30d != null ? <div className={classes.rowMeter}><Meter value={p.controversy_30d} /></div> : null}
                                     </div>
-                                    <div className={classes.rowValue}>{p.controversy_30d == null ? "–" : p.controversy_30d.toFixed(2)}</div>
+                                    <div className={classes.rowValue}>{p.controversy_30d == null ? "–" : fmtNum(p.controversy_30d, 2)}</div>
                                 </div>
                             ))}
                         </div>
@@ -755,9 +756,9 @@ class GDMetrics extends React.PureComponent {
                                 <a key={p.author + "/" + p.permlink} className={`${classes.row} ${classes.link}`} href={p.url} target="_blank" rel="noopener noreferrer">
                                     <div className={classes.rowMain}>
                                         <div className={classes.rowTitle}>{p.title || p.permlink}</div>
-                                        <div className={classes.rowSub}>@{p.author} · ▲ {p.up_count} ▼ {p.down_count}{p.portal ? " · " + p.portal : ""}</div>
+                                        <div className={classes.rowSub}>@{p.author} · ▲ {fmtInt(p.up_count)} ▼ {fmtInt(p.down_count)}{p.portal ? " · " + p.portal : ""}</div>
                                     </div>
-                                    <div className={classes.rowValue}>{p.controversy == null ? "–" : p.controversy.toFixed(2)}</div>
+                                    <div className={classes.rowValue}>{p.controversy == null ? "–" : fmtNum(p.controversy, 2)}</div>
                                 </a>
                             ))}
                         </div>
@@ -826,7 +827,7 @@ class GDMetrics extends React.PureComponent {
                     </Card>
                     <Card
                         title={tr(K + "price_feed", "Median price feed")}
-                        subtitle={s && s.feed_pixa_per_pxs ? `${s.feed_pixa_per_pxs.toFixed(3)} PIXA ${tr(K + "per_pxs", "per PXS")}` : ""}
+                        subtitle={s && s.feed_pixa_per_pxs ? `${fmtNum(s.feed_pixa_per_pxs, 3)} PIXA ${tr(K + "per_pxs", "per PXS")}` : ""}
                         info={tr(K + "price_feed_info", "Median of the feeds the witnesses published in each period. PXS is a Big Mac referenced supracoin: the feed says how many PIXA one PXS converts to.")}
                     >
                         {feed.length > 1 ? (
@@ -836,7 +837,7 @@ class GDMetrics extends React.PureComponent {
                                         <CartesianGrid {...GRID} />
                                         <XAxis dataKey="bucket" tickFormatter={xTick} {...AXIS} minTickGap={24} />
                                         <YAxis {...AXIS} domain={feedScale.domain} ticks={feedScale.ticks} interval={0} width={56} tickFormatter={tickFormat(feedScale.step)} />
-                                        <Tooltip cursor={CURSOR} content={<ChartTip labelFormatter={xFmt} valueFormatter={(v, p) => `${v.toFixed(3)} PIXA · ${p.payload.n} ${tr(K + "feeds", "feeds")}`} />} />
+                                        <Tooltip cursor={CURSOR} content={<ChartTip labelFormatter={xFmt} valueFormatter={(v, p) => `${fmtNum(v, 3)} PIXA · ${fmtInt(p.payload.n)} ${tr(K + "feeds", "feeds")}`} />} />
                                         <Line type="stepAfter" dataKey="v" name={tr(K + "pixa_per_pxs", "PIXA per PXS")} stroke={SERIES[0].stroke} strokeWidth={2} dot={false} activeDot={ACTIVE_DOT} isAnimationActive={false} />
                                     </LineChart>
                                 </ResponsiveContainer>
@@ -845,7 +846,7 @@ class GDMetrics extends React.PureComponent {
                     </Card>
                     <Card
                         title={tr(K + "pxp_distribution", "Accounts by Pixa Power")}
-                        subtitle={d.pxp ? `${tr(K + "gini", "Gini")} ${d.pxp.gini == null ? "–" : d.pxp.gini.toFixed(2)} · ${tr(K + "nakamoto", "Nakamoto")} ${d.pxp.nakamoto_50 == null ? "–" : d.pxp.nakamoto_50}` : ""}
+                        subtitle={d.pxp ? `${tr(K + "gini", "Gini")} ${d.pxp.gini == null ? "–" : fmtNum(d.pxp.gini, 2)} · ${tr(K + "nakamoto", "Nakamoto")} ${d.pxp.nakamoto_50 == null ? "–" : fmtInt(d.pxp.nakamoto_50)}` : ""}
                         info={tr(K + "pxp_info", "User accounts per bucket of own Pixa Power (VESTS × ratio). System and portal accounts are excluded. Nakamoto: fewest accounts holding more than half of user stake.")}
                     >
                         {pxp.length ? (
@@ -948,7 +949,7 @@ class GDMetrics extends React.PureComponent {
                                         <CartesianGrid {...GRID} />
                                         <XAxis dataKey="bucket" tickFormatter={xTick} ticks={timeTicks(tps, g)} {...AXIS} minTickGap={24} />
                                         <YAxis {...AXIS} width={48} domain={tpsScale.domain} ticks={tpsScale.ticks} interval={0} tickFormatter={tickFormat(tpsScale.step)} />
-                                        <Tooltip cursor={CURSOR} content={<ChartTip labelFormatter={xFmt} names={names} valueFormatter={(v) => (v == null ? "–" : v.toFixed(3))} />} />
+                                        <Tooltip cursor={CURSOR} content={<ChartTip labelFormatter={xFmt} names={names} valueFormatter={(v) => (v == null ? "–" : fmtNum(v, 3))} />} />
                                         <Line type="monotone" dataKey="peak" name={names.peak} stroke={SERIES[1].stroke} strokeDasharray={SERIES[1].dash} strokeWidth={2} dot={false} activeDot={ACTIVE_DOT} isAnimationActive={false} />
                                         <Line type="monotone" dataKey="avg" name={names.avg} stroke={SERIES[0].stroke} strokeWidth={2} dot={false} activeDot={ACTIVE_DOT} isAnimationActive={false} />
                                     </LineChart>
@@ -968,7 +969,7 @@ class GDMetrics extends React.PureComponent {
                             label={tr(K + "cohort", "Cohort")}
                             value={cohortWeeksAgo}
                             onChange={this._setCohort}
-                            options={[1, 2, 4, 8].map((w) => ({ value: w, label: `-${w}w` }))}
+                            options={[1, 2, 4, 8].map((w) => ({ value: w, label: trf(K + "weeks_ago_short_n", "-{n}w", { n: w }) }))}
                         />
                     }
                 >
@@ -986,7 +987,7 @@ class GDMetrics extends React.PureComponent {
                                 {f.median_days_to_first_reward != null ? (
                                     <div className={classes.headlineSide}>
                                         <div className={classes.headlineSideValue}>
-                                            {f.median_days_to_first_reward.toFixed(1)}<span className={classes.headlineUnit}>{tr(K + "days", "days")}</span>
+                                            {fmtNum(f.median_days_to_first_reward, 1)}<span className={classes.headlineUnit}>{tr(K + "days", "days")}</span>
                                         </div>
                                         <div className={classes.headlineSub}>{tr(K + "median_first_reward_short", "median, first post to first reward")}</div>
                                     </div>
@@ -1409,7 +1410,7 @@ class GDMetrics extends React.PureComponent {
                                 <span className={classes.statLabel}>{tr(K + "internal_market", "Internal market")}</span>
                                 <span className={classes.statValue}>
                                     {mkt && mkt.value != null
-                                        ? `${mkt.value.toFixed(3)} PIXA/PXS · ${trf(K + "trades_n", "trades: {n}", { n: fmtInt(trades) })}`
+                                        ? `${fmtNum(mkt.value, 3)} PIXA/PXS · ${trf(K + "trades_n", "trades: {n}", { n: fmtInt(trades) })}`
                                         : tr(K + "no_trade", "no trade yet")}
                                 </span>
                             </div>
@@ -1684,7 +1685,7 @@ class GDMetrics extends React.PureComponent {
                                         <CartesianGrid {...GRID} />
                                         <XAxis dataKey="bucket" tickFormatter={dFmt} {...AXIS} minTickGap={24} />
                                         <YAxis {...AXIS} width={48} allowDecimals={false} />
-                                        <Tooltip cursor={CURSOR} content={<ChartTip labelFormatter={dFmt} names={eNames} valueFormatter={(v) => (v == null ? "–" : v.toFixed(1))} />} />
+                                        <Tooltip cursor={CURSOR} content={<ChartTip labelFormatter={dFmt} names={eNames} valueFormatter={(v) => (v == null ? "–" : fmtNum(v, 1))} />} />
                                         {["votes", "comments"].map((k, i) => (
                                             <Line key={k} type="monotone" dataKey={k} name={eNames[k]} stroke={SERIES[i].stroke} strokeDasharray={SERIES[i].dash}
                                                   strokeWidth={2} dot={false} activeDot={ACTIVE_DOT} isAnimationActive={false} connectNulls />
@@ -1704,8 +1705,8 @@ class GDMetrics extends React.PureComponent {
                 >
                     {!d.formats ? this._placeholder(d.formats) : !anyFormat ? <Empty>{tr(K + "no_artworks", "No artwork in this period.")}</Empty> : (
                         <div className={classes.cols2}>
-                            {[[tr(K + "canvas", "Canvas"), canvas, "px"], [tr(K + "data_size", "Size"), bytes, ""]].map(([title, rows, unit]) => (
-                                <div key={title}>
+                            {[["canvas", tr(K + "canvas", "Canvas"), canvas, "px"], ["size", tr(K + "data_size", "Size"), bytes, ""]].map(([id, title, rows, unit]) => (
+                                <div key={id}>
                                     <div className={classes.listTitle}>{title}</div>
                                     <div className={classes.rows}>
                                         {rows.map(([k, n]) => (
@@ -1818,7 +1819,7 @@ class GDMetrics extends React.PureComponent {
     _renderError() {
         const { classes } = this.props;
         const { error } = this.state;
-        return error ? <div className={classes.error}><Pill level="amber">{tr(K + "offline", "offline")}</Pill>{error}</div> : null;
+        return error ? <div className={classes.error}><Pill level="amber">{tr(K + "offline", "offline")}</Pill>{tr(K + "unreachable", "The statistics service cannot be reached right now.")}</div> : null;
     }
 
     /** The 3 × 3 grid of sections. Each card's icon is the one that flies into the strip when it opens. */

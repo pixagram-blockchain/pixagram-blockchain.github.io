@@ -38,10 +38,17 @@
 // ---------
 //   - Username validated synchronously (validateUsername) and asynchronously
 //     (api.accounts.getAccounts) with 250ms debounce.
-//   - Keys are NOT pre-generated in the background; they are derived inline
-//     when the user clicks CREATE, so the button's enabled-state never
-//     depends on async background success. If derivation fails, the error
-//     panel surfaces the actual exception.
+//   - The backup comes FIRST. Keys are NOT pre-generated in the background:
+//     NEXT derives them and builds the recipient's backup PDF, then a backup
+//     step asks the creator to download that PDF and to confirm it is saved
+//     in a safe place (a checkbox and its label, which only a downloaded
+//     copy unlocks). CREATE — the active key, then the broadcast — exists
+//     only after that: no account is created whose keys aren't saved. If
+//     derivation fails, the error panel surfaces the actual exception.
+//   - One key set per username for the dialog's life (backupsRef): BACK to
+//     the form and NEXT again, or TRY AGAIN after a failed broadcast, keeps
+//     the PDF already saved valid — a username never gets a second PDF with
+//     other keys. Each username has its own seed: never shared by accounts.
 //   - Chain reads: `api.globals.getChainProperties()`,
 //     `api.globals.getDynamicGlobalProperties()` (raw pass-through — carries
 //     total_vesting_shares and available_account_subsidies) and
@@ -88,6 +95,8 @@ import CircularProgress from "@material-ui/core/CircularProgress";
 import Fade from "@material-ui/core/Fade";
 import Collapse from "@material-ui/core/Collapse";
 import LinearProgress from "@material-ui/core/LinearProgress";
+import FormControlLabel from "@material-ui/core/FormControlLabel";
+import Checkbox from "@material-ui/core/Checkbox";
 import AccountRemove from "../icons/AccountRemove";
 import AccountQuestion from "../icons/AccountQuestion";
 import AccountAlert from "../icons/AccountAlert";
@@ -98,6 +107,7 @@ import PixaSupra from "../icons/PixaSupra";
 import PixaPower from "../icons/PixaPower";
 import CheckCircleOutlineIcon from "@material-ui/icons/CheckCircleOutline";
 import FlashOnIcon from "@material-ui/icons/FlashOn";
+import VpnKeyIcon from "@material-ui/icons/VpnKey";
 import { validateUsername, generateMnemonic, generateMasterKey, generatePDF, backupPdfOptions } from "../utils/BackUpWallet3";
 import * as actions from "../actions/utils";
 
@@ -525,12 +535,13 @@ function extractErrorMessage(error) {
 }
 
 /**
- * Save a Blob as a file. Pure DOM — deliberately independent of the component
- * lifecycle, so the recipient's key backup is still saved if the dialog was
- * closed or unmounted while the transaction was in flight (e.g. while the
- * UnlockKeyDialog was on top). The anchor is attached to the document (Firefox
- * ignores clicks on detached anchors) and the object URL is revoked later,
- * not synchronously — revoking right after click() can cancel the download.
+ * Save a Blob as a file — the recipient's backup PDF, from the backup step's
+ * button (a click, so phones allow it), before anything is broadcast. Pure
+ * DOM, independent of the component lifecycle. The anchor is attached to the
+ * document (Firefox ignores clicks on detached anchors) and the object URL is
+ * revoked later, not synchronously — revoking right after click() can cancel
+ * the download. True once the download has started: whether the file was
+ * kept can't be seen from the page, hence the creator's confirmation.
  */
 function downloadBlob(blob, filename) {
     if (!blob || typeof document === "undefined") return false;
@@ -736,6 +747,25 @@ const styles = (theme) => ({
         "& .MuiLinearProgress-barColorPrimary": { backgroundColor: "#7a7a7a" },
         "& .MuiLinearProgress-colorPrimary":    { backgroundColor: "#1a1a1a" },
     },
+    // Backup step: "I have saved the backup PDF…" — the box and its words
+    // (one <label>), greyscale like the rest; dimmed until a copy was
+    // downloaded, which is what unlocks it.
+    backupConfirm: {
+        margin: "4px 0 0 0",
+        maxWidth: 480,
+        textAlign: "left",
+        userSelect: "none",
+        "& .MuiTypography-root": {
+            fontSize: 14,
+            color: "#cccccc",
+            transition: "color 200ms cubic-bezier(0.4, 0, 0.2, 1)",
+        },
+        "&:hover .MuiTypography-root": { color: "#ffffff" },
+        "& .MuiCheckbox-root":             { color: "#777777" },
+        "& .MuiCheckbox-root.Mui-checked": { color: "#e6e6e6" },
+        "&.Mui-disabled .MuiTypography-root, &.Mui-disabled:hover .MuiTypography-root": { color: "#5f5f5f" },
+        "& .MuiCheckbox-root.Mui-disabled": { color: "#3f3f3f" },
+    },
 });
 
 // =============================================================================
@@ -785,13 +815,22 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
     const [pxpAmount,  setPxpAmount]  = useState(0);
 
     // ── Status ───────────────────────────────────────────────────────────────
-    // 'form' | 'working' | 'success' | 'error'
+    // 'form' → NEXT → 'preparing' (keys + PDF) → 'backup' (download, confirm)
+    // → CREATE → 'working' → 'success' | 'error'
     const [status,         setStatus]         = useState("form");
     const [errorMessage,   setErrorMessage]   = useState("");
     const [autoCloseInSec, setAutoCloseInSec] = useState(null);
-    const [pdfDownloaded,  setPdfDownloaded]  = useState(false);
-    const lastPdfBlob      = useRef(null);
-    const lastUsername     = useRef("");
+
+    // ── Backup of the new account's keys — saved BEFORE the broadcast ───────
+    // username → { pdfBlob, pub, downloaded, confirmed }: one key set (and one
+    // PDF) per username for the dialog's life, see the header. Emptied once
+    // the account exists. The three states below mirror the entry on screen.
+    const backupsRef      = useRef(new Map());
+    const preparingRef    = useRef(false);
+    const [backupFor,     setBackupFor]     = useState("");    // username of the backup step's PDF
+    const [pdfDownloaded, setPdfDownloaded] = useState(false); // a download of it was started
+    const [pdfConfirmed,  setPdfConfirmed]  = useState(false); // the creator ticked "I have saved…"
+    const [pdfFailed,     setPdfFailed]     = useState(false); // the last download couldn't start
 
     // In-flight guards. `awaitingKey` is true while UnlockKeyDialog is stacked
     // on top; `pinned` keeps this dialog visible from CREATE until the user
@@ -1112,14 +1151,29 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
     }, [pxpAvailable]);
 
     // ─────────────────────────────────────────────────────────────────────────
-    // PDF download — triggered after a successful broadcast
+    // Backup step — download the PDF, then confirm it is saved. Both are
+    // required before CREATE (canCreate) and checked again by handleSubmit.
     // ─────────────────────────────────────────────────────────────────────────
     const triggerPdfDownload = useCallback(() => {
-        const blob = lastPdfBlob.current;
-        const name = lastUsername.current;
-        if (!blob || !name) return;
-        if (downloadBlob(blob, backupFileName(name)) && isMounted.current) setPdfDownloaded(true);
-    }, []);
+        const backup = backupsRef.current.get(backupFor);
+        if (!backup) return;
+        const started = downloadBlob(backup.pdfBlob, backupFileName(backupFor));
+        if (started) backup.downloaded = true;
+        if (!isMounted.current) return;
+        setPdfFailed(!started);
+        if (started) setPdfDownloaded(true);
+    }, [backupFor]);
+
+    // The box or the words of its label. It confirms a copy already
+    // downloaded, so it can't be ticked before one; ticking does nothing else.
+    const togglePdfConfirmed = useCallback((e, checked) => {
+        const backup = backupsRef.current.get(backupFor);
+        if (!backup) return;
+        const next = typeof checked === "boolean" ? checked : !backup.confirmed;
+        if (next && !backup.downloaded) return;
+        backup.confirmed = next;
+        setPdfConfirmed(next);
+    }, [backupFor]);
 
     // Single close path: releases the pin, then tells the parent.
     const handleClose = useCallback(() => {
@@ -1151,10 +1205,10 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
     }, [handleClose]);
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Submit — derives keys, builds ops, broadcasts in one click
+    // NEXT — keys + backup PDF; CREATE — active key, ops, broadcast
     // ─────────────────────────────────────────────────────────────────────────
-    const canSubmit = useMemo(() => {
-        if (status !== "form")    return false;
+    // What the form must hold for either step (was canSubmit).
+    const formReady = useMemo(() => {
         if (awaitingKey)          return false;
         if (!currentAccount)      return false;
         if (!usernameAvailable)   return false;
@@ -1165,27 +1219,92 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
             if (!canAffordFee)    return false;
         }
         return true;
-    }, [status, awaitingKey, currentAccount, usernameAvailable, usernamePending, isRc, rcBlocked, canAffordFee]);
+    }, [awaitingKey, currentAccount, usernameAvailable, usernamePending, isRc, rcBlocked, canAffordFee]);
+
+    const canNext = status === "form" && formReady;
+    // CREATE: only once the backup PDF of THIS username was downloaded and
+    // the creator confirmed it is saved in a safe place.
+    const canCreate = status === "backup" && formReady && backupFor === username && pdfDownloaded && pdfConfirmed;
+
+    // NEXT (form → backup step): derive the keys and build the backup PDF —
+    // or take this username's, already made (see backupsRef). Nothing goes
+    // on-chain here.
+    const handleNext = useCallback(async () => {
+        if (!canNext || preparingRef.current) return;
+        preparingRef.current = true;
+        // The method on screen is the one broadcast: no automatic switch
+        // (RC reads landing late) behind the backup step.
+        methodTouched.current = true;
+
+        const name = username;
+        let backup = backupsRef.current.get(name);
+        if (!backup) {
+            setStatus("preparing");
+            try {
+                console.log("[AddAccountDialog] generating mnemonic…");
+                // Seed wordlist follows the active UI language; languages without
+                // a BIP-39 wordlist fall back to English inside BackUpWallet3.
+                const seed = await generateMnemonic(18, getLanguage());
+                console.log("[AddAccountDialog] deriving master key…");
+                const masterKey = await generateMasterKey(seed, "");
+                console.log("[AddAccountDialog] building backup PDF + role keys…");
+                // Printed in the locale and page size chosen in the settings.
+                const [pdfBlob, keys] = await generatePDF(name, seed, "", masterKey, backupPdfOptions(api, getLocaleCode()));
+                const pub = keys && keys.pub;
+                if (!pdfBlob || !pub || !pub.owner || !pub.active || !pub.posting || !pub.memo) {
+                    throw new Error(t("components.add_account_dialog.incomplete_authority_set"));
+                }
+                backup = { pdfBlob, pub, downloaded: false, confirmed: false };
+                backupsRef.current.set(name, backup);
+            } catch (err) {
+                console.error("[AddAccountDialog] key / backup PDF generation failed:", err);
+                preparingRef.current = false;
+                if (!isMounted.current) return;
+                setStatus("error");
+                setErrorMessage(extractErrorMessage(err) || t("components.add_account_dialog.unknown_error"));
+                return;
+            }
+        }
+        preparingRef.current = false;
+        if (!isMounted.current) return;
+        setBackupFor(name);
+        setPdfDownloaded(backup.downloaded);
+        setPdfConfirmed(backup.confirmed);
+        setPdfFailed(false);
+        setStatus("backup");
+    }, [canNext, username, api]);
+
+    // BACK (backup step → form): the backup made is kept for this username.
+    const handleBack = useCallback(() => {
+        if (awaitingKey || submittingRef.current) return;
+        setStatus("form");
+    }, [awaitingKey]);
 
     const handleSubmit = useCallback(async () => {
-        if (!canSubmit || submittingRef.current) return;
+        if (!canCreate || submittingRef.current) return;
+        // The gate, from the backup itself: a started download and the
+        // creator's confirmation. No broadcast without both.
+        const backup = backupsRef.current.get(backupFor);
+        if (!backup || !backup.downloaded || !backup.confirmed) return;
         submittingRef.current = true;
 
         // From here on the flow must run to the end even if this dialog is
         // hidden or unmounted (the UnlockKeyDialog can make the host close
-        // it). The values it uses (account, username, method, amounts) are
-        // frozen in this closure at click time; only setState calls are
-        // guarded by isMounted — the broadcast and the PDF download are not.
+        // it). The values it uses (account, username, keys, method, amounts)
+        // are frozen in this closure at click time; only setState calls are
+        // guarded by isMounted — the broadcast is not.
         const creator = currentAccount;
+        const name = backupFor;
+        const pub = backup.pub;
 
         setErrorMessage("");
         setPinned(true);
 
-        // ── 1. Active key FIRST ─────────────────────────────────────────────
-        // Asked before any key material is generated, so a cancelled or
-        // interrupted unlock leaves nothing behind. claim_account,
-        // create_claimed_account and account_create are all active-authority
-        // operations. UnlockKeyDialog stacks on top if the vault is locked.
+        // ── 1. Active key ───────────────────────────────────────────────────
+        // claim_account, create_claimed_account and account_create are all
+        // active-authority operations. UnlockKeyDialog stacks on top if the
+        // vault is locked. Cancelled: back on the backup step, nothing
+        // broadcast — the saved backup stays valid for the next CREATE.
         let key = null;
         setAwaitingKey(true);
         try {
@@ -1197,7 +1316,7 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
             if (isMounted.current) setAwaitingKey(false);
         }
         if (!key) {
-            // Unlock cancelled — back to the untouched form, nothing broadcast.
+            // Unlock cancelled — still on the backup step, nothing broadcast.
             submittingRef.current = false;
             if (isMounted.current) setPinned(false);
             return;
@@ -1207,23 +1326,8 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
 
         let broadcasted = false;
         try {
-            // 2. Derive keys inline so any failure surfaces in the error panel.
-            console.log("[AddAccountDialog] generating mnemonic…");
-            // Seed wordlist follows the active UI language; languages without
-            // a BIP-39 wordlist fall back to English inside BackUpWallet3.
-            const seed = await generateMnemonic(18, getLanguage());
-            console.log("[AddAccountDialog] deriving master key…");
-            const masterKey = await generateMasterKey(seed, "");
-            console.log("[AddAccountDialog] building backup PDF + role keys…");
-            // Printed in the locale and page size chosen in the settings.
-            const [pdfBlob, keys] = await generatePDF(username, seed, "", masterKey, backupPdfOptions(api, getLocaleCode()));
-            const pub = keys && keys.pub;
-            if (!pub || !pub.owner || !pub.active || !pub.posting || !pub.memo) {
-                throw new Error(t("components.add_account_dialog.incomplete_authority_set"));
-            }
-            lastPdfBlob.current  = pdfBlob;
-            lastUsername.current = username;
-
+            // The keys are the backup's (`pub`): derived at NEXT, their PDF
+            // downloaded and its save confirmed by the creator before this.
             const jsonMetadata = JSON.stringify({
                 created_by: "pixagram-credit-gift",
                 created_at: new Date().toISOString(),
@@ -1256,7 +1360,7 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
                 }
                 ops.push(["create_claimed_account", {
                     creator: currentAccount,
-                    new_account_name: username,
+                    new_account_name: name,
                     owner:   buildAuth(pub.owner),
                     active:  buildAuth(pub.active),
                     posting: buildAuth(pub.posting),
@@ -1278,7 +1382,7 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
                 ops.push(["account_create", {
                     fee: toChainAsset(feeParsed.amount, feeParsed.symbol),
                     creator: currentAccount,
-                    new_account_name: username,
+                    new_account_name: name,
                     owner:   buildAuth(pub.owner),
                     active:  buildAuth(pub.active),
                     posting: buildAuth(pub.posting),
@@ -1293,14 +1397,14 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
                 // VESTS so a "max" selection can't be rejected for overshoot.
                 ops.push(["delegate_vesting_shares", {
                     delegator: currentAccount,
-                    delegatee: username,
+                    delegatee: name,
                     vesting_shares: powerToVestsAsset(pxpAmount, vestRatio, pxpAvailableVests),
                 }]);
             }
             if (pxaAmount > 0) {
                 ops.push(["transfer", {
                     from: currentAccount,
-                    to:   username,
+                    to:   name,
                     amount: toChainAsset(pxaAmount, SYM_PXA),
                     memo:   "Welcome to Pixagram",
                 }]);
@@ -1308,7 +1412,7 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
             if (pxsAmount > 0) {
                 ops.push(["transfer", {
                     from: currentAccount,
-                    to:   username,
+                    to:   name,
                     amount: toChainAsset(pxsAmount, SYM_PXS),
                     memo:   "Welcome to Pixagram",
                 }]);
@@ -1322,19 +1426,19 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
             console.log("[AddAccountDialog] broadcast result:", result);
             broadcasted = true;
 
-            // 4. The account now exists on-chain and its keys live ONLY in
-            //    pdfBlob. Save it unconditionally — never behind isMounted,
-            //    otherwise a closed dialog silently loses the recipient's keys.
-            const downloaded = downloadBlob(pdfBlob, backupFileName(username));
+            // 4. The account now exists on-chain. Its keys were already saved:
+            //    the backup PDF was downloaded, and its save confirmed, before
+            //    this broadcast — a closed dialog loses nothing. The key
+            //    material has done its job: dropped from memory.
+            backupsRef.current.clear();
             if (actions && actions.trigger_snackbar) {
                 actions.trigger_snackbar(t("components.add_account_dialog.account_created", {
-                    username: username
+                    username: name
                 }));
             }
             try { await api.accounts.getAccounts([creator], true); } catch (_) {}
 
             if (!isMounted.current) return;
-            setPdfDownloaded(downloaded);
             setStatus("success");
             startAutoClose();
         } catch (err) {
@@ -1353,7 +1457,7 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
             submittingRef.current = false;
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [canSubmit, api, currentAccount, username, isRc, pendingClaimed, creationFee, pxaAmount, pxsAmount, pxpAmount, vestRatio, pxpAvailableVests, startAutoClose]);
+    }, [canCreate, backupFor, api, currentAccount, isRc, pendingClaimed, creationFee, pxaAmount, pxsAmount, pxpAmount, vestRatio, pxpAvailableVests, startAutoClose]);
 
     const handleRetry = useCallback(() => {
         setStatus("form");
@@ -1627,17 +1731,70 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
         </Fade>
     );
 
-    const renderWorking = () => (
+    const renderPreparing = () => (
         <div className={classes.statusPanel}>
             <CircularProgress size={48} style={WORKING_SPINNER_STYLE} />
             <Typography className={classes.statusMessage}>
-                {t(
-                    "components.add_account_dialog.generating_keys_signing_the_transaction_broadcas"
-                )}
+                {t("components.add_account_dialog.generating_the_keys_and_the_backup_pdf")}
             </Typography>
         </div>
     );
 
+    // The backup step, between NEXT and CREATE: 1. download the PDF, 2. tick
+    // the box (or its words) to confirm it is saved in a safe place — the box
+    // only once a copy was downloaded. CREATE waits for both (canCreate).
+    const renderBackup = () => (
+        <Fade in timeout={200}>
+            <div className={classes.statusPanel}>
+                <VpnKeyIcon className={classes.statusIcon} />
+                <Typography className={classes.statusMessage}>
+                    {t("components.add_account_dialog.back_up_the_keys_of", { username: backupFor })}
+                </Typography>
+                <Typography className={classes.statusMessage} style={SUCCESS_SUB_STYLE}>
+                    {t("components.add_account_dialog.this_pdf_holds_the_new_accounts_seed_phrase")}
+                </Typography>
+                <Button
+                    variant={pdfDownloaded ? "outlined" : "contained"}
+                    color="primary"
+                    onClick={triggerPdfDownload}
+                    disabled={awaitingKey}
+                >
+                    {pdfDownloaded
+                        ? t("components.add_account_dialog.re_download_backup_pdf")
+                        : t("components.add_account_dialog.download_backup_pdf")}
+                </Button>
+                {pdfFailed && (
+                    <Typography style={ERROR_HINT_STYLE}>
+                        {t("components.add_account_dialog.the_pdf_couldnt_be_downloaded_please_try_again")}
+                    </Typography>
+                )}
+                <FormControlLabel
+                    className={classes.backupConfirm}
+                    control={
+                        <Checkbox
+                            color="default"
+                            checked={pdfConfirmed}
+                            onChange={togglePdfConfirmed}
+                            disabled={!pdfDownloaded || awaitingKey}
+                            name="backup-saved"
+                        />
+                    }
+                    label={t("components.add_account_dialog.i_have_saved_the_backup_pdf_with_the", { username: backupFor })}
+                />
+            </div>
+        </Fade>
+    );
+
+    const renderWorking = () => (
+        <div className={classes.statusPanel}>
+            <CircularProgress size={48} style={WORKING_SPINNER_STYLE} />
+            <Typography className={classes.statusMessage}>
+                {t("components.add_account_dialog.signing_and_broadcasting_the_transaction")}
+            </Typography>
+        </div>
+    );
+
+    // The backup PDF was saved before the broadcast (the backup step).
     const renderSuccess = () => (
         <div className={classes.statusPanel}>
             <CheckCircleOutlineIcon className={classes.statusIcon} />
@@ -1650,11 +1807,6 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
                     text: pdfDownloaded ? " " + t("components.add_account_dialog.please_hand_it_over_securely") : "."
                 }
             )}</Typography>
-            {!pdfDownloaded && (
-                <Button variant="contained" color="primary" onClick={triggerPdfDownload}>
-                    {t("components.add_account_dialog.re_download_backup_pdf")}
-                </Button>
-            )}
             {autoCloseInSec !== null && (
                 <Typography style={AUTO_CLOSE_STYLE}>{t("components.add_account_dialog.closing_in_s", {
                     autoCloseInSec: autoCloseInSec
@@ -1679,7 +1831,7 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
     // Build a friendly hint for *why* the button is disabled — surfaces in a
     // tooltip so the user isn't left wondering.
     const disabledHint = useMemo(() => {
-        if (canSubmit) return "";
+        if (formReady) return "";
         if (!currentAccount)                  return t("components.add_account_dialog.resolving_your_active_account");
         if (accountInfoLoading)               return t("components.add_account_dialog.loading_your_wallet");
         if (!username.length)                 return t("components.add_account_dialog.choose_a_username_for_the_new_account");
@@ -1693,10 +1845,19 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
             creationFee: creationFee || ""
         });
         return "";
-    }, [canSubmit, currentAccount, accountInfoLoading, username, usernamePending, usernameSyntaxError, usernameTaken, usernameAvailable, isRc, rcBlocked, canAffordFee, creationFee]);
+    }, [formReady, currentAccount, accountInfoLoading, username, usernamePending, usernameSyntaxError, usernameTaken, usernameAvailable, isRc, rcBlocked, canAffordFee, creationFee]);
 
-    // Busy = waiting on the UnlockKeyDialog, or signing / broadcasting.
-    const busy = awaitingKey || status === "working";
+    // The same, for CREATE on the backup step: the backup comes first.
+    const createHint = useMemo(() => {
+        if (canCreate) return "";
+        if (!pdfDownloaded) return t("components.add_account_dialog.download_the_backup_pdf_first");
+        if (!pdfConfirmed)  return t("components.add_account_dialog.confirm_that_the_backup_pdf_is_saved_in");
+        return disabledHint;
+    }, [canCreate, pdfDownloaded, pdfConfirmed, disabledHint]);
+
+    // Busy = making the keys, waiting on the UnlockKeyDialog, or signing /
+    // broadcasting.
+    const busy = awaitingKey || status === "preparing" || status === "working";
 
     return (
         <Dialog
@@ -1718,34 +1879,60 @@ const AddAccountDialog = ({ classes, open, api, onClose }) => {
         >
             {busy && <LinearProgress className={classes.progressOverlay} />}
             <DialogContent>
-                {status === "form"    && renderForm()}
-                {status === "working" && renderWorking()}
-                {status === "success" && renderSuccess()}
-                {status === "error"   && renderError()}
+                {status === "form"      && renderForm()}
+                {status === "preparing" && renderPreparing()}
+                {status === "backup"    && renderBackup()}
+                {status === "working"   && renderWorking()}
+                {status === "success"   && renderSuccess()}
+                {status === "error"     && renderError()}
             </DialogContent>
             <DialogActions style={ACTIONS_STYLE}>
                 {status === "form" && (
                     <>
                         <Button variant="text" color="primary" onClick={handleClose} disabled={awaitingKey}>{t("words.cancel", {TUC: true})}</Button>
+                        {/* NEXT: keys + backup PDF — nothing is created yet. */}
                         <Tooltip
                             title={disabledHint}
-                            disableHoverListener={canSubmit}
-                            disableFocusListener={canSubmit}
-                            disableTouchListener={canSubmit}
+                            disableHoverListener={canNext}
+                            disableFocusListener={canNext}
+                            disableTouchListener={canNext}
                         >
                             <span>
                                 <Button
                                     variant="contained"
                                     color="primary"
                                     autoFocus
+                                    onClick={handleNext}
+                                    disabled={!canNext}
+                                >{t("words.next", {TUC: true})} </Button>
+                            </span>
+                        </Tooltip>
+                    </>
+                )}
+                {status === "backup" && (
+                    <>
+                        <Button variant="text" color="primary" onClick={handleBack} disabled={awaitingKey}>{t("words.back", {TUC: true})}</Button>
+                        <Button variant="text" color="primary" onClick={handleClose} disabled={awaitingKey}>{t("words.cancel", {TUC: true})}</Button>
+                        {/* CREATE: only with the backup PDF downloaded and its
+                            save confirmed. */}
+                        <Tooltip
+                            title={createHint}
+                            disableHoverListener={canCreate}
+                            disableFocusListener={canCreate}
+                            disableTouchListener={canCreate}
+                        >
+                            <span>
+                                <Button
+                                    variant="contained"
+                                    color="primary"
                                     onClick={handleSubmit}
-                                    disabled={!canSubmit}
+                                    disabled={!canCreate}
                                 >{t("words.create", {TUC: true})} </Button>
                             </span>
                         </Tooltip>
                     </>
                 )}
-                {status === "working" && (
+                {(status === "preparing" || status === "working") && (
                     <Button variant="text" color="primary" disabled>{t("components.add_account_dialog.working")}</Button>
                 )}
                 {status === "success" && (

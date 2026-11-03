@@ -16,6 +16,7 @@ import {
     EXAMPLE_FADE_MS, EXAMPLE_FIRST_MS, EXAMPLE_INTERVAL_MS,
 } from "./config";
 import { countFilters } from "./filters";
+import { useFullScreen } from "./fullScreen";
 import { tr } from "./highlight";
 import { ghostFor } from "./intent";
 import { searchStyles } from "./styles";
@@ -24,7 +25,15 @@ import { LISTBOX_ID, fillable, optionId } from "./SuggestionList";
 
 // ── SearchBar ─────────────────────────────────────────────────────────────────
 // The toolbar's search box: input, filter button, close/back button,
-// click-away, and the results dropdown anchored to the bar.
+// click-away, and the results dropdown, rendered inside the bar so it hangs
+// right under it (CSS, no Popper).
+//
+// Full screen (fullScreen.js): scrolled down into the posts and artworks, the
+// bar grows into a panel with the dropdown inside it — a centred sheet on
+// desktop (61.8 % × 82.7 % of the viewport), the whole screen on phones — in a
+// hero transition from where bar + dropdown stood; scrolled back up out of
+// them, it shrinks back. Meanwhile a hidden copy of the bar holds its place in
+// the toolbar, and the sizes below are measured on that copy.
 //
 // The filter button's icon follows the search: a magnifier while it is closed
 // (so the bar reads as a search box), the filter icon once it is open, with the
@@ -187,6 +196,11 @@ function useBarMetrics(bar, wrapper, open) {
     const openRef = useRef(open);
     openRef.current = open;
     const measureRef = useRef(null);
+    // The element measured now: an observer of the one before (until its effect is
+    // cleaned up) measures nothing — the bar that became the full-screen panel is not
+    // the bar's size.
+    const barRef = useRef(bar);
+    barRef.current = bar;
 
     useEffect(() => {
         if (!bar) return undefined;
@@ -196,6 +210,7 @@ function useBarMetrics(bar, wrapper, open) {
                 cancelAnimationFrame(frame);
                 frame = 0;
             }
+            if (barRef.current !== bar) return;
             const vw = window.innerWidth;
             const vh = window.innerHeight;
             const desktop = vw >= DESKTOP_MIN_WIDTH;
@@ -253,14 +268,23 @@ const SearchBarInner = React.memo(
         const setRef = useCallback((el) => { if (el) setAnchorEl(el); }, []);
         const setWrapperRef = useCallback((el) => { if (el) setWrapperEl(el); }, []);
         const setInputRef = useCallback((el) => { if (el) setInputEl(el); }, []);
-        const { width, maxHeight, extra } = useBarMetrics(anchorEl, wrapperEl, open);
+        const reduceMotion = useReducedMotion();
+        // Full screen, the bar is the panel and its hidden copy stands in the toolbar:
+        // the sizes are the copy's then (the toolbar's, which the panel goes back to).
+        const resultsRef = useRef(null);
+        const maxHeightRef = useRef(0);
+        const fullScreen = useFullScreen({ open, panel: anchorEl, resultsRef, maxHeightRef, reduceMotion });
+        const full = open && fullScreen.full;
+        const { width, maxHeight, extra } = useBarMetrics(full ? fullScreen.spacer : anchorEl, wrapperEl, open);
+        maxHeightRef.current = maxHeight;
         const openRef = useRef(open);
         openRef.current = open;
 
         // ── v3: suggestions, ghost text, examples ──
         const suggest = results ? results.suggest : null;
         const examples = results ? results.examples : null;
-        const box = useInputBox(inputEl, [width, open]);
+        // (the input widens and narrows with the panel: measured again once the panel has moved)
+        const box = useInputBox(inputEl, [width, open, full, fullScreen.tick, fullScreen.vw]);
 
         // The suggestion rows shown: not the text itself.
         const typed = String(value || "").trim().toLowerCase();
@@ -302,7 +326,6 @@ const SearchBarInner = React.memo(
         void caretTick; // re-read the caret after a click or an arrow key
 
         const pageVisible = usePageVisible();
-        const reduceMotion = useReducedMotion();
         const hasExamples = !!examples && examples.length > 0;
         const cycle = useExampleCycle(examples, hasExamples && !value && pageVisible && !reduceMotion);
         const example = hasExamples && cycle.index >= 0 ? examples[cycle.index] : null;
@@ -441,7 +464,19 @@ const SearchBarInner = React.memo(
         return (
             <ClickAwayListener onClickAway={onClickAway}>
                 <div className={classes.searchBarWrapper} ref={setWrapperRef} style={{ "--search-extra": `${extra}px` }}>
-                    <div className={open ? classes.searchBarOpen : classes.searchBar} ref={setRef}>
+                    {full ? (
+                        <div
+                            key="spacer"
+                            className={classes.searchBarOpen + " " + classes.searchBarSpacer}
+                            ref={fullScreen.setSpacer}
+                            aria-hidden="true"
+                        />
+                    ) : null}
+                    <div
+                        key="bar"
+                        className={open ? (full ? classes.searchBarOpen + " " + classes.searchBarFull : classes.searchBarOpen) : classes.searchBar}
+                        ref={setRef}
+                    >
                         <input
                             ref={setInputRef}
                             className={classes.searchInput}
@@ -504,29 +539,31 @@ const SearchBarInner = React.memo(
                         <IconButton className={classes.searchButton} onClick={onButton}>
                             {open ? <CloseIcon /> : <ArrowBackRounded />}
                         </IconButton>
+                        {open && anchorEl && width > 0 && (
+                            <SearchResults
+                                classes={classes}
+                                query={value}
+                                results={results}
+                                suggestions={listShown ? items : EMPTY_ITEMS}
+                                highlight={highlight}
+                                onPick={pick}
+                                onFill={fill}
+                                maxHeight={full ? fullScreen.height : maxHeight}
+                                full={full}
+                                columns={fullScreen.columns}
+                                scrollRef={fullScreen.setScroller}
+                                resultsRef={resultsRef}
+                                history={history}
+                                controls={controls}
+                                onGoToUsername={onGoToUsername}
+                                onGoToTag={onGoToTag}
+                                onGoToCommunity={onGoToCommunity}
+                                onGoToArtwork={onGoToArtwork}
+                                onGoToPost={onGoToPost}
+                                onSetTagNavigation={onSetTagNavigation}
+                            />
+                        )}
                     </div>
-                    {open && anchorEl && width > 0 && (
-                        <SearchResults
-                            classes={classes}
-                            query={value}
-                            results={results}
-                            suggestions={listShown ? items : EMPTY_ITEMS}
-                            highlight={highlight}
-                            onPick={pick}
-                            onFill={fill}
-                            anchorEl={anchorEl}
-                            width={width}
-                            maxHeight={maxHeight}
-                            history={history}
-                            controls={controls}
-                            onGoToUsername={onGoToUsername}
-                            onGoToTag={onGoToTag}
-                            onGoToCommunity={onGoToCommunity}
-                            onGoToArtwork={onGoToArtwork}
-                            onGoToPost={onGoToPost}
-                            onSetTagNavigation={onSetTagNavigation}
-                        />
-                    )}
                 </div>
             </ClickAwayListener>
         );

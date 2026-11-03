@@ -7,7 +7,8 @@ import { withLanguage } from "../utils/withLanguage";
 // Terms of Use. Every string lives in locales/en.js under
 // components.privacy_policy, one key per paragraph / bullet (bold lead-ins
 // get their own key), in document order. Rendered by AppInfoDialog (Privacy
-// tab) and by the agreement modal of CreateAccountDialog. Not translated.
+// tab) and by the agreement modal of CreateAccountDialog. Translated in
+// every locale.
 const styles = theme => ({
 
 });
@@ -22,7 +23,10 @@ class PrivacyPolicy extends React.PureComponent {
     };
 
     shouldComponentUpdate(nextProps, nextState, nextContext) {
-        return false;
+        // Static text: re-render only when the translations change (a language
+        // switch, or a missing key's English fallback landing).
+        return nextProps.__i18nLang !== this.props.__i18nLang ||
+            nextProps.__i18nRev !== this.props.__i18nRev;
     }
 
     render() {

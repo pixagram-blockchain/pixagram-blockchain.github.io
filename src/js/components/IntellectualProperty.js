@@ -16,7 +16,11 @@ class IntellectualProperty extends React.PureComponent {
     };
 
     shouldComponentUpdate(nextProps, nextState, nextContext) {
-        return false;
+        // Static text: re-render only when the UI language changes
+        // (withLanguage passes the active code as __i18nLang, and a counter
+        // that also moves when a fallback catalogue lands as __i18nRev).
+        return nextProps.__i18nLang !== this.props.__i18nLang ||
+            nextProps.__i18nRev !== this.props.__i18nRev;
     }
 
     render() {
@@ -28,7 +32,7 @@ class IntellectualProperty extends React.PureComponent {
                 <p>
                     {t(
                         "components.intellectual_property.mit_license_copyright_c_2024_2025_pixagram"
-                    )}<br/><br/>Permission is granted, without charge, to any entity obtaining a copy of this software and corresponding documentation files (the "Software"), to deal in the Software without restriction. This includes the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to allow individuals to whom the Software is provided to do so, abiding by the following conditions: The preceding copyright notice and this permission notice must be included in all copies or substantial parts of the Software.<br/><br/>
+                    )}<br/><br/>{t("components.intellectual_property.permission_is_granted_without_charge_to_any")}<br/><br/>
                     {t("components.intellectual_property.the_software_is_delivered_as_is_without")}<br/>
                     {t("components.intellectual_property.in_no_event_shall_pixagram_sa_be")}
                 </p>

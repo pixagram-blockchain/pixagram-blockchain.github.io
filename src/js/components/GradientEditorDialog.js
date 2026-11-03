@@ -33,9 +33,15 @@ import Menu from "@material-ui/core/Menu";
 import ColorPicker from "./ColorPicker";
 import {optimize} from "svgo/lib/svgo";
 
-import { t } from "../utils/text";
+import { t, tk, tx, getLocaleCode } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
+
+// A decimal number shown to the user, with the app locale's separator.
+const formatDecimal = (n, digits) => Number(n).toLocaleString(getLocaleCode(), {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits
+});
 // ===== Color Engine Class =====
 class ColorEngine {
     static hexToRgb(hex) {
@@ -715,7 +721,7 @@ const styles = (theme) => ({
 
     // Right: accordion controls
     controlsPanel: {
-        maxHeight: "calc(80vh - 120px)",
+        maxHeight: "calc(var(--app-h, 100vh) * 0.8 - 120px)",
         overflowY: "auto",
         "& div.MuiPaper-rounded": { borderRadius: "21px", backgroundColor: "#171717" },
         "& .MuiAccordionDetails-root": { overflow: "hidden" },
@@ -863,7 +869,8 @@ class GradientEditorDialog extends React.Component {
             colorMenuAnchor: null,
 
             stats: {
-                svgSizeText: "0 KB",
+                // formatted at render (locale-aware), see the Download button
+                svgKb: 0,
             }
         };
 
@@ -1468,35 +1475,35 @@ class GradientEditorDialog extends React.Component {
         }
     };
 
+    // Labels are tk() descriptors, resolved with tx() where the menu renders.
     getPaletteOptions = () => {
         const n = this.state.colorCount|0;
         if (n === 1) {
             return [
-                { value: 'monotone', label: 'Monotone' },
-                { value: 'complementary', label: 'Complementary' },
-                { value: 'darker', label: 'Darker Tones' },
-                { value: 'lighter', label: 'Lighter Tones' },
+                { value: 'monotone', label: tk("components.gradient_editor_dialog.monotone") },
+                { value: 'complementary', label: tk("components.gradient_editor_dialog.complementary") },
+                { value: 'darker', label: tk("components.gradient_editor_dialog.darker_tones") },
+                { value: 'lighter', label: tk("components.gradient_editor_dialog.lighter_tones") },
             ];
         }
         if (n === 2) {
             return [
-                { value: 'interpolate', label: 'Interpolate' },
-                { value: 'triadic', label: 'Triadic' },
-                { value: 'shortHue', label: 'Short Hue Path' },
-                { value: 'longHue', label: 'Long Hue Path' },
+                { value: 'interpolate', label: tk("components.gradient_editor_dialog.interpolate") },
+                { value: 'triadic', label: tk("components.gradient_editor_dialog.triadic") },
+                { value: 'shortHue', label: tk("components.gradient_editor_dialog.short_hue_path") },
+                { value: 'longHue', label: tk("components.gradient_editor_dialog.long_hue_path") },
             ];
         }
         // n === 3
         return [
-            { value: 'shortHue', label: 'Short Hue Path' },
-            { value: 'longHue', label: 'Long Hue Path' },
+            { value: 'shortHue', label: tk("components.gradient_editor_dialog.short_hue_path") },
+            { value: 'longHue', label: tk("components.gradient_editor_dialog.long_hue_path") },
         ];
     };
 
     updateStats = () => {
         const bytes = new Blob([this.svgContent]).size;
-        const kb = (bytes / 1024).toFixed(2) + " KB";
-        this.setState({ stats: { svgSizeText: kb } });
+        this.setState({ stats: { svgKb: bytes / 1024 } });
     };
 
     // ===== Debounced regeneration =====
@@ -1719,7 +1726,7 @@ class GradientEditorDialog extends React.Component {
                                         </Grid>
                                         <Grid item xs={12} md={4}>
                                             <Button fullWidth variant="text" onClick={this.downloadSVG} startIcon={<GetAppIcon />}>{t("components.gradient_editor_dialog.download", {
-                                                    svgSizeText: s.stats.svgSizeText
+                                                    svgSizeText: formatDecimal(s.stats.svgKb, 2) + " KB"
                                                 })}</Button>
                                         </Grid>
                                     </Grid>
@@ -1799,21 +1806,21 @@ class GradientEditorDialog extends React.Component {
                                                     >
                                                         <ToggleButton
                                                             value={1}
-                                                            aria-label="1 color"
+                                                            aria-label={t("components.gradient_editor_dialog.n_colors", { color: { color: 1 } })}
                                                             style={{ flex: 1, fontWeight: "bold"}}
                                                         >
                                                             1
                                                         </ToggleButton>
                                                         <ToggleButton
                                                             value={2}
-                                                            aria-label="2 colors"
+                                                            aria-label={t("components.gradient_editor_dialog.n_colors", { color: { color: 2 } })}
                                                             style={{ flex: 1, fontWeight: "bold"}}
                                                         >
                                                             2
                                                         </ToggleButton>
                                                         <ToggleButton
                                                             value={3}
-                                                            aria-label="3 colors"
+                                                            aria-label={t("components.gradient_editor_dialog.n_colors", { color: { color: 3 } })}
                                                             style={{ flex: 1, fontWeight: "bold"}}
                                                         >
                                                             3
@@ -1887,7 +1894,7 @@ class GradientEditorDialog extends React.Component {
                                                                 }}
                                                             >
                                                                 {this.getPaletteOptions().map(opt => (
-                                                                    <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                                                                    <MenuItem key={opt.value} value={opt.value}>{tx(opt.label)}</MenuItem>
                                                                 ))}
                                                             </Select>
                                                         </FormControl>
@@ -2072,7 +2079,7 @@ class GradientEditorDialog extends React.Component {
                                                         onChange={this.handleSliderGenerate("noiseAmount")}
                                                     />
                                                     <Typography gutterBottom variant="caption">{t("components.gradient_editor_dialog.noise_frequency", {
-                                                            noiseFrequency: (s.noiseFrequency / 100).toFixed(2)
+                                                            noiseFrequency: formatDecimal(s.noiseFrequency / 100, 2)
                                                         })}</Typography>
                                                     <Slider
                                                         min={10}
@@ -2154,7 +2161,7 @@ class GradientEditorDialog extends React.Component {
                                                         onChange={this.handleSliderGenerate("noiseAmount")}
                                                     />
                                                     <Typography gutterBottom variant="caption">{t("components.gradient_editor_dialog.noise_frequency", {
-                                                            noiseFrequency: (s.noiseFrequency / 100).toFixed(2)
+                                                            noiseFrequency: formatDecimal(s.noiseFrequency / 100, 2)
                                                         })}</Typography>
                                                     <Slider
                                                         min={10}

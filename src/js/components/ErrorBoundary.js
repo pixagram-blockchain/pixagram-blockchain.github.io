@@ -104,7 +104,7 @@ export class ErrorBoundary extends React.Component {
         return (
             <div style={FALLBACK_STYLE} role="alert">
                 <span>{t("components.error_boundary.couldnt_render_this", {
-                    label: label || "content"
+                    label: label || t("components.error_boundary.content")
                 })}</span>
                 <button style={RETRY_STYLE} onClick={this._retry}>{t("components.error_boundary.retry")}</button>
             </div>

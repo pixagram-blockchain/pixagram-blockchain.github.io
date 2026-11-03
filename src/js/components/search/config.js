@@ -30,12 +30,17 @@ export const SEARCH_API_URL = (
     "https://pixagram-search-v4.p1x4.workers.dev"
 ).replace(/\/+$/, "");
 
+// The documentation /help answers from is the wiki on pixa.org. The Worker's
+// index still links to its old home on GitHub (pixagram-blockchain/information):
+// wiki.js turns those links into the wiki's before the box shows them.
+export const WIKI_URL = "https://pixa.org/wiki";
+
 export const LIMITS = Object.freeze({
-    users: 10,
-    tags: 20,
-    communities: 10,
-    artworks: 15,
-    posts: 5,
+    users: 12,
+    tags: 24,
+    communities: 8,
+    artworks: 48,
+    posts: 12,
 });
 
 // Community accounts are named portal-<id>; lookup_accounts returns them like any
@@ -62,6 +67,24 @@ export const DROPDOWN_MAX_HEIGHT = 786;
 
 // Filter panel: suggestions shown under the author / community text fields.
 export const SUGGEST_LIMIT = 6;
+
+// ── The full-screen panel (fullScreen.js) ─────────────────────────────────────
+// Scrolled down into the posts and artworks, the open search grows into a
+// panel; scrolled back up out of them, it shrinks into the toolbar. On desktop
+// (DESKTOP_MIN_WIDTH and up) the panel is a centred sheet FULL_WIDTH of the
+// viewport's width and FULL_HEIGHT of its height (61.8 %, 82.7 %); below, the
+// whole screen, its corners squared. The posts or artworks must show by
+// FULL_ENTER_PX before it grows (hiding them entirely shrinks it). The hero
+// transition takes FULL_EXPAND_MS out and FULL_COLLAPSE_MS back. Full, the
+// artworks take as many columns of about FULL_COLUMN_PX as fit, from
+// MASONRY_COLUMNS to FULL_MAX_COLUMNS.
+export const FULL_WIDTH = 0.618;
+export const FULL_HEIGHT = 0.827;
+export const FULL_ENTER_PX = 24;
+export const FULL_EXPAND_MS = 450;
+export const FULL_COLLAPSE_MS = 350;
+export const FULL_COLUMN_PX = 192;
+export const FULL_MAX_COLUMNS = 8;
 
 // ── v3: the box guesses ───────────────────────────────────────────────────────
 // Suggestions are cheap (index lookups, cached at the edge): asked at every

@@ -38,7 +38,7 @@ import useMediaQuery from "@material-ui/core/useMediaQuery";
 import { useTheme } from "@material-ui/core/styles";
 
 import { T } from "../utils/T";
-import { t, getLocaleCode, useLanguage } from "../utils/text";
+import { t, tk, tx, tnode, getLocaleCode, useLanguage } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
 // ── Block strip dimensions ────────────────────────────────────────────────
@@ -65,10 +65,10 @@ const styles = theme => ({
             }
         },
         "& .react-swipeable-view-container": {
-            height: "max(80vh, calc(-420px + 100vh)) !important"
+            height: "max(calc(var(--app-h, 100vh) * 0.8), calc(var(--app-h, 100vh) - 420px)) !important"
         },
         "& .react-swipeable-view-container > div": {
-            height: "max(80vh, calc(-420px + 100vh)) !important",
+            height: "max(calc(var(--app-h, 100vh) * 0.8), calc(var(--app-h, 100vh) - 420px)) !important",
             overflow: "hidden overlay !important"
         }
     },
@@ -461,7 +461,7 @@ const styles = theme => ({
         "& .MuiDrawer-paper": {
             backgroundColor: "#171717",
             borderRadius: "21px 21px 0 0",
-            maxHeight: "80vh",
+            maxHeight: "calc(var(--app-h, 100vh) * 0.8)",
             overflow: "hidden",
             minWidth: "100%",
             zIndex: 9999999
@@ -480,7 +480,7 @@ const styles = theme => ({
     drawerContent: {
         padding: "16px",
         overflowY: "auto",
-        maxHeight: "calc(80vh - 80px)"
+        maxHeight: "calc(var(--app-h, 100vh) * 0.8 - 80px)"
     },
     transactionJsonContainer: {
         backgroundColor: "#101010",
@@ -604,12 +604,13 @@ const styles = theme => ({
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /**
- * Extract the primary actor from a blockchain operation.
+ * Extract the primary actor from a blockchain operation. Null when the
+ * operation names none (the list then shows the operation type alone).
  */
 function getOperationUser(opTuple) {
-    if (!opTuple || !Array.isArray(opTuple) || opTuple.length < 2) return "unknown";
+    if (!opTuple || !Array.isArray(opTuple) || opTuple.length < 2) return null;
     const [type, data] = opTuple;
-    if (!data) return "unknown";
+    if (!data) return null;
 
     switch (type) {
         case "vote":                     return data.voter;
@@ -644,16 +645,16 @@ function getOperationUser(opTuple) {
         case "custom_json":
             return (data.required_posting_auths && data.required_posting_auths[0])
                 || (data.required_auths && data.required_auths[0])
-                || "system";
+                || null;
         case "custom":
-            return (data.required_auths && data.required_auths[0]) || "system";
+            return (data.required_auths && data.required_auths[0]) || null;
         case "producer_reward":          return data.producer;
         case "pow":                      return data.worker_account;
         case "pow2":                     return data.work && data.work[1] && data.work[1].input
-            ? data.work[1].input.worker_account : "unknown";
+            ? data.work[1].input.worker_account : null;
         default:
             return data.account || data.from || data.voter || data.author
-                || data.creator || data.curator || data.owner || "unknown";
+                || data.creator || data.curator || data.owner || null;
     }
 }
 
@@ -704,11 +705,11 @@ function flattenBlockTransactions(block) {
     return rows;
 }
 
-/** Estimate block payload size */
+/** Estimate block payload size in kB (null when it can't be measured). */
 function estimateBlockSize(block) {
-    if (!block) return "0kB";
-    try { return (JSON.stringify(block).length / 1024).toFixed(1) + "kB"; }
-    catch { return "?kB"; }
+    if (!block) return 0;
+    try { return JSON.stringify(block).length / 1024; }
+    catch { return null; }
 }
 
 /**
@@ -725,7 +726,8 @@ function getBlockCardData(block) {
     let entry = BLOCK_CARD_CACHE.get(block);
     if (!entry) {
         entry = {
-            size: estimateBlockSize(block),
+            sizeKb: estimateBlockSize(block),
+            size: "",
             timestamp: new Date(block.timestamp + "Z"),
             locale: null,
             dateLabel: "",
@@ -735,6 +737,9 @@ function getBlockCardData(block) {
     const locale = getLocaleCode();
     if (entry.locale !== locale) {
         entry.locale = locale;
+        entry.size = (entry.sizeKb == null
+            ? "?"
+            : entry.sizeKb.toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 })) + "kB";
         entry.dateLabel = entry.timestamp.toLocaleDateString(locale, {
             weekday: "long", year: "numeric", month: "long",
             day: "numeric", hour: "numeric", minute: "numeric", second: "numeric",
@@ -1139,18 +1144,20 @@ class BlockViewer extends React.PureComponent {
             ? vops[0]
             : { block, virtual_operation_count: vops.length, virtual_operations: vops };
 
+        // Notices are stored as tk() descriptors and resolved with tx() in
+        // render, so they follow a language switch while they are on screen.
         this.setState({
             data,
             drawerOpen: true,
             virtualNotice: vops.length > 0
-                ? t(
+                ? tk(
                 "components.block_viewer.virtual_operations_arent_broadcast_as_transactions",
                 {
                     operation: { operation: vops.length },
                     Number: Number(block).toLocaleString(getLocaleCode())
                 }
             )
-                : t("components.block_viewer.that_looks_like_a_virtual_operation_which", {
+                : tk("components.block_viewer.that_looks_like_a_virtual_operation_which", {
                 Number: Number(block).toLocaleString(getLocaleCode())
             }),
         }, () => this.forceUpdate());
@@ -1177,14 +1184,14 @@ class BlockViewer extends React.PureComponent {
                 }, () => this.forceUpdate());
             } else {
                 this.setState({
-                    virtualNotice: t("components.block_viewer.no_transaction_found_for_that_id_if"),
+                    virtualNotice: tk("components.block_viewer.no_transaction_found_for_that_id_if"),
                 }, () => this.forceUpdate());
             }
         } catch (e) {
             console.warn("[BlockViewer] Failed to fetch transaction:", txId, e);
             if (this.state.transaction !== txId) return;
             this.setState({
-                virtualNotice: t("components.block_viewer.couldnt_fetch_that_transaction_if_its_a"),
+                virtualNotice: tk("components.block_viewer.couldnt_fetch_that_transaction_if_its_a"),
             }, () => this.forceUpdate());
         }
     }
@@ -1528,7 +1535,7 @@ class BlockViewer extends React.PureComponent {
             data: operationData || this.state.data,
             drawerOpen: true,
             virtualNotice: isVirtual
-                ? t("components.block_viewer.this_is_a_virtual_operation_from_block", {
+                ? tk("components.block_viewer.this_is_a_virtual_operation_from_block", {
                 Number: Number(this.state.block).toLocaleString(getLocaleCode())
             })
                 : "",
@@ -1574,7 +1581,7 @@ class BlockViewer extends React.PureComponent {
 
     _renderBlockCard = (block, classes) => {
         const blockNum    = block.block_number;
-        const witness     = block.witness || "unknown";
+        const witness     = block.witness || null;
         const txCount     = block.transactions ? block.transactions.length : 0;
         const { size, timestamp, dateLabel } = getBlockCardData(block);
         const isSelected  = blockNum === this.state.block;
@@ -1604,7 +1611,7 @@ class BlockViewer extends React.PureComponent {
                     {`#${blockNum.toLocaleString(getLocaleCode())}`}
                 </span>
                 <span className={secondaryClass}>
-                    <span style={witnessStyle}>@{witness}</span>
+                    <span style={witnessStyle}>{witness ? "@" + witness : "—"}</span>
                     <br />
                     <span>{size}</span>
                     <span> · </span>
@@ -1642,7 +1649,10 @@ class BlockViewer extends React.PureComponent {
         const [opType, opData] = op.op;
         const user  = getOperationUser(op.op);
         const isVirtual = isVirtualOperation(op) || this._isVirtualTrxId(op.trx_id);
+        // "virtual" is also the lookup token the transaction field accepts
+        // (_isVirtualTrxId), so only the list label is translated.
         const trxId = isVirtual ? "virtual" : String(op.trx_id).substring(0, 8);
+        const opTypeNode = <span style={OP_TYPE_STYLE} key="operation">{opType}</span>;
 
         const detailData = {
             trx_id: op.trx_id,
@@ -1665,12 +1675,15 @@ class BlockViewer extends React.PureComponent {
                     </Avatar>
                 </ListItemAvatar>
                 <ListItemText
-                    primary={<span className={"monospace"}>{trxId}</span>}
+                    primary={<span className={"monospace"}>{isVirtual ? t("components.block_viewer.virtual") : trxId}</span>}
                     secondary={
                         <span>
-                            <span style={OP_TYPE_STYLE}>{opType}</span>
-                            <span> by </span>
-                            <span style={OP_TYPE_STYLE}>@{user}</span>
+                            {user
+                                ? tnode("components.block_viewer.operation_by_user", {
+                                    operation: opTypeNode,
+                                    user: <span style={OP_TYPE_STYLE} key="user">@{user}</span>,
+                                })
+                                : opTypeNode}
                         </span>
                     }
                 />
@@ -1714,7 +1727,7 @@ class BlockViewer extends React.PureComponent {
                 {virtualNotice && (
                     <div className={classes.virtualNotice}>
                         <InfoOutlinedIcon className={classes.virtualNoticeIcon} />
-                        <span>{virtualNotice}</span>
+                        <span>{tx(virtualNotice)}</span>
                     </div>
                 )}
             </React.Fragment>
@@ -1786,14 +1799,14 @@ class BlockViewer extends React.PureComponent {
                     {/* Block strip header */}
                     <div className={classes.blockStripHeader}>
                         <span className={classes.blockCountLabel}>
-                            {neighborBlocks.length} block{neighborBlocks.length !== 1 ? "s" : ""}
+                            {t("components.block_viewer.block_count", { block: { block: neighborBlocks.length } })}
                         </span>
                         {headBlockNum > 0 && (
                             <span
                                 className={classes.headBlockLabel}
                                 role="button"
                                 tabIndex={0}
-                                title="Jump to the latest block"
+                                title={t("components.block_viewer.jump_to_the_latest_block")}
                                 onClick={this._goToHead}
                                 onKeyDown={this._onHeadPillKeyDown}
                             ><T
@@ -1857,7 +1870,7 @@ class BlockViewer extends React.PureComponent {
                                 {/* Regular transactions */}
                                 <ListSubheader className={classes.listItemHeader}>
                                     <ListItem>
-                                        <ListItemText primary={`Transactions (${transactions.length})`} />
+                                        <ListItemText primary={t("components.block_viewer.transactions_count", { count: transactions.length })} />
                                     </ListItem>
                                 </ListSubheader>
                                 {transactions.length === 0 && !loading && (
@@ -1937,7 +1950,7 @@ class BlockViewer extends React.PureComponent {
                             {this.state.virtualNotice && (
                                 <div className={classes.virtualNotice} style={DRAWER_NOTICE_STYLE}>
                                     <InfoOutlinedIcon className={classes.virtualNoticeIcon} />
-                                    <span>{this.state.virtualNotice}</span>
+                                    <span>{tx(this.state.virtualNotice)}</span>
                                 </div>
                             )}
                         </div>

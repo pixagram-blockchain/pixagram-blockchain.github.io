@@ -24,6 +24,19 @@
  * unpriced figures print "n/a" with a warning; CSV cells escape CR and formula
  * prefixes. CSV schema changes: outbound column "taxable" is now "is_disposal",
  * and counterparties no longer carry an "@" prefix.
+ *
+ * LANGUAGE (Nov 2026): every label is a catalogue key (components.tax_report.*,
+ * plus a few shared with the wallet dialog), resolved through `opts.i18n` — a
+ * document translator from utils/docLanguage.js: { t, text, number, date,
+ * upper }. The dialog renders through renderInDocLanguage(), which writes the
+ * PDF in the UI language when Helvetica (WinAnsi) can print every string of it
+ * — see printableInReport() — and in English otherwise. The engine's notes and
+ * warnings arrive as descriptors and are resolved by i18n.text(). Numbers and
+ * dates follow the document's language. This module still imports nothing but
+ * pdf-lib: without opts.i18n (Node, tests) keys print as themselves and numbers
+ * use en-US. CSV column headers and data tokens (yes/no, category codes, ISO
+ * dates, "(pooled/none)") stay as they are — they are the file's schema; the
+ * human-text columns (tax_treatment, note) follow opts.i18n.
  * ===========================================================================*/
 
 import { PDFDocument, StandardFonts, rgb, PageSizes } from "pdf-lib";
@@ -94,17 +107,43 @@ function b64ToBytes(b64) {
   for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
   return a;
 }
+// ---- language ---------------------------------------------------------------
+
+/**
+ * Without opts.i18n (Node, tests): keys print as themselves and numbers and
+ * dates use en-US — never throws. The app passes a translator from
+ * utils/docLanguage.js instead; any object with this shape will do.
+ */
+function keyTranslator() {
+  const isTk = (x) => !!x && typeof x === "object" && typeof x.$t === "string";
+  const number = (n, d) => {
+    const dp = typeof d === "number" ? { min: d, max: d } : (d || { min: 0, max: 4 });
+    return Number(n).toLocaleString("en-US", { minimumFractionDigits: dp.min, maximumFractionDigits: dp.max });
+  };
+  const t = (key, vars) => (vars ? `${key} ${JSON.stringify(vars)}` : key);
+  const text = (x) => (isTk(x) ? t(x.$t, x.v) : Array.isArray(x) ? x.map(text).join("") : x == null ? "" : String(x));
+  const date = (d, o) => {
+    const s = String(d || "");
+    const v = new Date(/^\d{4}-\d{2}$/.test(s) ? `${s}-01T00:00:00Z` : /^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s}T00:00:00Z` : s);
+    return Number.isNaN(v.getTime()) ? s : new Intl.DateTimeFormat("en-US", Object.assign({ timeZone: "UTC" }, o || { dateStyle: "medium" })).format(v);
+  };
+  return { lang: "en", locale: "en-US", t, text, number, date, upper: (s) => String(s).toUpperCase() };
+}
+
 // Non-finite values print "n/a" (a NaN valuation must never pass for a real
-// zero), and amounts that round to zero never print as "-0.00".
-const fmt = (n, dp = 2) => {
+// zero), and amounts that round to zero never print as "-0.00". Formatted in
+// the document's locale.
+const makeFmt = (tr) => (n, dp = 2) => {
   const v = n == null ? NaN : Number(n);
-  if (!Number.isFinite(v)) return "n/a";
+  if (!Number.isFinite(v)) return tr.t("components.tax_report.not_available");
   const shown = Math.round(v * 10 ** dp) / 10 ** dp === 0 ? 0 : v;
-  return shown.toLocaleString("en-US", {
-    minimumFractionDigits: dp,
-    maximumFractionDigits: dp
-  });
+  return tr.number(shown, dp);
 };
+
+// Dates: the engine's ISO strings ("2025-12-31", timestamps, "2025-06" months)
+// shown in the document's language, always as the UTC calendar day.
+const dayOf = (tr, iso) => (iso ? tr.date(String(iso).slice(0, 10)) : "");
+const monthOf = (tr, ym) => tr.date(String(ym).slice(0, 7), { year: "numeric", month: "short" });
 
 // Display names. PIXA is the ticker; PXA is only the engine's internal alias
 // (kept as-is in the CSV exports, which the Basis section states). PXP is Pixa
@@ -114,7 +153,7 @@ const assetName = (a) => ASSET_LABELS[a] || a;
 
 // "1,800.0000 PIXA  ·  12.0000 PXS" — full per-asset breakdown for a row sub-line,
 // so token amounts are shown in full instead of truncated inside a column.
-const assetBreakdown = (byAsset, dp = 4) =>
+const assetBreakdown = (fmt, byAsset, dp = 4) =>
     Object.entries(byAsset || {}).map(([a, q]) => `${fmt(q, dp)} ${assetName(a)}`).join("   \u00b7   ");
 
 // The standard PDF fonts (Helvetica) use WinAnsi (CP1252) encoding, and pdf-lib
@@ -126,6 +165,16 @@ const assetBreakdown = (byAsset, dp = 4) =>
 // cite are romanised, accented letters outside CP1252 lose their accent, and
 // anything still unencodable becomes "?" (runs collapsed; a parenthesis holding
 // nothing printable is dropped).
+//
+// Translations: normalize() is the lossless part (typography, spaces, the
+// romanised legal terms). A language whose strings are all WinAnsi after it —
+// printableInReport() — gets a translated PDF; any other (Polish, Czech,
+// Turkish, Greek, Cyrillic, CJK…) gets English, so the lossy part of safe()
+// (accent stripping, "?") only ever touches user data, never a translation.
+// Narrow and figure spaces (fr/ch digit grouping) become a no-break space so a
+// number never wraps; wrap() breaks on ordinary spaces only. The romanised
+// terms carry no English gloss: they are printed inside every language, like
+// the other local professions the notes name (Steuerberater, contador...).
 const WINANSI_HIGH = "\u20AC\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u017D" +
     "\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u017E\u0178";
 const winAnsi = (c) => {
@@ -135,20 +184,35 @@ const winAnsi = (c) => {
 const TRANSLIT = [
   [/\u2192/g, "->"], [/\u2190/g, "<-"], [/\u2194/g, "<->"], [/\u21D2/g, "=>"], [/\u21D0/g, "<="],
   [/\u2212/g, "-"], [/[\u2032\u2035]/g, "'"], [/\u2264/g, "<="], [/\u2265/g, ">="], [/\u2248/g, "~"],
-  [/[\u2000-\u200A\u202F\u205F\u3000]/g, " "], [/[\u200B-\u200D\u2060\uFEFF]/g, ""],
+  [/[\u202F\u2007]/g, "\u00A0"], [/[\u2000-\u2006\u2008-\u200A\u205F\u3000]/g, " "], [/[\u200B-\u200D\u2060\uFEFF]/g, ""],
+  [/[\u2010-\u2012]/g, "-"], [/\u2015/g, "\u2014"], [/\u2033/g, "\""],
   [/\u20A9\s*/g, "KRW "], [/\u20B9\s*/g, "INR "], [/\u20A6\s*/g, "NGN "],
   [/\u96D1\u6240\u5F97/g, "zatsu shotoku"],                          // JP: miscellaneous income
   [/\u7DCF\u5E73\u5747\u6CD5/g, "so-heikin-ho"],                       // JP: total-average method
   [/\u79FB\u52D5\u5E73\u5747\u6CD5/g, "ido-heikin-ho"],                // JP: moving-average method
   [/\u56FD\u5916\u8CA1\u7523\u8ABF\u66F8/g, "kokugai zaisan chosho"],  // JP: overseas assets report
-  [/\u7A0E\u7406\u58EB/g, "zeirishi (tax accountant)"],                // JP: licensed tax accountant
-  [/\uC138\uBB34\uC0AC/g, "semusa (tax accountant)"],                  // KR: licensed tax accountant
-  [/\u05E8\u05D5\u05D0\u05D4 \u05D7\u05E9\u05D1\u05D5\u05DF/g, "roeh heshbon (CPA)"] // IL: CPA
+  [/\u7A0E\u7406\u58EB/g, "zeirishi"],                                 // JP: licensed tax accountant
+  [/\uC138\uBB34\uC0AC/g, "semusa"],                                   // KR: licensed tax accountant
+  [/\u05E8\u05D5\u05D0\u05D4 \u05D7\u05E9\u05D1\u05D5\u05DF/g, "roeh heshbon"]       // IL: CPA
 ];
+function normalize(s) {
+  s = String(s == null ? "" : s).replace(/[\u0000-\u001F\u007F]/g, " ");
+  for (const [re, to] of TRANSLIT) s = s.replace(re, to);
+  return s;
+}
+
+/**
+ * Can the report print this string without losing anything? The `canPrint`
+ * a caller hands to utils/docLanguage.js renderInDocLanguage() for this PDF.
+ */
+export function printableInReport(s) {
+  for (const c of normalize(s)) if (!winAnsi(c)) return false;
+  return true;
+}
+
 function safe(s) {
   if (s == null) return "";
-  s = String(s).replace(/[\u0000-\u001F\u007F]/g, " ");
-  for (const [re, to] of TRANSLIT) s = s.replace(re, to);
+  s = normalize(s);
   s = s.replace(/\s*\(([^()]*)\)/g, (m, inner) => ([...inner].some(c => winAnsi(c) && /\S/.test(c)) ? m : ""));
   let out = "";
   for (const c of s) {
@@ -185,38 +249,43 @@ async function sha256Hex(str) {
   }
 }
 
-// ASCII-only labels (the embedded Helvetica is WinAnsi — CJK cannot render).
+// Labels for the engine's codes, in the document's language (the catalogue
+// romanises the Japanese method name: Helvetica is WinAnsi). Each entry calls
+// tr.t() with a literal key so the i18n check can see it.
 const METHOD_LABELS = {
-  FIFO: "First-in, first-out (FIFO)",
-  LIFO: "Last-in, first-out (LIFO)",
-  HIFO: "Highest-in, first-out (HIFO)",
-  POOL: "Weighted-average pool (section-104 / adjusted-cost-base style)",
-  TOTAL_AVG: "Total average (Japan, so-heikin-ho) — each disposal priced at the full year's average cost"
+  FIFO: (tr) => tr.t("components.tax_report.method_fifo"),
+  LIFO: (tr) => tr.t("components.tax_report.method_lifo"),
+  HIFO: (tr) => tr.t("components.tax_report.method_hifo"),
+  POOL: (tr) => tr.t("components.tax_report.method_pool"),
+  TOTAL_AVG: (tr) => tr.t("components.tax_report.method_total_avg")
 };
+const methodLabel = (tr, m) => (METHOD_LABELS[m] ? METHOD_LABELS[m](tr) : String(m || ""));
 const TIMING_LABELS = {
-  claim: "On claim — rewards become income when collected",
-  accrual: "On accrual — rewards become income when credited"
+  claim: (tr) => tr.t("components.tax_report.timing_claim"),
+  accrual: (tr) => tr.t("components.tax_report.timing_accrual")
 };
+const timingLabel = (tr, k) => (TIMING_LABELS[k] ? TIMING_LABELS[k](tr) : String(k || ""));
 
 // Human labels for the engine's category codes (the tables used to print the
 // raw codes: "reward_claim", "market_fill", "delegation_out" ...).
 const CATEGORY_LABELS = {
-  reward_author: "Author rewards",
-  reward_curation: "Curation rewards",
-  reward_benefactor: "Beneficiary rewards",
-  reward_claim: "Rewards claimed (author + curation)",
-  proposal_income: "Proposal (DPF) payouts",
-  savings_interest: "Savings interest",
-  transfer_out: "Payments / transfers out",
-  swap: "Conversions (PIXA / PXS)",
-  market_fill: "Internal market trades"
+  reward_author: (tr) => tr.t("components.tax_report.category_reward_author"),
+  reward_curation: (tr) => tr.t("components.tax_report.category_reward_curation"),
+  reward_benefactor: (tr) => tr.t("components.tax_report.category_reward_benefactor"),
+  reward_claim: (tr) => tr.t("components.tax_report.category_reward_claim"),
+  proposal_income: (tr) => tr.t("components.tax_report.category_proposal_income"),
+  savings_interest: (tr) => tr.t("components.tax_report.category_savings_interest"),
+  transfer_out: (tr) => tr.t("components.tax_report.category_transfer_out"),
+  swap: (tr) => tr.t("components.tax_report.category_swap"),
+  market_fill: (tr) => tr.t("components.tax_report.category_market_fill")
 };
-const catLabel = (c) => CATEGORY_LABELS[c] || c;
+const catLabel = (tr, c) => (CATEGORY_LABELS[c] ? CATEGORY_LABELS[c](tr) : c);
 const SOURCE_LABELS = {
-  fta_list: "Official year-end list",
-  platform_price: "Platform price",
-  cost_basis: "Acquisition cost"
+  fta_list: (tr) => tr.t("components.tax_report.source_fta_list"),
+  platform_price: (tr) => tr.t("components.tax_report.source_platform_price"),
+  cost_basis: (tr) => tr.t("components.tax_report.source_cost_basis")
 };
+const sourceLabel = (tr, s) => (SOURCE_LABELS[s] ? SOURCE_LABELS[s](tr) : s);
 
 // True when the price source could not value something in the report currency
 // (a fiat missing from the provider makes every valuation NaN). The old report
@@ -238,7 +307,10 @@ function unpricedFigures(b) {
 // derived gain totals print "n/a" too.
 const txUnpriced = (b) => ((b.transactions && b.transactions.lines) || [])
     .some(l => l.proceedsFiat == null || !Number.isFinite(Number(l.proceedsFiat)));
-const unpricedMessage = (b) => `Some figures could not be valued in ${b.fiat}: the price source returned no ${b.fiat} rate for them. They are shown as "n/a" (not zero), and every total that includes them is incomplete. Fix the price source before using this report.`;
+const unpricedMessage = (tr, b) => tr.t("components.tax_report.some_figures_could_not_be_valued_in", {
+  fiat: b.fiat,
+  na: tr.t("components.tax_report.not_available")
+});
 
 // Are this report's gains taxed at all? "exempt" when there are disposals but
 // none carries a taxable lot (Swiss private investor, FR/AT before conversion
@@ -253,20 +325,29 @@ function gainsRegime(b) {
 // only means "is a disposal" — whether the gain is TAXED comes from the
 // transfer_out disposal lines themselves (always "no" for a Swiss private
 // investor, which the report used to print as "Taxable disposal").
-function sendDisposals(b) {
+function sendDisposals(tr, b) {
   const out = ((b.transactions && b.transactions.lines) || []).filter(l => l.category === "transfer_out");
   const taxed = out.filter(l => l.taxable).length;
-  const label = !out.length ? "Disposal"
-      : taxed === 0 ? "Disposal — gain not taxed here"
-          : taxed === out.length ? "Taxable disposal" : "Disposal — partly taxable";
+  const label = !out.length ? tr.t("components.tax_report.disposal")
+      : taxed === 0 ? tr.t("components.tax_report.disposal_gain_not_taxed_here")
+          : taxed === out.length ? tr.t("components.pixa_wallet_taxes_dialog.treat_taxable_disposal")
+              : tr.t("components.tax_report.disposal_partly_taxable");
   return { count: out.length, taxed, label };
 }
-function outboundTreatment(kind, slot, send) {
+function outboundTreatment(tr, kind, slot, send) {
   if (kind === "payment") return send.label;
-  if (kind === "own_exchange") return "Sale is off-platform";
-  if (kind === "own") return "Internal — not a disposal";
-  if (kind === "gift") return slot.taxable ? "Disposal at market value" : "Not a disposal here";
-  if (kind === "charity") return slot.taxable ? "Treated as a disposal" : "Exempt donation";
+  if (kind === "own_exchange") return tr.t("components.pixa_wallet_taxes_dialog.treat_sale_is_off_platform");
+  if (kind === "own") return tr.t("components.pixa_wallet_taxes_dialog.treat_internal_not_a_disposal");
+  if (kind === "gift") {
+    return slot.taxable
+        ? tr.t("components.pixa_wallet_taxes_dialog.treat_disposal_at_market_value")
+        : tr.t("components.pixa_wallet_taxes_dialog.treat_not_a_disposal_here");
+  }
+  if (kind === "charity") {
+    return slot.taxable
+        ? tr.t("components.pixa_wallet_taxes_dialog.treat_treated_as_a_disposal")
+        : tr.t("components.pixa_wallet_taxes_dialog.treat_exempt_donation");
+  }
   return "";
 }
 
@@ -300,17 +381,13 @@ function detectPriceMode(b, opts) {
   }
   return comparable ? "snapshot" : "unknown";
 }
-function priceBasisText(b, mode) {
+function priceBasisText(tr, b, mode) {
   const ps = b.priceSnapshot;
-  const ver = b.priceDataVersion || "n/a";
-  const asOf = ps ? `${ps.asOf} ${ps.timezone}` : String(b.periodEnd || "");
-  if (mode === "snapshot") {
-    return `${ver}. One unit price per token (snapshot ${asOf}) was applied to every date, so receipt-time and disposal-time values are approximations. Income must be valued on the day it is received: regenerate with historical prices before filing.`;
-  }
-  if (mode === "historical") {
-    return `${ver}. Each event is valued at the price for its own date; the unit prices on the summary page are the ${asOf} values used for closing balances.`;
-  }
-  return `${ver}. Each event is valued with the price provider's quote for its own date; the unit prices on the summary page are the ${asOf} values used for closing balances.`;
+  const version = b.priceDataVersion || tr.t("components.tax_report.not_available");
+  const asOf = ps ? `${dayOf(tr, ps.asOf)} ${ps.timezone}` : dayOf(tr, b.periodEnd);
+  if (mode === "snapshot") return tr.t("components.tax_report.price_basis_snapshot", { version, asOf });
+  if (mode === "historical") return tr.t("components.tax_report.price_basis_historical", { version, asOf });
+  return tr.t("components.tax_report.price_basis_unknown", { version, asOf });
 }
 
 function text(pg, s, x, y, size, font, color = INK) {
@@ -344,7 +421,7 @@ function newPage(ctx, continuation) {
   if (continuation) {
     bar(ctx.page, MRG, PAGE_H - MRG + 10, CONTENT_W, 2.5, ACCENT); // marks continuation pages only
     text(ctx.page, "PIXAGRAM", MRG, PAGE_H - MRG, 9, ctx.f.bold, INK);
-    textR(ctx.page, `Tax Report ${ctx.bundle.year} · continued`, PAGE_W - MRG, PAGE_H - MRG, 9, ctx.f.regular, SUB);
+    textR(ctx.page, ctx.tr.t("components.tax_report.tax_report_year_continued", { year: String(ctx.bundle.year) }), PAGE_W - MRG, PAGE_H - MRG, 9, ctx.f.regular, SUB);
     ctx.y = PAGE_H - MRG - 22;
   } else {
     ctx.y = PAGE_H - MRG;
@@ -360,11 +437,17 @@ function ensure(ctx, needed) {
 
 function drawHeader(ctx) {
   const b = ctx.bundle,
-      pg = ctx.page;
+      pg = ctx.page,
+      tr = ctx.tr,
+      fmt = ctx.fmt;
   let y = PAGE_H - MRG - 6;
 
   // right meta block
-  const meta = [`Generated ${b.generatedAt.slice(0, 10)}`, `Ruleset ${b.rulesVersion}`, `Prices ${b.priceDataVersion}`];
+  const meta = [
+    tr.t("components.tax_report.generated_date", { date: dayOf(tr, b.generatedAt) }),
+    tr.t("components.tax_report.ruleset_version", { version: String(b.rulesVersion || "") }),
+    tr.t("components.tax_report.prices_version", { version: String(b.priceDataVersion || "") })
+  ];
   meta.forEach((m, i) => textR(pg, m, PAGE_W - MRG, y - i * 11, 8, ctx.f.regular, SUB));
 
   // logo mark + headline lockup
@@ -387,9 +470,9 @@ function drawHeader(ctx) {
     });
     titleX = MRG + lw + 14;
   }
-  text(pg, `Tax Report ${b.year}`, titleX, titleBaseline, 23, ctx.f.bold, INK);
+  text(pg, tr.t("components.tax_report.tax_report_year", { year: String(b.year) }), titleX, titleBaseline, 23, ctx.f.bold, INK);
   y -= 20;
-  text(pg, `@${b.account}   ·   ${b.jurisdiction}   ·   reported in ${b.fiat}`, titleX, y, 10, ctx.f.regular, SUB);
+  text(pg, tr.t("components.tax_report.header_account_line", { account: b.account, jurisdiction: b.jurisdiction, fiat: b.fiat }), titleX, y, 10, ctx.f.regular, SUB);
   y -= 16;
   bar(pg, MRG, y, CONTENT_W, 1.8, ACCENT);
   y -= 16;
@@ -399,24 +482,34 @@ function drawHeader(ctx) {
   // report knows no liabilities), and when no gain is taxed (e.g. a Swiss
   // private investor) the second says so instead of a bare "TAXABLE AMOUNT 0.00".
   // Labels and values shrink to fit, so JPY/KRW/IDR amounts stay inside.
+  // Card labels are catalogue text in normal case, upper-cased per locale.
   const cards = [];
-  if (b.wealth) cards.push([`HOLDINGS VALUE @ ${b.wealth.refDate}`, `${fmt(b.wealth.totalFiat)} ${b.fiat}`,
-    b.jurisdiction === "CH" ? "Declare as wealth (securities list)" : "Tax value of on-platform holdings"]);
+  if (b.wealth) {
+    cards.push([tr.upper(tr.t("components.tax_report.holdings_value_at", { date: dayOf(tr, b.wealth.refDate) })), `${fmt(b.wealth.totalFiat)} ${b.fiat}`,
+      b.jurisdiction === "CH"
+          ? tr.t("components.tax_report.declare_as_wealth_securities_list")
+          : tr.t("components.tax_report.tax_value_of_on_platform_holdings")]);
+  }
   if (b.transactions) {
     const regime = gainsRegime(b);
     if (regime === "exempt") {
-      cards.push(["CAPITAL GAINS (RECORD ONLY)", `${fmt(b.transactions.totalGainFiat)} ${b.fiat}`,
-        b.jurisdiction === "CH" ? "Tax-exempt for a private investor" : "Not taxed as a capital gain here"]);
+      cards.push([tr.upper(tr.t("components.tax_report.capital_gains_record_only")), `${fmt(b.transactions.totalGainFiat)} ${b.fiat}`,
+        b.jurisdiction === "CH"
+            ? tr.t("components.tax_report.tax_exempt_for_a_private_investor")
+            : tr.t("components.tax_report.not_taxed_as_a_capital_gain_here")]);
     } else {
-      cards.push(["TAXABLE AMOUNT", `${txUnpriced(b) ? "n/a" : fmt(b.transactions.taxableAmountFiat ?? b.transactions.taxableGainFiat)} ${b.fiat}`,
-        regime === "none" ? "No disposals this period"
-            : b.transactions.deductionSteps ? "After the deductions shown" : "Gains on disposals"]);
+      cards.push([tr.upper(tr.t("components.tax_report.taxable_amount")), `${fmt(txUnpriced(b) ? NaN : (b.transactions.taxableAmountFiat ?? b.transactions.taxableGainFiat))} ${b.fiat}`,
+        regime === "none" ? tr.t("components.tax_report.no_disposals_this_period")
+            : b.transactions.deductionSteps ? tr.t("components.tax_report.after_the_deductions_shown")
+                : tr.t("components.tax_report.gains_on_disposals")]);
     }
   }
-  if (b.operations) cards.push(["INCOME TAXED AT RECEIPT", `${fmt(b.operations.totalIncomeFiat)} ${b.fiat}`,
-    b.operations.deferredIncomeFiat
-        ? `+ ${fmt(b.operations.deferredIncomeFiat)} received at zero cost basis`
-        : "Rewards and interest, value on receipt"]);
+  if (b.operations) {
+    cards.push([tr.upper(tr.t("components.tax_report.income_taxed_at_receipt")), `${fmt(b.operations.totalIncomeFiat)} ${b.fiat}`,
+      b.operations.deferredIncomeFiat
+          ? tr.t("components.tax_report.plus_received_at_zero_cost_basis", { amount: fmt(b.operations.deferredIncomeFiat) })
+          : tr.t("components.tax_report.rewards_and_interest_value_on_receipt")]);
+  }
   const gap = 10,
       cw = cards.length ? (CONTENT_W - gap * (cards.length - 1)) / cards.length : CONTENT_W,
       ch = 56;
@@ -435,17 +528,17 @@ function drawHeader(ctx) {
   const ps = b.priceSnapshot;
   if (ps) {
     const yy = y - ch - 16;
-    const px = (a, v) => `${a} ${v != null ? fmt(v, 4) : "n/a"}`;
-    const parts = [px("PIXA", ps.PXA), px("PXS", ps.PXS), `PXP ${ps.PXP != null ? fmt(ps.PXP, 4) : "n/a"} (= PIXA)`];
+    const px = (a, v) => `${a} ${fmt(v, 4)}`;   // fmt prints n/a for a missing price
+    const parts = [px("PIXA", ps.PXA), px("PXS", ps.PXS), `${px("PXP", ps.PXP)} (= PIXA)`];
     if (ps.vestingRatio != null) parts.push(`VESTS x ${fmt(ps.vestingRatio, 6)} = PXP`);
-    text(pg, `Valuation basis @ ${ps.asOf} ${ps.timezone} — prices in ${ps.fiat}:`, MRG, yy, 7.5, ctx.f.bold, SUB);
+    text(pg, tr.t("components.tax_report.valuation_basis_prices_in", { date: `${dayOf(tr, ps.asOf)} ${ps.timezone}`, fiat: ps.fiat }), MRG, yy, 7.5, ctx.f.bold, SUB);
     text(pg, parts.join("      "), MRG, yy - 11, 8, ctx.f.regular, INK);
     ctx.y = yy - 24;
   } else {
     ctx.y = y - ch - 22;
   }
   if (unpricedFigures(b)) {
-    for (const ln of wrap(unpricedMessage(b), ctx.f.bold, 8, CONTENT_W)) {
+    for (const ln of wrap(unpricedMessage(tr, b), ctx.f.bold, 8, CONTENT_W)) {
       text(pg, ln, MRG, ctx.y - 2, 8, ctx.f.bold, INK);
       ctx.y -= 11;
     }
@@ -484,7 +577,9 @@ function sectionTitle(ctx, n, title, note, keepWith = 0) {
   ctx.y -= 4;
 }
 function wrap(s, font, size, maxW) {
-  const words = safe(s).split(/\s+/),
+  // Ordinary spaces only: a no-break space (digit grouping, French typography)
+  // keeps its neighbours on one line.
+  const words = safe(s).split(/ +/),
       out = [];
   let cur = "";
   for (const w of words) {
@@ -616,59 +711,67 @@ function csvNote(ctx, msg) {
   ctx.y -= 8;
 }
 function renderWealth(ctx, r) {
+  const tr = ctx.tr, fmt = ctx.fmt;
+  const title = tr.t("components.pixa_wallet_taxes_dialog.section_wealth_statement");
+  const note = tr.text(r.note);
   if (!r.lines.length) {
-    sectionTitle(ctx, nextSection(ctx), "Wealth statement", r.note);
-    para(ctx, `No on-platform holdings at ${r.refDate}.`, { size: 9, color: INK, gap: 10 });
+    sectionTitle(ctx, nextSection(ctx), title, note);
+    para(ctx, tr.t("components.tax_report.no_on_platform_holdings_at", { date: dayOf(tr, r.refDate) }), { size: 9, color: INK, gap: 10 });
     return;
   }
   const cols = fit([{
-    title: "Asset",
+    title: tr.t("components.tax_report.col_asset"),
     w: 60,
     align: "l"
   }, {
-    title: "Quantity",
+    title: tr.t("components.tax_report.col_quantity"),
     w: 92,
     align: "r"
   }, {
-    title: `Unit (${r.fiat})`,
+    title: tr.t("components.tax_report.col_unit_fiat", { fiat: r.fiat }),
     w: 86,
     align: "r"
   }, {
-    title: `Value (${r.fiat})`,
+    title: tr.t("components.tax_report.col_value_fiat", { fiat: r.fiat }),
     w: 96,
     align: "r"
   }, {
-    title: "Valuation source",
+    title: tr.t("components.tax_report.col_valuation_source"),
     w: 110,
     align: "l"
   }]);
   const rows = r.lines.map(l => ({
-    cells: [assetName(l.asset), fmt(l.qty, 4), fmt(l.fiatPerUnit, 4), fmt(l.valueFiat), SOURCE_LABELS[l.source] || l.source],
-    sub: l.asset === "PXP" ? "Pixa Power: staked PIXA you own (1 PXP = 1 PIXA)" : undefined
+    cells: [assetName(l.asset), fmt(l.qty, 4), fmt(l.fiatPerUnit, 4), fmt(l.valueFiat), sourceLabel(tr, l.source)],
+    sub: l.asset === "PXP" ? tr.t("components.tax_report.pixa_power_staked_pixa_you_own") : undefined
   }));
-  sectionTitle(ctx, nextSection(ctx), "Wealth statement", r.note, tableHeight(rows, true));
+  sectionTitle(ctx, nextSection(ctx), title, note, tableHeight(rows, true));
   drawTable(ctx, cols, rows, {
-    cells: ["Total", "", "", `${fmt(r.totalFiat)}`, ""]
+    cells: [tr.t("components.tax_report.total"), "", "", `${fmt(r.totalFiat)}`, ""]
   });
   // Staked PIXA is the line users are most tempted to leave out (or declare at
   // zero), so the statement says plainly why it is in.
   if (r.lines.some(l => l.asset === "PXP")) {
-    csvNote(ctx, "PXP (Pixa Power) is PIXA you have staked. You still own it and can convert it back with a power-down (paid out over 13 weeks), so it is part of your wealth at its PIXA value. Neither staking nor delegating it to another account removes it; PXP that others delegated to you is not yours and is not included.");
+    csvNote(ctx, tr.t("components.tax_report.pxp_pixa_power_is_pixa_you_have_staked"));
   }
-  csvNote(ctx, `Per-asset holdings at the reference date. Full balance detail is in ${ctx.csv}.`);
+  csvNote(ctx, tr.t("components.tax_report.per_asset_holdings_at_the_reference_date", { csv: ctx.csv }));
 }
 function renderTransactions(ctx, r) {
+  const tr = ctx.tr, fmt = ctx.fmt;
   // A Swiss profile flagged as professional trader gets taxable lines; the
   // private-investor wording ("tax-free... listed for your records") and the
   // safe-harbour caveat would then contradict the figures below.
   const proCH = ctx.bundle.jurisdiction === "CH" && gainsRegime(ctx.bundle) === "taxable";
   const note = proCH
-      ? "This report treats you as a professional trader (self-employment): the gains below are taxable income and booked losses are deductible. The tax-free treatment for private investors does not apply."
-      : [r.note, r.safeHarbourCheck ? `Disposals this period: ${r.safeHarbourCheck.disposalCount}. ${r.safeHarbourCheck.note}` : ""].filter(Boolean).join("  ");
-  const title = "Transactions — disposals & swaps";
+      ? tr.t("components.tax_report.this_report_treats_you_as_a_professional")
+      : [
+        tr.text(r.note),
+        r.safeHarbourCheck ? tr.t("components.tax_report.disposals_this_period", { count: fmt(r.safeHarbourCheck.disposalCount, 0) }) : "",
+        r.safeHarbourCheck ? tr.text(r.safeHarbourCheck.note) : ""
+      ].filter(Boolean).join("  ");
+  const title = tr.t("components.tax_report.transactions_disposals_swaps");
   if (!r.lines.length) {
     sectionTitle(ctx, nextSection(ctx), title, note);
-    para(ctx, "No disposals or swaps in this period.", { size: 9, color: INK, gap: 10 });
+    para(ctx, tr.t("components.tax_report.no_disposals_or_swaps_in_this_period"), { size: 9, color: INK, gap: 10 });
     return;
   }
 
@@ -694,33 +797,33 @@ function renderTransactions(ctx, r) {
     tb += l.basisFiat;
   }
   const cols = fit([{
-    title: "Type",
+    title: tr.t("components.tax_report.col_type"),
     w: 132,
     align: "l"
   }, {
-    title: "Count",
+    title: tr.t("components.tax_report.col_count"),
     w: 52,
     align: "r"
   }, {
-    title: `Proceeds (${r.fiat})`,
+    title: tr.t("components.tax_report.col_proceeds_fiat", { fiat: r.fiat }),
     w: 92,
     align: "r"
   }, {
-    title: `Cost basis (${r.fiat})`,
+    title: tr.t("components.tax_report.col_cost_basis_fiat", { fiat: r.fiat }),
     w: 92,
     align: "r"
   }, {
-    title: `Gain (${r.fiat})`,
+    title: tr.t("components.tax_report.col_gain_fiat", { fiat: r.fiat }),
     w: 82,
     align: "r"
   }]);
   const rows = [...by.entries()].map(([cat, g]) => ({
-    cells: [catLabel(cat), String(g.n), fmt(g.proceeds), fmt(g.basis), fmt(g.gain)],
-    sub: assetBreakdown(g.byAsset)
+    cells: [catLabel(tr, cat), fmt(g.n, 0), fmt(g.proceeds), fmt(g.basis), fmt(g.gain)],
+    sub: assetBreakdown(fmt, g.byAsset)
   }));
   sectionTitle(ctx, nextSection(ctx), title, note, tableHeight(rows, true));
   drawTable(ctx, cols, rows, {
-    cells: ["Total", String(r.lines.length), fmt(tp), fmt(tb), fmt(r.totalGainFiat)]
+    cells: [tr.t("components.tax_report.total"), fmt(r.lines.length, 0), fmt(tp), fmt(tb), fmt(r.totalGainFiat)]
   });
   // By asset — one roll-up row per token: what was sold, at what cost, and how
   // much of the result is taxable vs exempt. (For no-set-off jurisdictions the
@@ -739,20 +842,20 @@ function renderTransactions(ctx, r) {
       byAsset.set(l.asset, a);
     }
     const acols = fit([
-      { title: "Asset", w: 64, align: "l" },
-      { title: "Disposals", w: 60, align: "r" },
-      { title: `Proceeds (${r.fiat})`, w: 88, align: "r" },
-      { title: `Cost basis (${r.fiat})`, w: 88, align: "r" },
-      { title: `Gain (${r.fiat})`, w: 74, align: "r" },
-      { title: "Taxable", w: 66, align: "r" },
-      { title: "Exempt", w: 60, align: "r" }
+      { title: tr.t("components.tax_report.col_asset"), w: 64, align: "l" },
+      { title: tr.t("components.tax_report.col_disposals"), w: 60, align: "r" },
+      { title: tr.t("components.tax_report.col_proceeds_fiat", { fiat: r.fiat }), w: 88, align: "r" },
+      { title: tr.t("components.tax_report.col_cost_basis_fiat", { fiat: r.fiat }), w: 88, align: "r" },
+      { title: tr.t("components.tax_report.col_gain_fiat", { fiat: r.fiat }), w: 74, align: "r" },
+      { title: tr.t("components.tax_report.col_taxable"), w: 66, align: "r" },
+      { title: tr.t("components.tax_report.col_exempt"), w: 60, align: "r" }
     ]);
     const arows = [...byAsset.entries()].sort((x, y) => x[0].localeCompare(y[0])).map(([asset, a]) => ({
-      cells: [assetName(asset), String(a.n), fmt(a.proceeds), fmt(a.basis), fmt(a.gain), fmt(a.taxable), a.exempt ? fmt(a.exempt) : "-"]
+      cells: [assetName(asset), fmt(a.n, 0), fmt(a.proceeds), fmt(a.basis), fmt(a.gain), fmt(a.taxable), a.exempt ? fmt(a.exempt) : "-"]
     }));
     const ah = tableHeight(arows, false);
     ensure(ctx, 12 + (ah <= KEEP_TOGETHER_MAX ? ah : TABLE_MIN)); // keep the label with its table
-    text(ctx.page, "By asset", MRG, ctx.y - 9, 9, ctx.f.bold, INK);
+    text(ctx.page, tr.t("components.tax_report.by_asset"), MRG, ctx.y - 9, 9, ctx.f.bold, INK);
     ctx.y -= 12;
     drawTable(ctx, acols, arows);
   }
@@ -763,24 +866,27 @@ function renderTransactions(ctx, r) {
   // gain" line only appears when deductions make it differ from the amount.
   const jur = ctx.bundle.jurisdiction;
   const regime = gainsRegime(ctx.bundle);
-  const amt = (v) => (txUnpriced(ctx.bundle) ? "n/a" : fmt(v)); // engine totals mask NaN as 0
+  const amt = (v) => fmt(txUnpriced(ctx.bundle) ? NaN : v); // engine totals mask NaN as 0
   const steps = r.deductionSteps && r.deductionSteps.length ? r.deductionSteps : null;
   if (regime === "exempt") {
     para(ctx, jur === "CH"
-            ? `Not taxed: for a private investor in Switzerland these gains (total ${fmt(r.totalGainFiat)} ${r.fiat}) are tax-exempt capital gains, and losses are not deductible. They are not entered on the return; they are listed for your records.`
-            : `None of these gains (total ${fmt(r.totalGainFiat)} ${r.fiat}) is taxed as a capital gain in ${jur} on the basis stated above; the lines are listed for your records.`,
+            ? tr.t("components.tax_report.ch_gains_not_taxed_for_a_private_investor", { total: fmt(r.totalGainFiat), fiat: r.fiat })
+            : tr.t("components.tax_report.none_of_these_gains_is_taxed_as_a_capital", { total: fmt(r.totalGainFiat), fiat: r.fiat, jurisdiction: jur }),
         { size: 9, color: INK, gap: 6 });
   } else if ((steps && steps.length > 1) || r.disallowedLossesFiat) {
     ensure(ctx, 16);
-    text(ctx.page, `Taxable gain for ${jur}: ${amt(r.taxableGainFiat)} ${r.fiat}`, MRG, ctx.y - 4, 9, ctx.f.bold, INK);
+    text(ctx.page, tr.t("components.tax_report.taxable_gain_for", { jurisdiction: jur, amount: amt(r.taxableGainFiat), fiat: r.fiat }), MRG, ctx.y - 4, 9, ctx.f.bold, INK);
     ctx.y -= 14;
   }
   if (r.splitByTerm || (r.exemptGainFiat && regime !== "exempt")) {
     const parts = [];
-    if (r.splitByTerm) parts.push(`short-term ${amt(r.shortTermGainFiat)}`, `long-term ${amt(r.longTermGainFiat)}`);
-    if (r.exemptGainFiat) parts.push(`tax-free ${amt(r.exemptGainFiat)}`);
+    if (r.splitByTerm) {
+      parts.push(tr.t("components.tax_report.split_short_term", { amount: amt(r.shortTermGainFiat) }),
+          tr.t("components.tax_report.split_long_term", { amount: amt(r.longTermGainFiat) }));
+    }
+    if (r.exemptGainFiat) parts.push(tr.t("components.tax_report.split_tax_free", { amount: amt(r.exemptGainFiat) }));
     ensure(ctx, 12);
-    text(ctx.page, `Gain split — ${parts.join("  ·  ")} ${r.fiat}`, MRG, ctx.y - 2, 8.5, ctx.f.regular, SUB);
+    text(ctx.page, tr.t("components.tax_report.gain_split", { parts: parts.join("  ·  "), fiat: r.fiat }), MRG, ctx.y - 2, 8.5, ctx.f.regular, SUB);
     ctx.y -= 12;
   }
   // UK share matching (same-day / 30-day / pool): quantities matched per HMRC's
@@ -797,7 +903,7 @@ function renderTransactions(ctx, r) {
     }
     if (any) {
       ensure(ctx, 12);
-      text(ctx.page, `Share matching — same-day ${fmt(sd, 4)}  ·  30-day ${fmt(td, 4)}  ·  from pool ${fmt(pl, 4)} (units; per-disposal split in the CSV)`, MRG, ctx.y - 2, 8.5, ctx.f.regular, SUB);
+      text(ctx.page, tr.t("components.tax_report.share_matching_summary", { same_day: fmt(sd, 4), thirty_day: fmt(td, 4), pool: fmt(pl, 4) }), MRG, ctx.y - 2, 8.5, ctx.f.regular, SUB);
       ctx.y -= 12;
     }
   }
@@ -806,38 +912,40 @@ function renderTransactions(ctx, r) {
   // then each deduction step, with the final taxable amount as the bold total.
   if (regime !== "exempt" && ((steps && steps.length > 1) || r.disallowedLossesFiat)) {
     const cols = fit([
-      { title: "Step", w: 330, align: "l" },
-      { title: `Amount (${r.fiat})`, w: 130, align: "r" }
+      { title: tr.t("components.tax_report.col_step"), w: 330, align: "l" },
+      { title: tr.t("components.tax_report.col_amount_fiat", { fiat: r.fiat }), w: 130, align: "r" }
     ]);
-    const allSteps = steps || [{ label: "Taxable gain", value: r.taxableAmountFiat ?? r.taxableGainFiat }];
+    const allSteps = steps || [{ label: tr.t("components.pixa_tax_engine.taxable_gain"), value: r.taxableAmountFiat ?? r.taxableGainFiat }];
     const rows = [];
     if (r.disallowedLossesFiat) {
-      rows.push({ cells: ["Losses disregarded — no set-off or carry-forward permitted (informational)", fmt(r.disallowedLossesFiat)] });
+      rows.push({ cells: [tr.t("components.tax_report.losses_disregarded_informational"), fmt(r.disallowedLossesFiat)] });
     }
-    for (const s of allSteps.slice(0, -1)) rows.push({ cells: [s.label, fmt(s.value)] });
+    for (const s of allSteps.slice(0, -1)) rows.push({ cells: [tr.text(s.label), fmt(s.value)] });
     const last = allSteps[allSteps.length - 1];
     ensure(ctx, 18 + tableHeight(rows, true)); // keep the heading with its schedule
-    text(ctx.page, "Computation of taxable amount", MRG, ctx.y - 10, 9.5, ctx.f.bold, INK);
+    text(ctx.page, tr.t("components.tax_report.computation_of_taxable_amount"), MRG, ctx.y - 10, 9.5, ctx.f.bold, INK);
     ctx.y -= 18;
-    drawTable(ctx, cols, rows, { cells: [last.label, fmt(last.value)] });
+    drawTable(ctx, cols, rows, { cells: [tr.text(last.label), fmt(last.value)] });
   }
   if (regime !== "exempt") {
     ensure(ctx, 14);
-    text(ctx.page, `Taxable amount for ${jur}: ${amt(r.taxableAmountFiat)} ${r.fiat}`, MRG, ctx.y - 4, 9.5, ctx.f.bold, INK);
+    text(ctx.page, tr.t("components.tax_report.taxable_amount_for", { jurisdiction: jur, amount: amt(r.taxableAmountFiat), fiat: r.fiat }), MRG, ctx.y - 4, 9.5, ctx.f.bold, INK);
     ctx.y -= 14;
   }
   if (r.lossCarryforwardOutFiat) {
     ensure(ctx, 11);
-    text(ctx.page, `Loss to carry forward: ${fmt(r.lossCarryforwardOutFiat)} ${r.fiat}`, MRG, ctx.y - 2, 8.5, ctx.f.regular, SUB);
+    text(ctx.page, tr.t("components.tax_report.loss_to_carry_forward", { amount: fmt(r.lossCarryforwardOutFiat), fiat: r.fiat }), MRG, ctx.y - 2, 8.5, ctx.f.regular, SUB);
     ctx.y -= 12;
   }
-  csvNote(ctx, `Summary by type. All ${r.lines.length} disposals — with the cost-basis lots consumed and holding period — are itemised line-by-line in ${ctx.csv}.`);
+  csvNote(ctx, tr.t("components.tax_report.summary_by_type_all_disposals", { count: fmt(r.lines.length, 0), csv: ctx.csv }));
 }
 function renderOperations(ctx, r) {
-  const title = "Operations — reward & interest income";
+  const tr = ctx.tr, fmt = ctx.fmt;
+  const title = tr.t("components.pixa_wallet_taxes_dialog.section_operations_income");
+  const note = tr.text(r.note);
   if (!r.lines.length) {
-    sectionTitle(ctx, nextSection(ctx), title, r.note);
-    para(ctx, "No reward or interest income in this period.", { size: 9, color: INK, gap: 10 });
+    sectionTitle(ctx, nextSection(ctx), title, note);
+    para(ctx, tr.t("components.tax_report.no_reward_or_interest_income_in_this"), { size: 9, color: INK, gap: 10 });
     return;
   }
 
@@ -848,7 +956,9 @@ function renderOperations(ctx, r) {
   const by = new Map();
   for (const l of r.lines) {
     const deferred = l.taxedAtReceipt === false;
-    const key = deferred ? `${catLabel(l.category)} (not taxed at receipt)` : catLabel(l.category);
+    const key = deferred
+        ? tr.t("components.tax_report.category_not_taxed_at_receipt", { category: catLabel(tr, l.category) })
+        : catLabel(tr, l.category);
     const g = by.get(key) ?? {
       n: 0,
       amt: 0,
@@ -861,74 +971,78 @@ function renderOperations(ctx, r) {
     by.set(key, g);
   }
   const cols = fit([{
-    title: "Income type",
+    title: tr.t("components.tax_report.col_income_type"),
     w: 210,
     align: "l"
   }, {
-    title: "Count",
+    title: tr.t("components.tax_report.col_count"),
     w: 64,
     align: "r"
   }, {
-    title: `Amount (${r.fiat})`,
+    title: tr.t("components.tax_report.col_amount_fiat", { fiat: r.fiat }),
     w: 106,
     align: "r"
   }]);
   const rows = [...by.entries()].map(([cat, g]) => ({
-    cells: [cat, String(g.n), fmt(g.amt)],
-    sub: assetBreakdown(g.byAsset)
+    cells: [cat, fmt(g.n, 0), fmt(g.amt)],
+    sub: assetBreakdown(fmt, g.byAsset)
   }));
   const taxedCount = r.lines.filter(l => l.taxedAtReceipt !== false).length;
-  sectionTitle(ctx, nextSection(ctx), title, r.note, tableHeight(rows, true));
+  sectionTitle(ctx, nextSection(ctx), title, note, tableHeight(rows, true));
   drawTable(ctx, cols, rows, {
-    cells: ["Total income (taxed at receipt)", String(taxedCount), fmt(r.totalIncomeFiat)]
+    cells: [tr.t("components.tax_report.total_income_taxed_at_receipt"), fmt(taxedCount, 0), fmt(r.totalIncomeFiat)]
   });
   if (r.deferredIncomeFiat) {
     ensure(ctx, 12);
-    text(ctx.page, `Received but not taxed at receipt (zero acquisition cost — taxed at the later fiat conversion): ${fmt(r.deferredIncomeFiat)} ${r.fiat}`, MRG, ctx.y - 2, 8.5, ctx.f.regular, SUB);
+    text(ctx.page, tr.t("components.tax_report.received_but_not_taxed_at_receipt", { amount: fmt(r.deferredIncomeFiat), fiat: r.fiat }), MRG, ctx.y - 2, 8.5, ctx.f.regular, SUB);
     ctx.y -= 12;
   }
   // Rewards paid as staked PIXA are still income on receipt — not a later
   // capital gain — which is exactly the point users get wrong.
   if (r.lines.some(l => l.asset === "PXP")) {
-    csvNote(ctx, "Rewards paid in PXP (staked) are treated exactly like liquid rewards: their PIXA value on the day received is what counts, not a later capital gain.");
+    csvNote(ctx, tr.t("components.tax_report.rewards_paid_in_pxp_are_treated_like"));
   }
   if (ctx.priceMode === "snapshot") {
-    csvNote(ctx, "Caution: these values use one snapshot price for every date, not the price on the day each reward was received. Income must be valued on the day it is received — regenerate with historical prices before filing.");
+    csvNote(ctx, tr.t("components.tax_report.caution_these_values_use_one_snapshot"));
   }
-  csvNote(ctx, `Summary by type. All ${r.lines.length} income events are itemised line-by-line in ${ctx.csv}.`);
+  csvNote(ctx, tr.t("components.tax_report.summary_by_type_all_income_events", { count: fmt(r.lines.length, 0), csv: ctx.csv }));
 }
 
 // Itemized non-taxable movements: proposal fees, savings withdrawals, completed
 // power-ups. Listed line-by-line; the table paginates via drawTable.
 function renderMovements(ctx, movements) {
   if (!movements || !movements.length) return;
-  sectionTitle(ctx, nextSection(ctx), "Account movements — fees, savings, staking & delegations",
-      "Not taxable disposals or income. Proposal fees leave the account and reduce holdings; conversion requests, savings withdrawals and power moves are internal and shown for completeness. Delegations lend voting power only — the PXP stays with its owner. Each row's exact time (UTC) and transaction id appear beneath its date.");
+  const tr = ctx.tr, fmt = ctx.fmt;
+  sectionTitle(ctx, nextSection(ctx), tr.t("components.tax_report.account_movements_fees_savings_staking"),
+      tr.t("components.tax_report.not_taxable_disposals_or_income_proposal_fees"));
+  // Labels shared with the wallet dialog where the wording is the same.
   const labels = {
-    fee_payment: "Fee paid",
-    savings_fill: "Savings withdrawal",
-    power_down: "Power-down (unstaked)",
-    request_powerdown: "Power-down request",
-    request_convert: "Conversion request",
-    request_collateralized: "Collateralized request",
-    immediate_conversion: "Collateralized — immediate leg",
-    to_own_exchange: "Sent to your exchange",
-    to_own_wallet: "Sent to your own wallet",
-    gift_out: "Gift sent",
-    charity_donation: "Charity donation",
-    delegation_out: "Delegated out (still yours)",
-    delegation_in: "Delegated to you (not yours)",
-    delegation_return: "Delegation returned"
+    fee_payment: () => tr.t("components.pixa_wallet_taxes_dialog.movement_fee_paid"),
+    savings_fill: () => tr.t("components.pixa_wallet_taxes_dialog.movement_savings_withdrawal"),
+    power_down: () => tr.t("components.pixa_wallet_taxes_dialog.movement_power_down_unstaked"),
+    request_powerdown: () => tr.t("components.pixa_wallet_taxes_dialog.movement_power_down_request"),
+    request_convert: () => tr.t("components.pixa_wallet_taxes_dialog.movement_conversion_request"),
+    request_collateralized: () => tr.t("components.pixa_wallet_taxes_dialog.movement_collateralized_request"),
+    immediate_conversion: () => tr.t("components.pixa_wallet_taxes_dialog.movement_collateralized_immediate_leg"),
+    to_own_exchange: () => tr.t("components.pixa_wallet_taxes_dialog.movement_sent_to_your_exchange"),
+    to_own_wallet: () => tr.t("components.pixa_wallet_taxes_dialog.movement_sent_to_your_own_wallet"),
+    gift_out: () => tr.t("components.pixa_wallet_taxes_dialog.movement_gift_sent"),
+    charity_donation: () => tr.t("components.pixa_wallet_taxes_dialog.movement_charity_donation"),
+    delegation_out: () => tr.t("components.tax_report.delegated_out_still_yours"),
+    delegation_in: () => tr.t("components.tax_report.delegated_to_you_not_yours"),
+    delegation_return: () => tr.t("components.pixa_wallet_taxes_dialog.movement_delegation_returned")
   };
   // A power-up has two legs: PXA out starts the stake, PXP in completes it.
   const labelFor = (m) => m.kind === "power_up"
-      ? (m.direction === "out" ? "Power-up (stake op start)" : "Power-up (stake op completed)")
-      : (labels[m.kind] || m.kind);
+      ? (m.direction === "out"
+          ? tr.t("components.pixa_wallet_taxes_dialog.movement_power_up_start")
+          : tr.t("components.pixa_wallet_taxes_dialog.movement_power_up_completed"))
+      : (labels[m.kind] ? labels[m.kind]() : m.kind);
   const cols = fit([
-    { title: "Date", w: 74, align: "l" },
-    { title: "Type", w: 162, align: "l" },
-    { title: "Asset", w: 54, align: "l" },
-    { title: "Amount", w: 90, align: "r" }
+    { title: tr.t("components.tax_report.col_date"), w: 74, align: "l" },
+    { title: tr.t("components.tax_report.col_type"), w: 162, align: "l" },
+    { title: tr.t("components.tax_report.col_asset"), w: 54, align: "l" },
+    { title: tr.t("components.tax_report.col_amount"), w: 90, align: "r" }
   ]);
   // The PDF is a summary; an active account can have thousands of movements, so
   // cap the table and send the full list to the CSV.
@@ -936,24 +1050,22 @@ function renderMovements(ctx, movements) {
   const shown = movements.slice(0, PDF_MOVE_CAP);
   const rows = shown.map(m => {
     const time = String(m.ts).slice(11, 19) || "00:00:00";
+    const sub = [tr.t("components.tax_report.time_utc", { time })];
+    if (m.block != null) sub.push(tr.t("components.tax_report.block_number", { block: String(m.block) }));
+    if (m.id) sub.push(tr.t("components.tax_report.transaction_id", { id: String(m.id) }));
     return {
       cells: [
-        String(m.ts).slice(0, 10),
+        dayOf(tr, m.ts),
         labelFor(m),
         assetName(m.asset),
         (m.direction === "out" ? "-" : "+") + fmt(m.amount, 4)
       ],
-      sub: (() => {
-        const t = `${time} UTC`;
-        const blk = m.block != null ? ` · block ${m.block}` : "";
-        const tx = m.id ? ` · tx ${m.id}` : "";
-        return t + blk + tx;
-      })()
+      sub: sub.join(" · ")
     };
   });
   drawTable(ctx, cols, rows);
   if (movements.length > PDF_MOVE_CAP) {
-    csvNote(ctx, `Showing the first ${PDF_MOVE_CAP} of ${movements.length} movements. The complete list is in ${ctx.csv}.`);
+    csvNote(ctx, tr.t("components.tax_report.showing_the_first_of_movements", { shown: fmt(PDF_MOVE_CAP, 0), total: fmt(movements.length, 0), csv: ctx.csv }));
   }
 }
 // Outbound transfers classified by purpose — count and quantity per asset. This is
@@ -962,22 +1074,23 @@ function renderMovements(ctx, movements) {
 function renderOutbound(ctx, outboundByIntent) {
   const present = outboundByIntent && Object.keys(outboundByIntent);
   if (!present || !present.length) return;
-  const note = "Every send you made over the period, grouped by what it was for, with the total amount and the number of transfers. Payments to others are disposals: their gain is computed under Transactions and taxed only where your jurisdiction taxes it. The other purposes are treated as noted. Confirm the treatment for your country with an adviser.";
+  const tr = ctx.tr, fmt = ctx.fmt;
+  const note = tr.t("components.tax_report.every_send_you_made_over_the_period");
   const ORDER = ["payment", "own_exchange", "own", "gift", "charity"];
   const LABEL = {
-    payment: "Payments to others",
-    own_exchange: "Sent to your exchange",
-    own: "To your own wallet",
-    gift: "Gifts",
-    charity: "Charity donations"
+    payment: () => tr.t("components.tax_report.payments_to_others"),
+    own_exchange: () => tr.t("components.pixa_wallet_taxes_dialog.movement_sent_to_your_exchange"),
+    own: () => tr.t("components.pixa_wallet_taxes_dialog.outbound_to_your_own_wallet"),
+    gift: () => tr.t("components.pixa_wallet_taxes_dialog.outbound_gifts"),
+    charity: () => tr.t("components.pixa_wallet_taxes_dialog.outbound_charity_donations")
   };
-  const send = sendDisposals(ctx.bundle);
+  const send = sendDisposals(tr, ctx.bundle);
   const f = ctx.bundle.fiat;
   const cols = fit([
-    { title: "Purpose", w: 110, align: "l" },
-    { title: "Tax treatment", w: 150, align: "l" },
-    { title: "Count", w: 50, align: "r" },
-    { title: `Total (${f})`, w: 90, align: "r" }
+    { title: tr.t("components.tax_report.col_purpose"), w: 110, align: "l" },
+    { title: tr.t("components.tax_report.col_tax_treatment"), w: 150, align: "l" },
+    { title: tr.t("components.tax_report.col_count"), w: 50, align: "r" },
+    { title: tr.t("components.tax_report.col_total_fiat", { fiat: f }), w: 90, align: "r" }
   ]);
   const keys = ORDER.filter(k => outboundByIntent[k]).concat(present.filter(k => !ORDER.includes(k)));
   let disposalValue = 0;
@@ -985,31 +1098,36 @@ function renderOutbound(ctx, outboundByIntent) {
     const s = outboundByIntent[k];
     if (s.taxable) disposalValue += s.valueFiat || 0; // engine flag = "is a disposal"
     return {
-      cells: [LABEL[k] || k, outboundTreatment(k, s, send), String(s.count), fmt(s.valueFiat || 0)],
-      sub: assetBreakdown(s.byAsset)
+      cells: [LABEL[k] ? LABEL[k]() : k, outboundTreatment(tr, k, s, send), fmt(s.count, 0), fmt(s.valueFiat || 0)],
+      sub: assetBreakdown(fmt, s.byAsset)
     };
   });
   const grandValue = keys.reduce((acc, k) => acc + (outboundByIntent[k].valueFiat || 0), 0);
   const grandCount = keys.reduce((acc, k) => acc + outboundByIntent[k].count, 0);
-  sectionTitle(ctx, nextSection(ctx), "Transfers out — classified by purpose", note, tableHeight(rows, true));
-  drawTable(ctx, cols, rows, { cells: ["Total sent out", "", String(grandCount), fmt(grandValue)] });
+  sectionTitle(ctx, nextSection(ctx), tr.t("components.tax_report.transfers_out_classified_by_purpose"), note, tableHeight(rows, true));
+  drawTable(ctx, cols, rows, { cells: [tr.t("components.tax_report.total_sent_out"), "", fmt(grandCount, 0), fmt(grandValue)] });
   const jur = ctx.bundle.jurisdiction;
-  csvNote(ctx, send.count
-      ? `${send.count} of these transfers (worth ${fmt(disposalValue)} ${f}) ${send.count === 1 ? "is a disposal" : "are disposals"}, with the gain computed under Transactions; ${send.taxed ? `${send.taxed} of them produced a taxable gain in ${jur}` : `none of them produced a taxable gain in ${jur}`}. Per-transfer detail is in ${ctx.csv}.`
-      : `None of these transfers is a disposal. Per-transfer detail is in ${ctx.csv}.`);
+  // One sentence per case, phrased so the count needs no plural agreement.
+  const vars = { count: fmt(send.count, 0), value: fmt(disposalValue), fiat: f, jurisdiction: jur, csv: ctx.csv };
+  csvNote(ctx, !send.count
+      ? tr.t("components.tax_report.none_of_these_transfers_is_a_disposal", { csv: ctx.csv })
+      : send.taxed
+          ? tr.t("components.tax_report.disposals_among_these_some_taxed", Object.assign({ taxed: fmt(send.taxed, 0) }, vars))
+          : tr.t("components.tax_report.disposals_among_these_none_taxed", vars));
 }
 
 // Per-token overview: opening / received / disposed / closing + closing value.
 function renderTokens(ctx, tokenSummary) {
   if (!tokenSummary || !tokenSummary.length) return;
+  const tr = ctx.tr, fmt = ctx.fmt;
   const f = ctx.bundle.fiat;
   const cols = fit([
-    { title: "Token", w: 48, align: "l" },
-    { title: "Opening", w: 78, align: "r" },
-    { title: "Received", w: 78, align: "r" },
-    { title: "Out", w: 78, align: "r" },
-    { title: "Closing", w: 78, align: "r" },
-    { title: `Value (${f})`, w: 86, align: "r" }
+    { title: tr.t("components.tax_report.col_token"), w: 48, align: "l" },
+    { title: tr.t("components.tax_report.col_opening"), w: 78, align: "r" },
+    { title: tr.t("components.tax_report.col_received"), w: 78, align: "r" },
+    { title: tr.t("components.tax_report.col_out"), w: 78, align: "r" },
+    { title: tr.t("components.tax_report.col_closing"), w: 78, align: "r" },
+    { title: tr.t("components.tax_report.col_value_fiat", { fiat: f }), w: 86, align: "r" }
   ]);
   // The engine stores an unpriced closing value as 0 (`|| 0`); show it as n/a.
   const unpriced = unpricedFigures(ctx.bundle);
@@ -1018,14 +1136,14 @@ function renderTokens(ctx, tokenSummary) {
     cells: [assetName(t.asset), fmt(t.openingQty, 4), fmt(t.receivedQty, 4), fmt(t.disposedQty, 4), fmt(t.closingQty, 4), fmt(valueOf(t))]
   }));
   const totalValue = tokenSummary.reduce((s, t) => s + valueOf(t), 0);
-  sectionTitle(ctx, nextSection(ctx), "Per-token summary",
-      "Opening balance, total received and disposed over the period, and the closing balance for each token. Opening reflects any balances entered under Advanced.",
+  sectionTitle(ctx, nextSection(ctx), tr.t("components.pixa_wallet_taxes_dialog.section_per_token_summary"),
+      tr.t("components.tax_report.opening_balance_total_received_and"),
       tableHeight(rows, true));
-  drawTable(ctx, cols, rows, { cells: ["Total", "", "", "", "", fmt(totalValue)] });
+  drawTable(ctx, cols, rows, { cells: [tr.t("components.tax_report.total"), "", "", "", "", fmt(totalValue)] });
   // The engine rebuilds PXP from history (VESTS converted at one ratio), which
   // drifts from the real stake once the vesting ratio moves. Say so.
   if (tokenSummary.some(t => t.asset === "PXP")) {
-    csvNote(ctx, "PXP quantities are rebuilt from the account history at the vesting ratio shown in the valuation basis. Check the closing PXP against the account's on-chain vesting balance at the same date before filing — if they differ, the on-chain balance is the one to declare.");
+    csvNote(ctx, tr.t("components.tax_report.pxp_quantities_are_rebuilt_from_the"));
   }
 }
 
@@ -1048,6 +1166,7 @@ function para(ctx, s, opts = {}) {
 }
 
 function renderReview(ctx) {
+  const tr = ctx.tr, fmt = ctx.fmt;
   const ing = ctx.ingest || {};
   const engineWarnings = (ctx.bundle.warnings) || [];
   const ingestWarnings = ing.warnings || [];
@@ -1057,21 +1176,26 @@ function renderReview(ctx) {
   if (!unpriced && !engineWarnings.length && !ingestWarnings.length && !skippedKeys.length
       && !ctx.pricingNote && !ctx.jurisdictionNote) return;
 
-  sectionTitle(ctx, "!", "Review & notes");
+  sectionTitle(ctx, "!", tr.t("components.pixa_wallet_taxes_dialog.section_review_notes"));
 
-  if (unpriced) para(ctx, unpricedMessage(ctx.bundle), { bullet: true, color: INK, font: ctx.f.bold });
-  for (const w of engineWarnings) para(ctx, w, { bullet: true });
-  for (const w of ingestWarnings) para(ctx, w, { bullet: true });
+  if (unpriced) para(ctx, unpricedMessage(tr, ctx.bundle), { bullet: true, color: INK, font: ctx.f.bold });
+  // Engine and ingest warnings are descriptors (plain strings pass through).
+  for (const w of engineWarnings) para(ctx, tr.text(w), { bullet: true });
+  for (const w of ingestWarnings) para(ctx, tr.text(w), { bullet: true });
 
   if (skippedKeys.length) {
-    const total = skippedKeys.reduce((s, k) => s + skipped[k], 0);
-    const counted = ctx.bundle.incomeTiming === "accrual" ? "when credited" : "at claim";
-    para(ctx, `Operations seen in the account history but not booked into the figures above — ${total} in total. These are social/governance actions with no balance impact, income already counted ${counted}, or movements settled at a later fill/execution. Counts by type:`, { gap: 2 });
-    para(ctx, skippedKeys.map(k => `${k} \u00d7${skipped[k]}`).join("   \u00b7   "), { size: 8 });
+    const total = fmt(skippedKeys.reduce((s, k) => s + skipped[k], 0), 0);
+    para(ctx, ctx.bundle.incomeTiming === "accrual"
+        ? tr.t("components.tax_report.operations_not_booked_accrual", { total })
+        : tr.t("components.tax_report.operations_not_booked_claim", { total }), { gap: 2 });
+    // Operation names are chain identifiers; only the counts are localised.
+    para(ctx, skippedKeys.map(k => `${k} \u00d7${fmt(skipped[k], 0)}`).join("   \u00b7   "), { size: 8 });
   }
 
-  if (ctx.pricingNote) para(ctx, ctx.pricingNote, { size: 8 });
-  if (ctx.jurisdictionNote) para(ctx, ctx.jurisdictionNote, { size: 8 });
+  // Caller notes: descriptors resolved in the document's language (plain
+  // strings are printed as given).
+  if (ctx.pricingNote) para(ctx, tr.text(ctx.pricingNote), { size: 8 });
+  if (ctx.jurisdictionNote) para(ctx, tr.text(ctx.jurisdictionNote), { size: 8 });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1084,8 +1208,11 @@ function renderReview(ctx) {
 
 function renderCover(ctx) {
   newPage(ctx, false);
-  const pg = ctx.page, b = ctx.bundle, f = ctx.f;
-  const period = `${String(b.periodStart || `${b.year}-01-01`).slice(0, 10)}  to  ${String(b.periodEnd || `${b.year}-12-31`).slice(0, 10)}`;
+  const pg = ctx.page, b = ctx.bundle, f = ctx.f, tr = ctx.tr;
+  const period = tr.t("components.tax_report.period_from_to", {
+    start: dayOf(tr, b.periodStart || `${b.year}-01-01`),
+    end: dayOf(tr, b.periodEnd || `${b.year}-12-31`)
+  });
 
   // Brand lockup
   let y = PAGE_H - 120;
@@ -1095,36 +1222,43 @@ function renderCover(ctx) {
     pg.drawImage(ctx.logo, { x: MRG, y, width: (ctx.logo.width || 1) * k, height: (ctx.logo.height || 1) * k });
     y -= 30;
   }
-  text(pg, "PIXAGRAM  ·  FAIRFLOW TAX ENGINE", MRG, y, 9, f.bold, SUB);
+  text(pg, `PIXAGRAM  ·  ${tr.upper(tr.t("components.tax_report.fairflow_tax_engine"))}`, MRG, y, 9, f.bold, SUB);
   y -= 34;
-  text(pg, `Tax Report ${b.year}`, MRG, y, 30, f.bold, INK);
+  text(pg, tr.t("components.tax_report.tax_report_year", { year: String(b.year) }), MRG, y, 30, f.bold, INK);
   y -= 14;
   bar(pg, MRG, y, CONTENT_W, 2.2, ACCENT);
   y -= 30;
 
   const idLine = (label, value, big) => {
-    text(pg, label.toUpperCase(), MRG, y, 7.5, f.bold, SUB);
+    text(pg, tr.upper(label), MRG, y, 7.5, f.bold, SUB);
     text(pg, value, MRG + 130, y, big ? 11 : 10, big ? f.bold : f.regular, INK);
     y -= 20;
   };
-  idLine("Account", `@${b.account}`, true);
-  idLine("Period", period);
-  idLine("Jurisdiction", `${b.jurisdictionName || b.jurisdiction} (${b.jurisdiction})  —  reported in ${b.fiat}`);
+  idLine(tr.t("components.tax_report.account"), `@${b.account}`, true);
+  idLine(tr.t("components.tax_report.period"), period);
+  idLine(tr.t("components.tax_report.jurisdiction"), tr.t("components.tax_report.jurisdiction_reported_in", {
+    name: b.jurisdictionName ? tr.text(b.jurisdictionName) : b.jurisdiction,
+    code: b.jurisdiction,
+    fiat: b.fiat
+  }));
 
   // Document control block
   y -= 16;
-  text(pg, "DOCUMENT CONTROL", MRG, y, 8, f.bold, SUB);
+  text(pg, tr.upper(tr.t("components.tax_report.document_control")), MRG, y, 8, f.bold, SUB);
   y -= 10;
+  const generated = b.generatedAt
+      ? `${tr.date(b.generatedAt, { dateStyle: "medium", timeStyle: "medium" })} UTC`
+      : "";
   const rows = [
-    ["Generated", b.generatedAt],
-    ["Ruleset", String(b.rulesVersion || "")],
-    ["Price data", String(b.priceDataVersion || "")],
-    ["Cost basis method", METHOD_LABELS[b.methodUsed] || String(b.methodUsed || "")],
-    ["Income recognition", TIMING_LABELS[b.incomeTiming] || String(b.incomeTiming || "")],
-    ["Report ID", ctx.reportId],
-    ["Fingerprint (SHA-256)", ctx.fingerprint
+    [tr.t("components.tax_report.generated"), generated],
+    [tr.t("components.tax_report.ruleset"), String(b.rulesVersion || "")],
+    [tr.t("components.tax_report.price_data"), String(b.priceDataVersion || "")],
+    [tr.t("components.tax_report.cost_basis_method"), methodLabel(tr, b.methodUsed)],
+    [tr.t("components.tax_report.income_recognition"), timingLabel(tr, b.incomeTiming)],
+    [tr.t("components.tax_report.report_id"), ctx.reportId],
+    [tr.t("components.tax_report.fingerprint_sha_256"), ctx.fingerprint
         ? `${ctx.fingerprint.slice(0, 32)}\n${ctx.fingerprint.slice(32)}`
-        : "unavailable in this environment"]
+        : tr.t("components.tax_report.unavailable_in_this_environment")]
   ];
   // Values wrap inside the panel (the Japanese total-average label used to run
   // past its right edge).
@@ -1138,52 +1272,63 @@ function renderCover(ctx) {
   drawRR(pg, MRG, y - panelH, CONTENT_W, panelH, 9, ZEBRA);
   let ry = y - pad - 8;
   for (const [label, lines] of rowLines) {
-    text(pg, label, MRG + 16, ry, 8, f.bold, SUB);
+    text(pg, ellipsize(label, f.bold, 8, 150), MRG + 16, ry, 8, f.bold, SUB);
     for (const [i, ln] of lines.entries()) {
       text(pg, ln, MRG + 170, ry - i * (rowH - 4), lines.length > 1 ? 8.5 : 9, f.regular, INK);
     }
     ry -= rowH + (lines.length - 1) * (rowH - 4);
   }
   y = y - panelH - 18;
-  for (const ln of wrap(
-      "The fingerprint is computed over the compact JSON serialisation of this report's data bundle; " +
-      "it ties this document to its CSV and JSON exports. Any figure herein can be traced to the " +
-      "line-item detail in those files.", f.regular, 8, CONTENT_W)) {
+  for (const ln of wrap(tr.t("components.tax_report.the_fingerprint_is_computed_over_the"), f.regular, 8, CONTENT_W)) {
     text(pg, ln, MRG, y, 8, f.regular, SUB);
     y -= 10;
   }
 
   // Bottom: preparer statement (the page footer adds the disclaimer + identity).
-  text(pg, "Prepared by the Pixagram FairFlow tax engine from on-chain history and user-supplied classifications.",
+  text(pg, ellipsize(tr.t("components.tax_report.prepared_by_the_pixagram_fairflow_tax"), f.regular, 8, CONTENT_W),
       MRG, FOOT_Y + 44, 8, f.regular, SUB);
 }
 
 function renderBasis(ctx) {
-  const b = ctx.bundle;
-  sectionTitle(ctx, nextSection(ctx), "Basis of preparation",
-      "How every figure in this report was computed — the method, the timing, the prices, and the assumptions.");
-  const period = `${String(b.periodStart || "").slice(0, 10)} to ${String(b.periodEnd || "").slice(0, 10)}`;
-  const ps = b.priceSnapshot;
+  const b = ctx.bundle, tr = ctx.tr, fmt = ctx.fmt;
+  sectionTitle(ctx, nextSection(ctx), tr.t("components.tax_report.basis_of_preparation"),
+      tr.t("components.tax_report.how_every_figure_in_this_report_was"));
+  const period = tr.t("components.tax_report.period_from_to", { start: dayOf(tr, b.periodStart), end: dayOf(tr, b.periodEnd) });
+  const losses = b.lossCarryforwardInFiat ? fmt(b.lossCarryforwardInFiat) : "";
+  const exemption = b.exemptionUsedInFiat ? fmt(b.exemptionUsedInFiat) : "";
+  const deductions = losses && exemption
+      ? tr.t("components.tax_report.deductions_losses_and_exemption", { losses, exemption, fiat: b.fiat })
+      : losses
+          ? tr.t("components.tax_report.deductions_losses_only", { losses, fiat: b.fiat })
+          : exemption
+              ? tr.t("components.tax_report.deductions_exemption_only", { exemption, fiat: b.fiat })
+              : tr.t("components.tax_report.deductions_none");
   const items = [
-    ["Jurisdiction & rules", `${b.jurisdictionName || b.jurisdiction} (${b.jurisdiction}), ruleset ${b.rulesVersion}. Figures reported in ${b.fiat}.`],
-    ["Scope", `On-platform activity for @${b.account}, ${period}. Off-platform events (external exchanges, other chains) are out of scope and must be reported separately.`],
-    ["Cost basis method", METHOD_LABELS[b.methodUsed] || String(b.methodUsed || "")],
-    ["Income recognition", TIMING_LABELS[b.incomeTiming] || String(b.incomeTiming || "")],
-    ["Tokens", "PIXA (liquid; exported as PXA in the CSV files), PXS (Pixa Supra), PXP (Pixa Power: staked PIXA, 1 PXP = 1 PIXA)."],
-    ["Price basis", priceBasisText(b, ctx.priceMode)],
-    ["Deductions supplied", (b.lossCarryforwardInFiat || b.exemptionUsedInFiat)
-        ? [b.lossCarryforwardInFiat ? `losses carried forward ${fmt(b.lossCarryforwardInFiat)} ${b.fiat}` : "",
-      b.exemptionUsedInFiat ? `exemption already used elsewhere ${fmt(b.exemptionUsedInFiat)} ${b.fiat}` : ""].filter(Boolean).join("; ") + "."
-        : "None."]
+    [tr.t("components.tax_report.jurisdiction_and_rules"), tr.t("components.tax_report.jurisdiction_rules_value", {
+      name: b.jurisdictionName ? tr.text(b.jurisdictionName) : b.jurisdiction,
+      code: b.jurisdiction,
+      version: String(b.rulesVersion || ""),
+      fiat: b.fiat
+    })],
+    [tr.t("components.tax_report.scope"), tr.t("components.tax_report.scope_value", { account: b.account, period })],
+    [tr.t("components.tax_report.cost_basis_method"), methodLabel(tr, b.methodUsed)],
+    [tr.t("components.tax_report.income_recognition"), timingLabel(tr, b.incomeTiming)],
+    [tr.t("components.tax_report.tokens"), tr.t("components.tax_report.tokens_value")],
+    [tr.t("components.tax_report.price_basis"), priceBasisText(tr, b, ctx.priceMode)],
+    [tr.t("components.tax_report.deductions_supplied"), deductions]
   ];
-  if (b.assumptionNote) items.push(["Assumptions", b.assumptionNote]);
+  if (b.assumptionNote) items.push([tr.t("components.tax_report.assumptions"), tr.text(b.assumptionNote)]);
   const LBL_W = 128;
   for (const [label, value] of items) {
     const lines = wrap(value, ctx.f.regular, 8.5, CONTENT_W - LBL_W);
-    ensure(ctx, lines.length * 11 + 8);
-    text(ctx.page, label, MRG, ctx.y - 9, 8.5, ctx.f.bold, SUB);
-    for (const ln of lines) {
-      text(ctx.page, ln, MRG + LBL_W, ctx.y - 9, 8.5, ctx.f.regular, INK);
+    // A translated label may be longer than the English one: it wraps in its
+    // own column instead of running into the value.
+    const labelLines = wrap(label, ctx.f.bold, 8.5, LBL_W - 8);
+    const n = Math.max(lines.length, labelLines.length);
+    ensure(ctx, n * 11 + 8);
+    for (let i = 0; i < n; i++) {
+      if (labelLines[i]) text(ctx.page, labelLines[i], MRG, ctx.y - 9, 8.5, ctx.f.bold, SUB);
+      if (lines[i]) text(ctx.page, lines[i], MRG + LBL_W, ctx.y - 9, 8.5, ctx.f.regular, INK);
       ctx.y -= 11;
     }
     ctx.y -= 6;
@@ -1201,59 +1346,64 @@ function renderBasis(ctx) {
 // Swiss filer actually needs. Labels follow the usual cantonal securities list;
 // a canton's software may word them differently.
 function renderSwissAnnex(ctx) {
-  const b = ctx.bundle, f = b.fiat;
-  const title = "Jurisdiction annex — Switzerland (where the figures go)";
-  const note = ("How the figures map onto the return of a private investor in Switzerland. Wording follows the usual cantonal securities list (Wertschriftenverzeichnis / état des titres); your canton's form may label the lines differently. No Swiss withholding tax applies to these rewards, so their income goes in the column for income without withholding tax." +
-      (f === "CHF" ? "" : ` These figures are in ${f}, but the Swiss return is filed in CHF: regenerate this report in CHF before using them.`));
+  const b = ctx.bundle, f = b.fiat, tr = ctx.tr, fmt = ctx.fmt;
+  const title = tr.t("components.tax_report.swiss_annex_title");
+  const note = f === "CHF"
+      ? tr.t("components.tax_report.swiss_annex_note")
+      : `${tr.t("components.tax_report.swiss_annex_note")} ${tr.t("components.tax_report.swiss_annex_not_in_chf", { fiat: f })}`;
   // (the heading is drawn once the rows are known, so it moves with the table)
   const cols = fit([
-    { title: "Item", w: 190, align: "l" },
-    { title: `Amount (${f})`, w: 86, align: "r" },
-    { title: "Where it goes", w: 224, align: "l" }
+    { title: tr.t("components.tax_report.col_item"), w: 190, align: "l" },
+    { title: tr.t("components.tax_report.col_amount_fiat", { fiat: f }), w: 86, align: "r" },
+    { title: tr.t("components.tax_report.col_where_it_goes"), w: 224, align: "l" }
   ]);
   const rows = [];
   if (b.wealth) {
     rows.push({
-      cells: [`Holdings at ${b.wealth.refDate}`, fmt(b.wealth.totalFiat), "Securities list: tax value (wealth)"],
-      sub: "PIXA, PXS and PXP together; staked and delegated-out PXP included"
+      cells: [tr.t("components.tax_report.holdings_at", { date: dayOf(tr, b.wealth.refDate) }), fmt(b.wealth.totalFiat), tr.t("components.tax_report.securities_list_tax_value_wealth")],
+      sub: tr.t("components.tax_report.pixa_pxs_and_pxp_together")
     });
   }
   const inc = ((b.operations && b.operations.lines) || []).filter(l => l.taxedAtReceipt !== false);
   const sum = (cats) => inc.filter(l => cats.includes(l.category)).reduce((s, l) => s + l.fmvFiat, 0);
   const has = (cats) => inc.some(l => cats.includes(l.category));
   const STAKE = ["reward_curation", "savings_interest"], WORK = ["reward_author", "reward_benefactor"];
-  if (has(STAKE)) rows.push({ cells: ["Curation rewards, savings interest", fmt(sum(STAKE)), "Securities list: income, no withholding tax"] });
-  if (has(WORK)) rows.push({ cells: ["Author & beneficiary rewards", fmt(sum(WORK)), "Other income (self-employment if regular)"] });
+  const selfEmployment = tr.t("components.tax_report.other_income_self_employment_if_regular");
+  if (has(STAKE)) rows.push({ cells: [tr.t("components.tax_report.curation_rewards_savings_interest"), fmt(sum(STAKE)), tr.t("components.tax_report.securities_list_income_no_withholding")] });
+  if (has(WORK)) rows.push({ cells: [tr.t("components.tax_report.author_beneficiary_rewards"), fmt(sum(WORK)), selfEmployment] });
   if (has(["reward_claim"])) {
     rows.push({
-      cells: ["Rewards claimed (author + curation)", fmt(sum(["reward_claim"])), "Split: curation vs author (see below)"],
-      sub: "Claim timing merges author and curation rewards; accrual timing would report them separately"
+      cells: [tr.t("components.tax_report.category_reward_claim"), fmt(sum(["reward_claim"])), tr.t("components.tax_report.split_curation_vs_author_see_below")],
+      sub: tr.t("components.tax_report.claim_timing_merges_author_and_curation")
     });
   }
-  if (has(["proposal_income"])) rows.push({ cells: ["Proposal (DPF) payouts", fmt(sum(["proposal_income"])), "Other income (self-employment if regular)"] });
+  if (has(["proposal_income"])) rows.push({ cells: [tr.t("components.tax_report.category_proposal_income"), fmt(sum(["proposal_income"])), selfEmployment] });
   const known = [...STAKE, ...WORK, "reward_claim", "proposal_income"];
   const other = inc.filter(l => !known.includes(l.category));
-  if (other.length) rows.push({ cells: ["Other income", fmt(other.reduce((s, l) => s + l.fmvFiat, 0)), "Other income"] });
+  if (other.length) {
+    const otherIncome = tr.t("components.tax_report.other_income");
+    rows.push({ cells: [otherIncome, fmt(other.reduce((s, l) => s + l.fmvFiat, 0)), otherIncome] });
+  }
   const t = b.transactions;
   if (t && t.lines && t.lines.length) {
     rows.push(gainsRegime(b) === "taxable"
-        ? { cells: ["Gains on disposals", fmt(t.taxableAmountFiat), "Self-employment income (professional trader)"] }
+        ? { cells: [tr.t("components.tax_report.gains_on_disposals"), fmt(t.taxableAmountFiat), tr.t("components.tax_report.self_employment_income_professional")] }
         : {
-          cells: ["Gains on disposals", fmt(t.totalGainFiat), "Not declared (tax-exempt private gain)"],
-          sub: "Kept as a record; losses are not deductible either"
+          cells: [tr.t("components.tax_report.gains_on_disposals"), fmt(t.totalGainFiat), tr.t("components.tax_report.not_declared_tax_exempt_private_gain")],
+          sub: tr.t("components.tax_report.kept_as_a_record_losses_are_not")
         });
   }
   sectionTitle(ctx, nextSection(ctx), title, note, rows.length ? tableHeight(rows, false) : 0);
   if (!rows.length) {
-    para(ctx, "Nothing to declare from this account for the period.", { size: 9, color: INK, gap: 10 });
+    para(ctx, tr.t("components.tax_report.nothing_to_declare_from_this_account"), { size: 9, color: INK, gap: 10 });
     return;
   }
   drawTable(ctx, cols, rows);
-  csvNote(ctx, "Author and beneficiary rewards and proposal payouts pay for work rather than for holding tokens: if that activity is regular and organised, the canton may treat it as self-employment, which also brings AHV/AVS contributions. Curation rewards and savings interest are a return on your stake, like staking rewards.");
+  csvNote(ctx, tr.t("components.tax_report.author_and_beneficiary_rewards_pay_for"));
 }
 
 function renderJurisdictionAnnex(ctx) {
-  const b = ctx.bundle;
+  const b = ctx.bundle, tr = ctx.tr, fmt = ctx.fmt;
   if (b.jurisdiction === "CH") return renderSwissAnnex(ctx);
   const t = b.transactions;
   if (!t || !t.lines || !t.lines.length) return;
@@ -1268,61 +1418,67 @@ function renderJurisdictionAnnex(ctx) {
     }
     return [...m.entries()].sort((a, z) => a[0].localeCompare(z[0]));
   };
+  const col = (title, w, align) => ({ title, w, align });
 
   if (b.jurisdiction === "BR") {
     const inBRL = b.fiat === "BRL";
-    sectionTitle(ctx, nextSection(ctx), "Jurisdiction annex — Brazil (IN RFB 1888)",
-        "Monthly gross disposal proceeds against the R$30,000 self-reporting threshold for activity on non-Brazilian platforms; months over the threshold are flagged. Gross proceeds are shown as the volume proxy — include acquisitions when computing your full monthly operations volume." +
-        (inBRL ? "" : ` Figures are in ${b.fiat}; the statutory threshold is defined in BRL — convert before comparing (flags not applied).`));
+    sectionTitle(ctx, nextSection(ctx), tr.t("components.tax_report.br_annex_title"),
+        inBRL
+            ? tr.t("components.tax_report.br_annex_note")
+            : `${tr.t("components.tax_report.br_annex_note")} ${tr.t("components.tax_report.br_annex_not_in_brl", { fiat: b.fiat })}`);
     const cols = fit([
-      { title: "Month", w: 92, align: "l" },
-      { title: "Disposals", w: 80, align: "r" },
-      { title: `Gross proceeds (${b.fiat})`, w: 170, align: "r" },
-      { title: "R$30,000 threshold", w: 132, align: "r" }
+      col(tr.t("components.tax_report.col_month"), 92, "l"),
+      col(tr.t("components.tax_report.col_disposals"), 80, "r"),
+      col(tr.t("components.tax_report.col_gross_proceeds_fiat", { fiat: b.fiat }), 170, "r"),
+      col(tr.t("components.tax_report.col_r30000_threshold"), 132, "r")
     ]);
     const rows = monthly().map(([m, g]) => ({
-      cells: [m, String(g.n), fmt(g.proceeds), inBRL ? (g.proceeds > 30000 ? "OVER - report" : "under") : "n/a"]
+      cells: [monthOf(tr, m), fmt(g.n, 0), fmt(g.proceeds), inBRL
+          ? (g.proceeds > 30000 ? tr.t("components.tax_report.over_report") : tr.t("components.tax_report.under"))
+          : tr.t("components.tax_report.not_available")]
     }));
     drawTable(ctx, cols, rows);
-    csvNote(ctx, "DeCripto expands reporting from 2026 — keep the CSV line items for every flagged month.");
+    csvNote(ctx, tr.t("components.tax_report.decripto_expands_reporting_from_2026"));
     return;
   }
 
   if (b.jurisdiction === "IN") {
     const inINR = b.fiat === "INR";
-    sectionTitle(ctx, nextSection(ctx), "Jurisdiction annex — India (Form 26AS / TDS reconciliation)",
-        "Gross consideration per month, with the indicative 1% that section 194S TDS would represent — reconcile against the credits in your Form 26AS / AIS. On P2P and foreign platforms the BUYER must deduct and deposit; annual thresholds Rs 50,000 / Rs 10,000 apply." +
-        (inINR ? "" : ` Figures are in ${b.fiat}; statutory thresholds are defined in INR.`));
+    sectionTitle(ctx, nextSection(ctx), tr.t("components.tax_report.in_annex_title"),
+        inINR
+            ? tr.t("components.tax_report.in_annex_note")
+            : `${tr.t("components.tax_report.in_annex_note")} ${tr.t("components.tax_report.in_annex_not_in_inr", { fiat: b.fiat })}`);
     const cols = fit([
-      { title: "Month", w: 92, align: "l" },
-      { title: "Transfers", w: 80, align: "r" },
-      { title: `Gross consideration (${b.fiat})`, w: 178, align: "r" },
-      { title: `Indicative TDS 1% (${b.fiat})`, w: 150, align: "r" }
+      col(tr.t("components.tax_report.col_month"), 92, "l"),
+      col(tr.t("components.tax_report.col_transfers"), 80, "r"),
+      col(tr.t("components.tax_report.col_gross_consideration_fiat", { fiat: b.fiat }), 178, "r"),
+      col(tr.t("components.tax_report.col_indicative_tds_fiat", { fiat: b.fiat }), 150, "r")
     ]);
     const rows = monthly().map(([m, g]) => ({
-      cells: [m, String(g.n), fmt(g.proceeds), fmt(g.proceeds * 0.01)]
+      cells: [monthOf(tr, m), fmt(g.n, 0), fmt(g.proceeds), fmt(g.proceeds * 0.01)]
     }));
     const grand = t.lines.reduce((s, l) => s + l.proceedsFiat, 0);
-    drawTable(ctx, cols, rows, { cells: ["Total", String(t.lines.length), fmt(grand), fmt(grand * 0.01)] });
+    drawTable(ctx, cols, rows, { cells: [tr.t("components.tax_report.total"), fmt(t.lines.length, 0), fmt(grand), fmt(grand * 0.01)] });
     return;
   }
 
   if (b.jurisdiction === "ID") {
     const inIDR = b.fiat === "IDR";
-    sectionTitle(ctx, nextSection(ctx), "Jurisdiction annex — Indonesia (PMK 50/2025 final tax)",
-        "Monthly gross disposal value with the indicative 1% FINAL income tax for transactions through foreign platforms (self-assessed by the seller where no collector is appointed) — the statutory base is the GROSS transaction value, not the gain. Registered domestic platforms withhold 0.21% instead." +
-        (inIDR ? "" : ` Figures are in ${b.fiat}; the statutory base is assessed in IDR — convert before filing.`));
+    sectionTitle(ctx, nextSection(ctx), tr.t("components.tax_report.id_annex_title"),
+        inIDR
+            ? tr.t("components.tax_report.id_annex_note")
+            : `${tr.t("components.tax_report.id_annex_note")} ${tr.t("components.tax_report.id_annex_not_in_idr", { fiat: b.fiat })}`);
     const cols = fit([
-      { title: "Month", w: 92, align: "l" },
-      { title: "Disposals", w: 80, align: "r" },
-      { title: `Gross value (${b.fiat})`, w: 178, align: "r" },
-      { title: `Indicative 1% (${b.fiat})`, w: 150, align: "r" }
+      col(tr.t("components.tax_report.col_month"), 92, "l"),
+      col(tr.t("components.tax_report.col_disposals"), 80, "r"),
+      col(tr.t("components.tax_report.col_gross_value_fiat", { fiat: b.fiat }), 178, "r"),
+      col(tr.t("components.tax_report.col_indicative_1_fiat", { fiat: b.fiat }), 150, "r")
     ]);
     const rows = monthly().map(([m, g]) => ({
-      cells: [m, String(g.n), fmt(g.proceeds), fmt(g.proceeds * 0.01)]
+      cells: [monthOf(tr, m), fmt(g.n, 0), fmt(g.proceeds), fmt(g.proceeds * 0.01)]
     }));
     const grand = t.lines.reduce((s, l) => s + l.proceedsFiat, 0);
-    drawTable(ctx, cols, rows, { cells: ["Total", String(t.lines.length), fmt(grand), fmt(grand * 0.01)] });
+    drawTable(ctx, cols, rows, { cells: [tr.t("components.tax_report.total"), fmt(t.lines.length, 0), fmt(grand), fmt(grand * 0.01)] });
     return;
   }
 
@@ -1334,29 +1490,32 @@ function renderJurisdictionAnnex(ctx) {
       a.q += lot.qty; a.b += lot.basisFiat; a.p += lot.proceedsFiat; a.g += lot.gainFiat; a.n++;
     }
     if (agg.sd.n + agg.td.n === 0) return; // pure pooling — the annex would add nothing
-    sectionTitle(ctx, nextSection(ctx), "Jurisdiction annex — United Kingdom (share matching)",
-        "How disposal quantity was matched under HMRC's ordering (TCGA 1992 s.105 / s.106A): same-day acquisitions first, then acquisitions in the following 30 days, then the section-104 pool.");
+    sectionTitle(ctx, nextSection(ctx), tr.t("components.tax_report.uk_annex_title"), tr.t("components.tax_report.uk_annex_note"));
     const cols = fit([
-      { title: "Matching rule", w: 158, align: "l" },
-      { title: "Quantity", w: 80, align: "r" },
-      { title: `Cost basis (${b.fiat})`, w: 92, align: "r" },
-      { title: `Proceeds (${b.fiat})`, w: 92, align: "r" },
-      { title: `Gain (${b.fiat})`, w: 82, align: "r" }
+      col(tr.t("components.tax_report.col_matching_rule"), 158, "l"),
+      col(tr.t("components.tax_report.col_quantity"), 80, "r"),
+      col(tr.t("components.tax_report.col_cost_basis_fiat", { fiat: b.fiat }), 92, "r"),
+      col(tr.t("components.tax_report.col_proceeds_fiat", { fiat: b.fiat }), 92, "r"),
+      col(tr.t("components.tax_report.col_gain_fiat", { fiat: b.fiat }), 82, "r")
     ]);
     const mkRow = (label, a) => ({ cells: [label, fmt(a.q, 4), fmt(a.b), fmt(a.p), fmt(a.g)] });
     const rows = [];
-    if (agg.sd.n) rows.push(mkRow("Same-day (s.105)", agg.sd));
-    if (agg.td.n) rows.push(mkRow("30-day bed & breakfast (s.106A)", agg.td));
-    if (agg.pool.n) rows.push(mkRow("Section-104 pool", agg.pool));
+    if (agg.sd.n) rows.push(mkRow(tr.t("components.tax_report.same_day_s105"), agg.sd));
+    if (agg.td.n) rows.push(mkRow(tr.t("components.tax_report.thirty_day_bed_and_breakfast_s106a"), agg.td));
+    if (agg.pool.n) rows.push(mkRow(tr.t("components.tax_report.section_104_pool"), agg.pool));
     const tot = ["q", "b", "p", "g"].map(k => agg.sd[k] + agg.td[k] + agg.pool[k]);
-    drawTable(ctx, cols, rows, { cells: ["Total", fmt(tot[0], 4), fmt(tot[1]), fmt(tot[2]), fmt(tot[3])] });
+    drawTable(ctx, cols, rows, { cells: [tr.t("components.tax_report.total"), fmt(tot[0], 4), fmt(tot[1]), fmt(tot[2]), fmt(tot[3])] });
   }
 }
 
-function drawFooters(doc, f, bundle, reportId) {
+function drawFooters(doc, f, bundle, reportId, tr) {
   const pages = doc.getPages();
-  const disclaimer = "Decision-support document generated from on-chain data — not a filed tax return. Figures must be reviewed and confirmed by a qualified advisor.";
-  const identity = `${reportId}  ·  @${bundle.account}  ·  ${String(bundle.periodStart || `${bundle.year}-01-01`).slice(0, 10)} – ${String(bundle.periodEnd || `${bundle.year}-12-31`).slice(0, 10)}  ·  ${bundle.jurisdiction}`;
+  const disclaimer = tr.t("components.tax_report.decision_support_document_not_a_filed");
+  const period = tr.t("components.tax_report.period_from_to", {
+    start: dayOf(tr, bundle.periodStart || `${bundle.year}-01-01`),
+    end: dayOf(tr, bundle.periodEnd || `${bundle.year}-12-31`)
+  });
+  const identity = `${reportId}  ·  @${bundle.account}  ·  ${period}  ·  ${bundle.jurisdiction}`;
   pages.forEach((pg, i) => {
     // Running identity above the rule: what document, whose, which period.
     pg.drawText(safe(identity), {
@@ -1366,7 +1525,7 @@ function drawFooters(doc, f, bundle, reportId) {
       font: f.regular,
       color: MUTED
     });
-    const pn = `Page ${i + 1} of ${pages.length}`;
+    const pn = safe(tr.t("components.tax_report.page_of", { page: tr.number(i + 1, 0), pages: tr.number(pages.length, 0) }));
     pg.drawText(pn, {
       x: PAGE_W - MRG - f.bold.widthOfTextAtSize(pn, 7.5),
       y: FOOT_Y + 18,
@@ -1407,12 +1566,27 @@ async function defaultFonts(doc) {
     oblique: await doc.embedFont(StandardFonts.HelveticaOblique)
   };
 }
+/**
+ * opts:
+ *   i18n             document translator (utils/docLanguage.js); keys print
+ *                    as-is without one. Render through renderInDocLanguage()
+ *                    with printableInReport so the language fits Helvetica.
+ *   fonts            { regular, bold, oblique } pdf-lib fonts (default Helvetica)
+ *   csvFilename      shown where the report points to the CSV
+ *   ingest           { skipped, warnings } from the ingest step
+ *   pricingNote,
+ *   jurisdictionNote tk() descriptors (or plain strings) for the Review section
+ *   priceMode        "historical" | "snapshot"
+ */
 export async function generateTaxReportPdf(bundle, opts = {}) {
+  const tr = opts.i18n || keyTranslator();
   const doc = await PDFDocument.create();
-  doc.setTitle(`Pixagram Tax Report ${bundle.year} — ${bundle.account}`);
+  // Metadata is stored as PDF text strings (UTF-16), not drawn with the font.
+  doc.setTitle(tr.t("components.tax_report.pdf_title", { year: String(bundle.year), account: bundle.account }));
   doc.setAuthor("Pixagram");
-  doc.setSubject(`${bundle.jurisdiction} tax report`);
+  doc.setSubject(tr.t("components.tax_report.pdf_subject", { jurisdiction: bundle.jurisdiction }));
   doc.setCreator("Pixagram Tax Reporting");
+  if (tr.lang) doc.setLanguage(tr.lang);
   const f = opts.fonts ?? (await defaultFonts(doc));
   let logo = null;
   try {
@@ -1425,9 +1599,11 @@ export async function generateTaxReportPdf(bundle, opts = {}) {
     page: null,
     y: 0,
     f,
+    tr,
+    fmt: makeFmt(tr),
     bundle,
     logo,
-    csv: opts.csvFilename ?? "the attached CSV file",
+    csv: opts.csvFilename ?? tr.t("components.tax_report.the_attached_csv_file"),
     ingest: opts.ingest || null,
     jurisdictionNote: opts.jurisdictionNote || "",
     pricingNote: opts.pricingNote || "",
@@ -1437,6 +1613,8 @@ export async function generateTaxReportPdf(bundle, opts = {}) {
   };
   // Fingerprint the exact data this PDF renders, so the document is verifiably
   // tied to its CSV/JSON exports. Report ID is the fingerprint's first 10 hex.
+  // The bundle's text is language-neutral (descriptors), so the fingerprint
+  // does not depend on the language the PDF is written in.
   const fingerprint = await sha256Hex(JSON.stringify(bundle));
   const reportId = "PIX-" + (fingerprint
       ? fingerprint.slice(0, 10).toUpperCase()
@@ -1456,7 +1634,7 @@ export async function generateTaxReportPdf(bundle, opts = {}) {
   renderJurisdictionAnnex(ctx);
   if (bundle.movements && bundle.movements.length) renderMovements(ctx, bundle.movements);
   renderReview(ctx);
-  drawFooters(doc, f, bundle, reportId);
+  drawFooters(doc, f, bundle, reportId, tr);
   return doc.save();
 }
 
@@ -1475,9 +1653,18 @@ function toCsv(rows) {
   return rows.map(r => r.map(csvCell).join(",")).join("\r\n");
 }
 
-/** Per-section CSVs (clean schemas) plus one combined long-format detail CSV. */
-export function generateTaxReportCsvs(bundle) {
+/**
+ * Per-section CSVs (clean schemas) plus one combined long-format detail CSV.
+ * Column headers and data tokens are the schema and stay as they are; the
+ * human-text columns (tax_treatment, note) are written with `opts.i18n` —
+ * the dialog passes a translator in the UI language (a CSV has no font).
+ */
+export function generateTaxReportCsvs(bundle, opts = {}) {
+  const tr = opts.i18n || keyTranslator();
   const fiat = bundle.fiat;
+  // A movement's note is a descriptor (or the user's memo); a gift or charity
+  // movement carries both: "memo · note".
+  const noteOf = (m) => [m.memo, tr.text(m.note)].filter(Boolean).join(" · ");
 
   const wRows = [["asset", "quantity", "unit_value", "value", "fiat", "source", "ref_date"]];
   if (bundle.wealth) for (const l of bundle.wealth.lines) wRows.push([l.asset, l.qty, l.fiatPerUnit, l.valueFiat, fiat, l.source, bundle.wealth.refDate]);
@@ -1545,7 +1732,7 @@ export function generateTaxReportCsvs(bundle) {
   if (bundle.operations) for (const l of bundle.operations.lines) oRows.push([l.ts, l.block ?? "", l.id || "", l.category, l.asset, l.qtyIn, l.fmvFiat, l.taxedAtReceipt === false ? "no" : "yes", l.source, l.counterparty || "", fiat]);
 
   const mRows = [["date", "block", "txid", "kind", "asset", "direction", "amount", "note", "fiat"]];
-  if (bundle.movements) for (const m of bundle.movements) mRows.push([m.ts, m.block ?? "", m.id || "", m.kind, m.asset, m.direction, m.amount, m.note, fiat]);
+  if (bundle.movements) for (const m of bundle.movements) mRows.push([m.ts, m.block ?? "", m.id || "", m.kind, m.asset, m.direction, m.amount, noteOf(m), fiat]);
 
   // Per-token summary: opening / received / disposed / closing per asset.
   const kRows = [["asset", "opening_qty", "received_qty", "income_qty", "income_value", "out_qty", "taxable_disposed_qty", "closing_qty", "closing_value", "fiat"]];
@@ -1562,10 +1749,10 @@ export function generateTaxReportCsvs(bundle) {
   // was wrong there).
   const obRows = [["purpose", "tax_treatment", "asset", "total_sent", "transfers_in_purpose", "is_disposal"]];
   if (bundle.outboundByIntent) {
-    const send = sendDisposals(bundle);
+    const send = sendDisposals(tr, bundle);
     for (const [k, s] of Object.entries(bundle.outboundByIntent))
       for (const [a, q] of Object.entries(s.byAsset))
-        obRows.push([k, outboundTreatment(k, s, send).replace(/\s*—\s*/g, " - "), a, q, s.count, s.taxable ? "yes" : "no"]);
+        obRows.push([k, outboundTreatment(tr, k, s, send).replace(/\s*—\s*/g, " - "), a, q, s.count, s.taxable ? "yes" : "no"]);
   }
 
   // combined long format: one normalised row per detail line across all reports
@@ -1573,7 +1760,7 @@ export function generateTaxReportCsvs(bundle) {
   if (bundle.wealth) for (const l of bundle.wealth.lines) cRows.push(["wealth", bundle.wealth.refDate, "holding", l.asset, "hold", l.qty, l.fiatPerUnit, l.valueFiat, "", "", "", l.source, fiat]);
   if (bundle.transactions) for (const l of bundle.transactions.lines) cRows.push(["transactions", l.ts, l.category, l.asset, "out", l.qtyOut, "", l.proceedsFiat, l.basisFiat, l.gainFiat, l.taxable ? "yes" : "no", l.method, fiat]);
   if (bundle.operations) for (const l of bundle.operations.lines) cRows.push(["operations", l.ts, l.category, l.asset, "in", l.qtyIn, "", l.fmvFiat, "", "", "", l.source, fiat]);
-  if (bundle.movements) for (const m of bundle.movements) cRows.push(["movements", m.ts, m.kind, m.asset, m.direction, m.amount, "", "", "", "", "", m.note, fiat]);
+  if (bundle.movements) for (const m of bundle.movements) cRows.push(["movements", m.ts, m.kind, m.asset, m.direction, m.amount, "", "", "", "", "", noteOf(m), fiat]);
 
   return {
     wealth: toCsv(wRows),

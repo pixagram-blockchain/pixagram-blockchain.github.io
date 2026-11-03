@@ -28,7 +28,7 @@ import * as actions from "../actions/utils";
 import * as favorites from "../utils/favorites";
 
 import { T } from "../utils/T";
-import { t, useLanguage } from "../utils/text";
+import { t, tk, tx, useLanguage } from "../utils/text";
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -489,7 +489,10 @@ const FavoriteRow = React.memo(function FavoriteRow({ classes, item, square, pix
     const secondary = (
         <React.Fragment>
             <span className={classes.secondary}>
-                {"by " + (item.author_name || item.author) + " · " + timeAgo.format(new Date(itemDate(item)))}
+                {t("components.favorite_manager_dialog.by_author_time", {
+                    author: item.author_name || item.author,
+                    time: timeAgo.format(new Date(itemDate(item))),
+                })}
             </span>
             {item.description ? (
                 <span className={classes.tertiary}>{item.description}</span>
@@ -572,15 +575,17 @@ const EmptyState = ({ classes, square, filtered }) => (
         {square ? <DescriptionRounded /> : <ImageRounded />}
         <Typography className={classes.stateTitle}>
             {filtered
-                ? "Nothing carries the selected tag"
-                : (square ? "No favorite blog posts yet" : "No favorite artworks yet")}
+                ? t("components.favorite_manager_dialog.nothing_carries_the_selected_tag")
+                : (square
+                    ? t("components.favorite_manager_dialog.no_favorite_blog_posts_yet")
+                    : t("components.favorite_manager_dialog.no_favorite_artworks_yet"))}
         </Typography>
         <Typography className={classes.stateHint}>
             {filtered
-                ? "Pick a different tag — or tap the selected one again to clear it."
+                ? t("components.favorite_manager_dialog.pick_a_different_tag_or_tap_the")
                 : (square
-                    ? "Tap the heart next to the share icon on any blog post to keep it here."
-                    : "Open an artwork and use Actions → Add to favorites to keep it here.")}
+                    ? t("components.favorite_manager_dialog.tap_the_heart_next_to_the_share_icon")
+                    : t("components.favorite_manager_dialog.open_an_artwork_and_use_actions_add"))}
         </Typography>
     </div>
 );
@@ -590,6 +595,7 @@ const EmptyState = ({ classes, square, filtered }) => (
 // ═════════════════════════════════════════════════════════════════════════════
 
 function FavoriteManagerDialog(props) {
+    useLanguage();
     const { classes, open, api, onClose } = props;
 
     const [tab, setTab] = useState(0);
@@ -685,8 +691,10 @@ function FavoriteManagerDialog(props) {
         const groups = Array.from(map.values());
         for (const g of groups) {
             g.latest = g.items.reduce((m, it) => Math.max(m, it.bookmarked_at || 0), 0);
+            // tk(): resolved where it is rendered (tx), so the memo — which
+            // does not depend on the language — never pins a stale wording.
             g.title = !g.slug
-                ? "No community"
+                ? tk("components.favorite_manager_dialog.no_community")
                 : (PORTAL_RE.test(g.slug)
                     ? (g.items.find((it) => it.community_title)?.community_title || titles[g.slug] || g.slug)
                     : g.slug);
@@ -737,6 +745,12 @@ function FavoriteManagerDialog(props) {
     // ── Render ─────────────────────────────────────────────────────────────
     const isFullScreen = typeof window !== "undefined"
         && (window.innerWidth || document.documentElement.clientWidth || 960) <= 600;
+    // The title goes in as an element (a <T> slot), not as a string: a string
+    // is interpolated before <T> parses the markup, so a post title holding
+    // "<i>" or "<b>" would have been rendered as markup.
+    const deleteVars = {
+        title: <React.Fragment>{deleteTarget ? (deleteTarget.title || "@" + deleteTarget.author + "/" + deleteTarget.permlink) : ""}</React.Fragment>,
+    };
 
     return (
         <Dialog
@@ -814,7 +828,7 @@ function FavoriteManagerDialog(props) {
                                     {blogGroups.map((group) => (
                                         <React.Fragment key={"grp-" + group.key}>
                                             <ListSubheader className={classes.communityHeader} disableSticky={false} disableGutters>
-                                                <span className={classes.communityHeaderBand}>{group.title}</span>
+                                                <span className={classes.communityHeaderBand}>{tx(group.title)}</span>
                                             </ListSubheader>
                                             {group.items.map((item) => (
                                                 <FavoriteRow
@@ -845,13 +859,15 @@ function FavoriteManagerDialog(props) {
                 BackdropProps={{ className: classes.backdrop }}
             >
                 <Typography className={classes.confirmTitle}>{t("components.favorite_manager_dialog.remove_from_favorites_3")}</Typography>
-                <Typography component="div" className={classes.confirmBody}><T
-                        k="components.favorite_manager_dialog.b_b_will_be_removed_from_your"
-                        vars={{
-                            title: deleteTarget ? (deleteTarget.title || "@" + deleteTarget.author + "/" + deleteTarget.permlink) : "",
-                            text: " ",
-                            text_2: deleteTarget && deleteTarget.type === favorites.FAVORITE_TYPES.BLOGS ? "blog posts" : "artworks"
-                        }} /></Typography>
+                {/* One sentence per list — the list's name used to be spliced
+                    in as an English word ("blog posts" / "artworks"). */}
+                <Typography component="div" className={classes.confirmBody}>
+                    {deleteTarget && deleteTarget.type === favorites.FAVORITE_TYPES.BLOGS ? (
+                        <T k="components.favorite_manager_dialog.title_will_be_removed_from_saved_blogs" vars={deleteVars} />
+                    ) : (
+                        <T k="components.favorite_manager_dialog.title_will_be_removed_from_saved_arts" vars={deleteVars} />
+                    )}
+                </Typography>
                 <div className={classes.confirmActions}>
                     <Button className={classes.confirmCancel} onClick={cancelDelete} disableElevation>
                         {t("words.cancel")}

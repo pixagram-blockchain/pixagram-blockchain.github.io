@@ -37,6 +37,7 @@ import Stepper from "@material-ui/core/Stepper";
 import Fade from "@material-ui/core/Fade";
 import PhoneIcon from '@material-ui/icons/Phone';
 import CheckCircleOutlineIcon from '@material-ui/icons/CheckCircleOutline';
+import VpnKeyIcon from '@material-ui/icons/VpnKey';
 import SendIcon from '@material-ui/icons/Send';
 import ExpandMoreIcon from '@material-ui/icons/ExpandMoreRounded';
 import Tooltip from "@material-ui/core/Tooltip";
@@ -452,7 +453,8 @@ const PERMANENT_VALIDATION_ERRORS = Object.freeze([
 
 // (No auto-close on the final success screen anymore: a download the person
 // cancelled went unnoticed and the dialog closed on an unsaved backup. The
-// dialog now stays until the backup PDF is saved — see _mayClose.)
+// dialog now stays until the backup PDF is saved — see _mayClose. A new
+// account's backup is saved even earlier: before CREATE, see StepConfirm.)
 
 // =============================================================================
 // Phone mask data — array of [ISO2, mask] tuples, one mask per length a
@@ -1493,7 +1495,7 @@ const styles = theme => ({
             position: "relative",
             display: "flex",
             flexDirection: "row",
-            maxHeight: "90vh",
+            maxHeight: "calc(var(--app-h, 100vh) * 0.9)",
             background: "linear-gradient(50deg, #171717 15%, #000000 70%)",
             [theme.breakpoints.down("md")]: {
                 background: "linear-gradient(50deg, #000000 15%, #000000 70%)",
@@ -1728,6 +1730,14 @@ const styles = theme => ({
         },
         "& .MuiCheckbox-root.Mui-checked": {
             color: "#ffffff",
+        },
+        // The backup checkbox (StepConfirm) waits for a downloaded copy: it
+        // has to look unavailable until then, hover included.
+        "&.Mui-disabled .MuiTypography-root, &.Mui-disabled:hover .MuiTypography-root": {
+            color: "#6b6b6b",
+        },
+        "& .MuiCheckbox-root.Mui-disabled": {
+            color: "#4a4a4a",
         },
     },
     // "Terms of Use" / "Privacy Policy" inside the agreement sentence: text,
@@ -3010,14 +3020,23 @@ const StepVerify = memo(function StepVerify({
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Memoized Step 3: Confirm
-//   Creation/recovery progress, then the backup PDF — downloaded by itself as
-//   soon as the account is ready, then acknowledged with a checkbox (which
-//   also opens "Save as" for a second copy) before the dialog can close. Where the browser offers a real "Save as"
-//   (File System Access), the save is known to have happened; anywhere else
-//   a plain download is all a page can start, and whether the file was kept
-//   or the download cancelled can't be seen — so the person confirms it.
-//   Closing a finished sign-up then signs the new account in (the class's
-//   _signInAndClose); this panel says so, and shows how it went.
+//   A new account: the backup comes FIRST, before anything is created. The
+//   panel opens on it (status 'idle'): the person downloads the backup PDF
+//   from its button, then ticks "I have saved my backup PDF, with my
+//   credentials, in a safe place" — a box that only a downloaded copy
+//   unlocks. CREATE, in the bottom bar, stays disabled until both are done
+//   (the class's _backup_done): no account exists without a saved backup.
+//   Then the creation's progress and its result; closing the finished
+//   sign-up signs the new account in (the class's _signInAndClose) — this
+//   panel says so, and shows how it went.
+//   Recovery: the progress, then the backup PDF — downloaded by itself as
+//   soon as the account is signed in, then acknowledged with the checkbox
+//   (which also opens "Save as" for a second copy) before the dialog can
+//   close.
+//   Where the browser offers a real "Save as" (File System Access), a save
+//   is known to have happened; anywhere else a plain download is all a page
+//   can start, and whether the file was kept or the download cancelled
+//   can't be seen — so the person confirms it.
 // ─────────────────────────────────────────────────────────────────────────────
 const ST_PDF_NOTE = { color: "#bdbdbd", fontSize: 13, textAlign: "center", maxWidth: 420, fontStyle: "italic" };
 const ST_PDF_SAVED = { color: "#ffffff", fontSize: 14, textAlign: "center", maxWidth: 420 };
@@ -3029,14 +3048,14 @@ const PDF_NOTICE_KEYS = {
 
 const StepConfirm = memo(function StepConfirm({
                                                   classes,
-                                                  status,           // 'working' | 'success' | 'error'
+                                                  status,           // 'idle' (a new account's backup) | 'working' | 'success' | 'error'
                                                   recoveryMode,
                                                   errorMessage,
                                                   hasPdfBlob,
                                                   pdfDownloaded,    // a download / save was started
                                                   pdfSaving,        // the "Save as" write is running
                                                   pdfVerified,      // written through "Save as": known saved
-                                                  pdfConfirmed,     // verified, or confirmed by the person
+                                                  pdfConfirmed,     // ticked by the person (recovery: also a verified save)
                                                   pdfNotice,        // '' | 'cancelled' | 'failed'
                                                   pdfReminder,      // closes refused so far (re-runs the shake)
                                                   username,
@@ -3046,9 +3065,77 @@ const StepConfirm = memo(function StepConfirm({
                                                   onTogglePdfConfirmed,
                                               }) {
     useLanguage();
+    // A new account's backup, before CREATE. (Recovery is 'idle' only for
+    // the instant before its sign-in starts: nothing to show.)
+    const backupStep = status === "idle" && !recoveryMode;
     return (
         <DialogContent key={"view-3"}>
             <div className={classes.statusPanel}>
+                {backupStep && hasPdfBlob && (
+                    <>
+                        <VpnKeyIcon className={classes.statusIconSuccess} />
+                        <Typography style={ST_C_FFF__FS_16__TA_CENTER}>
+                            {t("components.create_account_dialog.back_up_your_keys")}
+                        </Typography>
+                        <Typography style={ST_C_BDBDBD__FS_13__TA_CENTER}>
+                            {t("components.create_account_dialog.your_backup_pdf_holds_your_seed_phrase_and")}
+                        </Typography>
+
+                        {/* How the download went — above its button, as on
+                            the recovery screen. */}
+                        {pdfNotice && PDF_NOTICE_KEYS[pdfNotice] && (
+                            <Typography style={ST_PDF_NOTE}>{t(PDF_NOTICE_KEYS[pdfNotice])}</Typography>
+                        )}
+                        {pdfVerified ? (
+                            <Typography style={ST_PDF_SAVED}>
+                                {t("components.create_account_dialog.backup_pdf_saved_keep_it_somewhere_safe_it")}
+                            </Typography>
+                        ) : pdfDownloaded ? (
+                            <Typography style={ST_PDF_NOTE}>
+                                {t("components.create_account_dialog.check_that_the_download_finished_if_it_was")}
+                            </Typography>
+                        ) : null}
+
+                        {/* 1. Download — through "Save as" where the browser
+                            has it (_trigger_pdf_download). The panel's main
+                            action until a copy exists; then a quieter
+                            "Download again". */}
+                        <Button
+                            className={pdfDownloaded ? undefined : classes.whiteButton}
+                            variant={pdfDownloaded ? "outlined" : "contained"}
+                            color={pdfDownloaded ? "default" : "primary"}
+                            onClick={onDownloadPdf}
+                            disabled={pdfSaving}
+                            startIcon={pdfSaving ? <CircularProgress size={16} color="inherit" /> : null}
+                        >
+                            {pdfSaving ? t("components.create_account_dialog.saving") : pdfDownloaded ? t("components.create_account_dialog.download_again") : t("components.create_account_dialog.download_backup_pdf")}
+                        </Button>
+
+                        {/* 2. Confirm — the box or its words (one <label>).
+                            Unavailable until a copy was downloaded; never
+                            ticked for the person, even after a "Save as":
+                            only they can say the place is safe. */}
+                        <FormControlLabel
+                            className={classes.termsRow}
+                            control={
+                                <Checkbox
+                                    checked={pdfConfirmed}
+                                    onChange={onTogglePdfConfirmed}
+                                    disabled={!pdfDownloaded || pdfSaving}
+                                    name="backup-saved"
+                                />
+                            }
+                            label={t("components.create_account_dialog.i_have_saved_my_backup_pdf_with_my")}
+                        />
+                    </>
+                )}
+                {/* No keys to back up (their generation failed): nothing can
+                    be created — BACK to GENERATE tries again. */}
+                {backupStep && !hasPdfBlob && (
+                    <Typography style={ST_C_BDBDBD__FSTY_ITALIC__FS_14}>
+                        {t("components.create_account_dialog.could_not_prepare_your_account_keys")}
+                    </Typography>
+                )}
                 {status === "working" && (
                     <>
                         <CircularProgress color="inherit" />
@@ -3066,12 +3153,15 @@ const StepConfirm = memo(function StepConfirm({
                                 : t("components.create_account_dialog.account_created")}
                         </Typography>
 
-                        {/* The backup PDF has already downloaded by itself
-                            (_autoDownloadPdf). Ticking the box acknowledges it
-                            and opens "Save as" for a copy where the person
-                            chooses (_handlePdfConfirmedToggle); the dialog
-                            closes only once it is ticked (_mayClose). */}
-                        {hasPdfBlob && (
+                        {/* Recovery: the backup PDF has already downloaded by
+                            itself (_autoDownloadPdf). Ticking the box
+                            acknowledges it and opens "Save as" for a copy
+                            where the person chooses
+                            (_handlePdfConfirmedToggle); the dialog closes
+                            only once it is ticked (_mayClose). A new
+                            account's backup was saved, and its save
+                            confirmed, before CREATE: no box here. */}
+                        {recoveryMode && hasPdfBlob && (
                             <Typography style={ST_PDF_NOTE}>
                                 {pdfDownloaded
                                     ? t("components.create_account_dialog.check_that_the_download_finished_if_it_was")
@@ -3079,7 +3169,7 @@ const StepConfirm = memo(function StepConfirm({
                             </Typography>
                         )}
 
-                        {hasPdfBlob && (
+                        {recoveryMode && hasPdfBlob && (
                             <FormControlLabel
                                 key={"ack-" + pdfReminder}
                                 className={pdfReminder > 0 && !pdfConfirmed ? classes.termsRow + " " + classes.shake : classes.termsRow}
@@ -3095,7 +3185,7 @@ const StepConfirm = memo(function StepConfirm({
                             />
                         )}
 
-                        {hasPdfBlob && pdfReminder > 0 && !pdfConfirmed && (
+                        {recoveryMode && hasPdfBlob && pdfReminder > 0 && !pdfConfirmed && (
                             <Typography key={pdfReminder} className={classes.shake} style={ST_PDF_REMINDER}>
                                 {t("components.create_account_dialog.save_your_backup_pdf_before_closing_it_is")}
                             </Typography>
@@ -3105,14 +3195,14 @@ const StepConfirm = memo(function StepConfirm({
                             <Typography style={ST_PDF_NOTE}>{t(PDF_NOTICE_KEYS[pdfNotice])}</Typography>
                         )}
 
-                        {hasPdfBlob && pdfVerified && (
+                        {hasPdfBlob && (pdfVerified || !recoveryMode) && (
                             <Typography style={ST_PDF_SAVED}>
                                 {t("components.create_account_dialog.backup_pdf_saved_keep_it_somewhere_safe_it")}
                             </Typography>
                         )}
 
-                        {/* Another copy at any time — also the way out when
-                            the automatic download was blocked. */}
+                        {/* Another copy at any time — in recovery also the
+                            way out when the automatic download was blocked. */}
                         {hasPdfBlob && (
                             <Button
                                 variant="outlined"
@@ -3183,6 +3273,14 @@ class CreateAccountDialog extends React.PureComponent {
         this._signingIn = false;
         // An await that resolves after the dialog is gone must not touch it.
         this._unmounted = false;
+        // The /create-account request is running. An instance flag, like
+        // _signingIn: a double click on CREATE must not send it twice.
+        this._creatingAccount = false;
+        // Username the current backup PDF of a NEW account was built for
+        // (with the master key in state): NEXT from GENERATE keeps that PDF —
+        // and whether it was downloaded and confirmed — while the username,
+        // seed and password are unchanged (_generate_keys_silent).
+        this._pdfUsername = null;
         this._advancedOpenTimer = null;
         this._resendTimer = null;
         this._phoneCheckTimer = null;
@@ -3208,11 +3306,11 @@ class CreateAccountDialog extends React.PureComponent {
             _pending_username_validation: false,
             _username_available: false,
             _downloaded: false,
-            _pdfBlob: null,                // generated up-front, downloaded at step 2 success
+            _pdfBlob: null,                // new account: built at NEXT (step 0), saved at step 2 BEFORE CREATE; recovery: built at VERIFY
             _pdfDownloaded: false,         // a download / "Save as" has been started
             _pdfSaving: false,             // the "Save as" write is running
             _pdfVerified: false,           // written through "Save as": known to be saved
-            _pdfConfirmed: false,          // verified, or the person confirmed it was saved
+            _pdfConfirmed: false,          // ticked by the person (new account: required before CREATE); recovery: also set by a verified save
             _pdfNotice: "",                // '' | 'cancelled' | 'failed'
             _pdfReminder: 0,               // closes refused for an unsaved backup
             _quitConfirmOpen: false,       // the white "Quit the sign-up?" modal
@@ -3269,7 +3367,8 @@ class CreateAccountDialog extends React.PureComponent {
             _nextSendAllowedAt: null,      // ISO — when this phone may receive its next SMS
             // Step 1 (recovery branch): seed verification status
             _recoveryStatus: "idle",       // 'idle'|'pending'|'ok'|'fail'
-            // Step 2: final confirm/status panel
+            // Step 2: final confirm/status panel. 'idle' there is a new
+            // account's backup, before CREATE (see StepConfirm).
             _confirmStatus: "idle",        // 'idle'|'working'|'success'|'error'
             _errorMessage: "",
         };
@@ -3462,18 +3561,30 @@ class CreateAccountDialog extends React.PureComponent {
 
     /**
      * Derive keys and build the backup PDF blob WITHOUT triggering a download.
-     * The blob is held on state and only saved to disk on step 2 success via
-     * `_trigger_pdf_download` — that way we don't leak keys to the user's
-     * filesystem for accounts that never get created on-chain.
+     * The blob is held on state; the person saves it at step 2, BEFORE the
+     * account is created (StepConfirm's backup → `_trigger_pdf_download`,
+     * then the checkbox): CREATE waits for both (_backup_done).
+     *
+     * Same username, seed and password as the PDF already built (BACK to
+     * GENERATE, then NEXT): the same keys — that PDF is kept, and with it
+     * whether it was downloaded and confirmed. Anything changed: a new PDF,
+     * which has to be saved and confirmed again.
+     *
+     * Resolves true when the keys and the PDF are ready, false otherwise
+     * (the person is told by a snackbar).
      */
     _generate_keys_silent = async () => {
         const {_username, _seed, _password} = this.state;
         try {
             const masterKey = await generateMasterKey(_seed, _password);
+            if (this.state._pdfBlob && this._pdfUsername === _username && masterKey === this.state._masterKey) {
+                return true;
+            }
             // Printed in the locale and page size chosen in the settings.
             const [blob, keys] = await generatePDF(_username, _seed, _password, masterKey,
                 backupPdfOptions(this.props.api || this.state.api, getLocaleCode()));
 
+            this._pdfUsername = _username;
             this.setState({
                 _publicKeys:  keys.pub,
                 _privateKeys: keys.priv,
@@ -3487,20 +3598,28 @@ class CreateAccountDialog extends React.PureComponent {
                 _pdfNotice:     "",
                 _pdfReminder:   0,
             }, () => this.forceUpdate());
+            return true;
         } catch (err) {
             console.error("[CreateAccountDialog] silent key generation failed:", err);
             if (actions?.trigger_snackbar) {
                 actions.trigger_snackbar(t("components.create_account_dialog.could_not_prepare_your_account_keys"), "error");
             }
+            return false;
         }
     };
 
     /**
-     * Save the previously-built PDF blob to disk — from the "Download backup"
-     * button, and from ticking "I have saved my backup PDF" (the second,
-     * deliberate copy: see _handlePdfConfirmedToggle). The first copy is
-     * downloaded by itself when the account is ready (_autoDownloadPdf). The
-     * dialog cannot close before the backup is acknowledged (see _mayClose).
+     * Save the previously-built PDF blob to disk.
+     *
+     *  - A new account: from the backup's "Download backup PDF" button at
+     *    step 2, BEFORE CREATE — the first copy, which unlocks the "I have
+     *    saved my backup PDF…" checkbox (see _handlePdfConfirmedToggle);
+     *    "Download again" afterwards (and on the success screen).
+     *  - Recovery: from the "Download backup" button, and from ticking "I have
+     *    saved my backup PDF" (the second, deliberate copy: see
+     *    _handlePdfConfirmedToggle). The first copy is downloaded by itself
+     *    once signed in (_autoDownloadPdf). The dialog cannot close before
+     *    the backup is acknowledged (see _mayClose).
      *
      *  - Where the browser offers a real "Save as" (File System Access API,
      *    Chromium desktop), the file is written through it: a completed write
@@ -3516,8 +3635,9 @@ class CreateAccountDialog extends React.PureComponent {
         if (!_pdfBlob || _pdfSaving) return;
         const filename = this._pdfFilename();
         // From the acknowledgement checkbox, the automatic download already
-        // happened: a dismissed "Save as" only declines the extra copy.
-        const acknowledging = Boolean(opts && opts.acknowledging);
+        // happened — and after any copy at all, a dismissed "Save as" only
+        // declines an extra one: no "cancelled" notice then.
+        const acknowledging = Boolean(opts && opts.acknowledging) || this.state._pdfDownloaded;
 
         if (typeof window !== "undefined" && typeof window.showSaveFilePicker === "function") {
             let handle = null;
@@ -3544,7 +3664,11 @@ class CreateAccountDialog extends React.PureComponent {
                         _pdfSaving: false,
                         _pdfDownloaded: true,
                         _pdfVerified: true,
-                        _pdfConfirmed: true,
+                        // Recovery: a copy written through "Save as" IS the
+                        // acknowledgement. A new account's box is ticked by
+                        // the person, always — whether the place is safe is
+                        // theirs to say (CREATE waits for it).
+                        _pdfConfirmed: this.state._recoveryMode ? true : this.state._pdfConfirmed,
                         _pdfNotice: "",
                     }, () => this.forceUpdate());
                 } catch (err) {
@@ -3592,12 +3716,13 @@ class CreateAccountDialog extends React.PureComponent {
     };
 
     /**
-     * The account is ready (created, or recovered): download the backup PDF
-     * at once, without waiting for a click — people missed the button and
-     * then couldn't tell why the dialog wouldn't close. No click means no
+     * A recovered account is signed in: download the backup PDF at once,
+     * without waiting for a click — people missed the button and then
+     * couldn't tell why the dialog wouldn't close. No click means no
      * "Save as" picker here (browsers only open it from a click): this is a
      * plain download. The acknowledgement checkbox then asks for the copy
-     * saved where the person chooses.
+     * saved where the person chooses. (A new account's backup is downloaded
+     * by the person, from its button, before CREATE.)
      */
     _autoDownloadPdf = () => {
         const { _pdfBlob, _pdfDownloaded } = this.state;
@@ -3606,18 +3731,35 @@ class CreateAccountDialog extends React.PureComponent {
     };
 
     /**
-     * StepConfirm's "I have saved my backup PDF" checkbox. Ticking it is the
-     * acknowledgement that lets the dialog close — and, being a click, it
-     * also opens the system's "Save as" (File System Access API, Chromium
-     * desktop) so the backup gets a second copy in a place the person picks.
-     * Where the browser has no such picker (Firefox, Safari, phones), it
-     * starts the download again — on iOS that is also the copy that works
-     * when the automatic one was blocked for lack of a tap. Unticking only
-     * unticks; a copy written through "Save as" can't be unticked.
+     * StepConfirm's backup checkbox — the box or the words of its label.
+     *
+     *  - A new account (step 2, before CREATE): "I have saved my backup PDF,
+     *    with my credentials, in a safe place". It confirms a copy already
+     *    downloaded, so it can't be ticked before one (StepConfirm keeps it
+     *    disabled until then too). Ticking it is all it does — together with
+     *    the download, it is what CREATE waits for (_backup_done).
+     *  - Recovery (success screen): "I have saved my backup PDF". Ticking it
+     *    is the acknowledgement that lets the dialog close — and, being a
+     *    click, it also opens the system's "Save as" (File System Access API,
+     *    Chromium desktop) so the backup gets a second copy in a place the
+     *    person picks. Where the browser has no such picker (Firefox, Safari,
+     *    phones), it starts the download again — on iOS that is also the copy
+     *    that works when the automatic one was blocked for lack of a tap.
+     *    Unticking only unticks; a copy written through "Save as" can't be
+     *    unticked.
      */
     _handlePdfConfirmedToggle = (e, checked) => {
-        if (this.state._pdfVerified || this.state._pdfSaving) return;
+        if (this.state._pdfSaving) return;
         const next = typeof checked === "boolean" ? checked : !this.state._pdfConfirmed;
+
+        if (!this.state._recoveryMode) {
+            if (this.state._confirmStatus !== "idle") return; // the creation has started
+            if (next && !this.state._pdfDownloaded) return;   // nothing saved to confirm yet
+            this.setState({ _pdfConfirmed: next, _pdfNotice: "" }, () => this.forceUpdate());
+            return;
+        }
+
+        if (this.state._pdfVerified) return;
         this.setState({ _pdfConfirmed: next, _pdfNotice: "" }, () => this.forceUpdate());
         // Called in the click itself, not after the re-render: the picker
         // needs the click's user activation.
@@ -3669,6 +3811,17 @@ class CreateAccountDialog extends React.PureComponent {
         // The CONFIRM step finishes itself (success state); the OK button just
         // closes the dialog. There is no "next" past step 2.
         return this.state._confirmStatus === "success";
+    };
+
+    /**
+     * A new account's backup, at step 2: a copy of the PDF downloaded AND
+     * its save confirmed by the person (the checkbox). Nothing is created
+     * before — CREATE is disabled until then, and _createAccountOnChain
+     * refuses to run without it.
+     */
+    _backup_done = () => {
+        const { _pdfBlob, _pdfDownloaded, _pdfConfirmed, _pdfSaving } = this.state;
+        return Boolean(_pdfBlob) && _pdfDownloaded && _pdfConfirmed && !_pdfSaving;
     };
 
     _can_click_next = () => {
@@ -3778,8 +3931,9 @@ class CreateAccountDialog extends React.PureComponent {
      *
      * Both branches (fresh / recovery) have the same purpose: advance to step 1.
      * For fresh accounts we generate the keys + PDF blob in the background here
-     * — but DO NOT trigger the download yet. The download is offered on step 2
-     * success, and the user must download before closing.
+     * — but DO NOT trigger the download yet. Step 2 opens on the backup: the
+     * person downloads the PDF and confirms it is saved, and only then can
+     * CREATE the account (StepConfirm, _backup_done).
      */
     _handleNextFromGenerate = async () => {
         const { _recoveryMode } = this.state;
@@ -3788,7 +3942,9 @@ class CreateAccountDialog extends React.PureComponent {
 
         if (!_recoveryMode) {
             // Fresh account: derive keys + build PDF blob, but don't download.
-            await this._generate_keys_silent();
+            // No keys, no backup, no account: stay here (a snackbar says why).
+            const ready = await this._generate_keys_silent();
+            if (!ready) return;
         }
         this._goToTab(1);
     };
@@ -4379,6 +4535,7 @@ class CreateAccountDialog extends React.PureComponent {
                 chainKeys.memo    && chainKeys.memo    === derived.memo;
 
             if (match) {
+                this._pdfUsername = null; // a recovery PDF: never kept for a new account
                 this.setState({
                     _recoveryStatus: "ok",
                     _publicKeys:     derived,
@@ -4472,10 +4629,13 @@ class CreateAccountDialog extends React.PureComponent {
                 }
                 if (validation && validation.valid) break;
                 if (this._unmounted) return { ok: false, error: "" };
+                // `error` is the API's English text (matched just below);
+                // `errorKey` (+ `errorVars`) its translation, for the user.
                 const refusal = (validation && validation.error) || "";
                 if (PERMANENT_VALIDATION_ERRORS.includes(refusal) ||
                     Date.now() + ACCOUNT_VISIBLE_RETRY_MS > deadline) {
-                    throw new Error(refusal || t("components.create_account_dialog.your_new_account_could_not_be_verified_on"));
+                    throw new Error((validation && validation.errorKey ? t(validation.errorKey, validation.errorVars) : refusal)
+                        || t("components.create_account_dialog.your_new_account_could_not_be_verified_on"));
                 }
                 await new Promise((resolve) => setTimeout(resolve, ACCOUNT_VISIBLE_RETRY_MS));
             }
@@ -4502,7 +4662,7 @@ class CreateAccountDialog extends React.PureComponent {
             return { ok: true, error: "" };
         } catch (err) {
             console.error("[CreateAccountDialog] sign-in failed:", err);
-            return { ok: false, error: (err && err.message) || "" };
+            return { ok: false, error: (err && (err.errorKey ? t(err.errorKey, err.errorVars) : err.message)) || "" };
         }
     };
 
@@ -4587,8 +4747,17 @@ class CreateAccountDialog extends React.PureComponent {
     // ─────────────────────────────────────────────────────────────────────────
     // Account Creation via Cloudflare Worker
     // ─────────────────────────────────────────────────────────────────────────
+    // Called by CREATE only (_handleCreateAccount): the backup PDF comes
+    // first. Without a downloaded copy whose save the person confirmed, no
+    // request goes out.
     _createAccountOnChain = async () => {
         const { _username, _publicKeys, _voucher } = this.state;
+
+        if (this._creatingAccount) return;
+        if (!this._backup_done()) {
+            console.warn("[CreateAccountDialog] create refused: the backup PDF isn't downloaded and confirmed yet");
+            return;
+        }
 
         if (!_publicKeys.owner || !_publicKeys.active || !_publicKeys.posting || !_publicKeys.memo) {
             const errorMsg = t("components.create_account_dialog.public_keys_not_found_please_download_the");
@@ -4604,6 +4773,7 @@ class CreateAccountDialog extends React.PureComponent {
             return;
         }
 
+        this._creatingAccount = true;
         this.setState({ _creating_account: true, _confirmStatus: "working" }, () => this.forceUpdate());
 
         try {
@@ -4626,19 +4796,16 @@ class CreateAccountDialog extends React.PureComponent {
 
             if (result.success) {
                 // Not signed in here: the node may not show the account for a
-                // few seconds yet. The person saves the backup PDF first, and
-                // closing the dialog signs them in (_signInAndClose).
+                // few seconds yet. Closing the dialog signs them in
+                // (_signInAndClose).
                 //
-                // No auto-close: the dialog stays until the person has saved
-                // the backup PDF and closes it themselves (_mayClose).
-                // The backup PDF downloads by itself (_autoDownloadPdf).
+                // No auto-close: the person closes it themselves (_mayClose).
+                // No download either: the backup PDF was saved, and its save
+                // confirmed, before this request was sent (_backup_done).
                 this.setState({
                     _creating_account: false,
                     _confirmStatus:    "success",
-                }, () => {
-                    this.forceUpdate();
-                    this._autoDownloadPdf();
-                });
+                }, () => this.forceUpdate());
 
                 if (actions?.trigger_snackbar) {
                     actions.trigger_snackbar(t("components.create_account_dialog.account_created_successfully", {
@@ -4690,7 +4857,21 @@ class CreateAccountDialog extends React.PureComponent {
             });
             this.setState({ _creating_account: false, _confirmStatus: "error", _errorMessage: errorMsg }, () => this.forceUpdate());
             if (actions?.trigger_snackbar) actions.trigger_snackbar(errorMsg, "error");
+        } finally {
+            this._creatingAccount = false;
         }
+    };
+
+    /**
+     * CREATE — step 2's primary button while a new account's backup is shown
+     * (status 'idle'). Disabled until the backup PDF is downloaded and its
+     * save confirmed; checked again here, then the account is created.
+     */
+    _handleCreateAccount = () => {
+        const { _recoveryMode, _tab_value, _confirmStatus } = this.state;
+        if (_recoveryMode || _tab_value !== 2 || _confirmStatus !== "idle") return;
+        if (!this._backup_done()) return;
+        this._createAccountOnChain();
     };
 
     /**
@@ -4726,16 +4907,24 @@ class CreateAccountDialog extends React.PureComponent {
         if (target > previous_value && !this._can_click_next()) return;
         if (this.state._creating_account) return;
 
-        this.setState({ _tab_value: target }, () => {
+        const updates = { _tab_value: target };
+        // A new account always reaches the CONFIRM step on its backup — after
+        // a failed creation too (BACK, then NEXT): CREATE sends it again. A
+        // backup already downloaded and confirmed stays so.
+        if (target === 2 && !this.state._recoveryMode && this.state._confirmStatus === "error") {
+            updates._confirmStatus = "idle";
+            updates._errorMessage = "";
+        }
+
+        this.setState(updates, () => {
             this.forceUpdate(() => {
                 try { this.swipeableViewScrollTop(); } catch (_) {}
-                // Transitioning into the CONFIRM step kicks off the actual work.
-                if (previous_value === 1 && target === 2) {
-                    if (this.state._recoveryMode) {
-                        this._recoverAndLogin();
-                    } else {
-                        this._createAccountOnChain();
-                    }
+                // Transitioning into the CONFIRM step: a recovery signs in at
+                // once. A new account is NOT created here: the step first asks
+                // for its backup PDF, and CREATE starts the creation
+                // (_handleCreateAccount → _createAccountOnChain).
+                if (previous_value === 1 && target === 2 && this.state._recoveryMode) {
+                    this._recoverAndLogin();
                 }
             });
         });
@@ -4778,6 +4967,8 @@ class CreateAccountDialog extends React.PureComponent {
      *  - once the account exists: only with its backup PDF saved — no
      *    auto-close, no forced download on the way out (a download the
      *    person cancelled went unnoticed that way); a refused close says so.
+     *    (A new account's backup was saved and confirmed before CREATE, so
+     *    for it this holds from the start; recovery acknowledges it here.)
      *    With the backup saved, closing a finished sign-up signs the new
      *    account in first (_signInAndClose), and the dialog goes once that
      *    is done — or, after a failed sign-in, when the person picks CLOSE;
@@ -5083,6 +5274,10 @@ class CreateAccountDialog extends React.PureComponent {
 
         const username_message = this._get_username_message();
         const signingIn = _signInState === "pending";
+        // Step 2 on a new account's backup, before CREATE: BACK and CANCEL
+        // are still offered, and the primary button is CREATE.
+        const backupStep = _tab_value === 2 && !_recoveryMode && _confirmStatus === "idle";
+        const canGoBack = _tab_value === 1 || backupStep || (_tab_value === 2 && _confirmStatus === "error");
 
         return (
             <React.Fragment>
@@ -5234,10 +5429,10 @@ class CreateAccountDialog extends React.PureComponent {
                             {/* Sticky Actions at bottom */}
                             <Fade in timeout={900}>
                                 <DialogActions className={classes.dialogActions}>
-                                    <Fade in={_tab_value > 0 && (_tab_value < 2 || _confirmStatus === "error")}>
-                                        <Button variant="text" color="primary" onClick={this._goToPreviousStep} disabled={_tab_value === 0 || (_tab_value === 2 && _confirmStatus !== "error") || _creating_account}>{t("words.back", {TUC: true})}</Button>
+                                    <Fade in={canGoBack}>
+                                        <Button variant="text" color="primary" onClick={this._goToPreviousStep} disabled={!canGoBack || _creating_account}>{t("words.back", {TUC: true})}</Button>
                                     </Fade>
-                                    {_tab_value < 2 && (
+                                    {(_tab_value < 2 || backupStep) && (
                                         <Button variant="contained" color="primary" onClick={this._handleDialogClose} disabled={_creating_account}>{t("words.cancel", {TUC: true})}</Button>
                                     )}
                                     {_tab_value === 0 ? (
@@ -5260,6 +5455,16 @@ class CreateAccountDialog extends React.PureComponent {
                                             onClick={this._goToConfirmStep}
                                             disabled={!this._can_click_next()}
                                         >{t("words.next", {TUC: true})} </Button>
+                                    ) : backupStep ? (
+                                        // CREATE: only with the backup PDF downloaded and its
+                                        // save confirmed (the checkbox right above it).
+                                        <Button
+                                            className={classes.whiteButton}
+                                            variant="contained"
+                                            color="primary"
+                                            onClick={this._handleCreateAccount}
+                                            disabled={!this._backup_done() || _creating_account}
+                                        >{t("words.create", {TUC: true})}</Button>
                                     ) : (
                                         <React.Fragment>
                                             {/* A failed sign-in: leave without it. */}

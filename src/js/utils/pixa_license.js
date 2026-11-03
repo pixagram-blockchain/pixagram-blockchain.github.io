@@ -1,166 +1,205 @@
-export const PIXA_LICENSE_BASE = {
+import { t, tk, tx, isTk } from "./text";
+
+/*
+ * PIXA NFT LICENSE 1.0 — the license structure and its wording.
+ *
+ * The wording lives in the catalogue (components.pixa_license.*). LICENSE_TEXT
+ * below holds tk() descriptors where the text goes; ids, defaults and
+ * dependencies stay plain data — they are what a post stores on chain.
+ *
+ *   PIXA_LICENSE_BASE              the same tree with every text field turned
+ *                                  into a getter that translates when it is
+ *                                  read — so the License dialogs show the UI
+ *                                  language without resolving anything
+ *                                  themselves (read it at render, not at module
+ *                                  scope).
+ *   PIXA_LICENSE_BASE.localize(fn) a plain copy with every descriptor resolved
+ *                                  by `fn` — licensePDF.js passes a translator
+ *                                  in the PDF's language (utils/docLanguage.js).
+ *
+ * The customization tokens in the section contents ({royaltyPercentage},
+ * {jurisdiction}, {court}, {arbitrationLocation}, {arbitrationRules}) are
+ * single-brace and replaced by the renderers. The catalogue spells them
+ * {{royaltyPercentage}} etc. — a normal variable for translators, which can
+ * move it — and TOKEN fills each one back in as its single-brace form.
+ * Product names (PIXA NFT LICENSE 1.0) stay literal.
+ */
+
+const TOKEN = {
+    royaltyPercentage: "{royaltyPercentage}",
+    jurisdiction: "{jurisdiction}",
+    court: "{court}",
+    arbitrationLocation: "{arbitrationLocation}",
+    arbitrationRules: "{arbitrationRules}"
+};
+const UPPER = { TUC: true };
+
+// Defined terms of the agreement, shown as "TERM: definition".
+const KEY_TERMS = [
+    [tk("components.pixa_license.author", undefined, UPPER), tk("components.pixa_license.the_individual_or_entity_who_created_and")],
+    [tk("components.pixa_license.holder", undefined, UPPER), tk("components.pixa_license.the_person_or_entity_that_holds_a_valid_nft")],
+    [tk("components.pixa_license.visitor", undefined, UPPER), tk("components.pixa_license.anyone_who_views_or_interacts_with_the")]
+];
+
+const LICENSE_TEXT = {
     "name": "PIXA NFT LICENSE 1.0",
     "version": "1.0",
     "shortName": "PIXA LICENSE 1.0",
-    "description": "Customizable NFT License Agreement",
+    "description": tk("components.pixa_license.customizable_nft_license_agreement"),
     "explanation": {
-        "purpose": "This license provides a flexible, transparent, and fair licensing framework that can adapt to different use cases, business models, and artistic intentions, while ensuring that the moral rights of the Author remain intact and fully preserved.",
-        "mechanism": "This license delegates and allocates copyright permissions, which are by default very strict, from the Author onto the NFT Owner(s) and Visitor(s). The Author retains full intellectual property ownership while granting specific usage rights based on their preferences.",
-        "keyTerms": {
-            "AUTHOR": "The individual or entity who created and owns the copyright to the artwork.",
-            "HOLDER": "The person or entity that holds a valid NFT representing or associated with the artwork.",
-            "VISITOR": "Anyone who views or interacts with the artwork but does not own the associated NFT."
-        }
+        "purpose": tk("components.pixa_license.this_license_provides_a_flexible_transparent"),
+        "mechanism": tk("components.pixa_license.this_license_delegates_and_allocates_copyright"),
+        "keyTerms": { $terms: KEY_TERMS }
     },
     "sections": [
         {
             "id": "intro",
-            "title": "LEGAL AGREEMENT",
+            "title": tk("components.pixa_license.legal_agreement", undefined, UPPER),
             "type": "intro",
-            "content": "This NFT License Agreement (the \"Agreement\") sets forth the customizable terms under which the creator (hereinafter referred to as the \"Author\") grants certain rights to the purchaser (the \"Holder\") of non-fungible tokens (NFTs) associated with a specific collection of digital artwork (the \"Collection\"). The aim of this Agreement is to offer a flexible, transparent, and fair licensing framework that can adapt to different use cases, business models, and artistic intentions, while ensuring that the moral rights of the Author remain intact and fully preserved. This structure is particularly designed for NFT creators who wish to provide tailored usage rights to holders of their digital assets, enabling a range of interactions and exploitations with the artwork depending on the Author's selected preferences."
+            "content": tk("components.pixa_license.this_nft_license_agreement_the_agreement")
         },
         {
             "id": "ownership",
             "number": 1,
-            "title": "Ownership and Moral Rights",
+            "title": tk("components.pixa_license.ownership_and_moral_rights"),
             "type": "content",
-            "content": "The Author is and shall remain the sole and exclusive owner of all intellectual property rights in the underlying artworks and any associated content linked to the NFTs. The Author retains all moral rights, including the right to be identified as the creator and to object to any distortion, mutilation, or other modification of the work that would prejudice their honor or reputation. These moral rights are non-transferable and perpetual, and shall be respected by all Holders and third parties. This Agreement shall not be interpreted as a waiver or limitation of such rights."
+            "content": tk("components.pixa_license.the_author_is_and_shall_remain_the_sole")
         },
         {
             "id": "license-options",
             "number": 2,
-            "title": "License Options for the Holder",
+            "title": tk("components.pixa_license.license_options_for_the_holder"),
             "type": "customizable",
-            "content": "The Holder of an NFT is granted a non-exclusive, worldwide, royalty-free license to use the digital artwork associated with the NFT, but only to the extent expressly permitted by the Author below. The license is linked strictly to the specific NFT owned and is automatically transferred upon resale. The purpose of this section is to allow the Author to select the scope of rights granted to each Holder, thus offering legal clarity and creative flexibility for both parties. For each listed right, the Author may indicate whether the Holder is permitted to exercise it.",
+            "content": tk("components.pixa_license.the_holder_of_an_nft_is_granted_a_non"),
             "rightsCategories": [
                 {
                     "id": "holder-rights",
-                    "title": "Rights Granted to the Holder",
+                    "title": tk("components.pixa_license.rights_granted_to_the_holder"),
                     "rights": [
                         {
                             "id": "personal-display",
-                            "label": "Display the artwork for personal, non-commercial use",
+                            "label": tk("components.pixa_license.display_the_artwork_for_personal_non"),
                             "defaultValue": true,
                             "category": "basic",
-                            "categoryLabel": "Basic"
+                            "categoryLabel": tk("components.pixa_license.category_basic")
                         },
                         {
                             "id": "commercial-use",
-                            "label": "Use the artwork for commercial purposes",
+                            "label": tk("components.pixa_license.use_the_artwork_for_commercial_purposes"),
                             "defaultValue": true,
                             "category": "commercial",
-                            "categoryLabel": "Commercial",
-                            "note": "If granted, enables commercial sub-rights below"
+                            "categoryLabel": tk("components.pixa_license.category_commercial"),
+                            "note": tk("components.pixa_license.if_granted_enables_commercial_sub_rights")
                         },
                         {
                             "id": "social-media",
-                            "label": "Use in social media or advertising campaigns",
+                            "label": tk("components.pixa_license.use_in_social_media_or_advertising_campaigns"),
                             "defaultValue": true,
                             "category": "commercial",
                             "dependsOn": "commercial-use"
                         },
                         {
                             "id": "physical-goods",
-                            "label": "Print on physical goods (T-shirts, posters, etc.)",
+                            "label": tk("components.pixa_license.print_on_physical_goods_t_shirts_posters"),
                             "defaultValue": true,
                             "category": "commercial",
                             "dependsOn": "commercial-use"
                         },
                         {
                             "id": "third-party-licensing",
-                            "label": "License to third parties (stock sites, etc.)",
+                            "label": tk("components.pixa_license.license_to_third_parties_stock_sites_etc"),
                             "defaultValue": false,
                             "category": "commercial",
                             "dependsOn": "commercial-use"
                         },
                         {
                             "id": "modify",
-                            "label": "Modify or adapt the artwork",
+                            "label": tk("components.pixa_license.modify_or_adapt_the_artwork"),
                             "defaultValue": true,
                             "category": "creative",
-                            "categoryLabel": "Creative",
-                            "note": "With respect to the Author's moral rights"
+                            "categoryLabel": tk("components.pixa_license.category_creative"),
+                            "note": tk("components.pixa_license.with_respect_to_the_authors_moral_rights")
                         },
                         {
                             "id": "derivatives",
-                            "label": "Create public derivative works or remixes",
+                            "label": tk("components.pixa_license.create_public_derivative_works_or_remixes"),
                             "defaultValue": true,
                             "category": "creative",
                             "dependsOn": "modify"
                         },
                         {
                             "id": "mint-new-nfts",
-                            "label": "Mint the artwork or derivatives into new NFTs",
+                            "label": tk("components.pixa_license.mint_the_artwork_or_derivatives_into_new"),
                             "defaultValue": false,
                             "category": "creative",
                             "dependsOn": "modify"
                         },
                         {
                             "id": "metaverse",
-                            "label": "Use in virtual environments or metaverses",
+                            "label": tk("components.pixa_license.use_in_virtual_environments_or_metaverses"),
                             "defaultValue": true,
                             "category": "digital",
-                            "categoryLabel": "Digital"
+                            "categoryLabel": tk("components.pixa_license.category_digital")
                         },
                         {
                             "id": "games-apps",
-                            "label": "Include in digital games or apps",
+                            "label": tk("components.pixa_license.include_in_digital_games_or_apps"),
                             "defaultValue": true,
                             "category": "digital"
                         },
                         {
                             "id": "music-video-film",
-                            "label": "Use in music videos or films",
+                            "label": tk("components.pixa_license.use_in_music_videos_or_films"),
                             "defaultValue": true,
                             "category": "media",
-                            "categoryLabel": "Media"
+                            "categoryLabel": tk("components.pixa_license.category_media")
                         },
                         {
                             "id": "exhibitions",
-                            "label": "Display in online or offline exhibitions",
+                            "label": tk("components.pixa_license.display_in_online_or_offline_exhibitions"),
                             "defaultValue": true,
                             "category": "display",
-                            "categoryLabel": "Display"
+                            "categoryLabel": tk("components.pixa_license.category_display")
                         },
                         {
                             "id": "educational",
-                            "label": "Use in educational materials or presentations",
+                            "label": tk("components.pixa_license.use_in_educational_materials_or"),
                             "defaultValue": true,
                             "category": "educational",
-                            "categoryLabel": "Educational"
+                            "categoryLabel": tk("components.pixa_license.category_educational")
                         }
                     ]
                 },
                 {
                     "id": "visitor-rights",
-                    "title": "Rights Granted to the Visitor",
+                    "title": tk("components.pixa_license.rights_granted_to_the_visitor"),
                     "rights": [
                         {
                             "id": "share-with-attribution",
-                            "label": "Share the artwork with mentioning the author",
+                            "label": tk("components.pixa_license.share_the_artwork_with_mentioning_the"),
                             "defaultValue": true,
                             "category": "basic",
-                            "categoryLabel": "Basic"
+                            "categoryLabel": tk("components.pixa_license.category_basic")
                         },
                         {
                             "id": "share-without-attribution",
-                            "label": "Share the artwork without mentioning the author",
+                            "label": tk("components.pixa_license.share_the_artwork_without_mentioning_the"),
                             "defaultValue": false,
                             "category": "basic"
                         },
                         {
                             "id": "modify-and-share",
-                            "label": "Modify the artwork (and share it accordingly to this license)",
+                            "label": tk("components.pixa_license.modify_the_artwork_and_share_it_accordingly"),
                             "defaultValue": false,
                             "category": "creative",
-                            "categoryLabel": "Creative"
+                            "categoryLabel": tk("components.pixa_license.category_creative")
                         },
                         {
                             "id": "ai-training",
-                            "label": "Train or use in AI or machine learning models",
+                            "label": tk("components.pixa_license.train_or_use_in_ai_or_machine_learning"),
                             "defaultValue": true,
                             "category": "advanced",
-                            "categoryLabel": "Advanced"
+                            "categoryLabel": tk("components.pixa_license.category_advanced")
                         }
                     ]
                 }
@@ -169,28 +208,76 @@ export const PIXA_LICENSE_BASE = {
         {
             "id": "royalty",
             "number": 3,
-            "title": "Royalty on Secondary Sales",
+            "title": tk("components.pixa_license.royalty_on_secondary_sales"),
             "type": "customizable",
-            "content": "The Author shall receive a royalty of **{royaltyPercentage}%** on all secondary sales or transfers of the NFTs, regardless of the marketplace or means of transaction. This royalty shall be enforced automatically through smart contract functionality where supported. In the event the transaction occurs outside of an automated system, the seller is responsible for ensuring the Author receives the due royalty and for the compliance to the aforementioned rights.",
+            "content": tk("components.pixa_license.the_author_shall_receive_a_royalty_of", { royaltyPercentage: TOKEN.royaltyPercentage }),
             "customFields": ["royaltyPercentage"]
         },
         {
             "id": "term",
             "number": 4,
-            "title": "Term and Termination",
+            "title": tk("components.pixa_license.term_and_termination"),
             "type": "content",
-            "content": "When the NFT is sold or otherwise transferred, the rights that this license grants to the Holder are simultaneously transferred to the new owner, and all rights of the previous Holder are terminated without further notice. Any use of the artwork beyond the term of ownership shall be considered unauthorized."
+            "content": tk("components.pixa_license.when_the_nft_is_sold_or_otherwise")
         },
         {
             "id": "governing-law",
             "number": 5,
-            "title": "Governing Law and Jurisdiction",
+            "title": tk("components.pixa_license.governing_law_and_jurisdiction"),
             "type": "customizable",
-            "content": "This Agreement shall be governed by and construed in accordance with the laws of **{jurisdiction}**. Any disputes arising in connection with this Agreement shall be subject to the exclusive jurisdiction of the courts of **{court}**, or alternatively resolved by arbitration/mediation seated in **{arbitrationLocation}**, in accordance with the rules of **{arbitrationRules}**.",
+            "content": tk("components.pixa_license.this_agreement_shall_be_governed_by_and", {
+                jurisdiction: TOKEN.jurisdiction,
+                court: TOKEN.court,
+                arbitrationLocation: TOKEN.arbitrationLocation,
+                arbitrationRules: TOKEN.arbitrationRules
+            }),
             "customFields": ["jurisdiction", "court", "arbitrationLocation", "arbitrationRules"]
         }
     ]
 };
+
+const isTerms = (v) => !!v && typeof v === "object" && Array.isArray(v.$terms);
+
+// keyTerms is read as { TERM: definition }; the terms are translated too.
+const termsObject = (terms, resolve) => {
+    const out = {};
+    for (const [term, definition] of terms) out[resolve(term)] = resolve(definition);
+    return out;
+};
+
+/** Plain deep copy of the tree with every descriptor resolved by `resolve`. */
+const resolveTree = (node, resolve) => {
+    if (isTk(node)) return resolve(node);
+    if (isTerms(node)) return termsObject(node.$terms, resolve);
+    if (Array.isArray(node)) return node.map((n) => resolveTree(n, resolve));
+    if (node && typeof node === "object") {
+        const out = {};
+        for (const k of Object.keys(node)) out[k] = resolveTree(node[k], resolve);
+        return out;
+    }
+    return node;
+};
+
+/** The same tree, every text field a getter translating at read time (UI language). */
+const liveTree = (node) => {
+    if (Array.isArray(node)) return node.map(liveTree);
+    if (!node || typeof node !== "object") return node;
+    const out = {};
+    for (const k of Object.keys(node)) {
+        const v = node[k];
+        if (isTk(v)) Object.defineProperty(out, k, { enumerable: true, configurable: true, get: () => tx(v) });
+        else if (isTerms(v)) Object.defineProperty(out, k, { enumerable: true, configurable: true, get: () => termsObject(v.$terms, tx) });
+        else out[k] = liveTree(v);
+    }
+    return out;
+};
+
+export const PIXA_LICENSE_BASE = liveTree(LICENSE_TEXT);
+
+// Not enumerable: a spread / JSON copy of the base carries text, not this.
+Object.defineProperty(PIXA_LICENSE_BASE, "localize", {
+    value: (resolve) => resolveTree(LICENSE_TEXT, resolve)
+});
 
 export const PIXA_LICENSE_CUSTOMIZATION_EXAMPLE = {
     "isCustomized": true,
@@ -294,12 +381,13 @@ export const createDefaultCustomization = (baseLicense) => {
  * @param {Object} customization - Customization to validate
  * @param {Object} baseLicense - Base license structure
  * @returns {Object} Validation result with isValid flag and errors array
+ *   (messages in the UI language; nothing compares them)
  */
 export const validateCustomization = (customization, baseLicense) => {
     const errors = [];
 
     if (!customization || !baseLicense) {
-        errors.push('Missing required data');
+        errors.push(t("components.pixa_license.missing_required_data"));
         return { isValid: false, errors };
     }
 
@@ -308,13 +396,13 @@ export const validateCustomization = (customization, baseLicense) => {
         if (typeof customization.royaltyPercentage !== 'number' ||
             customization.royaltyPercentage < 0 ||
             customization.royaltyPercentage > 100) {
-            errors.push('Royalty percentage must be between 0 and 100');
+            errors.push(t("components.pixa_license.royalty_percentage_must_be_between_0_and_100"));
         }
     }
 
     // Validate rights configuration exists
     if (!customization.rightsConfiguration) {
-        errors.push('Missing rights configuration');
+        errors.push(t("components.pixa_license.missing_rights_configuration"));
         return { isValid: false, errors };
     }
 
@@ -328,7 +416,11 @@ export const validateCustomization = (customization, baseLicense) => {
                 if (right.dependsOn &&
                     customization.rightsConfiguration.holderRights[right.id] === true &&
                     customization.rightsConfiguration.holderRights[right.dependsOn] !== true) {
-                    errors.push(`${right.label} requires ${right.dependsOn} to be granted`);
+                    const parent = holderRightsCategory.rights.find(r => r.id === right.dependsOn);
+                    errors.push(t("components.pixa_license.right_requires_parent_to_be_granted", {
+                        right: right.label,
+                        parent: parent ? parent.label : right.dependsOn
+                    }));
                 }
             });
         }
@@ -344,7 +436,10 @@ export const validateCustomization = (customization, baseLicense) => {
  * Generate license text for blockchain/IPFS storage
  * @param {Object} baseLicense - Base license structure
  * @param {Object} customization - Applied customization
- * @returns {string} Complete license text
+ * @returns {string} Complete license text — in the UI language, like every
+ *   read of PIXA_LICENSE_BASE (nothing calls this today; a copy meant for
+ *   storage should be built from PIXA_LICENSE_BASE.localize() in one fixed
+ *   language instead)
  */
 export const generateLicenseText = (baseLicense, customization) => {
     if (!baseLicense) return '';
@@ -353,11 +448,14 @@ export const generateLicenseText = (baseLicense, customization) => {
 
     if (customization?.authorInfo) {
         const { name, username, url } = customization.authorInfo;
-        text += `Author: ${name}${username ? ` (@${username})` : ''}\n`;
-        if (url) text += `URL: ${url}\n`;
+        text += (username
+            ? t("components.pixa_license.author_name_username", { name, username })
+            : t("components.pixa_license.author_name", { name })) + '\n';
+        if (url) text += t("components.pixa_license.url_line", { url }) + '\n';
         text += '\n';
     }
 
+    const notSpecified = t("components.pixa_license.not_specified");
     baseLicense.sections.forEach(section => {
         if (section.type === 'intro') {
             text += `${section.title}\n${'='.repeat(section.title.length)}\n\n`;
@@ -395,10 +493,10 @@ export const generateLicenseText = (baseLicense, customization) => {
                     if (customization.governingLaw) {
                         const { jurisdiction, court, arbitrationLocation, arbitrationRules } = customization.governingLaw;
                         content = content
-                            .replace('{jurisdiction}', jurisdiction || '[Not Specified]')
-                            .replace('{court}', court || '[Not Specified]')
-                            .replace('{arbitrationLocation}', arbitrationLocation || '[Not Specified]')
-                            .replace('{arbitrationRules}', arbitrationRules || '[Not Specified]');
+                            .replace('{jurisdiction}', jurisdiction || notSpecified)
+                            .replace('{court}', court || notSpecified)
+                            .replace('{arbitrationLocation}', arbitrationLocation || notSpecified)
+                            .replace('{arbitrationRules}', arbitrationRules || notSpecified);
                     }
                 }
 

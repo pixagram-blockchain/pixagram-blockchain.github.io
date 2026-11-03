@@ -23,6 +23,8 @@
 
 import { default as encodeWebp } from '@jsquash/webp/encode';
 
+import { tk } from '../text';
+
 // ── Tunables ─────────────────────────────────────────────────────────────
 export const MAX_PIXELS = 1_000_000;            // ~1M px front-end cap
 export const LOSSLESS_MAX_PIXELS = 250_000;     // 0.25M px, measured on the ORIGINAL
@@ -214,7 +216,14 @@ export async function uploadImageToArweave(blob, { endpoint = ARWEAVE_UPLOAD_END
     });
     if (!response.ok) {
         const detail = await response.text().catch(() => '');
-        throw new Error(`Arweave upload failed (${response.status}): ${detail}`);
+        // `message` stays English (it is what the console logs); `i18n` is
+        // the user-facing text, resolved with tx() where it is shown. The
+        // worker's `detail` is server text and passes through as is.
+        const error = new Error(`Arweave upload failed (${response.status}): ${detail}`);
+        error.i18n = detail
+            ? tk('components.arweave_image.arweave_upload_failed_status_detail', { status: response.status, detail })
+            : tk('components.arweave_image.arweave_upload_failed_status', { status: response.status });
+        throw error;
     }
     return response.json(); // { id, url, bytes, winc }
 }

@@ -2,6 +2,7 @@
 
 import { COMMUNITY_ACCOUNT_RE, DEFAULT_COLORS, LIMITS, SEARCH_API_URL, SUGGEST_ROWS } from "./config";
 import { filtersToParams, hasFilters } from "./filters";
+import { wikiUrl } from "./wiki";
 
 // ── pixagram-search Worker client ─────────────────────────────────────────────
 // GET /search?q=…&<filters> returns artworks and posts. Two Workers answer in two shapes:
@@ -46,6 +47,9 @@ export function artworkImageUrl(item) {
 }
 
 const httpsUrl = (v) => (typeof v === "string" && /^https:\/\/[^\s]+$/i.test(v) ? v : null);
+
+/** A documentation link from the Worker: https only, and on the wiki (pixa.org), not GitHub. */
+const docUrl = (v) => wikiUrl(httpsUrl(v));
 
 /** An image path of the Worker ("/img/orig/…") or an https URL, as an absolute URL; else null. */
 function workerImage(v) {
@@ -322,7 +326,8 @@ export function loadVocab() {
 // /suggest and /query exist on the v3 Worker only. Against an older one (or when
 // it cannot be reached) these resolve to null / the built-in examples and the box
 // behaves as before. Everything from the Worker is checked here: texts are
-// plain strings (rendered as text nodes, never HTML), links are https only.
+// plain strings (rendered as text nodes, never HTML), links are https only, and
+// documentation links lead to the wiki on pixa.org, not GitHub (wiki.js).
 //
 // v4 answers the same requests with more: a status, the index's answer apart from
 // the reasoning model's explanation of it, the model's name, a query_id for votes.
@@ -376,7 +381,7 @@ export function normalizeSuggestion(raw) {
     if (query) out.query = query;
     if (Number.isFinite(Number(raw.n)) && Number(raw.n) > 0) out.n = Number(raw.n);
     if (raw.source && typeof raw.source === "object") {
-        const url = httpsUrl(raw.source.url);
+        const url = docUrl(raw.source.url);
         if (url) out.source = { title: clean(raw.source.title, 120), heading: clean(raw.source.heading, 120), url };
     }
     const p = raw.post;
@@ -630,7 +635,7 @@ function normalizeAsk(a, question) {
 function normalizeSources(list) {
     return (Array.isArray(list) ? list : [])
         .map((s, i) => {
-            const url = httpsUrl(s && s.url);
+            const url = docUrl(s && s.url);
             if (!url) return null;
             return { n: Number(s.n) || i + 1, title: clean(s.title, 120), heading: clean(s.heading, 120), url, excerpt: clean(s.excerpt, 400) };
         })
@@ -643,7 +648,7 @@ function normalizeRelated(list, sources) {
     const cited = new Set(sources.map((s) => s.url));
     return (Array.isArray(list) ? list : [])
         .map((r) => {
-            const url = httpsUrl(r && r.url);
+            const url = docUrl(r && r.url);
             if (!url || cited.has(url)) return null;
             return { title: clean(r.title, 120), heading: clean(r.heading, 120), url };
         })

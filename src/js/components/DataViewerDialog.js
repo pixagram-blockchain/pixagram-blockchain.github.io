@@ -13,7 +13,7 @@ import OpenInNewIcon from "@material-ui/icons/OpenInNew";
 import { inspectImageDataUri } from "../utils/api/sanitizer";
 
 import { T } from "../utils/T";
-import { t, getLocaleCode, useLanguage } from "../utils/text";
+import { t, tk, tx, getLocaleCode, useLanguage } from "../utils/text";
 
 const { memo, useCallback, useMemo, useState, useEffect, useRef } = React;
 
@@ -180,9 +180,11 @@ const SubtypeBadge = ({ subtype }) => {
     return <Badge label={subtype.replace(/_/g, " ")} style={s} />;
 };
 
+// Subtype badges (JSON, BASE64, DATE UNIX MS…) name the detector's type codes
+// and stay as they are; this one is a word. Badge upper-cases it in CSS.
 const ParsedBadge = ({ parsed }) => {
     if (!parsed) return null;
-    return <Badge label="PARSED" style={{ bg: "#1a1a1a", fg: "#999" }} />;
+    return <Badge label={t("components.data_viewer_dialog.parsed")} style={{ bg: "#1a1a1a", fg: "#999" }} />;
 };
 
 // ─── Chevron ───────────────────────────────────────────────────
@@ -202,12 +204,19 @@ const Chevron = ({ open }) => (
 
 // ─── Preview Text ──────────────────────────────────────────────
 
+// "1,234 characters" — the count in the user's number format, the noun by
+// the plural rules of the language.
+const characterCount = (n) => t("components.data_viewer_dialog.character_count", {
+    count: n.toLocaleString(getLocaleCode()),
+    character: { character: n },
+});
+
 function getPreview(node) {
     if (node.type === "object") return `{ ${node.children.length} }`;
     if (node.type === "array") return `[ ${node.children.length} ]`;
-    if (node.type === "string" && node.subtype === "JSON") return "{ parsed }";
+    if (node.type === "string" && node.subtype === "JSON") return t("components.data_viewer_dialog.parsed_2");
     if (node.type === "string" && (node.subtype === "BASE64" || node.subtype === "BASE64_URI"))
-        return `[${node.value.length} chars]`;
+        return `[${characterCount(node.value.length)}]`;
     if (node.type === "string" && node.subtype === "DATE") return new Date(node.value).toLocaleString(getLocaleCode());
     if (node.type === "number" && node.subtype === "DATE_UNIX_S") return new Date(node.value * 1000).toLocaleString(getLocaleCode());
     if (node.type === "number" && node.subtype === "DATE_UNIX_MS") return new Date(node.value).toLocaleString(getLocaleCode());
@@ -224,6 +233,12 @@ function getPreview(node) {
 
 const TreeNode = React.memo(({ node, depth, selectedId, onSelect, expanded, onToggle }) => {
     useLanguage();
+    // Date previews are memoised per locale code. Previews holding translated
+    // words ({ parsed }, [n characters]) are cheap and rebuilt every render:
+    // a memo could keep a string resolved before its catalogue landed.
+    const localeCode = getLocaleCode();
+    const wordyPreview = node.type === "string"
+        && (node.subtype === "JSON" || node.subtype === "BASE64" || node.subtype === "BASE64_URI");
     const hasChildren = node.children && node.children.length > 0;
     const isOpen = expanded.has(node.id);
     const isSelected = selectedId === node.id;
@@ -245,7 +260,9 @@ const TreeNode = React.memo(({ node, depth, selectedId, onSelect, expanded, onTo
         if (hasChildren) onToggle(node.id);
     }, [node.id, hasChildren, onToggle]);
 
-    const preview = useMemo(() => getPreview(node), [node]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const memoPreview = useMemo(() => (wordyPreview ? null : getPreview(node)), [node, localeCode]);
+    const preview = wordyPreview ? getPreview(node) : memoPreview;
 
     return (
         <div>
@@ -333,7 +350,7 @@ TreeNode.displayName = "TreeNode";
 const DRAWER_DISMISS_VELOCITY = 0.6; // px/ms — flick threshold
 const DRAWER_DISMISS_DISTANCE = 0.35; // fraction of drawer height
 
-const BottomDrawer = React.memo(({ open, onClose, children, peekHeight = "85vh" }) => {
+const BottomDrawer = React.memo(({ open, onClose, children, peekHeight = "calc(var(--app-h, 100vh) * 0.85)" }) => {
     useLanguage();
     const [mounted, setMounted] = useState(open);
     const [animating, setAnimating] = useState(false);
@@ -540,17 +557,20 @@ const metaValue = { fontSize: 12.5, color: "#ccc", fontFamily: mono, wordBreak: 
 
 const DateDetail = ({ value, source }) => {
     const d = new Date(value);
+    const code = getLocaleCode();
+    // [stable id, label, value]. ISO 8601 and the raw timestamps are machine
+    // formats and stay so; Local and UTC are read by people, in their locale.
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {[
-                    ["ISO 8601", d.toISOString()],
-                    ["Local", d.toLocaleString(getLocaleCode())],
-                    ["UTC", d.toUTCString()],
-                    ["Timestamp (s)", Math.floor(d.getTime() / 1000)],
-                    ["Timestamp (ms)", d.getTime()],
-                ].map(([label, val]) => (
-                    <div key={label} style={metaCard}>
+                    ["iso", "ISO 8601", d.toISOString()],
+                    ["local", t("components.data_viewer_dialog.local"), d.toLocaleString(code)],
+                    ["utc", "UTC", d.toLocaleString(code, { timeZone: "UTC", timeZoneName: "short" })],
+                    ["s", t("components.data_viewer_dialog.timestamp_s"), Math.floor(d.getTime() / 1000)],
+                    ["ms", t("components.data_viewer_dialog.timestamp_ms"), d.getTime()],
+                ].map(([id, label, val]) => (
+                    <div key={id} style={metaCard}>
                         <div style={metaLabel}>{label}</div>
                         <div style={metaValue}>{String(val)}</div>
                     </div>
@@ -588,23 +608,23 @@ const Base64Detail = ({ value, subtype }) => {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {isDataUri && declared && (
                     <div style={metaCard}>
-                        <div style={metaLabel}>{mismatched ? "MIME (declared)" : "MIME"}</div>
+                        <div style={metaLabel}>{mismatched ? t("components.data_viewer_dialog.mime_declared") : "MIME"}</div>
                         <div style={{ ...metaValue, color: mismatched ? "#d8d8d8" : metaValue.color }}>{declared}</div>
                     </div>
                 )}
                 {mismatched && (
                     <div style={metaCard}>
-                        <div style={metaLabel}>MIME (actual)</div>
+                        <div style={metaLabel}>{t("components.data_viewer_dialog.mime_actual")}</div>
                         <div style={{ ...metaValue, color: "#D8D8D8FF" }}>{sniffed}</div>
                     </div>
                 )}
                 <div style={metaCard}>
                     <div style={metaLabel}>{t("components.data_viewer_dialog.encoded_length")}</div>
-                    <div style={metaValue}>{value.length.toLocaleString(getLocaleCode())} chars</div>
+                    <div style={metaValue}>{characterCount(value.length)}</div>
                 </div>
                 <div style={metaCard}>
                     <div style={metaLabel}>{t("components.data_viewer_dialog.decoded_size")}</div>
-                    <div style={metaValue}>~{(byteSize / 1024).toFixed(1)} KB</div>
+                    <div style={metaValue}>~{(byteSize / 1024).toLocaleString(getLocaleCode(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} KB</div>
                 </div>
                 {verdict && verdict.width > 0 && (
                     <div style={metaCard}>
@@ -619,7 +639,7 @@ const Base64Detail = ({ value, subtype }) => {
                     <div style={metaLabel}>{t("components.data_viewer_dialog.preview")}</div>
                     <img
                         src={value}
-                        alt="preview"
+                        alt={t("components.data_viewer_dialog.preview")}
                         loading="lazy"
                         referrerPolicy="no-referrer"
                         style={{ maxWidth: "100%", borderRadius: 9, display: "block", marginTop: 6 }}
@@ -673,12 +693,14 @@ const DetailPane = ({ node }) => {
     const renderValue = () => {
         // Date from string
         if (node.type === "string" && node.subtype === "DATE")
-            return <DateDetail value={node.value} source="ISO 8601 string" />;
+            return <DateDetail value={node.value} source={t("components.data_viewer_dialog.iso_8601_string")} />;
 
         // Date from number
         if (node.type === "number" && (node.subtype === "DATE_UNIX_S" || node.subtype === "DATE_UNIX_MS")) {
             const ms = node.subtype === "DATE_UNIX_S" ? node.value * 1000 : node.value;
-            return <DateDetail value={ms} source={node.subtype === "DATE_UNIX_S" ? "Unix timestamp (seconds)" : "Unix timestamp (milliseconds)"} />;
+            return <DateDetail value={ms} source={node.subtype === "DATE_UNIX_S"
+                ? t("components.data_viewer_dialog.unix_timestamp_seconds")
+                : t("components.data_viewer_dialog.unix_timestamp_milliseconds")} />;
         }
 
         // Base64
@@ -716,7 +738,9 @@ const DetailPane = ({ node }) => {
             return (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     <div style={metaCard}>
-                        <div style={metaLabel}>{node.type === "array" ? "Array length" : "Object keys"}</div>
+                        <div style={metaLabel}>{node.type === "array"
+                            ? t("components.data_viewer_dialog.array_length")
+                            : t("components.data_viewer_dialog.object_keys")}</div>
                         <div style={{ fontSize: 18, color: "#ccc", fontFamily: mono, fontWeight: 600 }}>
                             {node.children.length}
                         </div>
@@ -734,7 +758,7 @@ const DetailPane = ({ node }) => {
                     </div>
                     {node.type === "object" && (
                         <div style={{ ...codeBlock, color: "#555" }}>
-                            Keys: {node.children.map(c => c.key).join(", ")}
+                            {t("components.data_viewer_dialog.keys", { keys: node.children.map(c => c.key).join(", ") })}
                         </div>
                     )}
                 </div>
@@ -817,7 +841,7 @@ const UrlBar = React.memo(({ url }) => {
             </span>
             {copied && (
                 <span style={{ color: "#ffffff", fontSize: 10, fontFamily: sansFont }}>
-                    copied
+                    {t("components.data_viewer_dialog.copied")}
                 </span>
             )}
             <a
@@ -844,8 +868,10 @@ const styles = () => ({
             borderRadius: 16,
             maxWidth: 960,
             width: "100%",
-            height: "80vh",
-            maxHeight: "80vh",
+            // Measured visible height (utils/viewport), not vh: on phones
+            // vh counts the hidden-toolbar height and pushed the bottom off.
+            height: "calc(var(--app-h, 100vh) * 0.8)",
+            maxHeight: "calc(var(--app-h, 100vh) * 0.8)",
             margin: 16,
             overflow: "hidden",
             display: "flex",
@@ -1092,15 +1118,17 @@ const DataViewerDialog = React.memo(({ classes, open, onClose, data, api, author
         try {
             const result = await api.content.getContent(resolvedAuthor, resolvedPermlink, { raw: true });
             if (seq !== fetchSeqRef.current) return; // stale response
+            // Errors are kept as tk() descriptors (or the node's own message)
+            // and resolved with tx() in render, so they follow the language.
             if (!result) {
-                setError(t("components.data_viewer_dialog.no_content_returned_the_post_may_not"));
+                setError(tk("components.data_viewer_dialog.no_content_returned_the_post_may_not"));
                 setFetchedData(null);
             } else {
                 setFetchedData(result);
             }
         } catch (e) {
             if (seq !== fetchSeqRef.current) return;
-            setError(e?.message || "Fetch failed");
+            setError(e?.message || tk("components.data_viewer_dialog.fetch_failed"));
             setFetchedData(null);
         } finally {
             if (seq === fetchSeqRef.current) setLoading(false);
@@ -1270,7 +1298,7 @@ const DataViewerDialog = React.memo(({ classes, open, onClose, data, api, author
 
                 {!loading && error && !activeData && (
                     <div className={classes.centerState}>
-                        <span style={{ color: "#ffffff" }}>{error}</span>
+                        <span style={{ color: "#ffffff" }}>{tx(error)}</span>
                         {apiMode && (
                             <span
                                 onClick={fetchFresh}
@@ -1279,7 +1307,7 @@ const DataViewerDialog = React.memo(({ classes, open, onClose, data, api, author
                                     textDecoration: "underline", fontSize: 11,
                                 }}
                             >
-                                retry
+                                {t("components.data_viewer_dialog.retry")}
                             </span>
                         )}
                     </div>
@@ -1332,7 +1360,7 @@ const DataViewerDialog = React.memo(({ classes, open, onClose, data, api, author
                 )}
                 {apiMode && (
                     <span style={{ color: loading ? "#888" : "#ffffff", flexShrink: 0 }}>
-                        {loading ? "● fetching" : "● raw"}
+                        {loading ? t("components.data_viewer_dialog.fetching") : t("components.data_viewer_dialog.raw")}
                     </span>
                 )}
                 <span className={classes.statusLegend}>

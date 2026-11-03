@@ -75,7 +75,7 @@ import getIT from "../data/pixaLogoWhite";
 // stays lazy via PAGE_IMPORTERS below.
 import HomeEager from "./Home";
 
-import { t, setLanguage, subscribe as subscribe_language, useLanguage } from "../utils/text";
+import { t, tk, setLanguage, subscribe as subscribe_language, useLanguage } from "../utils/text";
 
 const pixaLogoWhite = getIT();
 
@@ -1668,7 +1668,11 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl, onNo
                             mode: "pin",
                             username: data.account,
                             requiredKeyType: data.type || "posting",
-                            actionDescription: data.reason || "Security Check Required",
+                            // The API sends the reason as a key (reasonKey) next to its
+                            // English text; UnlockKeyDialog renders either form.
+                            actionDescription: data.reasonKey
+                                ? tk(data.reasonKey, data.reasonVars)
+                                : (data.reason || tk("components.index.security_check_required")),
                             allowModeSwitch: true,
                             onUnlock: async (result) => {
                                 try {
@@ -1682,13 +1686,13 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl, onNo
                                     }
                                 } catch (e) {
                                     console.error("[pin_required] onUnlock error:", e);
-                                    showSnackbar(e.message || "Unlock failed", 3000);
+                                    showSnackbar(e.message || t("components.index.unlock_failed"), 3000);
                                 }
                             },
                             onKeyAdded: async (result) => {
                                 if (data.keyCallback && result.key) {
                                     try { await data.keyCallback(result.key); }
-                                    catch (e) { showSnackbar(e.message || "Failed to process key", 3000); }
+                                    catch (e) { showSnackbar(e.message || t("components.index.failed_to_process_key"), 3000); }
                                 }
                             },
                         });
@@ -1743,9 +1747,9 @@ function usePixaAPI(apiRef, settingsRef, openDialog, showSnackbar, nodeUrl, onNo
                     // per successful broadcast on every path (dialog or direct);
                     // never fires on cancel. Components must NOT show their own.
                     on("vote_done", ({ outcome }) => {
-                        const msg = outcome === "positive" ? "Upvoted successfully"
-                            : outcome === "negative" ? "Downvoted successfully"
-                                : outcome === "withdrawal" ? "Vote removed"
+                        const msg = outcome === "positive" ? t("components.index.upvoted_successfully")
+                            : outcome === "negative" ? t("components.index.downvoted_successfully")
+                                : outcome === "withdrawal" ? t("components.index.vote_removed")
                                     : null;
                         if (msg) showSnackbar(msg, 2000);
                     });
@@ -2925,7 +2929,7 @@ const LandingLayer = React.memo(
 // ── SnackbarComponent ────────────────────────────────────────────────────────
 
 const SnackbarComponent = React.memo(
-    ({ classes, open, message, duration, onClose }) => (
+    ({ classes, open, message, duration, onClose }) => { useLanguage(); return (
         <Portal container={document}>
             <Snackbar
                 key={message}
@@ -2937,7 +2941,7 @@ const SnackbarComponent = React.memo(
                 anchorOrigin={SNACKBAR_ANCHOR}
                 message={<span style={{ color: "#000" }}>{message}</span>}
                 action={
-                    <IconButton size="small" aria-label="close" color="inherit" onClick={onClose}>
+                    <IconButton size="small" aria-label={t("words.close")} color="inherit" onClick={onClose}>
                         <CloseIcon fontSize="small" />
                     </IconButton>
                 }
@@ -2945,7 +2949,7 @@ const SnackbarComponent = React.memo(
                 onClose={onClose}
             />
         </Portal>
-    ),
+    ); },
     (prev, next) =>
         prev.open === next.open &&
         prev.message === next.message &&
@@ -2961,11 +2965,24 @@ const styles = (theme) => {
     const buttonTransition = `225ms ${EASE}`;
 
     return {
+        // The app shell is pinned to the viewport itself. Its layout
+        // containment makes it the containing block of every position:fixed
+        // descendant (the pages' CREATE buttons included), so wherever this
+        // box ends, they end. It used to be height: 100% of #app, which a
+        // min-height: 100dvh floor could stretch past the screen — on Brave,
+        // whose dvh ignores its bottom toolbar, by the toolbar's height,
+        // leaving the CREATE button half under it. A fixed box with all four
+        // insets at 0 is exactly the area the browser keeps clear of its own
+        // toolbars (the same box every MUI dialog fills), with no viewport
+        // unit involved.
         root: {
             contain: "size style layout",
             overflow: "hidden",
-            height: "100%",
-            width: "100%",
+            position: "fixed",
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
             backgroundColor: theme.palette.primary.dark,
             color: theme.palette.primary.contrastText,
         },
@@ -3200,11 +3217,14 @@ const styles = (theme) => {
             textTransform: "uppercase",
             fontFamily: '"Normative Pro"',
         },
+        // Top and bottom insets instead of top + height: calc(100% - 96px)
+        // (which on phones only came out right through a min-height patch,
+        // the toolbar there being 64px). The box now always ends on the
+        // shell's bottom edge, i.e. on the visible bottom of the screen.
         content: {
             position: "absolute",
             overflow: "hidden",
             width: "calc(100% - 284px)",
-            minHeight: "calc(100% - 96px)",
             marginLeft: 284,
             background: "transparent",
             backgroundColor: theme.palette.primary.light,
@@ -3212,11 +3232,10 @@ const styles = (theme) => {
             boxShadow: "inset 0px 3px 2px 0px rgba(0,0,0,0.2), inset 0px 2px 2px 1px rgba(0,0,0,0.14), inset 0px 2px 5px 2px rgba(0,0,0,0.12)",
             top: 96,
             right: 0,
-            height: "calc(100% - 96px)",
+            bottom: 0,
             borderRadius: "28px 0 0 0",
             [theme.breakpoints.down("sm")]: {
                 borderRadius: "0px",
-                minHeight: "calc(100% - 64px)",
                 width: "100%",
                 top: 64,
                 marginLeft: 0,
@@ -3892,7 +3911,13 @@ function Index({ classes, history, settings: rawSettings }) {
                 else closeDialog(null);
                 break;
             case "SHARE_CONTENT":
-                shareContent(event.data.title, event.data.text, event.data.url);
+                // shareContent(options, modal_cb, toast_cb) — it was called with
+                // three strings, so it bailed out on a missing URL every time.
+                shareContent(
+                    { title: event.data.title, text: event.data.text, url: event.data.url },
+                    null,
+                    (message, duration) => showSnackbar(message, duration)
+                );
                 break;
         }
     };

@@ -22,9 +22,11 @@ import { usePrices } from "../../hooks/usePrices";
 
 import CoverImageUpload from './CoverImageUpload';
 import ActionButtons from './ActionButtons';
-import DateRangePicker from '../DateRangePicker';
+import DateRangePicker, {
+    dateFnsPattern, firstDayOfWeek, weekdayHeaders, formatMonthYear, formatIntlDate
+} from '../DateRangePicker';
 
-import { t } from "../../utils/text";
+import { t, useLanguage, getLocaleCode } from "../../utils/text";
 
 // ── Proposal fee (compile-time constants) ────────────────────────────────
 // The chain charges the creator a flat listing fee on create_proposal, and
@@ -88,6 +90,48 @@ function NumberFormatPXS(props) {
         />
     );
 }
+
+// The edit-mode end-date KeyboardDatePicker asks its utils for every name it
+// prints. Stock @date-io/date-fns answers from date-fns' built-in English
+// locale (no date-fns locale is bundled); this subclass answers from Intl in
+// the app language instead, with the same week start and weekday letters as
+// DateRangePicker. Numeric formatting and parsing stay date-fns', driven by
+// the locale-ordered pattern (dateFnsPattern) passed as `format`.
+const PICKER_HEADER_DATE = { weekday: 'short', month: 'short', day: 'numeric' };
+const PICKER_MONTH = { month: 'long' };
+
+class LocaleDateFnsUtils extends DateFnsUtils {
+    getCalendarHeaderText(date) { return formatMonthYear(date, getLocaleCode()); }
+
+    getDatePickerHeaderText(date) { return formatIntlDate(date, getLocaleCode(), PICKER_HEADER_DATE); }
+
+    getMonthText(date) { return formatIntlDate(date, getLocaleCode(), PICKER_MONTH); }
+
+    getWeekdays() { return weekdayHeaders(getLocaleCode()); }
+
+    // Same rows as the stock version, but each week starts on the locale's
+    // first day instead of date-fns' en-US Sunday.
+    getWeekArray(date) {
+        const weekStartsOn = firstDayOfWeek(getLocaleCode());
+        const first = this.startOfMonth(date);
+        const last = this.endOfMonth(date);
+        const end = this.addDays(last, (weekStartsOn + 6 - last.getDay() + 7) % 7);
+        let current = this.addDays(first, -((first.getDay() - weekStartsOn + 7) % 7));
+        const weeks = [];
+        for (let count = 0; this.isBefore(current, end); count++) {
+            const week = Math.floor(count / 7);
+            (weeks[week] || (weeks[week] = [])).push(current);
+            current = this.addDays(current, 1);
+        }
+        return weeks;
+    }
+}
+
+// Amounts in the user's number format ("1 234,500" in fr-CH), fixed decimals.
+const formatFixed = (value, decimals) => value.toLocaleString(getLocaleCode(), {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
+});
 
 export const settingsPanelStyles = (theme) => ({
     settingsPanel: {
@@ -202,6 +246,7 @@ const ProposalCostSummary = React.memo(({
                                             currency,
                                             fiatRate
                                         }) => {
+    useLanguage();
     const start = startDate ? (startDate instanceof Date ? startDate : new Date(startDate)) : null;
     const end = endDate ? (endDate instanceof Date ? endDate : new Date(endDate)) : null;
     const validDates = !!(start && end && !isNaN(start.getTime()) && !isNaN(end.getTime())
@@ -230,9 +275,9 @@ const ProposalCostSummary = React.memo(({
 
     const pxsAndFiat = (v, decimals) => (
         <React.Fragment>
-            {v.toFixed(decimals)} PXS
+            {formatFixed(v, decimals)} PXS
             <span className={classes.proposalSummaryFiat}>
-                ≈ {(v * pxsRate * rate).toFixed(2)} {cur}
+                ≈ {formatFixed(v * pxsRate * rate, 2)} {cur}
             </span>
         </React.Fragment>
     );
@@ -242,7 +287,7 @@ const ProposalCostSummary = React.memo(({
             <div className={classes.proposalSummaryRow}>
                 <span className={classes.proposalSummaryLabel}>{t("components.settings_panel.duration")}</span>
                 <span className={classes.proposalSummaryValue + " monospace"}>
-                    {durationDays != null ? `${durationDays} day${durationDays === 1 ? '' : 's'}` : '—'}
+                    {durationDays != null ? t("components.settings_panel.day_count", { day: { day: durationDays } }) : '—'}
                 </span>
             </div>
             <div className={classes.proposalSummaryRow}>
@@ -266,11 +311,16 @@ const ProposalCostSummary = React.memo(({
                                  leaveTouchDelay={4000}
                                  classes={{ tooltip: classes.tooltipRoot }}
                                  title={
+                                     // One sentence, one key. Its {{text}} slot is
+                                     // the space after "plus" (the key predates this
+                                     // file and is translated in every locale as is).
                                      <span className={classes.tooltip}>
-                                         Submitting a proposal costs {PROPOSAL_FEE_PXS} PXS, plus{' '}
-                                         {PROPOSAL_FEE_INCREASE_PXS_PER_DAY} PXS per day for proposals
-                                         longer than {PROPOSAL_FEE_INCREASE_THRESHOLD_DAYS} days. The fee
-                                         is deducted from your PXS balance when the proposal is created.
+                                         {t("components.settings_panel.submitting_a_proposal_costs_pxs_plus_pxs", {
+                                             PROPOSAL_FEE_PXS,
+                                             text: ' ',
+                                             PROPOSAL_FEE_INCREASE_PXS_PER_DAY,
+                                             PROPOSAL_FEE_INCREASE_THRESHOLD_DAYS
+                                         })}
                                      </span>
                                  }>
                             <IconButton size="small"><InfoOutlined style={SMALL_INFO_ICON_STYLE}/></IconButton>
@@ -324,6 +374,9 @@ const SettingsPanel = React.memo(({
                                       onFinish,
                                       onPreview
                                   }) => {
+    // memo() + props that never change on a language switch: subscribe.
+    useLanguage();
+    const localeCode = getLocaleCode();
     // Live PXS/USD (witness feed) + the user's display currency and its
     // USD→currency rate — the same hook PaperCardActions feeds its payout
     // stack with. Re-renders here are cheap: the panel already re-renders
@@ -362,10 +415,10 @@ const SettingsPanel = React.memo(({
                                 onChange={onPayoutChange}
                                 style={WHITE_TEXT_STYLE}
                             >
-                                <MenuItem value="default">60% Authors / 40% Curators</MenuItem>
-                                <MenuItem value="author">100% Author</MenuItem>
+                                <MenuItem value="default">{t("components.settings_panel.60_authors_40_curators")}</MenuItem>
+                                <MenuItem value="author">{t("components.settings_panel.100_author")}</MenuItem>
                                 <MenuItem value="everyone">50% / 50%</MenuItem>
-                                <MenuItem value="curators">100% Curators</MenuItem>
+                                <MenuItem value="curators">{t("components.settings_panel.100_curators")}</MenuItem>
                             </Select>
                         </FormControl>
                     </div>
@@ -517,25 +570,35 @@ const SettingsPanel = React.memo(({
                                 <IconButton><InfoOutlined/></IconButton>
                             </Tooltip>
                         </Typography>
-                        <MuiPickersUtilsProvider utils={DateFnsUtils}>
+                        <MuiPickersUtilsProvider utils={LocaleDateFnsUtils}>
                             <div style={PROPOSAL_EDIT_FIELDS_STYLE}>
                                 {proposalStartDate && (
                                     <Typography variant="caption" style={PROPOSAL_START_CAPTION_STYLE}>
-                                        Started {proposalStartDate.toLocaleDateString()} · start date is fixed
+                                        {t("components.settings_panel.started_start_date_is_fixed", {
+                                            proposalStartDate: proposalStartDate.toLocaleDateString(localeCode)
+                                        })}
                                     </Typography>
                                 )}
+                                {/* Typed in the locale's numeric order (dd.MM.yyyy,
+                                 yyyy/MM/dd…): the same pattern formats, parses
+                                 and — letters become digit slots — masks it. */}
                                 <KeyboardDatePicker
                                     className={classes.proposalField}
                                     margin="dense"
                                     inputVariant="outlined"
                                     id="proposal-edit-end-date"
                                     label={t("components.settings_panel.end_date")}
-                                    format="MM/dd/yyyy"
+                                    format={dateFnsPattern(localeCode)}
                                     fullWidth
                                     minDate={proposalStartDate || undefined}
                                     value={proposalEndDate}
                                     onChange={onProposalEndDateChange}
-                                    KeyboardButtonProps={{ 'aria-label': 'change end date' }}
+                                    invalidDateMessage={t("components.settings_panel.invalid_date_format")}
+                                    minDateMessage={t("components.settings_panel.the_end_date_cant_be_before_the_start_date")}
+                                    maxDateMessage={t("components.settings_panel.date_is_too_far_in_the_future")}
+                                    okLabel={t("components.settings_panel.ok")}
+                                    cancelLabel={t("words.cancel")}
+                                    KeyboardButtonProps={{ 'aria-label': t("components.settings_panel.change_end_date") }}
                                 />
                                 <TextField
                                     className={classes.proposalField}
@@ -553,8 +616,12 @@ const SettingsPanel = React.memo(({
                                     }}
                                     helperText={
                                         proposalOriginalDailyPay
-                                            ? `Currently ${proposalOriginalDailyPay} PXS/day — can only be lowered`
-                                            : "Amount disbursed per day (in PXS) — can only be lowered"
+                                            ? t("components.settings_panel.currently_pxs_day_can_only_be_lowered", {
+                                                proposalOriginalDailyPay: Number.isFinite(Number(proposalOriginalDailyPay))
+                                                    ? Number(proposalOriginalDailyPay).toLocaleString(localeCode, { maximumFractionDigits: 3 })
+                                                    : proposalOriginalDailyPay
+                                            })
+                                            : t("components.settings_panel.amount_disbursed_per_day_in_pxs_can_only_be")
                                     }
                                 />
                                 {/* Listing fee omitted here on purpose — it was

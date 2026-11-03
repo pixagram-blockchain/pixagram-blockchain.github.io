@@ -11,11 +11,22 @@
  * Background watermark: CMYK halftone dither (classic preset) of
  * opts.artworkImage.  Input pixel art is upscaled by a crisp NN factor
  * (4, 9, 16, 25, 36, 49, or 64).  scale = √factor, sharpness = scale/2.
+ *
+ * Language: the PDF is written in the UI language when the Industry fonts
+ * have a glyph for every string it prints in that language, else in English
+ * (utils/docLanguage.js renderInDocLanguage; the fonts cover Latin-1 and most
+ * of Latin Extended-A — no Greek, Cyrillic, CJK, Romanian ș/ț or Turkish ı).
+ * Labels come from the catalogue; the license wording from
+ * PIXA_LICENSE_BASE.localize() in that language; numbers and the date follow
+ * it. The fonts are fetched once and the guilloche overlay is drawn once —
+ * only the page assembly can run twice. User text (artwork title, author,
+ * governing-law fields) is sanitised so no character ever prints as a box.
  */
 
 import { PDFDocument, rgb, PageSizes } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit'
 import Engine from "./guilloche";
+import { renderInDocLanguage, fontkitCanPrint } from "./docLanguage";
 
 
 const ST = {
@@ -389,6 +400,34 @@ function drawRRTop(pg, x, y, w, h, r, col) {
 // TEXT UTILITIES
 // ═══════════════════════════════════════════════════════
 
+// Spaces, hyphens and controls the Industry fonts have no glyph for (no-break
+// and narrow spaces from French typography and digit grouping, U+2011)
+// become ones they have. Applied to everything drawn, and by the language check.
+function normalizeText(s) {
+    return String(s == null ? '' : s)
+        .replace(/[\u0000-\u001F\u007F]/g, ' ')
+        .replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, ' ')
+        .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
+        .replace(/[\u2010-\u2012]/g, '-');
+}
+
+// Drawable text for these fonts (fontkit objects): normalised, an accent
+// dropped where that leaves a letter the fonts have, anything else "?" —
+// never a missing-glyph box. Translations never need it (a language the fonts
+// cannot print is not chosen); user text can.
+function makeClean(fonts) {
+    const has = (ch) => { const cp = ch.codePointAt(0); return fonts.every(f => f.hasGlyphForCodePoint(cp)); };
+    return (s) => {
+        let out = '';
+        for (const ch of normalizeText(s)) {
+            if (has(ch)) { out += ch; continue; }
+            const base = ch.normalize('NFD').replace(/[\u0300-\u036F]/g, '');
+            out += base && [...base].every(has) ? base : '?';
+        }
+        return out.replace(/\?{2,}/g, '?');
+    };
+}
+
 function parseSegments(text) {
     const segs = [];
     const re = /\*\*([^*]+)\*\*/g;
@@ -487,24 +526,26 @@ const TITLE_TO_PARA = 8;
 const H2_ABOVE = TITLE_TO_PARA * PHI;
 
 class Col {
-    constructor(pg, fonts, x, w, topY, botY) {
+    // tr: document translator (utils/docLanguage.js); clean: makeClean(fonts).
+    constructor(pg, fonts, x, w, topY, botY, tr, clean) {
         this.pg = pg; this.f = fonts;
         this.x = x; this.w = w;
         this.y = topY; this.bot = botY;
+        this.tr = tr; this.c = clean;
     }
 
     drawTitle(text, sz) {
-        this.pg.drawText(text, { x: this.x, y: this.y, size: sz, font: this.f.bold, color: C.black.c, opacity: C.black.o });
+        this.pg.drawText(this.c(text), { x: this.x, y: this.y, size: sz, font: this.f.bold, color: C.black.c, opacity: C.black.o });
         this.y -= sz + 1;
     }
 
     drawSub(text) {
-        this.pg.drawText(text, { x: this.x, y: this.y, size: 6, font: this.f.regular, color: C.mid.c, opacity: C.mid.o });
+        this.pg.drawText(this.c(text), { x: this.x, y: this.y, size: 6, font: this.f.regular, color: C.mid.c, opacity: C.mid.o });
         this.y -= 14;
     }
 
     drawH1(text) {
-        this.pg.drawText(text.toUpperCase(), { x: this.x, y: this.y, size: 9, font: this.f.bold, color: C.black.c, opacity: C.black.o });
+        this.pg.drawText(this.c(this.tr.upper(text)), { x: this.x, y: this.y, size: 9, font: this.f.bold, color: C.black.c, opacity: C.black.o });
         this.y -= 4;
         this.pg.drawLine({
             start: { x: this.x, y: this.y },
@@ -516,13 +557,13 @@ class Col {
 
     drawH2(text) {
         this.y -= H2_ABOVE;
-        this.pg.drawText(text, { x: this.x, y: this.y, size: 8, font: this.f.bold, color: C.dark.c, opacity: C.dark.o });
+        this.pg.drawText(this.c(text), { x: this.x, y: this.y, size: 8, font: this.f.bold, color: C.dark.c, opacity: C.dark.o });
         this.y -= TITLE_TO_PARA;
     }
 
     drawBody(text, fs = BODY_FS) {
         const lh = fs * 1.4;
-        const lines = wrapTokens(text, this.f, fs, this.w);
+        const lines = wrapTokens(this.c(text), this.f, fs, this.w);
         for (let i = 0; i < lines.length; i++) {
             drawTokenLineJustified(this.pg, lines[i], this.x, this.y, this.f, fs, C.body, this.w, i === lines.length - 1);
             this.y -= lh;
@@ -533,33 +574,40 @@ class Col {
     skip(h) { this.y -= h; }
 
     drawAboutBox(exp) {
+        const tr = this.tr;
         const RD = 9, padTop = 14, padBot = 5, padLR = 9;
         const innerW = this.w - padLR * 2;
         const fs = 6, lh = fs + 2, fss = 5.5, lhs = fss + 1.8, sectionGap = 5;
+        // Labels shared with the License dialog.
+        const purposeLabel = this.c(tr.t("components.license_dialog.purpose"));
+        const howLabel = this.c(tr.t("components.license_dialog.how_it_works"));
+        const termsLabel = this.c(tr.t("components.license_dialog.key_terms"));
+        const purpose = this.c(exp.purpose), mechanism = this.c(exp.mechanism);
+        const terms = exp.keyTerms ? Object.entries(exp.keyTerms).map(([t, d]) => [this.c(t), this.c(d)]) : null;
         let contentH = 13;
-        contentH += wrapPlain(`Purpose: ${exp.purpose}`, this.f.regular, fs, innerW).length * lh;
+        contentH += wrapPlain(`${purposeLabel} ${purpose}`, this.f.regular, fs, innerW).length * lh;
         contentH += sectionGap;
-        contentH += wrapPlain(`How It Works: ${exp.mechanism}`, this.f.regular, fs, innerW).length * lh;
+        contentH += wrapPlain(`${howLabel} ${mechanism}`, this.f.regular, fs, innerW).length * lh;
         contentH += sectionGap;
-        if (exp.keyTerms) {
+        if (terms) {
             contentH += lh;
-            for (const [t, d] of Object.entries(exp.keyTerms))
+            for (const [t, d] of terms)
                 contentH += wrapPlain(`${t}: ${d}`, this.f.regular, fss, innerW - 8).length * lhs + 0.5;
         }
         const boxH = padTop + contentH + padBot;
         const boxTop = this.y + padTop;
         drawRR(this.pg, this.x, boxTop, this.w, boxH, RD, C.aboutBg);
         const tx = this.x + padLR;
-        this.pg.drawText('ABOUT THIS LICENSE', { x: tx, y: this.y, size: 9, font: this.f.bold, color: C.black.c, opacity: C.black.o });
+        this.pg.drawText(this.c(tr.upper(tr.t("components.license_dialog.about_this_license"))), { x: tx, y: this.y, size: 9, font: this.f.bold, color: C.black.c, opacity: C.black.o });
         this.y -= 13;
-        this._lp('Purpose:', exp.purpose, tx, innerW, fs, lh);
+        this._lp(purposeLabel, purpose, tx, innerW, fs, lh);
         this.y -= sectionGap;
-        this._lp('How It Works:', exp.mechanism, tx, innerW, fs, lh);
+        this._lp(howLabel, mechanism, tx, innerW, fs, lh);
         this.y -= sectionGap;
-        if (exp.keyTerms) {
-            this.pg.drawText('Key Terms:', { x: tx, y: this.y, size: fs, font: this.f.bold, color: C.black.c, opacity: C.black.o });
+        if (terms) {
+            this.pg.drawText(termsLabel, { x: tx, y: this.y, size: fs, font: this.f.bold, color: C.black.c, opacity: C.black.o });
             this.y -= lh;
-            for (const [term, def] of Object.entries(exp.keyTerms)) {
+            for (const [term, def] of terms) {
                 const lines = wrapPlain(`${term}: ${def}`, this.f.regular, fss, innerW - 8);
                 for (let i = 0; i < lines.length; i++) {
                     if (i === 0) {
@@ -578,6 +626,7 @@ class Col {
         this.y = boxTop - boxH - H2_ABOVE;
     }
 
+    // label and text arrive cleaned (drawAboutBox).
     _lp(label, text, x, maxW, fs, lh) {
         const lines = wrapPlain(`${label} ${text}`, this.f.regular, fs, maxW);
         for (let i = 0; i < lines.length; i++) {
@@ -594,22 +643,31 @@ class Col {
     }
 
     drawRightsTable(category, customization) {
+        const tr = this.tr;
         const configKey = category.id === 'holder-rights' ? 'holderRights' : 'visitorRights';
         const rc = customization?.rightsConfiguration?.[configKey] || {};
         const grouped = groupRights(category.rights);
-        this.pg.drawText(category.title, { x: this.x, y: this.y, size: 7, font: this.f.bold, color: C.label.c, opacity: C.label.o });
+        this.pg.drawText(this.c(category.title), { x: this.x, y: this.y, size: 7, font: this.f.bold, color: C.label.c, opacity: C.label.o });
         this.y -= 10;
         const RD = 9, pad = 7, permColW = 52;
         const rightColW = this.w - permColW;
         const headerH = 14, catH = 12, rowFs = 6.2, rowLh = 7.8;
         const icoScale = 0.35, icoSz = 24 * icoScale, minRowH = 15;
+        // "CAN" / "CAN'T" in this language, shrunk if a translation is wider
+        // than the permission column.
+        const permText = (granted) => this.c(tr.upper(tr.t(granted ? "components.pixa_license.can" : "components.pixa_license.cant")));
+        const permMaxW = permColW - icoSz - 3 - 2;
+        const permFs = Math.min(rowFs, ...[true, false].map((g) => {
+            const w = this.f.bold.widthOfTextAtSize(permText(g), rowFs);
+            return w > permMaxW ? rowFs * permMaxW / w : rowFs;
+        }));
         let bodyH = 0;
         for (const group of grouped) {
             bodyH += catH;
             for (const r of group.rights) {
                 if (r.dependsOn && rc[r.dependsOn] !== true) continue;
                 const dep = Boolean(r.dependsOn);
-                const ll = wrapPlain(r.label, this.f.regular, rowFs, rightColW - (dep ? 16 : 4) - pad);
+                const ll = wrapPlain(this.c(r.label), this.f.regular, rowFs, rightColW - (dep ? 16 : 4) - pad);
                 bodyH += Math.max(minRowH, ll.length * rowLh + (r.note ? 6 : 0) + 4);
             }
         }
@@ -618,12 +676,12 @@ class Col {
         drawRR(this.pg, this.x, tableTop, this.w, totalH, RD, C.tableBg);
         drawRRTop(this.pg, this.x, tableTop, this.w, headerH, RD, C.tableHead);
         const hTY = tableTop - headerH / 2 - 2;
-        this.pg.drawText('Right', { x: this.x + pad, y: hTY, size: 6, font: this.f.bold, color: C.label.c, opacity: C.label.o });
-        this.pg.drawText('Permission', { x: this.x + rightColW, y: hTY, size: 6, font: this.f.bold, color: C.label.c, opacity: C.label.o });
+        this.pg.drawText(this.c(tr.t("components.license_dialog.right")), { x: this.x + pad, y: hTY, size: 6, font: this.f.bold, color: C.label.c, opacity: C.label.o });
+        this.pg.drawText(this.c(tr.t("components.license_dialog.permission")), { x: this.x + rightColW, y: hTY, size: 6, font: this.f.bold, color: C.label.c, opacity: C.label.o });
         let cy = tableTop - headerH;
         for (const group of grouped) {
             cy -= 1.5;
-            this.pg.drawText(group.label, { x: this.x + pad, y: cy - 7.5, size: 6.5, font: this.f.bold, color: C.black.c, opacity: C.black.o });
+            this.pg.drawText(this.c(group.label), { x: this.x + pad, y: cy - 7.5, size: 6.5, font: this.f.bold, color: C.black.c, opacity: C.black.o });
             cy -= catH;
             for (const right of group.rights) {
                 const granted = rc[right.id] !== undefined ? rc[right.id] : right.defaultValue;
@@ -631,7 +689,7 @@ class Col {
                 if (right.dependsOn && rc[right.dependsOn] !== true) continue;
                 const labelX = this.x + pad + (dep ? 12 : 0);
                 const maxLW = rightColW - (dep ? 16 : 4) - pad;
-                const ll = wrapPlain(right.label, this.f.regular, rowFs, maxLW);
+                const ll = wrapPlain(this.c(right.label), this.f.regular, rowFs, maxLW);
                 const contentH = ll.length * rowLh + (right.note ? 6 : 0);
                 const rowH = Math.max(minRowH, contentH + 4);
                 const rowMidY = cy - rowH / 2;
@@ -641,11 +699,11 @@ class Col {
                 let ly = rowMidY + lblBlockH / 2 - rowFs * 0.7;
                 const lblCol = dep ? C.mid : C.body;
                 for (const l of ll) { this.pg.drawText(l, { x: labelX, y: ly, size: rowFs, font: this.f.regular, color: lblCol.c, opacity: lblCol.o }); ly -= rowLh; }
-                if (right.note) this.pg.drawText(right.note, { x: labelX, y: ly + 1.5, size: 4.8, font: this.f.oblique, color: C.note.c, opacity: C.note.o });
+                if (right.note) this.pg.drawText(this.c(right.note), { x: labelX, y: ly + 1.5, size: 4.8, font: this.f.oblique, color: C.note.c, opacity: C.note.o });
                 const permX = this.x + rightColW, iconY = rowMidY + icoSz / 2 + 1;
                 const icoCol = granted ? C.iconCan : C.iconCant;
                 this.pg.drawSvgPath(granted ? ICON_CAN : ICON_CANT, { x: permX, y: iconY, scale: icoScale, color: icoCol.c, opacity: icoCol.o });
-                this.pg.drawText(granted ? 'CAN' : "CAN'T", { x: permX + icoSz + 3, y: rowMidY - rowFs * 0.35, size: rowFs, font: this.f.bold, color: C.black.c, opacity: C.black.o });
+                this.pg.drawText(permText(granted), { x: permX + icoSz + 3, y: rowMidY - permFs * 0.35, size: permFs, font: this.f.bold, color: C.black.c, opacity: C.black.o });
                 cy -= rowH;
             }
         }
@@ -663,7 +721,7 @@ class Col {
         this.pg.drawText('PIXAGRAM', { x: textX, y: logoMidY + 1, size: 9, font: this.f.bold, color: C.black.c, opacity: C.black.o });
         const nameW = this.f.bold.widthOfTextAtSize('PIXAGRAM', 9);
         this.pg.drawText('(R)', { x: textX + nameW + 1, y: logoMidY + 5, size: 4, font: this.f.regular, color: C.mid.c, opacity: C.mid.o });
-        this.pg.drawText('Social NFTs Marketplace', { x: textX, y: logoMidY - 10, size: 6, font: this.f.regular, color: C.mid.c, opacity: C.mid.o });
+        this.pg.drawText(this.c(this.tr.t("components.license_pdf.social_nfts_marketplace")), { x: textX, y: logoMidY - 10, size: 6, font: this.f.regular, color: C.mid.c, opacity: C.mid.o });
         this.y = ly - contentSz;
     }
 }
@@ -673,16 +731,22 @@ class Col {
 // CUSTOMIZATION
 // ═══════════════════════════════════════════════════════
 
-function applyCust(content, cust) {
+// Customization tokens in a section's content; the royalty is formatted in the
+// document's language, a missing governing-law field says so in it.
+function applyCust(content, cust, tr) {
     if (!cust) return content;
     let r = content;
-    if (cust.royaltyPercentage !== undefined) r = r.replace('{royaltyPercentage}', String(cust.royaltyPercentage));
+    if (cust.royaltyPercentage !== undefined) {
+        const pct = cust.royaltyPercentage;
+        r = r.replace('{royaltyPercentage}', typeof pct === 'number' && Number.isFinite(pct) ? tr.number(pct) : String(pct));
+    }
     if (cust.governingLaw) {
         const g = cust.governingLaw;
-        r = r.replace('{jurisdiction}', g.jurisdiction || '[Not Specified]')
-            .replace('{court}', g.court || '[Not Specified]')
-            .replace('{arbitrationLocation}', g.arbitrationLocation || '[Not Specified]')
-            .replace('{arbitrationRules}', g.arbitrationRules || '[Not Specified]');
+        const none = tr.t("components.pixa_license.not_specified");
+        r = r.replace('{jurisdiction}', g.jurisdiction || none)
+            .replace('{court}', g.court || none)
+            .replace('{arbitrationLocation}', g.arbitrationLocation || none)
+            .replace('{arbitrationRules}', g.arbitrationRules || none);
     }
     return r;
 }
@@ -776,58 +840,14 @@ function drawSvgOverlay(page, embeddedImg, imgW, imgH, pageW, pageH, globalOpaci
 // MAIN
 // ═══════════════════════════════════════════════════════
 
-export async function generateLicensePdf(licenseBase, customization = {}, opts = {}) {
-    const doc = await PDFDocument.create();
-    doc.setTitle(licenseBase.name || 'PIXA LICENSE 1.0');
-    doc.setAuthor(customization?.authorInfo?.name || 'Pixagram');
-    doc.setSubject('NFT License Agreement');
-    doc.setCreator('Pixagram License Generator');
+const FONT_URLS = [
+    "/src/fonts/industry/IndustryBook.ttf",
+    "/src/fonts/industry/IndustryBookItalic.ttf",
+    "/src/fonts/industry/IndustryBold.ttf",
+];
 
-    doc.registerFontkit(fontkit);
-    const prefix = "";
-    const IndustryBookPDF = await doc.embedFont(await fetch("/src/fonts/industry/IndustryBook.ttf").then(res => res.arrayBuffer()));
-    const IndustryBookItalicPDF = await doc.embedFont(await fetch("/src/fonts/industry/IndustryBookItalic.ttf").then(res => res.arrayBuffer()));
-    const IndustryBoldPDF = await doc.embedFont(await fetch("/src/fonts/industry/IndustryBold.ttf").then(res => res.arrayBuffer()));
-
-    const fonts = {
-        regular: IndustryBookPDF,
-        bold:    IndustryBoldPDF,
-        oblique: IndustryBookItalicPDF,
-    };
-
-    const sz = SIZES[opts.pageSize || 'a4'];
-    const page = doc.addPage([sz.w, sz.h]);
-    const MRG = 40, GUT = 22;
-    const colW = (sz.w - MRG * 2 - GUT) / 2;
-    const topY = sz.h - MRG, botY = MRG + 6;
-
-    /*
-    if (opts.artworkImage) {
-        const upscale = 8;
-        const imgd = await _dataURLToRGBA(opts.artworkImage, upscale);
-        const scale = upscale / 2;
-        const sharpness = scale / 2;
-        const ht = halftone(imgd, {scale, sharpness});
-        const svgDataUrl = `data:image/svg+xml;base64,${toBase64(ht.svg)}`;
-        const svgImg = await new Promise((resolve, reject) => {
-            const i = new Image();
-            i.onload = () => resolve(i);
-            i.onerror = reject;
-            i.src = svgDataUrl;
-        });
-        const cvs = document.createElement('canvas');
-        cvs.width = ht.width; cvs.height = ht.height;
-        const ctx = cvs.getContext('2d');
-        ctx.drawImage(svgImg, 0, 0, ht.width, ht.height);
-        const pngDataUrl = cvs.toDataURL('image/png');
-        const pngBase64 = pngDataUrl.split(',')[1];
-        const pngBytes = Uint8Array.from(atob(pngBase64), c => c.charCodeAt(0));
-        const embeddedImg = await doc.embedPng(pngBytes);
-        drawSvgOverlay(page, embeddedImg, ht.width, ht.height, sz.w, sz.h, 1.0);
-    }
-     */
-
-    // Overlay
+/** The guilloche overlay as PNG bytes — language-independent, rendered once. */
+async function renderOverlay(sz) {
     const st = JSON.parse(JSON.stringify(ST));
     st.page.sizePreset = sz.sizePreset;
 
@@ -840,7 +860,6 @@ export async function generateLicensePdf(licenseBase, customization = {}, opts =
     const promise = new Promise((resolve,reject) => {
         img.onload=()=>{
             ctx.drawImage(img,0,0,w*2,h*2);
-            const a=document.createElement('a');
             resolve(c.toDataURL('image/png'));
         };
         img.src='data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(res.svg)))
@@ -848,44 +867,88 @@ export async function generateLicensePdf(licenseBase, customization = {}, opts =
 
     const dataUrl = await promise;
     const base64Data = dataUrl.split(',')[1];
-    const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-    const embeddedImg = await doc.embedPng(imageBytes);
+    return { bytes: Uint8Array.from(atob(base64Data), c => c.charCodeAt(0)), width: st.page.width, height: st.page.height };
+}
+
+export async function generateLicensePdf(licenseBase, customization = {}, opts = {}) {
+    // Fetched once: embedded in every render, and read by fontkit for the
+    // language check (which characters the three faces can draw).
+    const fontBytes = await Promise.all(FONT_URLS.map(u => fetch(u).then(res => res.arrayBuffer()).then(b => new Uint8Array(b))));
+    const faces = fontBytes.map(b => fontkit.create(b));
+    const clean = makeClean(faces);
+    const sz = SIZES[opts.pageSize || 'a4'];
+    const overlay = await renderOverlay(sz);
+
+    return renderInDocLanguage(
+        (tr) => buildLicensePdf(tr, { licenseBase, customization, opts, sz, fontBytes, clean, overlay }),
+        { canPrint: fontkitCanPrint(faces, normalizeText) }
+    );
+}
+
+async function buildLicensePdf(tr, { licenseBase, customization, opts, sz, fontBytes, clean, overlay }) {
+    // PIXA_LICENSE_BASE carries its wording as translations: resolve it in
+    // this document's language. Any other license object prints as given.
+    const lic = typeof licenseBase.localize === 'function' ? licenseBase.localize(tr.text) : licenseBase;
+
+    const doc = await PDFDocument.create();
+    doc.setTitle(licenseBase.name || 'PIXA LICENSE 1.0');
+    doc.setAuthor(customization?.authorInfo?.name || 'Pixagram');
+    doc.setSubject(tr.t("components.license_pdf.nft_license_agreement"));
+    doc.setCreator('Pixagram License Generator');
+    doc.setLanguage(tr.lang);
+
+    doc.registerFontkit(fontkit);
+    const [IndustryBookPDF, IndustryBookItalicPDF, IndustryBoldPDF] = await Promise.all(fontBytes.map(b => doc.embedFont(b)));
+
+    const fonts = {
+        regular: IndustryBookPDF,
+        bold:    IndustryBoldPDF,
+        oblique: IndustryBookItalicPDF,
+    };
+
+    const page = doc.addPage([sz.w, sz.h]);
+    const MRG = 40, GUT = 22;
+    const colW = (sz.w - MRG * 2 - GUT) / 2;
+    const topY = sz.h - MRG, botY = MRG + 6;
+
+    // Overlay
+    const embeddedImg = await doc.embedPng(overlay.bytes);
     drawSvgOverlay(
         page,
         embeddedImg, // This is now a PDFImage object, not a string
-        st.page.width,
-        st.page.height,
+        overlay.width,
+        overlay.height,
         page.getWidth(),
         page.getHeight(),
         0.666
     );
 
-    // Footer
-    const dateStr = new Date().toLocaleDateString('en-CH');
+    // Footer — the date in the document's language, the user's local day.
+    const dateStr = tr.date(new Date(), { dateStyle: 'medium', timeZone: undefined });
     const artTitle = customization?.artworkInfo?.title || '';
     const authorName = customization?.authorInfo?.name || customization?.authorInfo?.username || '';
     const footerParts = [`PIXA LICENSE ${licenseBase.version || '1.0'}`];
     if (artTitle) footerParts.push(artTitle);
-    if (authorName) footerParts.push(`Author: ${authorName}`);
-    footerParts.push(`${dateStr}  (Generated by Pixagram(R) on ${dateStr})`);
-    const fullFooter = footerParts.join('  |  ');
+    if (authorName) footerParts.push(tr.t("components.pixa_license.author_name", { name: authorName }));
+    footerParts.push(tr.t("components.license_pdf.generated_by_pixagram_on", { date: dateStr }));
+    const fullFooter = clean(footerParts.join('  |  '));
     page.drawText(fullFooter, { x: (sz.w - fonts.regular.widthOfTextAtSize(fullFooter, 5)) / 4, y: 10, size: 8, font: fonts.regular, color: C.black.c, opacity: C.black.o });
 
     // Left column
-    const L = new Col(page, fonts, MRG, colW, topY, botY);
-    L.drawTitle(licenseBase.shortName || licenseBase.name, 16);
+    const L = new Col(page, fonts, MRG, colW, topY, botY, tr, clean);
+    L.drawTitle(lic.shortName || lic.name, 16);
     L.skip(8);
-    if (licenseBase.explanation) L.drawAboutBox(licenseBase.explanation);
-    for (const sec of licenseBase.sections) {
+    if (lic.explanation) L.drawAboutBox(lic.explanation);
+    for (const sec of lic.sections) {
         if (sec.type === 'intro') { L.drawH1(sec.title); L.drawBody(sec.content); continue; }
         if (sec.id === 'license-options') { L.drawH2(`${sec.number}. ${sec.title}`); L.drawBody(sec.content); continue; }
-        if (sec.type === 'customizable') { L.drawH2(`${sec.number}. ${sec.title}`); L.drawBody(applyCust(sec.content, customization)); continue; }
+        if (sec.type === 'customizable') { L.drawH2(`${sec.number}. ${sec.title}`); L.drawBody(applyCust(sec.content, customization, tr)); continue; }
         L.drawH2(`${sec.number}. ${sec.title}`); L.drawBody(sec.content);
     }
 
     // Right column
-    const R = new Col(page, fonts, MRG + colW + GUT, colW, topY, botY);
-    const lo = licenseBase.sections.find(s => s.id === 'license-options');
+    const R = new Col(page, fonts, MRG + colW + GUT, colW, topY, botY, tr, clean);
+    const lo = lic.sections.find(s => s.id === 'license-options');
     if (lo?.rightsCategories) {
         if (lo.rightsCategories[0]) R.drawRightsTable(lo.rightsCategories[0], customization);
         R.skip(12);

@@ -55,7 +55,7 @@ import { ToxicityWatcher } from "./ToxicityHint";
 import { parseRules, serializeRules, normalizeRule, appendRules, rulesPlainText, remainingRuleChars } from "../utils/community-rules";
 
 import { T } from "../utils/T";
-import { t, useLanguage } from "../utils/text";
+import { t, tk, tx, useLanguage } from "../utils/text";
 
 /**
  * The indexer's updateProps limits. Read from api.communities.PROPS_RULES
@@ -293,6 +293,7 @@ const AvatarZone = memo(({ classes, pictureUrl, onFileUpload, onRemove }) => {
 
 function EditCommunityDialog(props) {
     const { classes, open, onClose, onSave, api, communityName } = props;
+    useLanguage();
 
     const [loading, setLoading] = useState(false);
     const [loadError, setLoadError] = useState(null);
@@ -411,7 +412,7 @@ function EditCommunityDialog(props) {
             } catch (err) {
                 console.error("[EditCommunityDialog] Load failed:", err);
                 setLoadError(t("components.edit_community_dialog.failed_to_load_community", {
-                    message: (err.message || "Unknown error")
+                    message: (err.message || t("components.create_account_dialog.unknown_error"))
                 }));
             } finally { setLoading(false); }
         };
@@ -445,7 +446,7 @@ function EditCommunityDialog(props) {
     // false-negative and bounce the user straight back into the wizard.
     const processFile = useCallback(async (file, trusted = false) => {
         setSaveError("");
-        if (!file.type.startsWith("image/")) { setSaveError("Please upload an image file"); return; }
+        if (!file.type.startsWith("image/")) { setSaveError(tk("components.edit_community_dialog.please_upload_an_image_file")); return; }
         if (file.size > 48000) {
             // Too heavy for metadata storage — hand it to the ImageWizard,
             // which converts it (AI optional) and lets the user pick a size
@@ -465,7 +466,7 @@ function EditCommunityDialog(props) {
                 }
             } catch (e) {
                 console.error('[EditCommunityDialog] Pixel art check failed:', e);
-                setSaveError("Could not read this image. Please try another file.");
+                setSaveError(tk("components.image_wizard.could_not_read_this_image_please_try"));
                 return;
             }
         }
@@ -726,7 +727,8 @@ function EditCommunityDialog(props) {
                 // indexer's own reason so the user can fix the field and
                 // resubmit (keys were wiped above, they will be asked again).
                 console.error("[EditCommunityDialog] indexer rejected updateProps:", rejection);
-                setKeyError("The portal index rejected this update: " + rejection.reason);
+                // The reason is the indexer's own (English) wording.
+                setKeyError(tk("components.edit_community_dialog.the_portal_index_rejected_this_update", { reason: rejection.reason }));
                 return;
             }
 
@@ -748,7 +750,7 @@ function EditCommunityDialog(props) {
         } catch (err) {
             console.error("[EditCommunityDialog] Broadcast failed:", err);
             setKeyError(t("components.edit_community_dialog.broadcast_failed", {
-                message: (err.message || "Unknown error")
+                message: (err.message || t("components.create_account_dialog.unknown_error"))
             }));
         } finally { setBroadcasting(false); }
     }, [api, communityName, needsPostingKey, needsActiveKey, postingKeyValue, activeKeyValue, normalized, loggedInUser, avatarUrl, avatarFile, onSave, onClose, _wipeKeys]);
@@ -793,7 +795,7 @@ function EditCommunityDialog(props) {
                 </div>
             </div>
 
-            {saveError && <Typography color="error" variant="caption" style={{ display: "block", marginBottom: 16 }}>{saveError}</Typography>}
+            {saveError && <Typography color="error" variant="caption" style={{ display: "block", marginBottom: 16 }}>{tx(saveError)}</Typography>}
 
             <div className={classes.rulesBlock}>
                 <div className={classes.rulesHeader}>
@@ -892,7 +894,9 @@ function EditCommunityDialog(props) {
                         <Button variant="text" color="primary" onClick={handleCancel} disabled={isSaving}>{t("words.cancel")}</Button>
                         <Button variant="contained" onClick={handleSaveClick} disabled={isSaving || !hasChanges}
                                 style={{ borderRadius: "32px", minWidth: 100, backgroundColor: hasChanges ? "#d0d0d0" : "#333", color: hasChanges ? "#151515" : "#666" }}>
-                            {hasChanges ? "Save Changes" : "No Changes"}
+                            {hasChanges
+                                ? t("components.edit_community_dialog.save_changes")
+                                : t("components.edit_community_dialog.no_changes")}
                         </Button>
                     </DialogActions>
                 )}
@@ -1012,7 +1016,7 @@ function EditCommunityDialog(props) {
                         </FormControl>
                     )}
 
-                    {keyError && <Typography variant="caption" style={{ color: "#f44336", display: "block", marginTop: 8 }}>{keyError}</Typography>}
+                    {keyError && <Typography variant="caption" style={{ color: "#f44336", display: "block", marginTop: 8 }}>{tx(keyError)}</Typography>}
                     {broadcasting && (
                         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16, color: "#b0b0b0" }}>
                             <CircularProgress size={20} color="inherit" />
@@ -1023,7 +1027,7 @@ function EditCommunityDialog(props) {
                 <DialogActions style={{ padding: "16px 24px" }}>
                     <Button variant="text" color="primary" onClick={() => setKeyDialogOpen(false)} disabled={broadcasting}>{t("words.cancel", {TUC: true})}</Button>
                     <Button className={classes.whiteButton} variant="contained" color="primary" onClick={handleKeyConfirm} disabled={!canConfirm || broadcasting}>
-                        {broadcasting ? "BROADCASTING..." : "CONFIRM"}
+                        {broadcasting ? t("words.broadcasting", { TUC: true }) : t("words.confirm", { TUC: true })}
                     </Button>
                 </DialogActions>
             </Dialog>

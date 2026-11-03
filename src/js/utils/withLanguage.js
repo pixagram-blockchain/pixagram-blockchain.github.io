@@ -26,18 +26,24 @@
  * outermost means one uniform edit per file and no reasoning about which HOC
  * forwards what.
  *
- * `__i18nLang` is safe to add because no class in this codebase spreads
+ * `__i18nLang` / `__i18nRev` are safe to add because no class in this codebase spreads
  * `{...this.props}` onto a DOM node — checked before this was written. If that
  * ever changes, React will warn about an unknown attribute, which is a loud
  * failure rather than a silent one.
  */
 
 import { createElement } from "preact";
-import { useLanguage } from "./text";
+import { useLanguage, getRevision } from "./text";
 
 export const withLanguage = (Wrapped) => {
-    const WithLanguage = (props) =>
-        createElement(Wrapped, { ...props, __i18nLang: useLanguage() });
+    // `__i18nRev` changes on every notify, not only on a language switch: when
+    // the English fallback file lands, keys a locale lacks turn from their bare
+    // name into English with the language code unchanged — PureComponent would
+    // compare the code alone and keep showing the key name.
+    const WithLanguage = (props) => {
+        const lang = useLanguage();
+        return createElement(Wrapped, { ...props, __i18nLang: lang, __i18nRev: getRevision() });
+    };
 
     WithLanguage.displayName =
         "i18n(" + (Wrapped.displayName || Wrapped.name || "Component") + ")";

@@ -11,7 +11,7 @@ import MoreVertIcon from '@material-ui/icons/MoreVert';
 import Chip from '@material-ui/core/Chip';
 import DateLabel from './DateLabel';
 import { HISTORY, COMMUNITY_TAG_REGEX, buildCommentFocusHash } from '../utils/constants';
-import { t, useLanguage } from '../utils/text';
+import { t, tnode, useLanguage } from '../utils/text';
 import * as actions from '../actions/utils';
 import PaperCardActions from './PaperCardActions';
 import ProfileHoverAnchor from './ProfileHoverCard';
@@ -168,13 +168,9 @@ function blogRootPathFromChain(chainComment, data) {
 function rootTypeLabel(data) {
     const blog = rootIsBlog(data);
     if (blog === null) return null;
-    // utils/text renders an unknown key as its own last path segment, so until
-    // the two keys are in all 12 catalogs the chip shows English rather than a
-    // raw key. Delete the two fallback lines once they land.
-    const s = t(blog ? 'components.paper_card.root_type_blog_post' : 'components.paper_card.root_type_artwork');
-    if (s === 'root_type_blog_post') return 'Blog Post';
-    if (s === 'root_type_artwork') return 'Artwork';
-    return s;
+    return blog
+        ? t('components.paper_card.root_type_blog_post')
+        : t('components.paper_card.root_type_artwork');
 }
 
 
@@ -388,7 +384,7 @@ const ReplyCardContent = memo(function ReplyCardContent({
                 })
                 .catch((e) => {
                     console.warn('[PaperCardReply] vote failed:', e.message);
-                    actions.trigger_snackbar(e.message || 'Failed to vote');
+                    actions.trigger_snackbar(e.message || t('components.paper_card.failed_to_vote'));
                 })
                 .finally(() => { setUpvoteLoading(false); });
         } else {
@@ -419,7 +415,7 @@ const ReplyCardContent = memo(function ReplyCardContent({
                 })
                 .catch((e) => {
                     console.warn('[PaperCardReply] vote failed:', e.message);
-                    actions.trigger_snackbar(e.message || 'Failed to vote');
+                    actions.trigger_snackbar(e.message || t('components.paper_card.failed_to_vote'));
                 })
                 .finally(() => { setDownvoteLoading(false); });
         } else {
@@ -449,6 +445,20 @@ const ReplyCardContent = memo(function ReplyCardContent({
     const downVotesNumber = (data.downVotesNumber || 0) + (voted === -1 ? 1 : 0) - (initialVoted === -1 ? 1 : 0);
 
     const typeLabel = rootTypeLabel(data);
+
+    // The subheader sentence's fixed parts (see the subheader below).
+    const dateNode = <DateLabel date={data.date} locales={locales} className={classes.subheaderDate} />;
+    // Rich author hover card instead of the old raw-@username Tooltip. The
+    // anchor adds no element: it attaches its pointer listeners to this very
+    // span (and to the "to" name), and the card itself is the page's single
+    // <ProfileHoverCardLayer/>. Click behavior is unchanged.
+    const authorNode = (
+        <ProfileHoverAnchor api={api} author={author} onOpenProfile={openAuthor}>
+            <span className={classes.subheaderName} onClick={() => openAuthor(author.username)}>
+                {authorName}
+            </span>
+        </ProfileHoverAnchor>
+    );
 
     return (
         <React.Fragment>
@@ -481,29 +491,24 @@ const ReplyCardContent = memo(function ReplyCardContent({
                     </span>
                 }
                 subheader={
-                    <span>
-                        <DateLabel date={data.date} locales={locales} className={classes.subheaderDate} />
-                        <span className={classes.subheaderBy}> {t('words.by')} </span>
-                        {/* Rich author hover card instead of the old raw-@username
-                            Tooltip. The anchor adds no element: it attaches its
-                            pointer listeners to this very span (and to the "to"
-                            name below), and the card itself is the page's single
-                            <ProfileHoverCardLayer/>. Click behavior is unchanged. */}
-                        <ProfileHoverAnchor api={api} author={author} onOpenProfile={openAuthor}>
-                            <span className={classes.subheaderName} onClick={() => openAuthor(author.username)}>
-                                {authorName}
-                            </span>
-                        </ProfileHoverAnchor>
-                        {replyToUsername ? (
-                            <span>
-                                <span className={classes.subheaderBy}> {t('words.to')} </span>
-                                <ProfileHoverAnchor api={api} author={replyToAuthor} onOpenProfile={openAuthor}>
-                                    <span className={classes.subheaderName} onClick={() => openAuthor(replyToUsername)}>
-                                        {replyToDisplayName}
-                                    </span>
-                                </ProfileHoverAnchor>
-                            </span>
-                        ) : null}
+                    // One sentence per variant — "{{date}} by {{author}}" and
+                    // "… to {{recipient}}" — so a translation can reorder it;
+                    // its words take subheaderBy's colour, the date and the
+                    // names keep their own classes.
+                    <span className={classes.subheaderBy}>
+                        {replyToUsername
+                            ? tnode('components.paper_card.date_by_author_to_recipient', {
+                                date: dateNode,
+                                author: authorNode,
+                                recipient: (
+                                    <ProfileHoverAnchor api={api} author={replyToAuthor} onOpenProfile={openAuthor}>
+                                        <span className={classes.subheaderName} onClick={() => openAuthor(replyToUsername)}>
+                                            {replyToDisplayName}
+                                        </span>
+                                    </ProfileHoverAnchor>
+                                ),
+                            })
+                            : tnode('components.paper_card.date_by_author', { date: dateNode, author: authorNode })}
                     </span>
                 }
             />

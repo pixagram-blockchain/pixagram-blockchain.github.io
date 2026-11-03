@@ -18,9 +18,23 @@ import Fade from "@material-ui/core/Fade";
 import LinearProgress from "@material-ui/core/LinearProgress";
 import * as actions from "../actions/utils";
 
-import { t } from "../utils/text";
+import { t, tk, tx } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
+
+// The chain's role ids ("mod", "admin"…) are identifiers, not words: shown
+// next to existing members and inside the "added as" message. Unknown roles
+// fall through as they are.
+const ROLE_LABELS = {
+    owner: tk("components.notifications_dialog.role_owner"),
+    admin: tk("components.notifications_dialog.role_admin"),
+    mod: tk("components.notifications_dialog.role_moderator"),
+    moderator: tk("components.notifications_dialog.role_moderator"),
+    member: tk("components.notifications_dialog.role_member"),
+    guest: tk("components.notifications_dialog.role_guest"),
+    muted: tk("components.notifications_dialog.role_muted"),
+};
+const roleLabel = (role) => (Object.prototype.hasOwnProperty.call(ROLE_LABELS, role) ? tx(ROLE_LABELS[role]) : role);
 const styles = theme => ({
     popper: {
         backgroundColor: "#242424ff !important"
@@ -258,7 +272,7 @@ class AddSomeoneCommunityDialog extends React.PureComponent {
 
             actions.trigger_snackbar(t("components.add_someone_community_dialog.has_been_added_as", {
                 _username: _username,
-                _role: _role
+                _role: roleLabel(_role)
             }));
 
             if (typeof this.props.onSave === 'function') {
@@ -268,7 +282,7 @@ class AddSomeoneCommunityDialog extends React.PureComponent {
             }
         } catch (err) {
             console.error('[AddSomeoneCommunityDialog] setRole failed:', err);
-            actions.trigger_snackbar(err.message || 'Failed to set role');
+            actions.trigger_snackbar(err.message || t("components.add_someone_community_dialog.failed_to_set_role"));
 
             this.setState({ _broadcasting: false }, () => {
                 this.forceUpdate();
@@ -309,7 +323,7 @@ class AddSomeoneCommunityDialog extends React.PureComponent {
                 <div>
                     <strong>@{option.username}</strong>
                     {isMember
-                        ? <span style={OPTION_ROLE_STYLE}> ({existingRole})</span>
+                        ? <span style={OPTION_ROLE_STYLE}> ({roleLabel(existingRole)})</span>
                         : null}
                     <div style={OPTION_NAME_STYLE}>{option.name}</div>
                 </div>
@@ -400,7 +414,7 @@ class AddSomeoneCommunityDialog extends React.PureComponent {
                         onInputChange={this._onUsernameInputChange}
                         loading={_searching}
                         loadingText={t("words.searching")}
-                        noOptionsText={_username.length > 0 ? "No accounts found" : "Type a username"}
+                        noOptionsText={_username.length > 0 ? t("words.no_accounts_found") : t("words.type_a_username")}
                         disabled={_broadcasting}
                         renderOption={this._renderOption}
                         freeSolo

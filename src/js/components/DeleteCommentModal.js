@@ -9,7 +9,7 @@ import DialogContentText from "@material-ui/core/DialogContentText";
 import CircularProgress from "@material-ui/core/CircularProgress";
 import DeleteOutlineRounded from "@material-ui/icons/DeleteOutlineRounded";
 
-import { t } from "../utils/text";
+import { t, tk, tx } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
 const styles = theme => ({
@@ -94,7 +94,8 @@ class DeleteCommentModal extends React.PureComponent {
 
         // Guard: only the comment's own author may delete it.
         if (!api || !account || !author || !permlink || author !== account) {
-            this.setState({ error: "This comment can't be deleted." });
+            // Deferred (tk) so the message follows a language switch while shown.
+            this.setState({ error: tk("components.delete_comment_modal.this_comment_can_t_be_deleted") });
             return;
         }
 
@@ -111,12 +112,13 @@ class DeleteCommentModal extends React.PureComponent {
         } catch (e) {
             // The chain rejects delete_comment once a comment has votes, replies
             // or a payout — surface that reason inline and keep the dialog open.
-            const message = (e && e.message) || "Failed to delete comment.";
-            console.warn("[DeleteCommentModal] delete failed:", message);
+            // The chain's own reason is shown as-is; our fallback is translated at render.
+            const message = (e && e.message) || null;
+            console.warn("[DeleteCommentModal] delete failed:", message || e);
             if (onError) {
                 onError(e);
             }
-            this.setState({ deleting: false, error: message });
+            this.setState({ deleting: false, error: message || tk("components.delete_comment_modal.failed_to_delete_comment") });
         }
     };
 
@@ -147,16 +149,18 @@ class DeleteCommentModal extends React.PureComponent {
                 disableEscapeKeyDown={deleting}
             >
                 <DialogTitle id="delete-comment-dialog-title">
-                    {deleting ? "Deleting comment…" : "Delete this comment?"}
+                    {deleting
+                        ? t("components.delete_comment_modal.deleting_comment")
+                        : t("components.delete_comment_modal.delete_this_comment")}
                 </DialogTitle>
                 <DialogContent>
                     <DialogContentText id="delete-comment-dialog-description">
                         {error ? (
-                            <span className={classes.errorText}>{error}</span>
+                            <span className={classes.errorText}>{tx(error)}</span>
                         ) : deleting ? (
-                            "Please wait while the comment is removed from the chain…"
+                            t("components.delete_comment_modal.please_wait_while_the_comment_is_removed")
                         ) : (
-                            "The comment is removed from the chain with a delete_comment operation. This can't be undone."
+                            t("components.delete_comment_modal.the_comment_is_removed_from_the_chain")
                         )}
                     </DialogContentText>
                     {!error && !deleting && (
@@ -186,9 +190,9 @@ class DeleteCommentModal extends React.PureComponent {
                         {deleting ? (
                             <span className={classes.progressContainer}>{t("components.delete_comment_modal.deleting")}</span>
                         ) : error ? (
-                            "Retry"
+                            t("components.delete_comment_modal.retry")
                         ) : (
-                            "Delete"
+                            t("components.delete_comment_modal.delete")
                         )}
                     </Button>
                 </DialogActions>

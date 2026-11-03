@@ -153,7 +153,7 @@ const CommunityHeader = React.memo(({
                             </ButtonBase>
                         }
                         action={
-                            <IconButton aria-label="settings">
+                            <IconButton aria-label={t("words.settings")}>
                                 <ArrowDropDown style={mobileCardExpanded ? ARROW_OPEN_STYLE : ARROW_CLOSED_STYLE} />
                             </IconButton>
                         }

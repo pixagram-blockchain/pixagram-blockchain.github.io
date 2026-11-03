@@ -4,29 +4,31 @@ import Dialog from "@material-ui/core/Dialog";
 import DialogContent from "@material-ui/core/DialogContent";
 import DialogActions from "@material-ui/core/DialogActions";
 import Button from "@material-ui/core/Button";
-import List from "@material-ui/core/List";
-import ListItem from "@material-ui/core/ListItem";
-import ListItemText from "@material-ui/core/ListItemText";
-import ListItemAvatar from "@material-ui/core/ListItemAvatar";
-import Avatar from "@material-ui/core/Avatar";
-import VirtualizedList from "@pixagram/virtualized/dist/es/List";
-import AutoSizer from "@pixagram/virtualized/dist/es/AutoSizer";
 import TextField from "@material-ui/core/TextField";
 import InputAdornment from "@material-ui/core/InputAdornment";
 import IconButton from "@material-ui/core/IconButton";
 import CloseIcon from "@material-ui/icons/Close";
-import ListItemSecondaryAction from "@material-ui/core/ListItemSecondaryAction";
-import Checkbox from "@material-ui/core/Checkbox";
 import CircularProgress from "@material-ui/core/CircularProgress";
-import Chip from "@material-ui/core/Chip";
 import { HISTORY } from "../utils/constants";
 import * as actions from "../actions/utils";
 import { PagedLoader } from "../utils/api/paged-list";
-import { getProfiles } from "../utils/api/account-cache";
+import { AccountList, AccountImageStore, FollowableAccountRow, followTargetOf } from "./list/AccountList";
 
-import { t } from "../utils/text";
+import { t, tk, tx, getLanguage } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
+
+// Role badge text: the chain's role ids ("mod", "muted"…) are identifiers,
+// not words. Unknown roles fall through as they are.
+const ROLE_LABELS = {
+    owner: tk("components.notifications_dialog.role_owner"),
+    admin: tk("components.notifications_dialog.role_admin"),
+    mod: tk("components.notifications_dialog.role_moderator"),
+    moderator: tk("components.notifications_dialog.role_moderator"),
+    member: tk("components.notifications_dialog.role_member"),
+    muted: tk("components.notifications_dialog.role_muted"),
+};
+const roleLabel = (role) => (Object.prototype.hasOwnProperty.call(ROLE_LABELS, role) ? tx(ROLE_LABELS[role]) : role);
 // ── MembersListDialog (progressive) ────────────────────────────────────
 // What changed vs. the previous version:
 //
@@ -54,14 +56,28 @@ import { withLanguage } from "../utils/withLanguage";
 //   5. Search is computed in render from (_members, _search) with a
 //      one-slot memo, so it stays correct while rows stream in.
 //
+//   6. SHARED LIST (components/list/AccountList) — the fixed 480px
+//      react-virtualized box (a second scrollbar, too tall for short
+//      phones) and its per-render rowRenderer factory are gone: rows
+//      window against the dialog's own scroll area and are memoised
+//      (a follow toggle re-renders one row). Avatars are no longer
+//      hydrated per streamed page — up to 2 000 accounts fetched while
+//      the first screen was showing — but for the rows ON SCREEN only,
+//      through an AccountImageStore owned by this dialog.
+//
 // Public props are unchanged: { open, onClose, api, communityName }.
 // ───────────────────────────────────────────────────────────────────────
 
 const styles = theme => ({
     dialog: {
         "& .MuiDialog-paperScrollPaper": {
+            // 12px off every edge on phones: 100% plus MUI's 32px margins
+            // used to overflow the screen.
             [theme.breakpoints.down("sm")]: {
-                maxHeight: "100%"
+                margin: 12,
+                width: "calc(100% - 24px)",
+                maxWidth: "none",
+                maxHeight: "calc(100% - 24px)",
             },
         },
     },
@@ -89,41 +105,6 @@ const styles = theme => ({
         margin: "0px 0px 8px 0px",
         padding: "0 8px",
     },
-    listItem: {
-        "&.MuiListItem-root": {
-            borderRadius: "16px",
-            backgroundColor: "#ffffff00",
-            transition: "background-color 225ms cubic-bezier(0.4, 0, 0.2, 1) 5ms",
-        },
-        "&.MuiListItem-root:hover": {
-            borderRadius: "16px",
-            backgroundColor: "#ffffff14",
-            transition: "background-color 225ms cubic-bezier(0.4, 0, 0.2, 1) 5ms",
-        },
-    },
-    listItemTitle: {
-        fontWeight: "bold",
-        fontFamily: '"Industry Book", "Normative Pro"',
-        color: "#fff",
-        cursor: "pointer",
-    },
-    roleChip: {
-        marginLeft: 8,
-        height: 20,
-        fontSize: "0.7rem",
-    },
-    action: {
-        display: "inline-flex",
-        justifyContent: "right",
-        right: "0px !important",
-        left: "auto !important",
-        width: "64px !important",
-        paddingRight: 16,
-        transform: "translateY(0px)",
-        "& .MuiIconButton-edgeEnd": {
-            marginRight: "0px !important",
-        },
-    },
     loadingContainer: {
         display: "flex",
         justifyContent: "center",
@@ -139,6 +120,8 @@ const styles = theme => ({
         fontSize: "0.8rem",
     },
 });
+
+const getUsername = (m) => (m && m.username) || "";
 
 class MembersListDialog extends React.PureComponent {
     constructor(props) {
@@ -156,6 +139,11 @@ class MembersListDialog extends React.PureComponent {
         this._gen = 0;
         this._membersLoader = null;
         this._followLoader = null;
+        // Avatars for the rows on screen (see AccountImageStore); one per
+        // open, dropped with the loaders.
+        this._images = null;
+        // One-slot memo for the row renderer (see _getRenderRow).
+        this._rowCache = { followingSet: null, user: null, lang: null, fn: null };
 
         // One-slot memo for the search filter (see _getFiltered).
         this._filterCache = { members: null, search: "", out: [] };
@@ -189,6 +177,9 @@ class MembersListDialog extends React.PureComponent {
         if (this._followLoader) this._followLoader.cancel();
         this._membersLoader = null;
         this._followLoader = null;
+        // Stops its requests; the URLs it has stay readable for the rows
+        // still fading out with the dialog. Replaced on the next open.
+        if (this._images) this._images.dispose();
     };
 
     // ── Data loading ──────────────────────────────────────────────────
@@ -200,6 +191,7 @@ class MembersListDialog extends React.PureComponent {
 
         this._cancelLoaders();
         const gen = this._gen;
+        this._images = new AccountImageStore(api);
 
         this.setState({
             _members: [],
@@ -235,7 +227,6 @@ class MembersListDialog extends React.PureComponent {
                         role: s[1],
                         title: s[2] || "",
                         joinedAt: s[3],
-                        image: "",
                     });
                 }
                 this.setState({
@@ -243,7 +234,6 @@ class MembersListDialog extends React.PureComponent {
                     _firstPage: true,
                     _membersDone: done,
                 });
-                this._hydrateAvatars(gen, mapped, fresh.map((s) => s[0]));
             },
             onError: (e) => {
                 if (gen !== this._gen) return;
@@ -275,38 +265,6 @@ class MembersListDialog extends React.PureComponent {
             });
             this._followLoader.start();
         }
-    };
-
-    /**
-     * Per-page avatar hydration through the shared account-cache:
-     * batched and deduped app-wide, never blocks rows from painting.
-     * Patches only rows still missing an image, with new object
-     * identities so PureComponent rows re-render correctly.
-     */
-    _hydrateAvatars = (gen, mapped, names) => {
-        const api = this.props.api;
-        if (!api || !names || names.length === 0) return;
-
-        getProfiles(api, names)
-            .then((profiles) => {
-                if (gen !== this._gen) return;
-                let changed = false;
-                for (let i = 0; i < mapped.length; i++) {
-                    const m = mapped[i];
-                    if (m.image) continue;
-                    const p = profiles.get(String(m.username).toLowerCase());
-                    if (p && p.image) {
-                        mapped[i] = { ...m, image: p.image };
-                        changed = true;
-                    }
-                }
-                if (changed && gen === this._gen) {
-                    this.setState({ _members: mapped.slice() });
-                }
-            })
-            .catch((e) => {
-                console.warn("[MembersListDialog] hydrate error:", e && e.message);
-            });
     };
 
     // ── Search (computed in render, one-slot memo) ────────────────────
@@ -353,84 +311,42 @@ class MembersListDialog extends React.PureComponent {
             this.setState({ _followingSet: new Set(_followingSet) });
         } catch (e) {
             console.error("[MembersListDialog] toggle follow error:", e);
-            actions.trigger_snackbar(e.message || "Failed to update follow status");
+            actions.trigger_snackbar(e.message || t("components.members_list_dialog.failed_to_update_follow_status"));
         }
     };
 
-    _roleColor = (role) => {
-        switch (role) {
-            case "owner": return "#333";
-            case "admin": return "#333";
-            case "mod": return "#333";
-            default: return "#333";
-        }
+    _onToggleFollow = (e) => {
+        const username = followTargetOf(e);
+        if (username) this._toggleFollow(username);
     };
 
-    // ── Row renderer (factory bound to the current filtered list) ─────
-
-    _memberRenderer = (members) => ({ index, key, style }) => {
-        const { classes } = this.props;
+    // ── Rows ──────────────────────────────────────────────────────────
+    // The renderer is rebuilt only when what the rows read from state does
+    // (the follow set, the session user) or the language their role badges
+    // are written in: AccountList re-offers its visible rows then, and the
+    // memoised rows decide which actually changed.
+    _getRenderRow = () => {
         const { _followingSet, _loggedInUser } = this.state;
-        const member = members[index];
-        if (!member) return null;
-
-        const { username, image, role } = member;
-        const isFollowing = _followingSet.has(username);
-        const isOwnAccount = _loggedInUser &&
-            _loggedInUser.toLowerCase() === username.toLowerCase();
-        const roleColor = this._roleColor(role);
-
-        return (
-            <ListItem
-                classes={{ root: classes.listItem }}
-                ContainerComponent={"div"}
-                key={key}
-                style={Object.assign({ height: 64 }, style)}
-                component={"div"}
-            >
-                <ListItemAvatar>
-                    <Avatar
-                        onClick={() => this._open_author(username)}
-                        src={image}
-                        style={{ borderRadius: "14px", cursor: "pointer" }}
-                        className={"pixelated"}
-                    />
-                </ListItemAvatar>
-                <ListItemText
-                    id={`@${username}`}
-                    primary={
-                        <span>
-                            <span
-                                className={classes.listItemTitle}
-                                onClick={() => this._open_author(username)}
-                            >
-                                {`@${username}`}
-                            </span>
-                            {role && role !== "guest" && (
-                                <Chip
-                                    label={role}
-                                    size="small"
-                                    className={classes.roleChip}
-                                    style={roleColor ? { backgroundColor: roleColor, color: "#fff" } : undefined}
-                                />
-                            )}
-                        </span>
-                    }
+        const lang = getLanguage();
+        const c = this._rowCache;
+        if (c.fn && c.followingSet === _followingSet && c.user === _loggedInUser && c.lang === lang) return c.fn;
+        const me = _loggedInUser ? String(_loggedInUser).toLowerCase() : "";
+        const fn = (member, index, classes, image) => {
+            const username = member.username;
+            return (
+                <FollowableAccountRow
+                    classes={classes}
+                    username={username}
+                    image={image}
+                    badge={member.role && member.role !== "guest" ? roleLabel(member.role) : ""}
+                    canFollow={!!me && me !== String(username).toLowerCase()}
+                    following={_followingSet.has(username)}
+                    onToggleFollow={this._onToggleFollow}
                 />
-                {_loggedInUser && !isOwnAccount && (
-                    <ListItemSecondaryAction className={classes.action} style={style}>
-                        <Checkbox
-                            size="medium"
-                            color="primary"
-                            checked={isFollowing}
-                            onChange={() => this._toggleFollow(username)}
-                            edge="end"
-                            inputProps={{ "aria-labelledby": `@${username}` }}
-                        />
-                    </ListItemSecondaryAction>
-                )}
-            </ListItem>
-        );
+            );
+        };
+        this._rowCache = { followingSet: _followingSet, user: _loggedInUser, lang, fn };
+        return fn;
     };
 
     // ── Render ────────────────────────────────────────────────────────
@@ -474,7 +390,9 @@ class MembersListDialog extends React.PureComponent {
                 {_firstPage && (
                     <div className={classes.streamRow}>
                         <span>
-                            {_members.length}{_membersDone ? "" : "+"} member{_members.length === 1 ? "" : "s"}
+                            {_membersDone
+                                ? t("components.members_list_dialog.member_count", { member: { member: _members.length } })
+                                : t("components.members_list_dialog.member_count_more", { member: { member: _members.length } })}
                         </span>
                         {!_membersDone && (
                             <CircularProgress size={12} thickness={5} color={"secondary"} />
@@ -487,32 +405,16 @@ class MembersListDialog extends React.PureComponent {
                             <CircularProgress color={"secondary"} />
                         </div>
                     ) : (
-                        <AutoSizer disableHeight>
-                            {({ width }) => (
-                                <List component="div">
-                                    <VirtualizedList
-                                        noRowsRenderer={() => (
-                                            <ListItem component="div">
-                                                <ListItemText
-                                                    secondary={
-                                                        _search
-                                                            ? "No members matching your search"
-                                                            : "No members yet"
-                                                    }
-                                                />
-                                            </ListItem>
-                                        )}
-                                        scrollToIndex={undefined}
-                                        height={480}
-                                        overscanRowCount={5}
-                                        rowCount={filtered.length}
-                                        rowHeight={64}
-                                        rowRenderer={this._memberRenderer(filtered)}
-                                        width={width}
-                                    />
-                                </List>
-                            )}
-                        </AutoSizer>
+                        <AccountList
+                            items={filtered}
+                            getName={getUsername}
+                            renderRow={this._getRenderRow()}
+                            imageStore={this._images}
+                            onOpenAccount={this._open_author}
+                            emptyText={_search
+                                ? t("components.members_list_dialog.no_members_matching_your_search")
+                                : t("components.members_list_dialog.no_members_yet")}
+                        />
                     )}
                 </DialogContent>
                 <DialogActions>

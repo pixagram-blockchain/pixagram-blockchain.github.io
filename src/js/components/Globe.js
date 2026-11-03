@@ -7,9 +7,10 @@ import ListItemText from "@material-ui/core/ListItemText";
 import CheckIcon from "@material-ui/icons/Check";
 import LinkOffIcon from "@material-ui/icons/LinkOff";
 import { DEFAULT_NODES } from "../utils/constants";
+import { nodeDisplayName } from "../utils/displayNames";
 import { DEFAULT_API_NODE_URL, normalize_node_url, same_node_url, measure_node_latency } from "../utils/settings";
 
-import { t } from "../utils/text";
+import { t, useLanguage } from "../utils/text";
 
 /**
  * Globe.js — API Node Globe Selector (cobe v2)
@@ -172,7 +173,7 @@ const S_PING_OFF = { fontSize: 13, color: "#666", display: "block" };
 const S_PING_MS = { fontSize: 10, color: "#666", fontWeight: 500 };
 
 // Hostname for a list row's secondary line — falls back to the raw URL when it
-// doesn't parse (same spirit as selectedNode's "Custom" fallback below).
+// doesn't parse (same spirit as the status bar's "Custom" fallback below).
 const nodeHost = (url) => {
     try { return new URL(url).hostname; } catch (e) { return url || ""; }
 };
@@ -284,6 +285,7 @@ export default function Globe({
                                   onNodeSelect,                 // (url) => void — receives the normalized URL
                                   size = 300,                   // fallback only; the globe fills its container width
                               }) {
+    useLanguage();
     const canvasRef = useRef(null);
     const hostRef = useRef(null);        // cobe's only sibling-free parent — see the effect below
     const containerRef = useRef(null);
@@ -314,8 +316,9 @@ export default function Globe({
         const found = nodes.find((n) => same_node_url(n.url, resolvedSelectedUrl));
         if (found) return found;
         // Not one of the predefined nodes — a custom endpoint. It has no fixed
-        // lat/lng so it never gets a globe pin, but the status bar names it.
-        return { id: "custom", name: nodeHost(resolvedSelectedUrl) || "Custom", url: resolvedSelectedUrl, custom: true };
+        // lat/lng so it never gets a globe pin, but the status bar names it
+        // (a translated "Custom" there when the URL yields no hostname).
+        return { id: "custom", name: nodeHost(resolvedSelectedUrl), url: resolvedSelectedUrl, custom: true };
     }, [nodes, resolvedSelectedUrl]);
     const selectedKey = urlKey(selectedNode.url);
 
@@ -637,7 +640,7 @@ export default function Globe({
                                 onClick={() => handleNodeClick(node)}
                                 style={isSelected ? S_LABEL_NODE_SELECTED : S_LABEL_NODE}
                             >
-                                <span>{node.name}</span>
+                                <span>{nodeDisplayName(node)}</span>
                                 {renderPing(node.key, true)}
                             </div>
                         );
@@ -669,7 +672,7 @@ export default function Globe({
                                 style={{ ...S_LIST_ITEM, background: isSelected ? "rgba(255,255,255,0.08)" : "transparent" }}
                             >
                                 <ListItemText
-                                    primary={node.name}
+                                    primary={nodeDisplayName(node)}
                                     secondary={node.host}
                                     primaryTypographyProps={{ style: { ...S_ITEM_PRIMARY, color: isSelected ? "#ffffff" : "#e6e6e6", fontWeight: isSelected ? 600 : 400 } }}
                                     secondaryTypographyProps={{ style: S_ITEM_SECONDARY }}
@@ -711,11 +714,11 @@ export default function Globe({
                 )}
                 <span style={{ color: "#666", flexShrink: 0 }}>API</span>
                 <span style={{ color: "#fff", fontWeight: 500 }}>
-                    {selectedNode.name || "—"}
+                    {nodeDisplayName(selectedNode) || (selectedNode.custom ? t("components.globe.custom") : "—")}
                 </span>
                 {pings[selectedKey] != null && (
                     <span style={{ fontSize: 10, color: "#999", fontWeight: 500, marginLeft: 2 }}>
-                        {pings[selectedKey] < 0 ? "unreachable" : `${pings[selectedKey]}ms`}
+                        {pings[selectedKey] < 0 ? t("components.globe.unreachable") : `${pings[selectedKey]}ms`}
                     </span>
                 )}
             </div>

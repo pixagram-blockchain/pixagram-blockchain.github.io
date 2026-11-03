@@ -20,7 +20,7 @@ import VideocamIcon from "@material-ui/icons/Videocam";
 
 import JSLoader from "../utils/JSLoader";
 
-import { t } from "../utils/text";
+import { t, useLanguage } from "../utils/text";
 
 /**
  * Fraction of the frame's short edge that we both *search* and *draw a reticle
@@ -244,6 +244,7 @@ const ScannerView = ({ classes, isLoading, trackState, hint, videoRef, trackerRe
 };
 
 const QRScannerDialog = ({ classes, open, onClose, onScanResult }) => {
+    useLanguage();
     const [cameras, setCameras] = useState([]);
     const [selectedCamera, setSelectedCamera] = useState("");
     const [isFlashOn, setIsFlashOn] = useState(false);
@@ -492,7 +493,7 @@ const QRScannerDialog = ({ classes, open, onClose, onScanResult }) => {
                         >
                             {cameras.map((cam, idx) => (
                                 <MenuItem key={cam.id || idx} value={cam.id}>
-                                    {cam.label}
+                                    {cam.label || t("components.qr_scanner.camera_n", { n: (cam.index ?? idx) + 1 })}
                                 </MenuItem>
                             ))}
                         </Select>

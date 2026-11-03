@@ -15,7 +15,7 @@ import { cssBackgroundImage } from "../utils/safeUrl";
 // the on-chain balances are read live only to reconcile against it.
 import TOKENOMICS from "../data/tokenomics.json";
 
-import { t } from "../utils/text";
+import { t, getLocaleCode } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
 
@@ -577,37 +577,38 @@ const readLive = (acc, price) => {
 };
 
 // ──────────────────────────────────────────────────────────────
-// Formatting
+// Formatting — figures and dates in the app's locale (utils/text),
+// read at each call: every formatter runs at render.
 // ──────────────────────────────────────────────────────────────
+// `n` with exactly `digits` decimals: "1,234.5" in English, "1 234,5" in French.
+const fmtFixed = (n, digits) =>
+    (Number(n) || 0).toLocaleString(getLocaleCode(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
 // "25.00M" / "245.0K" / "812". A figure that rounds up to the next unit
-// ("1000.0K") is promoted to it ("1.00M").
+// ("1000.0K") is promoted to it ("1.00M") — decided on the rounded number,
+// since the text follows the locale. The K/M/B suffixes stay as they are.
 const fmtCompact = (n) => {
     const v = Number(n) || 0;
     const a = Math.abs(v);
-    const at = (div, suffix, digits) => `${(v / div).toFixed(digits)}${suffix}`;
+    const at = (div, suffix, digits) => `${fmtFixed(v / div, digits)}${suffix}`;
+    const reaches1000 = (div, digits) => Math.abs(Number((v / div).toFixed(digits))) >= 1000;
     if (a >= 1e9) return at(1e9, 'B', 2);
-    if (a >= 1e6) {
-        const s = at(1e6, 'M', 2);
-        return /^-?1000\.00M$/.test(s) ? at(1e9, 'B', 2) : s;
-    }
-    if (a >= 1e3) {
-        const s = at(1e3, 'K', 1);
-        return /^-?1000\.0K$/.test(s) ? at(1e6, 'M', 2) : s;
-    }
+    if (a >= 1e6) return reaches1000(1e6, 2) ? at(1e9, 'B', 2) : at(1e6, 'M', 2);
+    if (a >= 1e3) return reaches1000(1e3, 1) ? at(1e6, 'M', 2) : at(1e3, 'K', 1);
     const r = Math.round(v);
-    return Math.abs(r) >= 1000 ? at(1e3, 'K', 1) : String(r);
+    return Math.abs(r) >= 1000 ? at(1e3, 'K', 1) : fmtFixed(r, 0);
 };
 // Chain precision, as the wallet prints it: "8,000,000.030".
-const fmtExact = (n, digits = 3) =>
-    (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
-const fmtPct = (n) => `${(Number(n) || 0).toFixed(1)}%`;
+const fmtExact = (n, digits = 3) => fmtFixed(n, digits);
+// A figure given in percent ("12.3"), as the locale writes percentages: "12.3%", "12,3 %".
+const fmtPct = (n, digits = 1) =>
+    ((Number(n) || 0) / 100).toLocaleString(getLocaleCode(), { style: 'percent', minimumFractionDigits: digits, maximumFractionDigits: digits });
 // "0.06 y" — the unit comes from the locale, like the roadmap's axis labels.
-const fmtYears = (n) => t("components.gdvmtokenomics.n_y", { n: (Number(n) || 0).toFixed(2) });
+const fmtYears = (n) => t("components.gdvmtokenomics.n_y", { n: fmtFixed(n, 2) });
 const fmtDate = (ms) => Number.isFinite(ms)
-    ? new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    ? new Date(ms).toLocaleDateString(getLocaleCode(), { month: 'short', day: 'numeric', year: 'numeric' })
     : '—';
 const fmtMonthYear = (ms) => Number.isFinite(ms)
-    ? new Date(ms).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+    ? new Date(ms).toLocaleDateString(getLocaleCode(), { month: 'short', year: 'numeric' })
     : '—';
 
 // ──────────────────────────────────────────────────────────────
@@ -1046,7 +1047,7 @@ const RoadmapChart = ({ classes, roadmap }) => {
         <div className={classes.roadmap}>
             <div className={classes.roadmapY}>
                 {[100, 75, 50, 25, 0].map(p => (
-                    <span key={p} style={{ top: `${100 - p}%` }}>{p}%</span>
+                    <span key={p} style={{ top: `${100 - p}%` }}>{fmtPct(p, 0)}</span>
                 ))}
             </div>
             <div className={classes.roadmapPlot}>
@@ -1083,7 +1084,7 @@ const RoadmapChart = ({ classes, roadmap }) => {
             <div className={classes.roadmapX}>
                 {labelYears.map(y => (
                     <span key={y} style={xLabelStyle(y)}>
-                        {y === 0 ? t("components.gdvmtokenomics.tge") : t("components.gdvmtokenomics.n_y", { n: y })}
+                        {y === 0 ? t("components.gdvmtokenomics.tge") : t("components.gdvmtokenomics.n_y", { n: y.toLocaleString(getLocaleCode()) })}
                     </span>
                 ))}
             </div>

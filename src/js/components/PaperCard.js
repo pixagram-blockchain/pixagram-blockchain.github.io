@@ -18,8 +18,8 @@ import { pngdby } from '../utils/png-db';
 import PaperCardActions from './PaperCardActions';
 import ProfileHoverAnchor from './ProfileHoverCard';
 import FadeAvatar from './FadeAvatar';
-import { withErrorBoundary } from './ErrorBoundary';
-import { t, useLanguage } from '../utils/text';
+import { ErrorBoundary } from './ErrorBoundary';
+import { t, tnode, useLanguage } from '../utils/text';
 
 // Version stamp — check in console: window.__PIXA_VERSIONS__
 if (typeof window !== 'undefined') {
@@ -827,7 +827,7 @@ function PaperCardInner({
                     // No Suspense boundary here any more: nothing inside it
                     // was lazy, so it was one extra component per card that
                     // did nothing.
-                    <IconButton aria-label="settings" onClick={(e) => onMenuClick(e, data)}>
+                    <IconButton aria-label={t('words.settings')} onClick={(e) => onMenuClick(e, data)}>
                         <MoreVertIcon />
                     </IconButton>
                 }
@@ -837,20 +837,26 @@ function PaperCardInner({
                     </span>
                 }
                 subheader={
-                    <span>
-            <DateLabel date={data.date} locales={locales} className={classes.subheaderDate} narrow />
-            <span className={classes.subheaderBy}> {t('words.by')} </span>
-                        {/* Rich author hover card instead of the old raw-@username
-                Tooltip. The anchor adds no element: it attaches its
-                pointer listeners to this very span, and the card itself
-                is the page's single <ProfileHoverCardLayer/>. Click
-                behavior is unchanged. */}
-                        <ProfileHoverAnchor api={api} author={author} onOpenProfile={openAuthor}>
-              <span className={classes.subheaderName} onClick={() => openAuthor(author.username)}>
-                {(typeof author.name === 'string' && author.name.trim()) || author.username || ''}
-              </span>
-            </ProfileHoverAnchor>
-          </span>
+                    // One sentence, "{{date}} by {{author}}", so a translation
+                    // can reorder it; the words take subheaderBy's colour, the
+                    // date and the name keep their own classes.
+                    <span className={classes.subheaderBy}>
+                        {tnode('components.paper_card.date_by_author', {
+                            date: <DateLabel date={data.date} locales={locales} className={classes.subheaderDate} narrow />,
+                            // Rich author hover card instead of the old raw-@username
+                            // Tooltip. The anchor adds no element: it attaches its
+                            // pointer listeners to this very span, and the card itself
+                            // is the page's single <ProfileHoverCardLayer/>. Click
+                            // behavior is unchanged.
+                            author: (
+                                <ProfileHoverAnchor api={api} author={author} onOpenProfile={openAuthor}>
+                                    <span className={classes.subheaderName} onClick={() => openAuthor(author.username)}>
+                                        {(typeof author.name === 'string' && author.name.trim()) || author.username || ''}
+                                    </span>
+                                </ProfileHoverAnchor>
+                            ),
+                        })}
+                    </span>
                 }
             />
 
@@ -950,7 +956,21 @@ const PaperCard = memo(
 // now drops one cell with a Retry box instead of white-screening the
 // whole feed. resetKey is tied to the post id so a recycled virtualized
 // cell that receives a NEW post clears any previous error automatically.
-export default withErrorBoundary(PaperCard, {
-    label: "post card",
-    getResetKey: (props) => props && props.data && props.data.id,
+//
+// Same shape as withErrorBoundary(PaperCard, {...}), written out so the
+// label — shown in the fallback, "Couldn't render this {{label}}." — is
+// translated at render: withErrorBoundary() reads its options once, at
+// module scope, which would freeze it (blank before the locale loads).
+const PaperCardWithBoundary = React.forwardRef(function PaperCardBoundary(props, ref) {
+    return (
+        <ErrorBoundary
+            label={t('components.paper_card.post_card')}
+            resetKey={props && props.data && props.data.id}
+        >
+            <PaperCard {...props} ref={ref} />
+        </ErrorBoundary>
+    );
 });
+PaperCardWithBoundary.displayName = 'withErrorBoundary(PaperCard)';
+
+export default PaperCardWithBoundary;

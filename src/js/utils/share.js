@@ -1,3 +1,5 @@
+import { t } from "./text";
+
 /**
  * Cross-platform sharing function
  * - Android/Mobile: Uses native Web Share API
@@ -59,7 +61,7 @@ async function handleClipboardShare(url, title, text, clipboard_toast_callback) 
         await navigator.clipboard.writeText(shareText);
 
         // Show notification
-        clipboard_toast_callback('Link copied to clipboard!', 2500);
+        clipboard_toast_callback(t("words.link_copied_to_clipboard"), 2500);
         console.log('Link copied to clipboard');
         return true;
     } catch (error) {
@@ -75,7 +77,7 @@ async function handleClipboardShare(url, title, text, clipboard_toast_callback) 
 
         try {
             document.execCommand('copy');
-            clipboard_toast_callback('Link copied to clipboard!', 2500);
+            clipboard_toast_callback(t("words.link_copied_to_clipboard"), 2500);
             return true;
         } catch (err) {
             console.error('Fallback copy failed:', err);

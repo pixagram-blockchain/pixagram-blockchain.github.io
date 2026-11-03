@@ -199,7 +199,8 @@ function inspectTx(tx) {
         const name = Array.isArray(op) ? String(op[0] || "") : "";
         const d = (Array.isArray(op) && op[1] && typeof op[1] === "object") ? op[1] : {};
 
-        if (!ALLOWED_OPS.has(name)) { rejected.push({ index: i, name: name || "(malformed)" }); continue; }
+        // name "" = malformed: named for the user where it is shown.
+        if (!ALLOWED_OPS.has(name)) { rejected.push({ index: i, name }); continue; }
 
         if (d.from) senders.add(String(d.from));
         rows.push({
@@ -363,7 +364,7 @@ class PixaWalletBulkPowerDialog extends React.PureComponent {
         } catch (err) {
             this.setState({ _building: false }, () => this.forceUpdate());
             if (actions?.trigger_snackbar) actions.trigger_snackbar(t("components.pixa_wallet_bulk_power_dialog.build_failed", {
-                err: ((err && err.message) || "error")
+                err: ((err && err.message) || t("words.error"))
             }), "error");
         }
     };
@@ -378,19 +379,20 @@ class PixaWalletBulkPowerDialog extends React.PureComponent {
         try {
             const obj = await readFileAsJson(file);
             const tx = extractTx(obj);
-            if (!tx) throw new Error("no transaction found in file");
+            if (!tx) throw new Error(t("components.pixa_wallet_bulk_power_dialog.file_no_transaction_found", { name: file.name }));
 
             // Refuse before the key field is ever shown. A file that contains
             // an account_update or a plain PXA transfer is not a bulk power
             // batch, and must never reach signTransaction().
             const check = inspectTx(tx);
-            if (!check.count) throw new Error("that file contains no operations");
+            if (!check.count) throw new Error(t("components.pixa_wallet_bulk_power_dialog.file_contains_no_operations", { name: file.name }));
             if (check.rejected.length) {
-                throw new Error(
-                    "refused: this file contains " + check.rejected.length +
-                    " operation(s) this dialog cannot sign (" +
-                    check.rejected.map((r) => r.name).join(", ") + ")"
-                );
+                throw new Error(t("components.pixa_wallet_bulk_power_dialog.refused_file_contains_unsignable_operations", {
+                    op: { op: check.rejected.length },
+                    operations: check.rejected
+                        .map((r) => r.name || t("components.pixa_wallet_bulk_power_dialog.malformed_operation"))
+                        .join(", "),
+                }));
             }
             this.setState({ _signWrapper: obj.transaction ? obj : { transaction: tx }, _signFileName: file.name, _signedFile: null }, () => this.forceUpdate());
         } catch (err) {
@@ -451,7 +453,7 @@ class PixaWalletBulkPowerDialog extends React.PureComponent {
         } catch (err) {
             this.setState({ _signing: false }, () => this.forceUpdate());
             if (actions?.trigger_snackbar) actions.trigger_snackbar(t("components.pixa_wallet_bulk_power_dialog.signing_failed", {
-                err: ((err && err.message) || "error")
+                err: ((err && err.message) || t("words.error"))
             }), "error");
         }
     };
@@ -536,7 +538,7 @@ class PixaWalletBulkPowerDialog extends React.PureComponent {
         } catch (err) {
             this.setState({ _broadcasting: false, _broadcastResult: { error: (err && err.message) || t("components.pixa_wallet_bulk_power_dialog.broadcast_failed_2") } }, () => this.forceUpdate());
             if (actions?.trigger_snackbar) actions.trigger_snackbar(t("components.pixa_wallet_bulk_power_dialog.broadcast_failed", {
-                err: ((err && err.message) || "error")
+                err: ((err && err.message) || t("words.error"))
             }), "error");
         }
     };

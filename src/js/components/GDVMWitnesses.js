@@ -17,7 +17,7 @@ import { cssBackgroundImage } from "../utils/safeUrl";
 import { DEFAULT_NODES } from "../utils/constants";
 
 import { T } from "../utils/T";
-import { t } from "../utils/text";
+import { t, tk, tx, getLocaleCode } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
 import ExpandMoreRounded from "@material-ui/icons/ExpandMoreRounded";
@@ -524,28 +524,38 @@ const chainMs = (s) => (s ? Date.parse(String(s).replace(/Z?$/, 'Z')) : NaN);
 const toChainIso = (ms) => new Date(ms).toISOString().slice(0, 19);
 
 // ──────────────────────────────────────────────────────────────
-// Format helpers
+// Format helpers — figures in the app's locale (utils/text), units and
+// magnitude suffixes as they are. They run at render, or in buildRowStatics,
+// which is rebuilt on a language switch (see _rowStatics).
 // ──────────────────────────────────────────────────────────────
+// `n` with exactly `digits` decimals: "1,234.5" in English, "1 234,5" in French.
+const formatFixed = (n, digits) =>
+    (Number(n) || 0).toLocaleString(getLocaleCode(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
+// A figure given in percent ("12.3"), as the locale writes percentages: "12.3%", "12,3 %".
+const formatPct = (n, digits) =>
+    ((Number(n) || 0) / 100).toLocaleString(getLocaleCode(), { style: 'percent', minimumFractionDigits: digits, maximumFractionDigits: digits });
+
 const formatVotes = (v) => {
     const n = typeof v === 'string' ? Number(v) : (v || 0);
     if (!isFinite(n) || n <= 0) return '0';
     // VESTS are huge — collapse into readable magnitudes.
-    if (n >= 1e15) return `${(n / 1e15).toFixed(2)}P`;
-    if (n >= 1e12) return `${(n / 1e12).toFixed(2)}T`;
-    if (n >= 1e9)  return `${(n / 1e9).toFixed(2)}G`;
-    if (n >= 1e6)  return `${(n / 1e6).toFixed(2)}M`;
-    if (n >= 1e3)  return `${(n / 1e3).toFixed(1)}k`;
-    return String(Math.round(n));
+    if (n >= 1e15) return `${formatFixed(n / 1e15, 2)}P`;
+    if (n >= 1e12) return `${formatFixed(n / 1e12, 2)}T`;
+    if (n >= 1e9)  return `${formatFixed(n / 1e9, 2)}G`;
+    if (n >= 1e6)  return `${formatFixed(n / 1e6, 2)}M`;
+    if (n >= 1e3)  return `${formatFixed(n / 1e3, 1)}k`;
+    return formatFixed(Math.round(n), 0);
 };
 
-const formatInt = (n) => (Number(n) || 0).toLocaleString('en-US');
+const formatInt = (n) => (Number(n) || 0).toLocaleString(getLocaleCode());
 
 // 65536 → "64 KB", 2097152 → "2 MB"
 const formatBytes = (n) => {
     const v = Number(n) || 0;
-    if (v >= 1048576) return `${(v / 1048576).toFixed(v % 1048576 ? 2 : 0)} MB`;
-    if (v >= 1024) return `${(v / 1024).toFixed(v % 1024 ? 1 : 0)} KB`;
-    return `${v} B`;
+    if (v >= 1048576) return `${formatFixed(v / 1048576, v % 1048576 ? 2 : 0)} MB`;
+    if (v >= 1024) return `${formatFixed(v / 1024, v % 1024 ? 1 : 0)} KB`;
+    return `${formatInt(v)} B`;
 };
 
 // 45 → "45s", 125 → "2m 5s", 3900 → "1h 5m"
@@ -574,10 +584,10 @@ const sharesToPower = (shares, price) => {
 };
 const formatPower = (v) => {
     const n = Number(v) || 0;
-    if (n >= 1e9) return `${(n / 1e9).toFixed(2)}b`;
-    if (n >= 1e6) return `${(n / 1e6).toFixed(2)}m`;
-    if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
-    return String(Math.round(n));
+    if (n >= 1e9) return `${formatFixed(n / 1e9, 2)}b`;
+    if (n >= 1e6) return `${formatFixed(n / 1e6, 2)}m`;
+    if (n >= 1e3) return `${formatFixed(n / 1e3, 1)}k`;
+    return formatFixed(Math.round(n), 0);
 };
 
 // ──────────────────────────────────────────────────────────────
@@ -644,8 +654,11 @@ const formatRawPriceFeed = (feed) => {
 const DISPLAY_SYMBOL = { PIXA: 'PXA', PXS: 'PXS', VESTS: 'PXP' };
 const displaySymbol = (sym, fallback) => DISPLAY_SYMBOL[sym] || sym || fallback;
 
-// 102.000 → "102", 101.500 → "101.5", 57.143 → "57.143"
-const formatRatio = (n) => n.toFixed(3).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+// 102.000 → "102", 101.500 → "101.5", 57.143 → "57.143" (in the app's locale: "101,5")
+const formatRatio = (n) => n.toLocaleString(getLocaleCode(), { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+
+// A fee kept as the chain writes it ("0.001", the admin form's value) → its display figure.
+const formatFeeAmount = (s) => formatFixed(Number(s), FEE_PRECISION);
 
 const formatPriceFeed = (feed) => {
     if (!feed) return '—';
@@ -727,11 +740,11 @@ const buildRowStatics = (w) => {
         lastBlock,
         lastBlockText: lastBlock ? formatInt(lastBlock) : '—',
         fallbackAgo: w.last_aslot_time || w.created,
-        missedText: w.total_missed != null ? String(w.total_missed) : '—',
+        missedText: w.total_missed != null ? formatInt(w.total_missed) : '—',
         feedText: formatPriceFeed(feed),
         feedRaw: formatRawPriceFeed(feed),
         feedUpdated: formatTimeAgo(getWitnessFeedUpdatedAt(w)),
-        baseFeeText: chainProps.baseFee ? `${chainProps.baseFee} ${displaySymbol(FEE_SYMBOL)}` : '—',
+        baseFeeText: chainProps.baseFee ? `${formatFeeAmount(chainProps.baseFee)} ${displaySymbol(FEE_SYMBOL)}` : '—',
         maxBlockSizeText: chainProps.maxBlockSize ? formatBytes(chainProps.maxBlockSize) : '',
         maxBlockBytesText: chainProps.maxBlockSize ? formatInt(chainProps.maxBlockSize) : ''
     };
@@ -1028,7 +1041,7 @@ const WitnessAdminPanel = memo(function WitnessAdminPanel(props) {
                 InputLabelProps={SHRINK_LABEL}
             />
             {error ? (
-                <div className={classes.broadcastError}>{error}</div>
+                <div className={classes.broadcastError}>{tx(error)}</div>
             ) : null}
             {success ? (
                 <div className={classes.broadcastSuccess}>
@@ -1098,12 +1111,11 @@ function ScheduleDetails(props) {
                     t("components.gdvmwitnesses.next_shuffle"),
                     nextShuffle ? `#${formatInt(nextShuffle)}` : null,
                     nextShuffle
-                        ? (blocksToShuffle === 1
-                            ? t("components.gdvmwitnesses.in_1_block", { time: formatSeconds(BLOCK_INTERVAL_S) })
-                            : t("components.gdvmwitnesses.in_blocks", {
-                                blocks: blocksToShuffle,
-                                time: formatSeconds(blocksToShuffle * BLOCK_INTERVAL_S)
-                            }))
+                        // a plural token, not `=== 1`: languages split "blocks" at other counts
+                        ? t("components.gdvmwitnesses.in_n_blocks_time", {
+                            block: { block: blocksToShuffle },
+                            time: formatSeconds(blocksToShuffle * BLOCK_INTERVAL_S)
+                        })
                         : null
                 )}
                 {stat(
@@ -1115,7 +1127,7 @@ function ScheduleDetails(props) {
                 )}
                 {stat(
                     t("components.gdvmwitnesses.creation_fee"),
-                    medianProps.baseFee ? `${medianProps.baseFee} ${displaySymbol(FEE_SYMBOL)}` : null,
+                    medianProps.baseFee ? `${formatFeeAmount(medianProps.baseFee)} ${displaySymbol(FEE_SYMBOL)}` : null,
                     t("components.gdvmwitnesses.median_of_the_round")
                 )}
                 {stat(
@@ -1128,7 +1140,7 @@ function ScheduleDetails(props) {
                 {medianProps.interestRate !== ''
                     ? stat(
                         t("components.gdvmwitnesses.pxs_interest"),
-                        `${(Number(medianProps.interestRate) / 100).toFixed(2)}%`,
+                        formatPct(Number(medianProps.interestRate) / 100, 2),
                         t("components.gdvmwitnesses.median_per_year")
                     )
                     : null}
@@ -1223,7 +1235,7 @@ const SchedulePanel = memo(function SchedulePanel(props) {
                 {participation !== null ? (
                     <span className={classes.liveItem}>
                         <span className={classes.liveLabel}>{t("components.gdvmwitnesses.participation")}</span>
-                        <span>{participation.toFixed(1)}%</span>
+                        <span>{formatPct(participation, 1)}</span>
                     </span>
                 ) : null}
                 <span className={classes.liveItem}>
@@ -1278,7 +1290,7 @@ class GDVMWitnesses extends React.PureComponent {
             _propsInterestRate: "",         // pxs_interest_rate (basis points; 100 = 1%)
             _propsUrl: "",                  // url — editable witness URL
             _propsBroadcasting: false,
-            _propsError: "",
+            _propsError: "",                // "", a chain error text, or a tk() descriptor (tx() at render)
             _propsSuccess: false
         };
         this._mounted = false;
@@ -1739,7 +1751,7 @@ class GDVMWitnesses extends React.PureComponent {
         const { _currentAccount, _selfWitness, _propsBaseFee, _propsUrl } = this.state;
 
         if (!_currentAccount || !_selfWitness || !api?.broadcast?.witnessUpdate) {
-            this.setState({ _propsError: t("components.gdvmwitnesses.missing_account_witness_record_or_broadcast_api") });
+            this.setState({ _propsError: tk("components.gdvmwitnesses.missing_account_witness_record_or_broadcast_api") });
             return;
         }
 
@@ -1760,7 +1772,7 @@ class GDVMWitnesses extends React.PureComponent {
         const signingKey = _selfWitness.signing_key;
         if (!signingKey) {
             this.setState({
-                _propsError: t("components.gdvmwitnesses.no_signing_key_on_the_witness_record")
+                _propsError: tk("components.gdvmwitnesses.no_signing_key_on_the_witness_record")
             });
             return;
         }
@@ -1771,7 +1783,7 @@ class GDVMWitnesses extends React.PureComponent {
         const feeUnits = feeInputToUnits(_propsBaseFee);
         if (!isValidFeeUnits(feeUnits)) {
             this.setState({
-                _propsError: t("components.gdvmwitnesses.account_creation_fee_must_be_between_and", {
+                _propsError: tk("components.gdvmwitnesses.account_creation_fee_must_be_between_and", {
                     min: feeUnitsToAsset(FEE_MIN_UNITS),
                     max: feeUnitsToAsset(FEE_MAX_UNITS)
                 })
@@ -1783,7 +1795,7 @@ class GDVMWitnesses extends React.PureComponent {
         // so fail fast here instead of round-tripping to the node.
         const url = String(_propsUrl || "").trim();
         if (!url) {
-            this.setState({ _propsError: t("components.gdvmwitnesses.witness_url_cannot_be_empty") });
+            this.setState({ _propsError: tk("components.gdvmwitnesses.witness_url_cannot_be_empty") });
             return;
         }
 
@@ -1823,7 +1835,7 @@ class GDVMWitnesses extends React.PureComponent {
             if (!this._mounted) return;
             this.setState({
                 _propsBroadcasting: false,
-                _propsError: e?.message || t("components.gdvmwitnesses.broadcast_failed")
+                _propsError: e?.message || tk("components.gdvmwitnesses.broadcast_failed")
             });
         }
     };
@@ -1896,7 +1908,7 @@ class GDVMWitnesses extends React.PureComponent {
         const participation = (_dgp && Number.isFinite(Number(_dgp.participation_count)))
             ? Number(_dgp.participation_count) / 128 * 100
             : null;
-        const chainTime = Number.isFinite(round.chainNowMs) ? new Date(round.chainNowMs).toLocaleTimeString() : '—';
+        const chainTime = Number.isFinite(round.chainNowMs) ? new Date(round.chainNowMs).toLocaleTimeString(getLocaleCode()) : '—';
 
         return (
             <DialogContent className={classes.dialogContent}>

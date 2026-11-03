@@ -6,7 +6,8 @@ import * as React from "preact/compat";
  * The list renders at its full virtual height (top/bottom spacers) inside
  * whatever scrolls around it, so there is never a second, boxed scrollbar.
  *
- * Shared by WalletHistory and FollowListModal. Compared with the first
+ * Shared by WalletHistory and components/list/AccountList (the voters,
+ * followers / following and community members lists). Compared with the first
  * version that lived in WalletHistory, the visible band is now the
  * intersection of EVERY clipping ancestor (plus the viewport) instead of
  * "the nearest ancestor with overflow:auto". That matters inside dialogs:

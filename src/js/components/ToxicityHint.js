@@ -42,10 +42,25 @@ const HINT_STYLE = {
     marginTop: 4,
 };
 
+/**
+ * `label` names the field being checked. It is an identifier, not display
+ * text: each field has its own whole sentence, because "Your {{label}} might…"
+ * with an English word dropped in reads wrong in every other language (and
+ * the noun's gender/case changes the rest of the sentence in many of them).
+ */
+const HINT_KEYS = {
+    title: "components.toxicity_hint.your_title_might_come_across_as_toxic",
+    description: "components.toxicity_hint.your_description_might_come_across_as_toxic",
+    comment: "components.toxicity_hint.your_comment_might_come_across_as_toxic",
+    biography: "components.toxicity_hint.your_biography_might_come_across_as_toxic",
+    message: "components.toxicity_hint.your_message_might_come_across_as_toxic",
+};
+
 export const ToxicityHint = React.memo(function ToxicityHint({ result, label = "message", style }) {
     useLanguage();
     if (!result || !result.toxic) return null;
     const percent = Math.round((result.score || 0) * 100);
+    const hintKey = HINT_KEYS[label] || HINT_KEYS.message;
     return (
         <Fade in timeout={220}>
             <Typography variant="caption" component="div" style={style ? { ...HINT_STYLE, ...style } : HINT_STYLE}>
@@ -57,9 +72,7 @@ export const ToxicityHint = React.memo(function ToxicityHint({ result, label = "
                         percent: percent
                     })}
                 >
-                    <span>{t("components.toxicity_hint.your_might_come_across_as_toxic_a", {
-                            label: label
-                        })}</span>
+                    <span>{t(hintKey)}</span>
                 </Tooltip>
             </Typography>
         </Fade>

@@ -254,7 +254,10 @@ export function niceScale(lo, hi, maxTicks = 5, floorAtZero = true, integer = fa
     return { domain: [ticks[0], ticks[ticks.length - 1]], ticks, step };
 }
 
-/** Tick labels for a niceScale step: compact like fmtCompact (K from 10,000, M, B), with the decimals the step needs. */
+/**
+ * Tick labels for a niceScale step: compact like fmtCompact (K from 10,000, M, B), with the decimals the step
+ * needs, in the app's locale (dateLocale serves numbers too).
+ */
 export function tickFormat(step) {
     return (v) => {
         if (v == null || !isFinite(v)) return "";
@@ -263,7 +266,13 @@ export function tickFormat(step) {
         const s = step ? step / div : 1;
         let digits = 0;
         while (digits < 3 && Math.abs(Math.round(s * Math.pow(10, digits)) - s * Math.pow(10, digits)) > 1e-6) digits++;
-        const text = (a / div).toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+        const opts = { minimumFractionDigits: digits, maximumFractionDigits: digits };
+        let text;
+        try {
+            text = (a / div).toLocaleString(dateLocale(), opts);
+        } catch (e) {
+            text = (a / div).toLocaleString("en-US", opts);
+        }
         return `${v < 0 ? "−" : ""}${text}${unit}`;
     };
 }
@@ -748,7 +757,7 @@ export const Trend = withKit(({ classes, change, invert }) => {
     const flat = Math.abs(change) < 0.005;
     const Icon = flat ? TrendingFlatIcon : change > 0 ? TrendingUpIcon : TrendingDownIcon;
     return (
-        <span className={classes.trend} title={invert ? "lower is better" : undefined}>
+        <span className={classes.trend} title={invert ? tr("components.gdtower_kit.lower_is_better", "lower is better") : undefined}>
             <Icon className={classes.trendIcon} />
             {fmtSignedPct(change)}
         </span>
@@ -828,7 +837,7 @@ export const Legend = withKit(({ classes, items }) => (
         {items.map((it, i) => {
             const s = SERIES[Math.min(i, SERIES.length - 1)];
             return (
-                <span key={it.label} className={classes.legendItem}>
+                <span key={i} className={classes.legendItem}>
                     {it.shape === "block" ? (
                         <span className={classes.swatchBlock} style={{ backgroundColor: it.color || s.fill }} />
                     ) : (

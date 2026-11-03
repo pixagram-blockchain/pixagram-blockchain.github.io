@@ -8,6 +8,9 @@ import { PrivateKey } from "@pixagram/dpixa";
 import { generate_mnemonic, mnemonic_to_base58_master_key, search_mnemonic_words } from 'pixa_bip39';
 import { default as initB, PdfConverter} from "svg2pdf-wasm"
 import {font1, font2, font3} from "./fonts";
+// The "PDF: …" errors below reach the user (AddAccountDialog, CreateBulkAccountDialog):
+// their messages are translated when thrown. Nothing printed on the sheet uses t().
+import { t, getLocaleCode } from "./text";
 
 // Key-backup sheet v3 (data/masterKeyTemplate3): A4 or US Letter, localized labels.
 //
@@ -38,8 +41,22 @@ const CJK_RE = /[ぁ-ヿ가-힣]/u;
 const GRAPHEMES = /\P{M}\p{M}*|\p{M}+/gu;
 
 // Latin, Greek and Cyrillic share look-alike letters (A/А/Α, o/о/ο …): on paper a passphrase
-// mixing them cannot be told apart from another one.
-const LOOKALIKE_SCRIPTS = [["Latin", /\p{Script=Latin}/u], ["Greek", /\p{Script=Greek}/u], ["Cyrillic", /\p{Script=Cyrillic}/u]];
+// mixing them cannot be told apart from another one. [name, pattern, translation key of the name]
+const LOOKALIKE_SCRIPTS = [
+    ["Latin", /\p{Script=Latin}/u, "components.back_up_wallet3.script_latin"],
+    ["Greek", /\p{Script=Greek}/u, "components.back_up_wallet3.script_greek"],
+    ["Cyrillic", /\p{Script=Cyrillic}/u, "components.back_up_wallet3.script_cyrillic"],
+];
+
+/** "A, B and C" in the UI's language (a plain comma list where Intl.ListFormat is missing). */
+function listInLocale(items) {
+    try {
+        if (typeof Intl !== "undefined" && Intl.ListFormat) {
+            return new Intl.ListFormat(getLocaleCode(), { style: "long", type: "conjunction" }).format(items);
+        }
+    } catch (_) { /* unknown locale tag */ }
+    return items.join(", ");
+}
 
 const codePoints = (text) => Array.from(text).map((c) => "U+" + c.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")).join(" ");
 
@@ -114,7 +131,7 @@ function isoDate(date) {
     }
     const d = date === undefined || date === null ? new Date() : new Date(date);
     if (Number.isNaN(d.getTime())) {
-        throw new Error("PDF: invalid date.");
+        throw new Error(t("components.back_up_wallet3.pdf_invalid_date"));
     }
     const pad = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -201,15 +218,18 @@ async function loadTemplate() {
 
 export async function validateUsername(username){
     "use strict";
+    // The message is shown as is (CreateAccountDialog, AddAccountDialog), and callers
+    // test it for emptiness: never "" — t() answers "" until the language file is in.
+    const msg = (key) => t(key) || key;
     // Basic username validation for Pixa (similar to HIVE/STEEM rules)
-    if (!username || typeof username !== 'string') return 'Username is required';
-    if (username.length < 3) return 'Username must be at least 3 characters';
-    if (username.length > 16) return 'Username must be at most 16 characters';
-    if (!/^[a-z]/.test(username)) return 'Username must start with a letter';
-    if (!/^[a-z0-9.-]+$/.test(username)) return 'Username can only contain lowercase letters, numbers, dots, and hyphens';
-    if (/--/.test(username)) return 'Username cannot contain consecutive hyphens';
-    if (/\.\./.test(username)) return 'Username cannot contain consecutive dots';
-    if (/[.-]$/.test(username)) return 'Username cannot end with a dot or hyphen';
+    if (!username || typeof username !== 'string') return msg("components.back_up_wallet3.username_is_required");
+    if (username.length < 3) return msg("components.login_dialog.username_must_be_at_least_3_characters");
+    if (username.length > 16) return msg("components.back_up_wallet3.username_must_be_at_most_16_characters");
+    if (!/^[a-z]/.test(username)) return msg("components.back_up_wallet3.username_must_start_with_a_letter");
+    if (!/^[a-z0-9.-]+$/.test(username)) return msg("components.back_up_wallet3.username_can_only_contain");
+    if (/--/.test(username)) return msg("components.back_up_wallet3.username_cannot_contain_consecutive_hyphens");
+    if (/\.\./.test(username)) return msg("components.back_up_wallet3.username_cannot_contain_consecutive_dots");
+    if (/[.-]$/.test(username)) return msg("components.back_up_wallet3.username_cannot_end_with_a_dot_or_hyphen");
     return null; // null means valid
 }
 
@@ -416,20 +436,23 @@ export async function generateBackupSVG(username, mnemonic, password, masterKey,
         if (!unprintable.includes(ch)) { unprintable.push(ch); }
     }
     if(unprintable.length > 0){
-        throw new Error("PDF: these characters cannot be printed on the backup document (Latin, Greek, Cyrillic, kana and hangul only): "
-            + unprintable.map((c) => `"${c}" (${codePoints(c)})`).join(", "));
+        throw new Error(t("components.back_up_wallet3.pdf_unprintable_characters", {
+            characters: unprintable.map((c) => `"${c}" (${codePoints(c)})`).join(", ")
+        }));
     }
     const pass = printed.text;
-    const scripts = LOOKALIKE_SCRIPTS.filter(([, re]) => re.test(pass)).map(([name]) => name);
+    const scripts = LOOKALIKE_SCRIPTS.filter(([, re]) => re.test(pass));
     if(scripts.length > 1){
-        throw new Error(`PDF: the seed passphrase mixes ${scripts.join(" and ")} letters, which look identical on paper; it cannot be printed unambiguously.`);
+        throw new Error(t("components.back_up_wallet3.pdf_passphrase_mixes_scripts", {
+            scripts: listInLocale(scripts.map(([, , key]) => t(key)))
+        }));
     }
 
     let passBlock = null;
     if(pass !== ""){
         passBlock = passphraseSVG(outliner, pass, slots.password, template.LAYOUT.labels.passwordLabel.anchor[1]);
         if(passBlock === null){
-            throw new Error("PDF: the seed passphrase is too long to be printed legibly on the backup document.");
+            throw new Error(t("components.back_up_wallet3.pdf_passphrase_too_long"));
         }
     }
 

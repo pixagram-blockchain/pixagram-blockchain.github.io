@@ -1,44 +1,84 @@
 import * as React from "preact/compat";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "preact/compat";
 
 import withStyles from "@material-ui/core/styles/withStyles";
 import Dialog from "@material-ui/core/Dialog";
 import DialogContent from "@material-ui/core/DialogContent";
-import DialogTitle from "@material-ui/core/DialogTitle";
 import DialogActions from "@material-ui/core/DialogActions";
-import Typography from "@material-ui/core/Typography";
-import Divider from "@material-ui/core/Divider";
 import Button from "@material-ui/core/Button";
-import List from '@material-ui/core/List';
-import ListItem from '@material-ui/core/ListItem';
-import ListItemText from '@material-ui/core/ListItemText';
-import ListItemAvatar from '@material-ui/core/ListItemAvatar';
-import Avatar from '@material-ui/core/Avatar';
-import Tooltip from "@material-ui/core/Tooltip";
-import VirtualizedList from "@pixagram/virtualized/dist/es/List";
-import AutoSizer from "@pixagram/virtualized/dist/es/AutoSizer";
-import {HISTORY} from "../utils/constants";
-import timeAgo from "../utils/TimeAgo";
 import Tab from "@material-ui/core/Tab";
 import Tabs from "@material-ui/core/Tabs";
 import SwipeableViews from "react-swipeable-views";
 
-import { t } from "../utils/text";
-
-import { withLanguage } from "../utils/withLanguage";
-import { withPrices } from "../hooks/usePrices";
+import { HISTORY } from "../utils/constants";
+import timeAgo from "../utils/TimeAgo";
+import { t, useLanguage } from "../utils/text";
+import { usePrices } from "../hooks/usePrices";
 import {
     voteSign, votePercentBp, formatPxs,
     valueOfRshares, estimateVoteValue, fiatOf,
     getRewardSnapshot, getRewardSnapshotSync,
     getVoterAccount, getVoterAccountSync,
 } from "../utils/voteValue";
+import { AccountList, AccountRowLayout, AccountImageStore } from "./list/AccountList";
+
+// ── VotingListModal — who voted, and what each vote is worth ──────────────
+//
+// Rebuilt on the shared account list (components/list/AccountList). What the
+// old class did on every render, and what replaces it:
+//
+//   · Props were mirrored into state (open, votes, positive, locales, even
+//     classes) and re-synced in componentWillReceiveProps with setState +
+//     forceUpdate (two renders per prop change). → Props are read directly.
+//   · Both tabs' votes were valued, sorted and summed on EVERY render (tab
+//     switches, profile batches, snapshot…). → One memo, recomputed only when
+//     the votes, the reward snapshot, the prices or a pending voter's
+//     account change.
+//   · Every voter's account was fetched up front in ONE raw getAccounts()
+//     call (1 200 votes → 1 200 accounts to paint ~10 rows). → Avatars
+//     hydrate for the rows on screen only, batched and deduped app-wide
+//     (AccountImageStore over account-cache); the page's pre-fetched
+//     voter_profiles seed it.
+//   · A fixed 480px react-virtualized box (a second scrollbar inside the
+//     dialog, cut off on short phones), a new rowRenderer closure per render
+//     (all rows re-rendered), MUI ListItem / Avatar / ListItemText and a
+//     Tooltip per row, toLocaleDateString per row per render. → Rows window
+//     against the dialog's own scroll area; memoised rows of plain elements;
+//     the date is a native title from a cached Intl.DateTimeFormat.
+//   · The tab-switch scroll reset queried `document` for the FIRST swipeable
+//     container on the page (any dialog's). → Scoped to this dialog.
+//   · Clicking a voter navigated under the still-open dialog. → It closes,
+//     like the followers and members lists.
+//
+// Props are unchanged: { open, onClose, positive, votes, voterProfiles,
+// api, locales }.
+
+const SLIDE_STYLE = { height: "100%", overflowY: "auto", overflowX: "hidden" };
+const FILL_STYLE = { height: "100%" };
+const SPRING = { tension: 450, friction: 60, duration: "120ms", easeFunction: "cubic-bezier(0.280, 0.840, 0.420, 1)", delay: "5ms" };
+const EMPTY_OBJ = Object.freeze({});
+const EMPTY_LIST = Object.freeze([]);
+
 const styles = theme => ({
     dialog: {
+        // A definite paper height gives the slides a bounded height, so each
+        // slide is the single scroll area its list windows against.
         "& .MuiDialog-paperScrollPaper": {
+            height: "calc(100% - 64px)",
+            maxHeight: 720,
             [theme.breakpoints.down("sm")]: {
-                maxHeight: "100%"
+                margin: 12,
+                width: "calc(100% - 24px)",
+                maxWidth: "none",
+                height: "calc(100% - 24px)",
+                maxHeight: "none",
             },
         },
+    },
+    swipeRoot: {
+        position: "relative",
+        flex: "1 1 auto",
+        minHeight: 0,
     },
     cardTabs: {
         backgroundColor: "#171717",
@@ -67,6 +107,7 @@ const styles = theme => ({
             borderRadius: "21px",
             transform: "scale3d(0.875, 0.75, 1)"
         },
+        flex: "0 0 auto",
         margin: "16px 16px 0px 16px",
         width: "calc(100% - 32px)",
         borderRadius: "21px",
@@ -75,444 +116,395 @@ const styles = theme => ({
         zIndex: 1,
         transition: "transform 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms"
     },
-    subTitle: {
-        margin: "24px 0px 12px 0px"
-    },
     dialogContent: {
-        margin: "8px 0px 8px 0px"
+        margin: "0px 0px 8px 0px",
+        paddingTop: 0,
+        // The slide around it scrolls; never a second scroller in here.
+        overflowY: "visible",
     },
-    link: {
-        cursor: "pointer",
-        textDecoration: "underline"
-    },
-    boxContainer: {
+    // Per-tab total, right-aligned above the list; stays in view while the
+    // list scrolls under it.
+    tabTotal: {
+        position: "sticky",
+        top: 0,
+        zIndex: 2,
         display: "flex",
-        flexWrap: "wrap"
-    },
-    listItemTitle: {
-        fontWeight: 'bold',
-        fontFamily: '"Industry Book", "Normative Pro"',
-        color: '#fff',
-        cursor: 'pointer',
-    },
-    listItemSubTitle: {
-        display: 'inline-block',
-        textOverflow: 'ellipsis',
-        overflow: 'hidden',
-        whiteSpace: 'nowrap'
+        justifyContent: "flex-end",
+        alignItems: "baseline",
+        gap: 8,
+        padding: "8px 16px 4px 16px",
+        backgroundColor: "#000",
+        color: "#9a9a9a",
+        fontFamily: '"Geist Mono", monospace',
+        fontVariantNumeric: "tabular-nums",
+        fontSize: 12,
+        lineHeight: "16px",
+        minHeight: 20,
+        "& b": {
+            color: "#fff",
+            fontWeight: 500,
+        },
     },
     // What the vote is worth: PXS from its rshares through the reward fund,
     // then the user's display currency. Greyscale like the rest of the UI —
     // an estimate (vote still waiting for the chain) is dimmer and prefixed ≈.
     voteValue: {
-        color: '#fff',
+        color: "#fff",
         fontFamily: '"Geist Mono", monospace',
-        fontVariantNumeric: 'tabular-nums',
+        fontVariantNumeric: "tabular-nums",
     },
     voteValueFiat: {
-        color: '#9a9a9a',
+        color: "#9a9a9a",
         fontFamily: '"Geist Mono", monospace',
-        fontVariantNumeric: 'tabular-nums',
+        fontVariantNumeric: "tabular-nums",
     },
     voteValueEstimate: {
-        color: '#bdbdbd',
+        color: "#bdbdbd",
     },
-    // Per-tab total, right-aligned above the list.
-    tabTotal: {
-        display: 'flex',
-        justifyContent: 'flex-end',
-        alignItems: 'baseline',
-        gap: 8,
-        padding: '0px 16px 4px 16px',
-        color: '#9a9a9a',
-        fontFamily: '"Geist Mono", monospace',
-        fontVariantNumeric: 'tabular-nums',
-        fontSize: 12,
-        lineHeight: '16px',
-        minHeight: 20,
-        '& b': {
-            color: '#fff',
-            fontWeight: 500,
-        },
-    },
-    listItemAvatar: {
-        cursor: 'pointer',
-        borderRadius: '14px',
-        width: 48,
-        height: 48,
-        '& .MuiCardHeader-avatar': { marginRight: '8px' },
-    },
-    action: {
-        display: "inline-flex",
-        justifyContent: "right",
-        right: "0px !important",
-        left: "auto !important",
-        width: "64px !important",
-        paddingRight: 16,
-        transform: "translateY(0px)",
-        "& .MuiIconButton-edgeEnd": {
-            marginRight: "0px !important"
-        }
-    },
-    listItem: {
-        "&.MuiListItem-root": {
-            borderRadius: "16px",
-            backgroundColor: "#ffffff00",
-            transition: "background-color 225ms cubic-bezier(0.4, 0, 0.2, 1) 5ms",
-        },
-        "&.MuiListItem-root:hover": {
-            borderRadius: "16px",
-            backgroundColor: "#ffffff14",
-            transition: "background-color 225ms cubic-bezier(0.4, 0, 0.2, 1) 5ms",
-
-        },
-    },
-    badgeItem: {
-        "& .MuiBadge-anchorOriginTopRightCircular": {
-            top: "0%",
-            right: "0%",
-            backgroundColor: "#212121ff"
-        }
-    }
+    votePercent: { color: "#ccc" },
+    voteTime: { color: "#fff" },
 });
 
-class VotingListModal extends React.PureComponent {
+// ── Pure helpers ─────────────────────────────────────────────────────────
 
-    constructor(props) {
-        super(props);
-        this.state = {
-            classes: props.classes,
-            open: props.open || false,
-            positive: props.positive != null ? props.positive : true,
-            locales: props.locales,
-            votes: props.votes || [],
-            _voter_profiles: props.voterProfiles || {}, // pre-fetched from Profile.js
-            _history: HISTORY,
-            // Reward-fund snapshot (recent_claims / reward_balance / feed) that
-            // turns each vote's rshares into PXS — see utils/voteValue.
-            _snapshot: getRewardSnapshotSync(props.api),
-            // Accounts of voters whose vote is still optimistic (rshares '0'
-            // placeholder): their value is ESTIMATED from vesting + mana.
-            _voter_accounts: {},
-        };
-    };
+/** Translation with an English fallback while a locale chunk is loading. */
+function tr(key, fallback) {
+    const v = t(key);
+    return !v || v === key || v === key.slice(key.lastIndexOf(".") + 1) ? fallback : v;
+}
 
-    componentWillMount() {
-
+// One Intl.DateTimeFormat per locale for the rows' full-date title (was a
+// toLocaleDateString per row per render).
+const DATE_OPTS = { weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "numeric" };
+const DATE_FORMATS = new Map();
+function fullDate(ms, locales) {
+    const key = String(locales || "");
+    let f = DATE_FORMATS.get(key);
+    if (!f) {
+        try { f = new Intl.DateTimeFormat(locales || undefined, DATE_OPTS); }
+        catch (e) { f = new Intl.DateTimeFormat(undefined, DATE_OPTS); }
+        DATE_FORMATS.set(key, f);
     }
+    return f.format(ms);
+}
 
-    componentDidMount(){
-        this._fetchVoterProfiles(this.state.votes);
-        this._loadPricing(this.state.votes);
+/**
+ * What one vote is worth right now — the HIVE estimate_upvote recipe:
+ * rshares / recent_claims × reward_balance gives PXA; PXA is then priced
+ * through usePrices() (PXA anchored in USD, PXS derived from it), never
+ * through the raw 1:1 bootstrap feed. Chain rows use their rshares; an
+ * optimistic placeholder is estimated from the voter's vesting shares
+ * and current mana. Returns { pxs, usd, estimate, ready }.
+ */
+function voteValue(vote, snap, prices, accounts, api) {
+    const estimate = !!(vote && vote._optimistic);
+    if (!vote || !snap || !snap.ok) return { pxs: 0, usd: 0, estimate, ready: false };
+    if (estimate) {
+        const acc = accounts[vote.voter] || getVoterAccountSync(api, vote.voter);
+        if (!acc) return { pxs: 0, usd: 0, estimate: true, ready: false };
+        const v = estimateVoteValue(acc, vote.weight, snap, prices);
+        return { pxs: v.pxs, usd: v.usd, estimate: true, ready: true };
     }
+    const v = valueOfRshares(vote.rshares, snap, prices);
+    return { pxs: v.pxs, usd: v.usd, estimate: false, ready: true };
+}
 
-    componentWillReceiveProps(nextProps, nextContext) {
-
-        if(this.state.open !== nextProps.open || this.state.positive !== nextProps.positive || this.state.votes !== nextProps.votes) {
-            const merged = { ...(nextProps.voterProfiles || {}), ...this.state._voter_profiles };
-            this.setState({locales: nextProps.locales, open: nextProps.open, positive: nextProps.positive, votes: nextProps.votes || [], _voter_profiles: merged}, () => {
-                this._fetchVoterProfiles(nextProps.votes || []);
-                this._loadPricing(nextProps.votes || []);
-                this.forceUpdate();
-            });
-        }
-    }
-
-    _fetchVoterProfiles = (votes) => {
-        const api = this.props.api;
-        if (!api || !Array.isArray(votes) || votes.length === 0) return;
-
-        const voterNames = votes.map(v => v.voter).filter(Boolean);
-        if (voterNames.length === 0) return;
-
-        // Only fetch names we don't already have
-        const missing = voterNames.filter(name => !this.state._voter_profiles[name]);
-        if (missing.length === 0) return;
-
-        api.accounts.getAccounts(missing).then((accounts) => {
-            if (!Array.isArray(accounts)) return;
-            const profiles = { ...this.state._voter_profiles };
-            accounts.forEach((acc) => {
-                if (!acc) return;
-                const name = acc.name || acc._entity_id;
-                const image = (acc._profile && acc._profile.profile_image) || '';
-                if (name) profiles[name] = image;
-            });
-            this.setState({ _voter_profiles: profiles }, () => this.forceUpdate());
-        }).catch((e) => {
-            console.warn('[VotingListModal] Failed to fetch voter profiles:', e.message);
-        });
-    }
-
-    // ── Vote pricing ──────────────────────────────────────────────────
-    // Fund snapshot (60 s RAM cache in utils/voteValue) + the accounts of any
-    // voters whose rows are still optimistic placeholders. Both are cheap,
-    // deduped and only fetched while the dialog is open.
-    _loadPricing = (votes) => {
-        const api = this.props.api;
-        if (!api || !this.state.open) return;
-        getRewardSnapshot(api)
-            .then((snap) => { if (snap && snap !== this.state._snapshot) this.setState({ _snapshot: snap }); })
-            .catch(() => {});
-        const pending = (Array.isArray(votes) ? votes : []).filter(v => v && v._optimistic && v.voter);
-        for (const v of pending) {
-            if (this.state._voter_accounts[v.voter]) continue;
-            getVoterAccount(api, v.voter)
-                .then((acc) => {
-                    if (!acc) return;
-                    this.setState((st) => ({ _voter_accounts: { ...st._voter_accounts, [v.voter]: acc } }));
-                })
-                .catch(() => {});
-        }
-    }
-
-    /**
-     * What one vote is worth right now — the HIVE estimate_upvote recipe:
-     * rshares / recent_claims × reward_balance gives PXA; PXA is then priced
-     * through usePrices() (PXA anchored in USD, PXS derived from it), never
-     * through the raw 1:1 bootstrap feed. Chain rows use their rshares; an
-     * optimistic placeholder is estimated from the voter's vesting shares
-     * and current mana. Returns { pxa, pxs, usd, estimate, ready }.
-     */
-    _voteValue = (vote) => {
-        const snap = this.state._snapshot;
-        const prices = this.props.prices;
-        const none = { pxa: 0, pxs: 0, usd: 0 };
-        if (!vote || !snap || !snap.ok) return { ...none, estimate: !!(vote && vote._optimistic), ready: false };
-        if (vote._optimistic) {
-            const acc = this.state._voter_accounts[vote.voter] || getVoterAccountSync(this.props.api, vote.voter);
-            if (!acc) return { ...none, estimate: true, ready: false };
-            return { ...estimateVoteValue(acc, vote.weight, snap, prices), estimate: true, ready: true };
-        }
-        return { ...valueOfRshares(vote.rshares, snap, prices), estimate: false, ready: true };
-    }
-
-    // USD → the user's display currency (fiatRate / currency from usePrices).
-    _fiatOf = (usd) => fiatOf(usd, this.props.prices);
-
-    // Votes ranked by what they are worth; a voter's still-pending vote sits on
-    // top so the user finds the vote they just cast at a glance.
-    _rank = (list) => list.map((v) => ({ v, val: this._voteValue(v) }))
-        .sort((a, b) => {
-            if (!!a.v._optimistic !== !!b.v._optimistic) return a.v._optimistic ? -1 : 1;
-            return Math.abs(b.val.pxs) - Math.abs(a.val.pxs);
-        });
-
-    _renderValue = (val, classes) => {
-        if (!val.ready) {
-            return <span className={classes.voteValue + ' ' + classes.voteValueEstimate}>{val.estimate ? '≈ …' : '…'}</span>;
-        }
-        const fiat = this._fiatOf(Math.abs(val.usd));
-        return (
-            <span>
-                <span className={classes.voteValue + (val.estimate ? ' ' + classes.voteValueEstimate : '')}>
-                    {val.estimate ? '≈ ' : ''}{formatPxs(Math.abs(val.pxs))} PXS
-                </span>
-                <span className={classes.voteValueFiat}>{' · '}{fiat.amount.toFixed(2)} {fiat.currency}</span>
-            </span>
-        );
-    }
-
-    _open_author = (username) => {
-        this.state._history.push("/@"+username);
-    }
-
-    swipeableViewScrollTop = () => {
-
-        let views = document.getElementsByClassName("react-swipeable-view-container"), i = 0;
-        let view = views.item(0);
-        let child = view.children.item(0);
-        child.style.scrollBehavior = "smooth";
-        child.scrollTop = 0;
-    };
-
-    _votesRenderer = (ranked) => ({index, isScrolling, key, style}) => {
-
-        const locales = this.state.locales;
-        const classes = this.state.classes;
-        const voterProfiles = this.state._voter_profiles;
-        const entry = ranked[index];
-        if (!entry) return null;
-        const vote = entry.v;
-        const voter = vote.voter || '';
-        const profileImage = voterProfiles[voter] || '';
-        // Percent only when the row actually knows it (|weight| ≤ 10 000);
-        // bridge rows omit it and condenser rows may carry a curation weight.
-        const percentBp = votePercentBp(vote);
-        const weightPercent = percentBp != null ? Math.abs(percentBp) / 100 : null;
-        const voteTime = vote.time ? new Date(vote.time) : null;
-        return (
-            <ListItem classes={{ root: classes.listItem }} key={voter} style={Object.assign({height: 64}, style)} component={"div"}>
-                <ListItemAvatar className={classes.listItemAvatar}>
-                    <Avatar onClick={() => {this._open_author(voter);}} src={profileImage} style={{borderRadius: "14px", cursor: "pointer"}} className={"pixelated"}></Avatar>
-                </ListItemAvatar>
-                <ListItemText id={`@${voter}`} primary={<span className={classes.listItemTitle} onClick={() => {this._open_author(voter);}}>{`@${voter}`}</span>} secondary={
-                    <span className={classes.listItemSubTitle}>
-                        {this._renderValue(entry.val, classes)}
-                        {weightPercent != null && (
-                            <span>
-                                <span> • </span>
-                                <span style={{color: "#ccc"}}>{`${weightPercent.toFixed(0)}%`}</span>
-                            </span>
-                        )}
-                        {voteTime && !isNaN(voteTime.getTime()) && (
-                            <span>
-                                <span> • </span>
-                                <Tooltip arrow title={ voteTime.toLocaleDateString(locales, {
-                                    weekday: 'long',
-                                    year: 'numeric',
-                                    month: 'long',
-                                    day: 'numeric',
-                                    hour: 'numeric',
-                                    minute: 'numeric'
-                                })}>
-                                    <span style={{color: "#fff"}}>{timeAgo.format(voteTime.getTime())}</span>
-                                </Tooltip>
-                            </span>
-                        )}
-                    </span>}
-                />
-            </ListItem>
-        );
-    }
-
-    _get_views = () => {
-
-        const {
-            classes,
-            votes,
-        } = this.state;
-
+/**
+ * Both tabs, valued, ranked and summed in one pass. A row is a flat record
+ * of display-ready primitives, so a memoised row compares cheaply. Ranking:
+ * a still-pending vote first (the user finds the vote they just cast at a
+ * glance), then by what the vote is worth.
+ */
+function rankVotes(votes, snap, prices, accounts, api) {
+    const up = [];
+    const down = [];
+    for (const vote of Array.isArray(votes) ? votes : EMPTY_LIST) {
         // Direction from rshares first (weight isn't reliably the percent);
         // zeroed rows — what hivemind keeps after an unvote — are not votes.
-        const upvotes = this._rank((votes || []).filter(v => v && voteSign(v) > 0));
-        const downvotes = this._rank((votes || []).filter(v => v && voteSign(v) < 0));
-
-        return [
-            <DialogContent scroll={"paper"} className={classes.dialogContent}>
-                {this._renderTotal(upvotes, classes)}
-                <AutoSizer disableHeight>
-                    {({width}) => (
-                        <List component="div" className={classes.list}>
-                            <VirtualizedList
-                                noRowsRenderer={() => {
-                                    return <ListItem component="div"><ListItemText secondary={t("components.voting_list_modal.no_upvotes_yet")}/></ListItem>;
-                                }}
-                                scrollToIndex={() => {}}
-                                height={480}
-                                overscanRowCount={1}
-                                rowCount={upvotes.length}
-                                rowHeight={64}
-                                rowRenderer={this._votesRenderer(upvotes)}
-                                width={width}
-                            />
-                        </List>
-                    )}
-                </AutoSizer>
-            </DialogContent>,
-            <DialogContent scroll={"paper"} className={classes.dialogContent}>
-                {this._renderTotal(downvotes, classes)}
-                <AutoSizer disableHeight>
-                    {({width}) => (
-                        <List component="div" className={classes.list}>
-                            <VirtualizedList
-                                noRowsRenderer={() => {
-                                    return <ListItem component="div"><ListItemText secondary={t("components.voting_list_modal.no_downvotes_yet")}/></ListItem>;
-                                }}
-                                scrollToIndex={() => {}}
-                                height={480}
-                                overscanRowCount={1}
-                                rowCount={downvotes.length}
-                                rowHeight={64}
-                                rowRenderer={this._votesRenderer(downvotes)}
-                                width={width}
-                            />
-                        </List>
-                    )}
-                </AutoSizer>
-            </DialogContent>
-        ];
-    }
-
-    // Sum of what the listed votes are worth (PXS + display currency). "≈"
-    // while any row is still an estimate or the fund snapshot hasn't landed.
-    _renderTotal = (ranked, classes) => {
-        if (!ranked.length) return <div className={classes.tabTotal} />;
-        let pxs = 0, usd = 0, approx = false;
-        for (const e of ranked) {
-            if (!e.val.ready || e.val.estimate) approx = true;
-            pxs += Math.abs(e.val.pxs);
-            usd += Math.abs(e.val.usd);
+        const sign = vote ? voteSign(vote) : 0;
+        if (!sign || !vote.voter) continue;
+        const val = voteValue(vote, snap, prices, accounts, api);
+        // Percent only when the row actually knows it (|weight| ≤ 10 000);
+        // bridge rows omit it and condenser rows may carry a curation weight.
+        const bp = votePercentBp(vote);
+        let time = 0;
+        if (vote.time) {
+            const d = new Date(vote.time).getTime();
+            if (Number.isFinite(d)) time = d;
         }
-        const fiat = this._fiatOf(usd);
-        return (
-            <div className={classes.tabTotal}>
-                <span>Σ {ranked.length}</span>
-                <b>{approx ? '≈ ' : ''}{formatPxs(pxs)} PXS</b>
-                <span>{fiat.amount.toFixed(2)} {fiat.currency}</span>
-            </div>
-        );
+        const fiat = val.ready ? fiatOf(Math.abs(val.usd), prices) : null;
+        const entry = {
+            voter: vote.voter,
+            optimistic: !!vote._optimistic,
+            absPxs: Math.abs(val.pxs),
+            absUsd: Math.abs(val.usd),
+            ready: val.ready,
+            estimate: val.estimate,
+            pxsText: val.ready ? (val.estimate ? "≈ " : "") + formatPxs(Math.abs(val.pxs)) + " PXS" : "",
+            fiatText: fiat ? fiat.amount.toFixed(2) + " " + fiat.currency : "",
+            pctText: bp != null ? (Math.abs(bp) / 100).toFixed(0) + "%" : "",
+            time,
+        };
+        (sign > 0 ? up : down).push(entry);
     }
+    const byWorth = (a, b) => {
+        if (a.optimistic !== b.optimistic) return a.optimistic ? -1 : 1;
+        return b.absPxs - a.absPxs;
+    };
+    up.sort(byWorth);
+    down.sort(byWorth);
+    return { up, down, upTotal: totalOf(up, prices), downTotal: totalOf(down, prices) };
+}
 
-    _handleTabChange = (e, value) => {
-        const isPositive = value === 0;
-        this.setState({positive: isPositive}, () => {
-            this.swipeableViewScrollTop();
-            this.forceUpdate();
-        });
+// Sum of what the listed votes are worth (PXS + display currency). "≈"
+// while any row is still an estimate or the fund snapshot hasn't landed.
+function totalOf(entries, prices) {
+    if (!entries.length) return null;
+    let pxs = 0, usd = 0, approx = false;
+    for (const e of entries) {
+        if (!e.ready || e.estimate) approx = true;
+        pxs += e.absPxs;
+        usd += e.absUsd;
     }
+    const fiat = fiatOf(usd, prices);
+    return {
+        count: entries.length,
+        pxsText: (approx ? "≈ " : "") + formatPxs(pxs) + " PXS",
+        fiatText: fiat.amount.toFixed(2) + " " + fiat.currency,
+    };
+}
 
-    render() {
+const getVoter = (entry) => (entry && entry.voter) || "";
 
-        const {
-            classes,
-            open,
-            positive,
-            votes,
-        } = this.state;
+// ── Rows ─────────────────────────────────────────────────────────────────
 
-        return (
-            <Dialog className={classes.dialog}
-                    open={open}
-                    fullWidth={true}
-                    disablePortal={false}
-                    onClose={this.props.onClose}
-                    keepMounted={false}>
-                <Tabs
-                    className={classes.cardTabs}
-                    value={positive ? 0: 1}
-                    variant="fullWidth"
-                    indicatorColor="primary"
-                    textColor="primary"
-                    onChange={this._handleTabChange}
-                    fullwidth={true}
-                >
-                    <Tab icon={"UpVotes"} />
-                    <Tab icon={"DownVotes"} />
-                </Tabs>
+/** One voter. Memoised on the row record, its avatar and the locale. */
+const VoterRow = memo(function VoterRow({ classes, vclasses, entry, image, locales }) {
+    const value = entry.ready ? (
+        <React.Fragment>
+            <span className={entry.estimate ? vclasses.voteValue + " " + vclasses.voteValueEstimate : vclasses.voteValue}>
+                {entry.pxsText}
+            </span>
+            <span className={vclasses.voteValueFiat}>{" · " + entry.fiatText}</span>
+        </React.Fragment>
+    ) : (
+        <span className={vclasses.voteValue + " " + vclasses.voteValueEstimate}>{entry.estimate ? "≈ …" : "…"}</span>
+    );
+    const secondary = (
+        <React.Fragment>
+            {value}
+            {entry.pctText ? <React.Fragment>{" • "}<span className={vclasses.votePercent}>{entry.pctText}</span></React.Fragment> : null}
+            {entry.time ? (
+                <React.Fragment>
+                    {" • "}
+                    <span className={vclasses.voteTime} title={fullDate(entry.time, locales)}>{timeAgo.format(entry.time)}</span>
+                </React.Fragment>
+            ) : null}
+        </React.Fragment>
+    );
+    return <AccountRowLayout classes={classes} username={entry.voter} image={image} secondary={secondary} />;
+});
+
+const TotalLine = memo(function TotalLine({ className, total }) {
+    if (!total) return <div className={className} />;
+    return (
+        <div className={className}>
+            <span>{"Σ " + total.count}</span>
+            <b>{total.pxsText}</b>
+            <span>{total.fiatText}</span>
+        </div>
+    );
+});
+
+/** One tab: its total and its windowed voters. */
+const VotesPane = memo(function VotesPane({ classes, entries, total, active, slot, store, renderRow, onOpenAccount, emptyText }) {
+    return (
+        <DialogContent className={classes.dialogContent}>
+            <TotalLine className={classes.tabTotal} total={total} />
+            <AccountList
+                items={entries}
+                getName={getVoter}
+                renderRow={renderRow}
+                imageStore={store}
+                active={active}
+                slot={slot}
+                onOpenAccount={onOpenAccount}
+                emptyText={emptyText}
+            />
+        </DialogContent>
+    );
+});
+
+// ── Data hooks ───────────────────────────────────────────────────────────
+
+/** Reward-fund snapshot (60 s RAM cache in utils/voteValue), while open. */
+function useRewardSnapshot(api, open) {
+    const [snapshot, setSnapshot] = useState(() => getRewardSnapshotSync(api));
+    useEffect(() => {
+        if (!api || !open) return undefined;
+        let live = true;
+        getRewardSnapshot(api)
+            .then((snap) => { if (live && snap) setSnapshot((prev) => (prev === snap ? prev : snap)); })
+            .catch(() => {});
+        return () => { live = false; };
+    }, [api, open]);
+    return snapshot;
+}
+
+/**
+ * Accounts of voters whose vote is still an optimistic placeholder
+ * (rshares '0'): their value is ESTIMATED from vesting + mana. Usually one
+ * row — the vote the user just cast. Deduped across renders.
+ */
+function usePendingVoterAccounts(api, votes, open) {
+    const [accounts, setAccounts] = useState(EMPTY_OBJ);
+    const asked = useRef(new Set());
+    useEffect(() => {
+        if (!api || !open || !Array.isArray(votes)) return undefined;
+        let live = true;
+        for (const v of votes) {
+            if (!v || !v._optimistic || !v.voter || asked.current.has(v.voter)) continue;
+            if (getVoterAccountSync(api, v.voter)) continue;
+            asked.current.add(v.voter);
+            getVoterAccount(api, v.voter)
+                .then((acc) => {
+                    if (!live || !acc) return;
+                    setAccounts((prev) => (prev[v.voter] === acc ? prev : { ...prev, [v.voter]: acc }));
+                })
+                .catch(() => {})
+                .then(() => { asked.current.delete(v.voter); });
+        }
+        return () => { live = false; };
+    }, [api, votes, open]);
+    return accounts;
+}
+
+// ── Dialog ───────────────────────────────────────────────────────────────
+
+function VotingListModal({ classes, open, onClose, positive, votes, voterProfiles, api, locales }) {
+    useLanguage();
+
+    // ── Tabs ──
+    const initialTab = positive === false ? 1 : 0;
+    const [tab, setTab] = useState(initialTab);
+    // Re-targeted (another post's votes, or the other sign): follow it.
+    useEffect(() => { setTab(initialTab); }, [initialTab, votes]);
+
+    const swipeRootRef = useRef(null);
+    const scrollSlidesToTop = useCallback(() => {
+        const root = swipeRootRef.current;
+        const container = root && root.querySelector(".react-swipeable-view-container");
+        if (!container) return;
+        for (const slide of Array.from(container.children)) {
+            slide.style.scrollBehavior = "smooth";
+            slide.scrollTop = 0;
+        }
+    }, []);
+    const onTabChange = useCallback((e, value) => {
+        setTab(value);
+        scrollSlidesToTop();
+    }, [scrollSlidesToTop]);
+    const onChangeIndex = useCallback((value) => onTabChange(null, value), [onTabChange]);
+
+    // ── Valuation: one memo for both tabs ──
+    const { pxaUsdPrice, pxsUsdPrice, fiatRate, currency } = usePrices(api);
+    // usePrices() hands back a new object each render; the voteValue helpers
+    // only read these four fields, so this is the stable thing to key on.
+    const prices = useMemo(
+        () => ({ pxaUsdPrice, pxsUsdPrice, fiatRate, currency }),
+        [pxaUsdPrice, pxsUsdPrice, fiatRate, currency],
+    );
+    const snapshot = useRewardSnapshot(api, open);
+    const pendingAccounts = usePendingVoterAccounts(api, votes, open);
+    const ranked = useMemo(
+        () => rankVotes(votes, snapshot, prices, pendingAccounts, api),
+        [votes, snapshot, prices, pendingAccounts, api],
+    );
+
+    // ── Avatars: one store for both tabs, seeded with the page's prefetch ──
+    const store = useMemo(() => new AccountImageStore(api, voterProfiles), [api]); // eslint-disable-line react-hooks/exhaustive-deps
+    useEffect(() => { store.seed(voterProfiles); }, [store, voterProfiles]);
+    useEffect(() => () => store.dispose(), [store]);
+
+    // ── Rows ──
+    const openAccount = useCallback((username) => {
+        if (!username) return;
+        if (typeof onClose === "function") onClose();
+        HISTORY.push("/@" + username);
+    }, [onClose]);
+    const renderRow = useCallback(
+        (entry, index, listClasses, image) => (
+            <VoterRow classes={listClasses} vclasses={classes} entry={entry} image={image} locales={locales} />
+        ),
+        [classes, locales],
+    );
+
+    return (
+        <Dialog
+            className={classes.dialog}
+            open={!!open}
+            fullWidth={true}
+            onClose={onClose}
+            keepMounted={false}
+        >
+            <Tabs
+                className={classes.cardTabs}
+                value={tab}
+                variant="fullWidth"
+                indicatorColor="primary"
+                textColor="primary"
+                onChange={onTabChange}
+            >
+                <Tab label={tr("components.gdmetrics.upvotes", "Upvotes")} />
+                <Tab label={tr("components.gdmetrics.downvotes_title", "Downvotes")} />
+            </Tabs>
+            <div className={classes.swipeRoot} ref={swipeRootRef}>
                 <SwipeableViews
                     ignoreNativeScroll={true}
-                    containerStyle={{height: "100%"}}
+                    style={FILL_STYLE}
+                    containerStyle={FILL_STYLE}
+                    slideStyle={SLIDE_STYLE}
                     animateHeight={false}
                     animateTransitions={true}
                     disableLazyLoading={true}
                     resistance={true}
-                    springConfig={{tension: 450, friction: 60, duration: '120ms', easeFunction: 'cubic-bezier(0.280, 0.840, 0.420, 1)', delay: '5ms'}}
-                    index={positive ? 0: 1}
-                    onChangeIndex={(v) => this._handleTabChange({}, v)}
-                    disabled={false}
-                    key={"swipe-able-view-votes"}
+                    springConfig={SPRING}
+                    index={tab}
+                    onChangeIndex={onChangeIndex}
                 >
-                    {this._get_views()}
+                    <VotesPane
+                        key="up"
+                        classes={classes}
+                        entries={ranked.up}
+                        total={ranked.upTotal}
+                        active={tab === 0}
+                        slot="up"
+                        store={store}
+                        renderRow={renderRow}
+                        onOpenAccount={openAccount}
+                        emptyText={t("components.voting_list_modal.no_upvotes_yet")}
+                    />
+                    <VotesPane
+                        key="down"
+                        classes={classes}
+                        entries={ranked.down}
+                        total={ranked.downTotal}
+                        active={tab === 1}
+                        slot="down"
+                        store={store}
+                        renderRow={renderRow}
+                        onOpenAccount={openAccount}
+                        emptyText={t("components.voting_list_modal.no_downvotes_yet")}
+                    />
                 </SwipeableViews>
-                <DialogActions>
-                    <Button onClick={this.props.onClose} autoFocus variant="contained" color="primary">
-                        {t("words.close")}
-                    </Button>
-                </DialogActions>
-            </Dialog>
-        );
-    }
+            </div>
+            <DialogActions>
+                <Button onClick={onClose} autoFocus variant="contained" color="primary">
+                    {t("words.close")}
+                </Button>
+            </DialogActions>
+        </Dialog>
+    );
 }
 
-export default withLanguage(withStyles(styles)(withPrices(VotingListModal)));
+export default withStyles(styles)(memo(VotingListModal));

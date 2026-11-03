@@ -20,7 +20,7 @@ import EditRounded from "@material-ui/icons/EditRounded";
 import TextFormatIcon from "@material-ui/icons/TextFormat";
 import Edit from "@material-ui/icons/Edit";
 
-import { t } from "../../utils/text";
+import { t, useLanguage } from "../../utils/text";
 
 export const editorToolbarStyles = (theme) => ({
     fixedSidebar: {
@@ -184,6 +184,8 @@ const EditorToolbar = React.memo(({
                                       onUndo,
                                       onRedo
                                   }) => {
+    // memo() + props that never change on a language switch: subscribe.
+    useLanguage();
     // One shared classes object for every sidebar tooltip — memoized so the
     // 12 Tooltip elements below keep a stable identity across renders.
     const tooltipClasses = React.useMemo(() => ({ tooltip: classes.menuTooltip }), [classes]);
@@ -228,7 +230,7 @@ const EditorToolbar = React.memo(({
 
     return (
         <div>
-            <Tooltip title={editorMode === 'visual' ? "Switch to markdown code": "Switch to visual editor"} placement="right" classes={tooltipClasses}>
+            <Tooltip title={editorMode === 'visual' ? t("components.editor_toolbar.switch_to_markdown_code") : t("components.editor_toolbar.switch_to_visual_editor")} placement="right" classes={tooltipClasses}>
                 <Fab
                     className={classes.menuIconButtonFab}
                     onClick={onToggleEditorMode}
@@ -312,7 +314,7 @@ const EditorToolbar = React.memo(({
 
                             <div className={classes.menuDivider} />
 
-                            <Tooltip title={hasSelection ? "Link (Ctrl+K)" : "Select text to add a link"} placement="right" classes={tooltipClasses}>
+                            <Tooltip title={hasSelection ? t("components.editor_toolbar.link_ctrl_k") : t("components.editor_toolbar.select_text_to_add_a_link")} placement="right" classes={tooltipClasses}>
                             <span className={classes.menuButtonWrap}>
                                 <IconButton
                                     className={classes.menuIconButton}

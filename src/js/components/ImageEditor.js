@@ -54,29 +54,30 @@ import RotateRightIcon from "@material-ui/icons/RotateRight";
 import FlipIcon from "@material-ui/icons/Flip";
 import RestoreIcon from "@material-ui/icons/Restore";
 
-import { t, useLanguage } from "../utils/text";
+import { t, tk, tx, useLanguage } from "../utils/text";
 
 // ============================================================================
 // COPY
 // ============================================================================
-// Plain English, gathered here so the strings can be moved to locale keys in
-// one place (only the shared "words.cancel" key is resolved through t()).
+// Deferred translations: this table lives at module scope, so it holds tk()
+// descriptors and every use resolves them with tx() at render time (a
+// language switch then applies). The size line under "Crop" is built at
+// render (see `hint`), with the picture's dimensions as variables.
 
 const COPY = {
-    crop: "Crop",
-    done: "Done",
-    loading: "Loading picture…",
-    hint: "Drag the frame or its corners",
-    couldNotRead: "Could not read this picture. Please try another one.",
-    exportFailed: "Could not save the crop. Please try again.",
-    aspectRatio: "Aspect ratio",
-    rotate: "Rotate 90°",
-    flip: "Flip horizontally",
-    reset: "Reset",
-    cropFrame: "Crop frame — drag to move, drag a corner or an edge to resize, arrow keys to nudge",
-    free: "Free",
-    original: "Original",
-    square: "Square"
+    crop: tk("components.image_editor.crop"),
+    done: tk("words.done"),
+    loading: tk("components.image_editor.loading_picture"),
+    couldNotRead: tk("components.image_editor.could_not_read_this_picture_please_try_another"),
+    exportFailed: tk("components.image_editor.could_not_save_the_crop_please_try_again"),
+    aspectRatio: tk("components.image_editor.aspect_ratio"),
+    rotate: tk("components.image_editor.rotate_90"),
+    flip: tk("components.image_editor.flip_horizontally"),
+    reset: tk("words.reset"),
+    cropFrame: tk("components.image_editor.crop_frame_drag_to_move_drag_a_corner_or_an"),
+    free: tk("components.image_editor.free"),
+    original: tk("components.image_editor.original"),
+    square: tk("components.image_editor.square")
 };
 
 // ============================================================================
@@ -170,7 +171,7 @@ const styles = theme => ({
     stage: {
         position: "relative",
         width: "100%",
-        height: "min(58vh, 620px)",
+        height: "min(calc(var(--app-h, 100vh) * 0.58), 620px)",
         minHeight: 280,
         borderRadius: "21px",
         backgroundColor: "#0b0b0b",
@@ -968,14 +969,17 @@ function ImageEditor(props) {
         height: crop.h * scale
     };
 
+    // errorMsg holds a COPY descriptor (or "" when there is none).
     const hint = status === "loading"
-        ? COPY.loading
+        ? tx(COPY.loading)
         : status === "error"
-            ? errorMsg
+            ? tx(errorMsg)
             : errorMsg
-                ? errorMsg
+                ? tx(errorMsg)
                 : output
-                    ? `${output.w} × ${output.h} px${isModified ? "" : " — " + COPY.hint}`
+                    ? (isModified
+                        ? t("components.image_editor.width_height_px", { width: output.w, height: output.h })
+                        : t("components.image_editor.width_height_px_drag_the_frame_or_its_corners", { width: output.w, height: output.h }))
                     : "";
 
     return (
@@ -1010,7 +1014,7 @@ function ImageEditor(props) {
                                     style={cropStyle}
                                     tabIndex={0}
                                     role="group"
-                                    aria-label={COPY.cropFrame}
+                                    aria-label={tx(COPY.cropFrame)}
                                     onPointerDown={handlePointerDown}
                                     onPointerMove={handlePointerMove}
                                     onPointerUp={handlePointerEnd}
@@ -1074,19 +1078,19 @@ function ImageEditor(props) {
                     )}
                     {status === "error" && (
                         <div className={classes.stageMessage}>
-                            <Typography variant="body2" style={{ color: "#888" }}>{errorMsg}</Typography>
+                            <Typography variant="body2" style={{ color: "#888" }}>{tx(errorMsg)}</Typography>
                         </div>
                     )}
                 </div>
 
                 <div className={classes.toolbar}>
-                    <div className={classes.chipsRow} role="radiogroup" aria-label={COPY.aspectRatio}>
+                    <div className={classes.chipsRow} role="radiogroup" aria-label={tx(COPY.aspectRatio)}>
                         {ASPECTS.map((a) => {
                             const active = isAspectActive(a.value);
                             return (
                                 <Chip
                                     key={a.id}
-                                    label={a.label}
+                                    label={tx(a.label)}
                                     clickable
                                     disabled={!ready || exporting}
                                     role="radio"
@@ -1102,8 +1106,8 @@ function ImageEditor(props) {
                             className={classes.toolButton}
                             onClick={handleRotate}
                             disabled={!ready || exporting}
-                            aria-label={COPY.rotate}
-                            title={COPY.rotate}
+                            aria-label={tx(COPY.rotate)}
+                            title={tx(COPY.rotate)}
                         >
                             <RotateRightIcon />
                         </IconButton>
@@ -1111,8 +1115,8 @@ function ImageEditor(props) {
                             className={classes.toolButton}
                             onClick={handleFlip}
                             disabled={!ready || exporting}
-                            aria-label={COPY.flip}
-                            title={COPY.flip}
+                            aria-label={tx(COPY.flip)}
+                            title={tx(COPY.flip)}
                         >
                             <FlipIcon />
                         </IconButton>
@@ -1120,8 +1124,8 @@ function ImageEditor(props) {
                             className={classes.toolButton}
                             onClick={handleReset}
                             disabled={!ready || exporting || !isModified}
-                            aria-label={COPY.reset}
-                            title={COPY.reset}
+                            aria-label={tx(COPY.reset)}
+                            title={tx(COPY.reset)}
                         >
                             <RestoreIcon />
                         </IconButton>
@@ -1132,7 +1136,7 @@ function ImageEditor(props) {
             <DialogActions className={classes.actions + (isMobile ? " " + classes.actionsMobile : "")}>
                 <Box style={{ textAlign: "left", minWidth: 0 }}>
                     <Typography variant="body2" className={classes.stepLabel}>
-                        {COPY.crop}
+                        {tx(COPY.crop)}
                     </Typography>
                     <Typography variant="caption" className={classes.stepHint}>
                         {hint}
@@ -1156,7 +1160,7 @@ function ImageEditor(props) {
                     >
                         {exporting ? (
                             <CircularProgress size={24} style={{ color: "#111" }} />
-                        ) : COPY.done}
+                        ) : tx(COPY.done)}
                     </Button>
                 </Box>
             </DialogActions>

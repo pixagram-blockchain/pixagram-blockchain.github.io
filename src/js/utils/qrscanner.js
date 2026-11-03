@@ -69,8 +69,10 @@ export class QrScanner {
     }
 
     /**
-     * Video inputs, as `{ id, label }`. Labels are blank until camera
-     * permission has been granted once, so call this *after* `open()`.
+     * Video inputs, as `{ id, label, index }`. Labels are blank until camera
+     * permission has been granted once, so call this *after* `open()`. A
+     * device without a label gets `label: null`: the UI names it from
+     * `index` (0-based) in its own language.
      */
     static async listCameras() {
         if (!navigator.mediaDevices?.enumerateDevices) return [];
@@ -78,7 +80,7 @@ export class QrScanner {
             const devices = await navigator.mediaDevices.enumerateDevices();
             return devices
                 .filter((d) => d.kind === "videoinput")
-                .map((d, i) => ({ id: d.deviceId, label: d.label || `Camera ${i + 1}` }));
+                .map((d, i) => ({ id: d.deviceId, label: d.label || null, index: i }));
         } catch {
             return [];
         }

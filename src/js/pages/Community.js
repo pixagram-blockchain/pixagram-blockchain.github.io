@@ -44,7 +44,7 @@ import Button from "@material-ui/core/Button";
 import TextField from "@material-ui/core/TextField";
 import Typography from "@material-ui/core/Typography";
 
-import { t, useLanguage } from "../utils/text";
+import { t, tk, tx, useLanguage } from "../utils/text";
 
 // ── Deferred text editor import ──────────────────────────────────────────
 // Single loader shared by React.lazy and the idle prefetch below, so both
@@ -1536,7 +1536,13 @@ const CommunityInfoPanel = memo(function CommunityInfoPanel(props) {
 
 const LeaveConfirmDialog = memo(({ open, userRole, onCancel, onConfirm, dialogClass }) => {
         useLanguage();
-        const roleLabel = userRole === 'owner' ? 'the owner' : userRole === 'admin' ? 'an admin' : 'a moderator';
+        // One whole sentence per role: the article ("the owner", "an admin")
+        // cannot be passed in as a word for the translator to place.
+        const warning = userRole === 'owner'
+            ? t("components.community.you_are_currently_the_owner_of_this_community")
+            : userRole === 'admin'
+                ? t("components.community.you_are_currently_an_admin_of_this_community")
+                : t("components.community.you_are_currently_a_moderator_of_this_community");
         return (
             <Dialog open={open} keepMounted={false} PaperProps={{ classes: { root: dialogClass } }}
                     onClose={onCancel} maxWidth="xs" fullWidth
@@ -1544,9 +1550,7 @@ const LeaveConfirmDialog = memo(({ open, userRole, onCancel, onConfirm, dialogCl
                 <DialogTitle id="leave-dialog-title">{t("components.community.do_you_really_want_to_leave_this")}</DialogTitle>
                 <DialogContent>
                     <DialogContentText id="leave-dialog-desc">
-                        {t("components.community.you_are_currently_of_this_community_leaving", {
-                            roleLabel: roleLabel
-                        })}
+                        {warning}
                     </DialogContentText>
                 </DialogContent>
                 <DialogActions>
@@ -1572,11 +1576,13 @@ const LeaveConfirmDialog = memo(({ open, userRole, onCancel, onConfirm, dialogCl
 // Mirrors TextEditorDialog's LinkDialog: a small dark Dialog with labelled
 // inputs and Cancel / confirm actions. Used for flagPost / mutePost /
 // unmutePost which all take a free-text `notes` field on the custom_json op.
+// Texts are tk() descriptors, resolved with tx() in the dialog's render.
 const MOD_OP_COPY = {
-    flagPost:    { title: 'Flag this post',   desc: 'Flag this post for moderator review. Your reason will be sent with the flag.', confirm: 'Flag',   confirmColor: '#fff' },
-    mutePost:    { title: 'Mute this post',   desc: 'Muted posts are hidden from the community feed. Use "spam" as the reason for spam.', confirm: 'Mute',   confirmColor: '#fff' },
-    unmutePost:  { title: 'Unmute this post', desc: 'Restore this post in the community feed. You can optionally add a note.', confirm: 'Unmute', confirmColor: '#fff' },
+    flagPost:    { title: tk("components.community.flag_this_post"),   desc: tk("components.community.flag_this_post_for_moderator_review_your_reason"), confirm: tk("components.community.flag"),   confirmColor: '#fff' },
+    mutePost:    { title: tk("components.community.mute_this_post"),   desc: tk("components.community.muted_posts_are_hidden_from_the_community_feed"), confirm: tk("components.community.mute"),   confirmColor: '#fff' },
+    unmutePost:  { title: tk("components.community.unmute_this_post"), desc: tk("components.community.restore_this_post_in_the_community_feed_you"), confirm: tk("components.community.unmute"), confirmColor: '#fff' },
 };
+const MOD_OP_FALLBACK = { title: tk("components.community.moderation"), desc: '', confirm: tk("words.confirm"), confirmColor: '#fff' };
 
 const ModerationReasonDialog = memo(({
                                          classes,
@@ -1591,7 +1597,7 @@ const ModerationReasonDialog = memo(({
                                          submitting,
                                      }) => {
         useLanguage();
-        const copy = MOD_OP_COPY[op] || { title: 'Moderation', desc: '', confirm: 'Confirm', confirmColor: '#fff' };
+        const copy = MOD_OP_COPY[op] || MOD_OP_FALLBACK;
         const confirmTextColor = copy.confirmColor === '#fff' ? '#000' : '#fff';
         return (
             <Dialog
@@ -1604,7 +1610,7 @@ const ModerationReasonDialog = memo(({
             >
                 <DialogContent className={classes.darkDialogContent}>
                     <Typography variant="h6" gutterBottom id="moderation-dialog-title">
-                        {copy.title}
+                        {tx(copy.title)}
                     </Typography>
                     {author && permlink && (
                         <Typography
@@ -1615,13 +1621,13 @@ const ModerationReasonDialog = memo(({
                         </Typography>
                     )}
                     <Typography variant="body2" style={{ color: "rgba(255,255,255,0.8)", marginBottom: 16 }}>
-                        {copy.desc}
+                        {tx(copy.desc)}
                     </Typography>
                     <TextField
                         className={classes.darkInput}
                         variant="outlined"
                         label={t("components.community.reason_optional")}
-                        placeholder={op === 'mutePost' ? 'spam' : ''}
+                        placeholder={op === 'mutePost' ? t("components.community.spam") : ''}
                         value={notes}
                         onChange={onNotesChange}
                         fullWidth
@@ -1642,7 +1648,7 @@ const ModerationReasonDialog = memo(({
                         disabled={submitting}
                         style={{ backgroundColor: copy.confirmColor, color: confirmTextColor }}
                     >
-                        {submitting ? '…' : copy.confirm}
+                        {submitting ? '…' : tx(copy.confirm)}
                     </Button>
                 </DialogActions>
             </Dialog>
@@ -2026,7 +2032,7 @@ const Community = ({ classes, settings, pathname, api }) => {
         } catch (e) {
             console.warn(`[Community] ${op} failed:`, e?.message || e);
             actions.trigger_snackbar(t("components.community.failed", {
-                value: e?.message || 'unknown error'
+                value: e?.message || t("components.create_account_dialog.unknown_error")
             }));
         }
     }, [api, patchPostStats]);

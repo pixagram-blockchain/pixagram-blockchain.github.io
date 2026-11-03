@@ -551,7 +551,7 @@ const NotificationsContent = React.memo(({
                     )}
                 </div>
             </div>
-            <div className={classes.content} style={{ overflowY: "auto", maxHeight: showCloseButton ? "calc(100vh - 60px)" : 440 }}>
+            <div className={classes.content} style={{ overflowY: "auto", maxHeight: showCloseButton ? "calc(var(--app-h, 100vh) - 60px)" : 440 }}>
                 {loading ? (
                     <div className={classes.loadingContainer}>
                         <CircularProgress size={32} className={classes.loaderColor} />

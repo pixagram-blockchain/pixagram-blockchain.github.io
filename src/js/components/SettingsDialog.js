@@ -24,6 +24,7 @@ import Autocomplete from "@material-ui/lab/Autocomplete";
 import Slider from "@material-ui/core/Slider";
 
 import { CURRENCIES, DEFAULT_NODES } from "../utils/constants";
+import { currencyName, languageLabel, nodeDisplayName } from "../utils/displayNames";
 import { describe as describe_locale, STATUS } from "../utils/locale-status";
 import LOCALES from "../utils/constant_locales";
 import get_svg_in_b64 from "../utils/svgToBase64";
@@ -208,7 +209,7 @@ const fuzzyFilterCurrencies = (list, input_value) => {
 };
 
 const SettingsDialog = (props) => {
-    useLanguage();
+    const uiLanguage = useLanguage();
 
     const classes = useStyles();
     // `fallbackNode` / `onRetryConfiguredNode`: node failover state from
@@ -519,8 +520,8 @@ const SettingsDialog = (props) => {
     const fallbackNodeName = useMemo(() => {
         if (!fallbackNode) return null;
         const listed = DEFAULT_NODES.find((n) => api.same_node_url(n.url, fallbackNode.url));
-        return listed ? listed.name : null;
-    }, [fallbackNode]);
+        return listed ? nodeDisplayName(listed) : null;
+    }, [fallbackNode, uiLanguage]);
 
     // "Keep this node": persist the fallback as the configured endpoint
     // through the normal write path. Index then sees configured === fallback,
@@ -536,18 +537,33 @@ const SettingsDialog = (props) => {
         if (typeof onRetryConfiguredNode === "function") onRetryConfiguredNode();
     }, [onRetryConfiguredNode]);
 
+    // Each language named in its own words (and in the UI language when that
+    // reads differently) instead of the English names of constant_locales;
+    // rebuilt on a language switch. The value must come from this same list —
+    // Autocomplete matches options by identity.
+    const localeOptions = useMemo(
+        () => LOCALES.map(l => ({ ...l, name: languageLabel(l.code, l.name) })),
+        [uiLanguage]
+    );
     const locales = useMemo(
-        () => LOCALES.find(l => l.code === _selected_locales_code) || LOCALES[0],
-        [_selected_locales_code]
+        () => localeOptions.find(l => l.code === _selected_locales_code) || localeOptions[0],
+        [_selected_locales_code, localeOptions]
     );
 
     // Selected currency object for the Autocomplete, resolved from the live
     // currencyCode (settings-cache backed). Default USD if the code is unknown.
+    // The list with each currency named in the UI language (Intl), English as
+    // the fallback; rebuilt on a language switch. The selected value must come
+    // from this same list — Autocomplete matches options by identity.
+    const currencyOptions = useMemo(
+        () => CURRENCIES.map(c => ({ ...c, name: currencyName(c.code) || c.name })),
+        [uiLanguage]
+    );
     const currency = useMemo(
-        () => CURRENCIES.find(c => c.code === currencyCode)
-            || CURRENCIES.find(c => c.code === "USD")
-            || CURRENCIES[0],
-        [currencyCode]
+        () => currencyOptions.find(c => c.code === currencyCode)
+            || currencyOptions.find(c => c.code === "USD")
+            || currencyOptions[0],
+        [currencyCode, currencyOptions]
     );
 
     return (
@@ -569,7 +585,7 @@ const SettingsDialog = (props) => {
                         filterOptions={fuzzyFilterLocales}
                         onChange={_handle_locales_changed}
                         id="locales-autocomplete"
-                        options={LOCALES}
+                        options={localeOptions}
                         getOptionLabel={(option) => option.name || option.original.name}
                         renderOption={(option) => {
                             // One call decides the whole row: whether the flag is
@@ -616,7 +632,7 @@ const SettingsDialog = (props) => {
                         filterOptions={fuzzyFilterCurrencies}
                         onChange={_handle_currency_changed}
                         id="currency-autocomplete"
-                        options={CURRENCIES}
+                        options={currencyOptions}
                         disableClearable
                         getOptionLabel={(option) =>
                             option.original

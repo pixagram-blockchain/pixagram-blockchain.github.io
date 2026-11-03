@@ -43,7 +43,7 @@ import * as actions from "../actions/utils";
 import { HISTORY } from "../utils/constants";
 import { CONTENT_LANGUAGES, LANGUAGE_NAME } from "../utils/locale-status";
 
-import { t, getLanguage, getLocaleCode } from "../utils/text";
+import { t, tk, tx, getLanguage, getLocaleCode } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
 
@@ -276,7 +276,14 @@ function PxpNumberFormat(props) {
 
 // Stable render helpers + SwipeableViews config — were literals re-created
 // on every render (the dialog re-renders per keystroke of its inputs).
-const renderCapitalized = (v) => v.charAt(0).toUpperCase() + v.slice(1);
+// The portal type shown in the closed select: its translated name, the same
+// one the menu items show (the value itself is the chain identifier).
+const PORTAL_TYPE_LABELS = {
+    topic: tk("components.create_community_dialog.topic"),
+    journal: tk("components.create_community_dialog.journal"),
+    council: tk("components.create_community_dialog.council"),
+};
+const renderPortalType = (v) => (Object.prototype.hasOwnProperty.call(PORTAL_TYPE_LABELS, v) ? tx(PORTAL_TYPE_LABELS[v]) : v);
 const renderUppercased = (v) => v.toUpperCase();
 const SWIPE_CONTAINER_STYLE = { height: "100%" };
 const SWIPE_SPRING_CONFIG = {
@@ -724,7 +731,7 @@ class CreateCommunityDialog extends React.PureComponent {
             });
         } catch (err) {
             console.error("[CreateCommunityDialog] accountCreate failed:", err);
-            this.setState({ _creation_phase: "error", _creation_error: err.message || "Account creation failed" });
+            this.setState({ _creation_phase: "error", _creation_error: err.message || tk("components.create_community_dialog.account_creation_failed") });
             return;
         }
 
@@ -741,7 +748,7 @@ class CreateCommunityDialog extends React.PureComponent {
                 );
             } catch (err) {
                 console.error("[CreateCommunityDialog] delegation failed:", err);
-                this.setState({ _creation_phase: "error", _creation_error: err.message || "Delegation failed" });
+                this.setState({ _creation_phase: "error", _creation_error: err.message || tk("components.pixa_wallet_delegate_dialog.delegation_failed") });
                 return;
             }
         }
@@ -774,7 +781,7 @@ class CreateCommunityDialog extends React.PureComponent {
             }, portalAuths));
         } catch (err) {
             console.error("[CreateCommunityDialog] setRole failed:", err);
-            this.setState({ _creation_phase: "error", _creation_error: err.message || "Failed to set admin role" });
+            this.setState({ _creation_phase: "error", _creation_error: err.message || tk("components.create_community_dialog.failed_to_set_admin_role") });
             return;
         }
 
@@ -833,8 +840,11 @@ class CreateCommunityDialog extends React.PureComponent {
             // from its settings dialog once the field is fixed.
             this.setState({
                 _creation_phase: "error",
-                _creation_error: "Portal " + _portal_username + " was created, but its settings cannot be applied: "
-                    + problems.map((p) => p.reason).join("; ") + ". Fix them from the portal's settings.",
+                // The reasons are the API's own (English) wording.
+                _creation_error: tk("components.create_community_dialog.portal_was_created_but_its_settings_cannot_be", {
+                    username: _portal_username,
+                    reasons: problems.map((p) => p.reason).join("; "),
+                }),
             });
             return;
         }
@@ -875,7 +885,7 @@ class CreateCommunityDialog extends React.PureComponent {
             }, { posting: portalAuths.posting }));
         } catch (err) {
             console.error("[CreateCommunityDialog] configure failed:", err);
-            this.setState({ _creation_phase: "error", _creation_error: err.message || "Failed to configure portal" });
+            this.setState({ _creation_phase: "error", _creation_error: err.message || tk("components.create_community_dialog.failed_to_configure_portal") });
             return;
         }
 
@@ -907,8 +917,11 @@ class CreateCommunityDialog extends React.PureComponent {
                     console.error("[CreateCommunityDialog] indexer rejected updateProps:", rejection);
                     this.setState({
                         _creation_phase: "error",
-                        _creation_error: "Portal " + _portal_username + " was created, but the index rejected its settings: "
-                            + rejection.reason + ". Fix them from the portal's settings.",
+                        // The reason is the indexer's own (English) wording.
+                        _creation_error: tk("components.create_community_dialog.portal_was_created_but_the_index_rejected_its", {
+                            username: _portal_username,
+                            reason: rejection.reason,
+                        }),
                     });
                     return;
                 }
@@ -966,19 +979,19 @@ class CreateCommunityDialog extends React.PureComponent {
 
         // Build phases dynamically (delegation only shown if > 0)
         const phases = [
-            { key: "creating",    label: "Creating portal" },
+            { key: "creating",    label: t("components.create_community_dialog.creating_portal") },
         ];
 
         if (_delegation_pxp > 0) {
-            phases.push({ key: "delegating", label: "Delegating PXP to portal" });
+            phases.push({ key: "delegating", label: t("components.create_community_dialog.delegating_pxp_to_portal") });
         }
 
         phases.push(
             { key: "admin",       label: t("components.create_community_dialog.setting_as_admin", {
                     _logged_in_user: _logged_in_user
                 }) },
-            { key: "configuring", label: "Setting portal's configuration" },
-            { key: "indexing",    label: "Waiting for the portal index" },
+            { key: "configuring", label: t("components.create_community_dialog.setting_portals_configuration") },
+            { key: "indexing",    label: t("components.create_community_dialog.waiting_for_the_portal_index") },
         );
 
         const phaseOrder = phases.map(p => p.key).concat("done");
@@ -1023,7 +1036,7 @@ class CreateCommunityDialog extends React.PureComponent {
                 {isError && (
                     <div className={classes.errorBox}>
                         <Typography style={ST_FS_13__C_CCC__MB_14}>
-                            {_creation_error}
+                            {tx(_creation_error)}
                         </Typography>
                         <Button
                             variant="outlined"
@@ -1120,7 +1133,7 @@ class CreateCommunityDialog extends React.PureComponent {
                         value={_portal_type}
                         onChange={this._handlePortalTypeChange}
                         labelWidth={85}
-                        renderValue={renderCapitalized}
+                        renderValue={renderPortalType}
                     >
                         <MenuItem value="topic">
                             <ListItemText primary={t("components.create_community_dialog.topic")} secondary={t("components.create_community_dialog.anyone_can_post_or_comment")} />
@@ -1182,12 +1195,12 @@ class CreateCommunityDialog extends React.PureComponent {
                             <Tooltip
                                 title={
                                     _portal_username_syntax_error
-                                        ? "Invalid format. Use: portal-XXXXXX"
+                                        ? t("components.create_community_dialog.invalid_format_use_portal_xxxxxx")
                                         : _pending_username_validation
-                                            ? "Checking availability…"
+                                            ? t("components.add_account_dialog.checking_availability")
                                             : _portal_username_available
-                                                ? "Username available"
-                                                : "Username not available"
+                                                ? t("components.create_community_dialog.username_available")
+                                                : t("components.create_community_dialog.username_not_available")
                                 }
                             >
                                 <InputAdornment position="end" className={classes.inputEndAdornment}>
@@ -1271,7 +1284,9 @@ class CreateCommunityDialog extends React.PureComponent {
                         disabled={!_portal_username_available || _pending_username_validation}
                         style={{ color: _sprout_downloaded ? "#bbb" : "#ddd" }}
                     >
-                        {_sprout_downloaded ? "RE-DOWNLOAD CREDENTIALS" : "DOWNLOAD CREDENTIALS"}
+                        {_sprout_downloaded
+                            ? t("components.create_community_dialog.re_download_credentials", { TUC: true })
+                            : t("components.create_community_dialog.download_credentials", { TUC: true })}
                     </Button>
                 </div>
 

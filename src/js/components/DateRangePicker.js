@@ -11,7 +11,7 @@ import ChevronLeftIcon from "@material-ui/icons/ChevronLeft";
 import ChevronRightIcon from "@material-ui/icons/ChevronRight";
 import EventIcon from "@material-ui/icons/Event";
 
-import { t, useLanguage } from "../utils/text";
+import { t, useLanguage, getLocaleCode } from "../utils/text";
 
 /**
  * DateRangePicker — a single field + modal calendar for picking a start/end
@@ -32,7 +32,8 @@ import { t, useLanguage } from "../utils/text";
  * Props:
  *   startDate / endDate        Date | null — controlled values
  *   onChangeStart / onChangeEnd(date)     — both fired on OK
- *   label                      field label (default "Date range")
+ *   label                      field label (default: translated "Date
+ *                              range"; null for no label)
  *   helperText, error          forwarded to the TextField
  *   className                  extra class on the field (greyscale error
  *                              overrides ride in from the caller)
@@ -62,21 +63,162 @@ const withTimeOf = (day, ref) => {
 };
 
 const pad2 = (n) => String(n).padStart(2, '0');
-// Field format — matches the MM/dd/yyyy the two KeyboardDatePickers used.
-const formatMDY = (d) => `${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}/${d.getFullYear()}`;
-// Header chips — "Apr 1" like the MUI X modal.
-const formatShort = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-// Month title — "April 2022".
-const formatMonth = (d) => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
-const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']; // Sunday-first, like the reference
+// ── locale helpers (Intl only, still no date library) ────────────────────
+// Everything the picker shows follows the APP language (getLocaleCode(),
+// e.g. "fr-CH"), not en-US and not the browser: month and weekday names,
+// the first day of the week and the numeric day/month/year order. Digits
+// stay Latin (-u-nu-latn), as in utils/numberFormat: the day grid prints
+// plain numbers and the typed KeyboardDatePicker (SettingsPanel) only
+// accepts 0-9, so a bn-BD user sees one digit set everywhere. Exported for
+// that picker, which shares the numeric layout and the week start.
 
-// Weeks (rows of 7, null-padded) for the month containing `view`.
-const buildWeeks = (view) => {
+const FALLBACK_CODE = 'en-US';
+const latnTag = (code) => {
+    const base = String(code || FALLBACK_CODE);
+    if (base.indexOf('-nu-') !== -1) return base;
+    return base.indexOf('-u-') !== -1 ? base + '-nu-latn' : base + '-u-nu-latn';
+};
+
+// Intl formatters are ICU lookups: build each (locale, options) pair once.
+const intlCache = new Map();
+const dateFormatter = (code, id, opts) => {
+    code = code || FALLBACK_CODE;
+    const key = code + '|' + id;
+    let f = intlCache.get(key);
+    if (!f) {
+        try { f = new Intl.DateTimeFormat(latnTag(code), opts); }
+        catch (_) { f = new Intl.DateTimeFormat(latnTag(FALLBACK_CODE), opts); }
+        if (intlCache.size > 200) intlCache.clear();
+        intlCache.set(key, f);
+    }
+    return f;
+};
+
+const NUMERIC = { year: 'numeric', month: '2-digit', day: '2-digit' };
+const FIELDS = { day: 1, month: 1, year: 1 };
+const BIDI_MARKS = /[\u200e\u200f\u061c]/g;
+const US_LAYOUT = { order: ['month', 'day', 'year'], literals: ['', '/', '/', ''] };
+
+/**
+ * The locale's all-numeric date layout, read from Intl.formatToParts:
+ * `order` is the field sequence, `literals[i]` the text before field i and
+ * `literals[3]` the text after the last one.
+ *   en-US → month "/" day "/" year      de-DE → day "." month "." year
+ *   ja-JP → year "/" month "/" day      hu-HU → year ". " month ". " day "."
+ */
+const layoutCache = new Map();
+export const numericDateLayout = (code) => {
+    const c = code || FALLBACK_CODE;
+    let layout = layoutCache.get(c);
+    if (layout) return layout;
+    const order = [];
+    const literals = [''];
+    try {
+        dateFormatter(c, 'numeric', NUMERIC).formatToParts(new Date(2001, 10, 22)).forEach((p) => {
+            if (FIELDS[p.type]) { order.push(p.type); literals.push(''); }
+            else literals[literals.length - 1] += String(p.value).replace(BIDI_MARKS, '');
+        });
+    } catch (_) { order.length = 0; }
+    layout = (order.length === 3 && new Set(order).size === 3) ? { order, literals } : US_LAYOUT;
+    layoutCache.set(c, layout);
+    return layout;
+};
+
+const fieldText = (d, field) => field === 'day' ? pad2(d.getDate())
+    : field === 'month' ? pad2(d.getMonth() + 1)
+        : String(d.getFullYear()).padStart(4, '0');
+
+// Lays the three fields out in the locale's order: per field, `piece`
+// supplies the text ("02" / "11" / "2026", or the placeholder letters).
+const layOut = (code, piece) => {
+    const { order, literals } = numericDateLayout(code);
+    let out = literals[0];
+    for (let i = 0; i < order.length; i++) out += piece(order[i]) + literals[i + 1];
+    return out;
+};
+
+/** "11/22/2001" (en-US), "22.11.2001" (de-DE), "2001/11/22" (ja-JP). */
+export const formatNumericDate = (d, code) => layOut(code, (field) => fieldText(d, field));
+
+/**
+ * The same layout as a date-fns pattern ("dd.MM.yyyy") for the typed
+ * KeyboardDatePicker. Literals keep only separator characters: the picker
+ * derives its input mask from the pattern by turning every letter into a
+ * digit slot, so a letter in a literal would become one.
+ */
+export const dateFnsPattern = (code) => {
+    const { order, literals } = numericDateLayout(code);
+    const sep = (s) => s.replace(/[\u00a0\u202f]/g, ' ').replace(/[^ .,/-]/g, '');
+    const token = { day: 'dd', month: 'MM', year: 'yyyy' };
+    let out = sep(literals[0]);
+    for (let i = 0; i < order.length; i++) out += token[order[i]] + sep(literals[i + 1]);
+    return out;
+};
+
+// Territories whose week starts on Sunday / Saturday (CLDR weekData) — only
+// consulted when the browser has no Intl.Locale week info (Firefox).
+const SUNDAY_FIRST = new Set(('AG AS BD BR BS BT BW BZ CA CO DM DO ET GT GU HK HN ID IL IN JM JP KE '
+    + 'KH KR LA MH MM MO MT MX MZ NI NP PA PE PH PK PR PT PY SA SG SV TH TT TW UM US VE VI WS YE ZA ZW').split(' '));
+const SATURDAY_FIRST = new Set('AE AF BH DJ DZ EG IQ IR JO KW LY OM QA SD SY'.split(' '));
+
+/** First day of the week as Date#getDay() counts (0 = Sunday, 1 = Monday). */
+const firstDayCache = new Map();
+export const firstDayOfWeek = (code) => {
+    const c = code || FALLBACK_CODE;
+    let day = firstDayCache.get(c);
+    if (day !== undefined) return day;
+    day = null;
+    try {
+        const loc = new Intl.Locale(c);
+        const info = typeof loc.getWeekInfo === 'function' ? loc.getWeekInfo() : loc.weekInfo;
+        if (info && info.firstDay >= 1 && info.firstDay <= 7) day = info.firstDay % 7;  // 7 = Sunday
+    } catch (_) { day = null; }
+    if (day === null) {
+        const m = /^[a-z]{2,3}(?:-[A-Za-z]{4})?-([A-Za-z]{2})(?:-|$)/.exec(c);
+        const region = m ? m[1].toUpperCase() : null;
+        day = !region || SUNDAY_FIRST.has(region) ? 0 : (SATURDAY_FIRST.has(region) ? 6 : 1);
+    }
+    firstDayCache.set(c, day);
+    return day;
+};
+
+// 1 Jan 2023 was a Sunday: index i of the result is the name for getDay() === i.
+const weekdayNames = (code, width) =>
+    [0, 1, 2, 3, 4, 5, 6].map((i) => dateFormatter(code, 'wd-' + width, { weekday: width }).format(new Date(2023, 0, 1 + i)));
+
+/** Weekday names for the column headers, starting on the locale's first day. */
+const headerCache = new Map();
+export const weekdayHeaders = (code, width = 'narrow') => {
+    const key = (code || FALLBACK_CODE) + '|' + width;
+    let headers = headerCache.get(key);
+    if (!headers) {
+        const names = weekdayNames(code || FALLBACK_CODE, width);
+        const first = firstDayOfWeek(code);
+        headers = names.slice(first).concat(names.slice(0, first));
+        headerCache.set(key, headers);
+    }
+    return headers;
+};
+
+/** Any Intl date format in the app language (Latin digits, cached formatter). */
+export const formatIntlDate = (d, code, opts) => dateFormatter(code, JSON.stringify(opts), opts).format(d);
+
+/** Month name + year, e.g. "November 2026", "novembre 2026", "2026年11月". */
+export const formatMonthYear = (d, code) => dateFormatter(code, 'month-year', { month: 'long', year: 'numeric' }).format(d);
+
+// Header chips — "Apr 1" / "1 avr." like the MUI X modal.
+const formatShort = (d, code) => dateFormatter(code, 'short', { month: 'short', day: 'numeric' }).format(d);
+// Day buttons' accessible name — the full date, not just the number.
+const formatLong = (d, code) => dateFormatter(code, 'long', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }).format(d);
+
+// Weeks (rows of 7, null-padded) for the month containing `view`, the first
+// column being the locale's first day of the week (0 = Sunday … 6 = Saturday).
+const buildWeeks = (view, firstDay = 0) => {
     const first = new Date(view.getFullYear(), view.getMonth(), 1);
     const daysInMonth = new Date(view.getFullYear(), view.getMonth() + 1, 0).getDate();
     const weeks = [];
-    let week = new Array(first.getDay()).fill(null);
+    let week = new Array((first.getDay() - firstDay + 7) % 7).fill(null);
     for (let d = 1; d <= daysInMonth; d++) {
         week.push(new Date(view.getFullYear(), view.getMonth(), d));
         if (week.length === 7) { weeks.push(week); week = []; }
@@ -248,7 +390,7 @@ export const dateRangePickerStyles = () => ({
 const DateRangePicker = React.memo(({
                                         classes,
                                         className,
-                                        label = "Date range",
+                                        label,
                                         startDate,
                                         endDate,
                                         onChangeStart,
@@ -264,6 +406,9 @@ const DateRangePicker = React.memo(({
                                         id,
                                     }) => {
     useLanguage();
+    // Read per render (cheap): every name, order and week start below follows it.
+    const code = getLocaleCode();
+    const firstDay = firstDayOfWeek(code);
     const [open, setOpen] = React.useState(false);
     const [draftStart, setDraftStart] = React.useState(null);
     const [draftEnd, setDraftEnd] = React.useState(null);
@@ -331,7 +476,7 @@ const DateRangePicker = React.memo(({
     // floor — `view` is always the 1st of the month, so that's one compare.
     const prevDisabled = floorKey != null && floorKey >= dayKey(view);
 
-    const weeks = React.useMemo(() => buildWeeks(view), [view]);
+    const weeks = React.useMemo(() => buildWeeks(view, firstDay), [view, firstDay]);
     const todayKey = dayKey(new Date());
     const startKey = draftStart ? dayKey(draftStart) : null;
     const endKey = draftEnd ? dayKey(draftEnd) : null;
@@ -344,6 +489,25 @@ const DateRangePicker = React.memo(({
         : (hoverDay != null && startKey != null && hoverDay > startKey ? hoverDay : null);
     const previewOnly = endKey == null && bandHi != null;
 
+    // Field text in the locale's numeric order — "11/22/2026 – 11/29/2026",
+    // "22.11.2026 – 29.11.2026" — and a placeholder laid out the same way
+    // from translated field letters (DD/MM/YYYY, TT.MM.JJJJ, JJ/MM/AAAA…).
+    // Read-only: the field only opens the calendar, nothing is parsed here.
+    const fieldStart = asDate(startDate);
+    const fieldEnd = asDate(endDate);
+    const fieldValue = (fieldStart || fieldEnd)
+        ? t("components.date_range_picker.range_start_end", {
+            start: fieldStart ? formatNumericDate(fieldStart, code) : '',
+            end: fieldEnd ? formatNumericDate(fieldEnd, code) : '',
+        })
+        : '';
+    const placeholderLetters = {
+        day: t("components.date_range_picker.dd"),
+        month: t("components.date_range_picker.mm"),
+        year: t("components.date_range_picker.yyyy"),
+    };
+    const placeholderDate = layOut(code, (field) => placeholderLetters[field]);
+
     const field = (
         <TextField
             id={id}
@@ -351,13 +515,9 @@ const DateRangePicker = React.memo(({
             variant="outlined"
             margin={margin}
             fullWidth={fullWidth}
-            label={label}
-            value={
-                (asDate(startDate) ? formatMDY(asDate(startDate)) : '') +
-                (asDate(startDate) || asDate(endDate) ? ' – ' : '') +
-                (asDate(endDate) ? formatMDY(asDate(endDate)) : '')
-            }
-            placeholder={t("components.date_range_picker.mm_dd_yyyy_mm_dd_yyyy")}
+            label={label === undefined ? t("components.date_range_picker.date_range") : label}
+            value={fieldValue}
+            placeholder={t("components.date_range_picker.range_start_end", { start: placeholderDate, end: placeholderDate })}
             onClick={openPicker}
             disabled={disabled}
             helperText={helperText}
@@ -398,7 +558,7 @@ const DateRangePicker = React.memo(({
                             }
                             onClick={() => setActive('start')}
                         >
-                            {draftStart ? formatShort(draftStart) : 'Start'}
+                            {draftStart ? formatShort(draftStart, code) : t("components.date_range_picker.start")}
                         </button>
                         <span>–</span>
                         <button
@@ -410,13 +570,13 @@ const DateRangePicker = React.memo(({
                             }
                             onClick={() => setActive('end')}
                         >
-                            {draftEnd ? formatShort(draftEnd) : 'End'}
+                            {draftEnd ? formatShort(draftEnd, code) : t("components.date_range_picker.end")}
                         </button>
                     </div>
                 </div>
 
                 <div className={classes.monthRow}>
-                    <span className={classes.monthLabel}>{formatMonth(view)}</span>
+                    <span className={classes.monthLabel}>{formatMonthYear(view, code)}</span>
                     <span>
                         <IconButton
                             className={classes.navButton}
@@ -438,7 +598,7 @@ const DateRangePicker = React.memo(({
 
                 <div className={classes.grid} onMouseLeave={() => setHoverDay(null)}>
                     <div className={classes.weekdayRow}>
-                        {WEEKDAYS.map((w, i) => (
+                        {weekdayHeaders(code).map((w, i) => (
                             <span key={i} className={classes.weekday}>{w}</span>
                         ))}
                     </div>
@@ -485,7 +645,7 @@ const DateRangePicker = React.memo(({
                                             disabled={isDisabled}
                                             onClick={isDisabled ? undefined : () => pickDay(day)}
                                             onMouseEnter={isDisabled ? undefined : () => setHoverDay(k)}
-                                            aria-label={formatMDY(day)}
+                                            aria-label={formatLong(day, code)}
                                         >
                                             {day.getDate()}
                                         </button>
@@ -505,7 +665,7 @@ const DateRangePicker = React.memo(({
                         onClick={commit}
                         disabled={!draftStart || !draftEnd}
                     >
-                        OK
+                        {t("components.date_range_picker.ok")}
                     </Button>
                 </div>
             </Dialog>

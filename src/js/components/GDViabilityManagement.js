@@ -42,8 +42,8 @@ const L = "components.gdviability_management.";
 
 // The rail's tabs, in rail order (TAB_* above), named on hover and for screen readers.
 const TABS = [
-    { value: TAB_PROPOSALS, icon: DescriptionIcon, label: () => label(L + "tab_proposals", "Proposals") },
-    { value: TAB_WITNESSES, icon: HowToVoteIcon, label: () => label(L + "tab_witnesses", "Witnesses") },
+    { value: TAB_PROPOSALS, icon: DescriptionIcon, label: () => label("words.proposals", "Proposals") },
+    { value: TAB_WITNESSES, icon: HowToVoteIcon, label: () => label("words.witnesses", "Witnesses") },
     { value: TAB_TOKENOMICS, icon: AccountBalanceIcon, label: () => label(L + "tab_tokenomics", "Tokenomics") }
 ];
 

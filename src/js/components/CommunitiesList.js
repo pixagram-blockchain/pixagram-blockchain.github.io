@@ -14,6 +14,19 @@ import Community from "../icons/Community";
 
 import { t, useLanguage } from "../utils/text";
 
+// Community role ids from the chain ("owner", "admin", "mod"…) as words in the
+// UI language; an id the catalogue doesn't know is shown as it came.
+const ROLE_KEYS = {
+    owner: "components.notifications_dialog.role_owner",
+    admin: "components.notifications_dialog.role_admin",
+    mod: "components.notifications_dialog.role_moderator",
+    moderator: "components.notifications_dialog.role_moderator",
+    member: "components.notifications_dialog.role_member",
+    guest: "components.notifications_dialog.role_guest",
+    muted: "components.notifications_dialog.role_muted",
+};
+const roleLabel = (role) => (ROLE_KEYS[role] ? t(ROLE_KEYS[role], { FLUC: true }) : role);
+
 // Hoisted static styles — were inline literals re-created on every render.
 const ST_FS_12PX__C_888__LH_1REM = { fontSize: "12px", color: "#888", lineHeight: "1rem", fontStyle: "italic" };
 const ST_CUR_POINTER = { cursor: "pointer" };
@@ -98,7 +111,7 @@ const CommunitiesList = React.memo(({ classes, subscriptions, onGoToCommunity, o
                                         <span style={ST_C_717171}>{t("words.portal")} </span>
                                         <span style={ST_MR_8PX}>{d.title}</span>
                                         {d.role && d.role !== 'guest' && (
-                                            <Chip className={classes.communityChip} size="small" icon={<AccountCircleRounded />} label={d.role} />
+                                            <Chip className={classes.communityChip} size="small" icon={<AccountCircleRounded />} label={roleLabel(d.role)} />
                                         )}
                                     </Typography>
                                 }

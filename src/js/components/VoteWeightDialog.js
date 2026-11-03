@@ -6,6 +6,8 @@ import ButtonBase from "@material-ui/core/ButtonBase";
 import CircularProgress from "@material-ui/core/CircularProgress";
 import {DoneRounded} from "@material-ui/icons";
 import { withPrices } from "../hooks/usePrices";
+import { t, tk, tx } from "../utils/text";
+import { withLanguage } from "../utils/withLanguage";
 import {
     estimateVoteValue, fiatOf, formatPxs,
     getRewardSnapshot, getRewardSnapshotSync,
@@ -31,15 +33,13 @@ const TICK_INNER = R - STROKE_W / 2 - 2;
 const LABEL_R = R - STROKE_W / 2 - 16;
 
 // Disc diameter: 340px max, otherwise whatever fits the screen with a 20px
-// margin on each side. `svh` = the viewport with the mobile browser bars
-// shown, so the disc never ends up under them; `vh` is the fallback for
-// browsers without small-viewport units.
-const discSize = (vh) => "min(340px, calc(100vw - 40px), calc(100" + vh + " - 40px))";
-const DISC = discSize("svh");
-const DISC_FALLBACK = discSize("vh");
+// margin on each side. The height is --app-h, the MEASURED visible height
+// (utils/viewport): svh / dvh are each engine's own bookkeeping and Brave's
+// leave its bottom toolbar out, which put the bottom of the disc under it.
+const DISC = "min(340px, calc(100vw - 40px), calc(var(--app-h, 100vh) - 40px))";
 // Base font size of the HTML overlays, scaled with the disc (14px at 340px)
 // so the button content keeps its proportions when the disc shrinks.
-const discFont = (disc) => "calc(" + disc + " * 14 / 340)";
+const DISC_FONT = "calc(" + DISC + " * 14 / 340)";
 
 /** Math-convention angle → SVG point (y-down). */
 function toSvg(angle, radius) {
@@ -117,18 +117,29 @@ const TRANSITION = "filter 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms,box-shadow 250
 const styles = () => ({
     // The paper IS the disc.
     paper: {
-        fallbacks: [{ width: DISC_FALLBACK, height: DISC_FALLBACK, fontSize: discFont(DISC_FALLBACK) }],
         position: "relative",
         backgroundColor: "#fff !important",
         borderRadius: "50% !important",
         width: DISC,
         height: DISC,
-        fontSize: discFont(DISC),
+        fontSize: DISC_FONT,
         maxWidth: "none !important",
         maxHeight: "none !important",
         margin: "16px !important",
         overflow: "visible !important",
         color: "#000 !important",
+        // A dial, not a document. No translucent blue tap box (Chromium
+        // paints one over anything with pointer listeners), no text
+        // selection or long-press callout while the thumb is dragged or the
+        // dial is tapped, no double-tap zoom delay, no focus outline when
+        // the dialog takes focus on open.
+        WebkitTapHighlightColor: "transparent",
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        WebkitTouchCallout: "none",
+        touchAction: "manipulation",
+        outline: "none",
+        "& *": { WebkitTapHighlightColor: "transparent" },
     },
     svg: {
         position: "absolute",
@@ -137,7 +148,15 @@ const styles = () => ({
         display: "block",
         width: "100%",
         height: "100%",
+        overflow: "visible",
+        // The dial owns every gesture that starts on it (drag to set).
+        touchAction: "none",
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        cursor: "pointer",
+        "&$svgBusy": { cursor: "default" },
     },
+    svgBusy: {},
     errorText: {
         position: "absolute",
         top: "60%",
@@ -214,6 +233,67 @@ const styles = () => ({
     },
 });
 
+// ─── Static dial artwork ─────────────────────────────────────────────────────
+// Track, ticks and scale labels never change. Built once as module-level
+// vnodes: Preact recognises a reused vnode and skips it outright, so a drag
+// (one render per frame) diffs only the fill arc, the readout and the thumb
+// instead of re-creating and re-diffing ~20 SVG elements each time.
+const DIAL_BACKGROUND = (
+    <g>
+        {/* ── Track ─────────────────────────────── */}
+        <path d={TRACK_PATH} stroke="#fff" strokeWidth={STROKE_W} fill="none" strokeLinecap="round" />
+        {/* ── Track inner edge highlight ───────────────── */}
+        <path d={TRACK_PATH} stroke="#eee" strokeWidth={STROKE_W - 6} fill="none" strokeLinecap="round" />
+        {/* ── Tick marks ────────────────────────────────── */}
+        {TICKS.map((v) => {
+            const a = valueToAngle(v);
+            const outer = toSvg(a, TICK_OUTER);
+            const inner = toSvg(a, TICK_INNER);
+            return (
+                <line
+                    key={v}
+                    x1={inner.x.toFixed(2)}
+                    y1={inner.y.toFixed(2)}
+                    x2={outer.x.toFixed(2)}
+                    y2={outer.y.toFixed(2)}
+                    stroke="#999"
+                    strokeWidth={v % 5000 === 0 ? 2 : 1}
+                />
+            );
+        })}
+    </g>
+);
+
+const DIAL_LABELS = (
+    <g>
+        {/* ── Labels (inside the arc) ───────────────────── */}
+        {LABELS.map((m) => {
+            const a = valueToAngle(m.value);
+            const p = toSvg(a, LABEL_R);
+            return (
+                <text
+                    key={m.value}
+                    x={p.x.toFixed(2)}
+                    y={p.y.toFixed(2)}
+                    textAnchor={labelAnchor(a).textAnchor}
+                    dominantBaseline="central"
+                    fill="#333"
+                    fontSize="10"
+                    fontFamily={`'Industry Book'`}
+                    fontWeight="500"
+                >
+                    {m.label}
+                </text>
+            );
+        })}
+    </g>
+);
+
+const TABULAR_NUMS = { fontVariantNumeric: "tabular-nums" };
+const VIEW_BOX = "0 0 " + VB_W + " " + VB_H;
+const WHITE = { color: "#fff" };
+const DONE_ICON = { color: "#fff", fontSize: "1.7em" };
+
 // ═════════════════════════════════════════════════════════════════════════════
 // VoteWeightDialog
 // ═════════════════════════════════════════════════════════════════════════════
@@ -233,6 +313,12 @@ class VoteWeightDialog extends React.PureComponent {
         };
         this._svgRef = null;
         this._dragging = false;
+        // Disc rect, read once when a press starts (the disc doesn't move
+        // during a drag), and the latest pointer position waiting for the
+        // next frame — moves are applied at most once per frame.
+        this._rect = null;
+        this._pendingPoint = null;
+        this._moveRaf = 0;
         this._closed = false;
         this._unmounted = false;
         this._pricingToken = 0;
@@ -244,6 +330,8 @@ class VoteWeightDialog extends React.PureComponent {
 
     componentWillUnmount() {
         this._unmounted = true;
+        if (this._moveRaf) cancelAnimationFrame(this._moveRaf);
+        this._moveRaf = 0;
     }
 
     componentDidUpdate(prevProps) {
@@ -312,50 +400,76 @@ class VoteWeightDialog extends React.PureComponent {
     };
 
     // ── Pointer handling ─────────────────────────────────────────────────
+    // The disc's rect is read ONCE per press (getBoundingClientRect forces a
+    // layout when it follows a render, i.e. on every move of a drag) and
+    // reused until release. Moves only record the latest point; it is turned
+    // into a weight at most once per animation frame — high-rate pointers
+    // (120 Hz screens, pens) fire several moves per frame and each one used
+    // to cost a full render.
 
-    _toViewBox = (e) => {
-        const rect = this._svgRef.getBoundingClientRect();
+    _setSvgRef = (el) => { this._svgRef = el; };
+
+    _toViewBox = (x, y) => {
+        const rect = this._rect || (this._svgRef && this._svgRef.getBoundingClientRect());
+        if (!rect || !rect.width || !rect.height) return null;
         return {
-            px: ((e.clientX - rect.left) / rect.width) * VB_W,
-            py: ((e.clientY - rect.top) / rect.height) * VB_H,
+            px: ((x - rect.left) / rect.width) * VB_W,
+            py: ((y - rect.top) / rect.height) * VB_H,
         };
     };
 
     _onPointerDown = (e) => {
         if (this.state.broadcasting || !this._svgRef) return;
+        this._rect = this._svgRef.getBoundingClientRect();
         // The lower half of the disc holds the confirm button: a press there
         // must not snap the weight to ±100 %. Only presses on the upper half
         // (the dial) start a drag; once started, a drag may go anywhere.
-        const { py } = this._toViewBox(e);
-        if (py > CY + STROKE_W / 2) return;
+        const p = this._toViewBox(e.clientX, e.clientY);
+        if (!p || p.py > CY + STROKE_W / 2) { this._rect = null; return; }
         e.preventDefault();
         this._dragging = true;
         if (this._svgRef.setPointerCapture) {
             try { this._svgRef.setPointerCapture(e.pointerId); } catch (_) {}
         }
-        this._updateFromPointer(e);
+        // The press itself lands immediately: a tap must set the weight even
+        // if no frame runs before the release.
+        this._applyPoint(e.clientX, e.clientY);
     };
 
     _onPointerMove = (e) => {
         if (!this._dragging) return;
         e.preventDefault();
-        this._updateFromPointer(e);
+        this._pendingPoint = { x: e.clientX, y: e.clientY };
+        if (!this._moveRaf) this._moveRaf = requestAnimationFrame(this._flushMove);
+    };
+
+    _flushMove = () => {
+        this._moveRaf = 0;
+        const p = this._pendingPoint;
+        this._pendingPoint = null;
+        if (p && this._dragging) this._applyPoint(p.x, p.y);
     };
 
     _onPointerUp = (e) => {
         if (!this._dragging) return;
+        // Apply the last move before letting go, so the release position is
+        // the one that sticks even if its frame hasn't run yet.
+        if (this._moveRaf) { cancelAnimationFrame(this._moveRaf); this._moveRaf = 0; }
+        if (this._pendingPoint) { const p = this._pendingPoint; this._pendingPoint = null; this._applyPoint(p.x, p.y); }
         this._dragging = false;
+        this._rect = null;
         if (this._svgRef && this._svgRef.releasePointerCapture) {
             try { this._svgRef.releasePointerCapture(e.pointerId); } catch (_) {}
         }
     };
 
-    _updateFromPointer = (e) => {
-        if (!this._svgRef) return;
-        const { px, py } = this._toViewBox(e);
+    _applyPoint = (x, y) => {
+        if (this._unmounted) return;
+        const p = this._toViewBox(x, y);
+        if (!p) return;
         // Math-convention angle from centre
-        const dx = px - CX;
-        const dy = -(py - CY);
+        const dx = p.px - CX;
+        const dy = -(p.py - CY);
         let angle = Math.atan2(dy, dx);
         // Clamp: below centre → snap to nearest end
         if (angle < 0) angle = dx >= 0 ? 0 : Math.PI;
@@ -379,7 +493,7 @@ class VoteWeightDialog extends React.PureComponent {
             this._closed = true;
             if (typeof onClose === "function") onClose();
         } catch (e) {
-            this.setState({ broadcasting: false, error: e.message || "Broadcast failed" });
+            this.setState({ broadcasting: false, error: e.message || tk("components.vote_weight_dialog.broadcast_failed") });
         }
     };
 
@@ -393,6 +507,15 @@ class VoteWeightDialog extends React.PureComponent {
     };
 
     // ── Render ───────────────────────────────────────────────────────────
+
+    // One PaperProps object per paper class (stable across renders), so the
+    // Dialog doesn't see a new prop on every frame of a drag.
+    _paperProps = (className) => {
+        if (!this._paperPropsCache || this._paperPropsCache.className !== className) {
+            this._paperPropsCache = { className };
+        }
+        return this._paperPropsCache;
+    };
 
     render() {
         const { classes, open } = this.props;
@@ -413,59 +536,19 @@ class VoteWeightDialog extends React.PureComponent {
                 maxWidth={false}
                 onClose={broadcasting ? undefined : this._handleCancel}
                 keepMounted={false}
-                PaperProps={{ className: classes.paper }}
+                PaperProps={this._paperProps(classes.paper)}
             >
                 <svg
-                    ref={(el) => { this._svgRef = el; }}
-                    viewBox={"0 0 " + VB_W + " " + VB_H}
-                    className={classes.svg}
-                    style={{
-                        overflow: "visible",
-                        touchAction: "none",
-                        userSelect: "none",
-                        WebkitUserSelect: "none",
-                        cursor: broadcasting ? "default" : "pointer",
-                    }}
+                    ref={this._setSvgRef}
+                    viewBox={VIEW_BOX}
+                    className={broadcasting ? classes.svg + " " + classes.svgBusy : classes.svg}
                     onPointerDown={broadcasting ? undefined : this._onPointerDown}
                     onPointerMove={broadcasting ? undefined : this._onPointerMove}
                     onPointerUp={broadcasting ? undefined : this._onPointerUp}
                     onPointerCancel={broadcasting ? undefined : this._onPointerUp}
                 >
-                    {/* ── Track ─────────────────────────────── */}
-                    <path
-                        d={TRACK_PATH}
-                        stroke="#fff"
-                        strokeWidth={STROKE_W}
-                        fill="none"
-                        strokeLinecap="round"
-                    />
-
-                    {/* ── Track inner edge highlight ───────────────── */}
-                    <path
-                        d={TRACK_PATH}
-                        stroke="#eee"
-                        strokeWidth={STROKE_W - 6}
-                        fill="none"
-                        strokeLinecap="round"
-                    />
-
-                    {/* ── Tick marks ────────────────────────────────── */}
-                    {TICKS.map((v) => {
-                        const a = valueToAngle(v);
-                        const outer = toSvg(a, TICK_OUTER);
-                        const inner = toSvg(a, TICK_INNER);
-                        return (
-                            <line
-                                key={v}
-                                x1={inner.x.toFixed(2)}
-                                y1={inner.y.toFixed(2)}
-                                x2={outer.x.toFixed(2)}
-                                y2={outer.y.toFixed(2)}
-                                stroke="#999"
-                                strokeWidth={v % 5000 === 0 ? 2 : 1}
-                            />
-                        );
-                    })}
+                    {/* Track + ticks: static, see DIAL_BACKGROUND. */}
+                    {DIAL_BACKGROUND}
 
                     {/* ── Fill arc ─────────────────────────── */}
                     {fillPath && (
@@ -478,27 +561,8 @@ class VoteWeightDialog extends React.PureComponent {
                         />
                     )}
 
-                    {/* ── Labels (inside the arc) ───────────────────── */}
-                    {LABELS.map((m) => {
-                        const a = valueToAngle(m.value);
-                        const p = toSvg(a, LABEL_R);
-                        const props = labelAnchor(a);
-                        return (
-                            <text
-                                key={m.value}
-                                x={p.x.toFixed(2)}
-                                y={p.y.toFixed(2)}
-                                textAnchor={props.textAnchor}
-                                dominantBaseline="central"
-                                fill="#333"
-                                fontSize="10"
-                                fontFamily={`'Industry Book'`}
-                                fontWeight="500"
-                            >
-                                {m.label}
-                            </text>
-                        );
-                    })}
+                    {/* Scale labels: static, see DIAL_LABELS. */}
+                    {DIAL_LABELS}
 
                     {/* ── Centre percent display ───────────────────── */}
                     <text
@@ -510,22 +574,24 @@ class VoteWeightDialog extends React.PureComponent {
                         fontSize="40"
                         fontFamily={"'Geist Mono', monospace"}
                         fontWeight="400"
-                        style={{ fontVariantNumeric: "tabular-nums" }}
+                        style={TABULAR_NUMS}
                     >
                         {pctStr}
                     </text>
                     <text
                         x={CX}
-                        y={CY + 6}
+                        y={CY + 30}
                         textAnchor="middle"
                         dominantBaseline="central"
                         fill="#444"
-                        fontSize="16"
+                        fontSize="14"
                         fontFamily={`'Industry Book'`}
                         fontWeight="500"
                         letterSpacing="2"
                     >
-                        {isUpvote ? "UPVOTE" : "DOWNVOTE"}
+                        {isUpvote
+                            ? t("components.vote_weight_dialog.upvote", { TUC: true })
+                            : t("components.vote_weight_dialog.downvote", { TUC: true })}
                     </text>
 
                     {/* ── 0 % marker (subtle dot at top) ───────────── */}
@@ -563,7 +629,7 @@ class VoteWeightDialog extends React.PureComponent {
 
                 {error && (
                     <Typography className={classes.errorText} variant="body2">
-                        {error}
+                        {tx(error)}
                     </Typography>
                 )}
 
@@ -571,13 +637,15 @@ class VoteWeightDialog extends React.PureComponent {
                     onClick={this._handleConfirm}
                     disabled={broadcasting}
                     className={classes.blackButton}
-                    aria-label={"Confirm vote " + pctStr + (est && est.fiatText ? ", " + est.pxsText + ", " + est.fiatText : "")}
+                    aria-label={est && est.fiatText
+                        ? t("components.vote_weight_dialog.confirm_vote_with_value", { pct: pctStr, pxs: est.pxsText, fiat: est.fiatText })
+                        : t("components.vote_weight_dialog.confirm_vote", { pct: pctStr })}
                 >
                     <span className={classes.buttonIcon}>
                         {broadcasting ? (
-                            <CircularProgress size="1.3em" style={{ color: "#fff" }} />
+                            <CircularProgress size="1.3em" style={WHITE} />
                         ) : (
-                            <DoneRounded style={{ color: "#fff", fontSize: "1.7em" }} />
+                            <DoneRounded style={DONE_ICON} />
                         )}
                     </span>
                     {est && (
@@ -592,4 +660,4 @@ class VoteWeightDialog extends React.PureComponent {
     }
 }
 
-export default withStyles(styles)(withPrices(VoteWeightDialog));
+export default withLanguage(withStyles(styles)(withPrices(VoteWeightDialog)));

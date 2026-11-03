@@ -9,7 +9,7 @@ import BlockViewer from "./BlockViewer";
 import timeAgo from "../utils/TimeAgo";
 import { gatedInterval } from "../utils/visibility";
 
-import { t, getLocaleCode } from "../utils/text";
+import { t, tnode, getLocaleCode } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
 const styles = theme => ({
@@ -248,19 +248,29 @@ function parseAsset(str) {
     return parseFloat(String(str).split(" ")[0]) || 0;
 }
 
-/** Compact number display */
+/** `n` with exactly `digits` decimals, in the app's locale ("1,234.5" / "1 234,5"). Called at render. */
+function fixed(n, digits) {
+    return n.toLocaleString(getLocaleCode(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+/** A figure given in percent ("12.3"), as the locale writes percentages ("12.3%", "12,3 %"), with `digits` decimals. */
+function percent(n, digits) {
+    return (n / 100).toLocaleString(getLocaleCode(), { style: "percent", minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+/** Compact number display (the K/M/B suffixes are kept in every language) */
 function compactNumber(n) {
-    if (n >= 1e9) return (n / 1e9).toFixed(1) + "B";
-    if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
-    if (n >= 1e3) return (n / 1e3).toFixed(0) + "K";
-    return String(n);
+    if (n >= 1e9) return fixed(n / 1e9, 1) + "B";
+    if (n >= 1e6) return fixed(n / 1e6, 1) + "M";
+    if (n >= 1e3) return fixed(n / 1e3, 0) + "K";
+    return n.toLocaleString(getLocaleCode());
 }
 
 /** Estimate block payload size from its JSON representation */
 function estimateBlockSize(block) {
     if (!block) return "0kB";
     try {
-        return (JSON.stringify(block).length / 1024).toFixed(1) + "kB";
+        return fixed(JSON.stringify(block).length / 1024, 1) + "kB";
     } catch {
         return "?kB";
     }
@@ -290,13 +300,14 @@ class GDAttributes extends React.PureComponent {
             _blockViewerOpen: false,
             _selectedBlock: 0,
 
-            // Network metrics (fetched from proxy API)
+            // Network metrics (fetched from proxy API). Kept as numbers (null: not known):
+            // render formats them in the app's language, so a language switch shows at once.
             networkMetrics: {
-                pxsPrice: "–",
-                pixaPrice: "–",
-                conversionRate: "–",
-                pxsApr: "–",
-                debt: { ratio: 0, limit: 30, margin: "0.0" },
+                pxsUsd: 0,
+                pxaUsd: 0,
+                conversionRate: null,
+                pxsApr: null,
+                debt: { ratio: 0, limit: 30, margin: 0 },
             },
 
             loading: true,
@@ -520,19 +531,17 @@ class GDAttributes extends React.PureComponent {
             const pxaUsd     = prices ? prices.pxaUsd    : 0;
             const feedRatio  = prices ? prices.feedRatio : null;  // PXA per 1 PXS
 
-            const pxsPrice = pxsUsd > 0 ? "$ " + pxsUsd.toFixed(2) : "–";
-            const pixaPrice = pxaUsd > 0 ? "$ " + pxaUsd.toFixed(2) : "–";
             const conversionRate = (feedRatio && feedRatio > 0)
                 ? Math.round(feedRatio)
                 : Math.round(pxsUsd / pxaUsd);  // fallback to design ratio
 
-            // PXS APR
+            // PXS APR, in percent
             const pxsApr = (chainProps && chainProps.pxs_interest_rate !== undefined)
-                ? (chainProps.pxs_interest_rate / 100).toFixed(1) + "%"
-                : "–";
+                ? chainProps.pxs_interest_rate / 100
+                : null;
 
             // Debt ratio: PXS supply (valued in PXA via feed) vs virtual PIXA supply
-            let debt = { ratio: 0, limit: 30, margin: "0.0" };
+            let debt = { ratio: 0, limit: 30, margin: 0 };
             if (globalProps && feedRatio && feedRatio > 0) {
                 const pxsSupply     = parseAsset(globalProps.current_pxs_supply);
                 const virtualSupply = parseAsset(globalProps.virtual_supply);
@@ -543,13 +552,13 @@ class GDAttributes extends React.PureComponent {
                     debt = {
                         ratio: Math.round(ratio * 10) / 10,
                         limit: 30,
-                        margin: margin.toFixed(1),
+                        margin,
                     };
                 }
             }
 
             this.setState({
-                networkMetrics: { pxsPrice, pixaPrice, conversionRate, pxsApr, debt },
+                networkMetrics: { pxsUsd, pxaUsd, conversionRate, pxsApr, debt },
             }, () => this.forceUpdate());
         } catch (e) {
             console.warn("[GDAttributes] Network metrics fetch failed:", e.message);
@@ -561,7 +570,7 @@ class GDAttributes extends React.PureComponent {
     _renderBlock = (block) => {
         const { classes } = this.props;
         const blockNumber  = block.block_number;
-        const witness      = block.witness || "unknown";
+        const witness      = block.witness ? "@" + block.witness : t("components.gdattributes.unknown_witness");
         const txCount      = block.transactions ? block.transactions.length : 0;
         const size         = estimateBlockSize(block);
         const timestamp    = new Date(block.timestamp + "Z");
@@ -573,22 +582,26 @@ class GDAttributes extends React.PureComponent {
                     {`#${blockNumber.toLocaleString(getLocaleCode())}`}
                 </span>
                 <span className={classes.boxSecondary}>
-                    <span style={{ color: "#fff" }}>@{witness}</span>
-                    <span> processed {size} </span>
-                    <Tooltip arrow title={timestamp.toLocaleDateString(getLocaleCode(), {
-                        weekday: "long",
-                        year: "numeric",
-                        month: "long",
-                        day: "numeric",
-                        hour: "numeric",
-                        minute: "numeric",
-                        second: "numeric",
-                    })}>
-                        <span className={classes.subheaderDate}>{timeAgo.format(timestamp)}</span>
-                    </Tooltip>
-                    <span>{t("components.gdattributes.with_transactions", {
-                            txCount: txCount
-                        })}</span>
+                    {/* One sentence, so a translation can reorder it: the producer and the time keep their own look. */}
+                    {tnode("components.gdattributes.block_processed_by", {
+                        witness: <span key="witness" style={{ color: "#fff" }}>{witness}</span>,
+                        size,
+                        time: (
+                            <Tooltip key="time" arrow title={timestamp.toLocaleDateString(getLocaleCode(), {
+                                weekday: "long",
+                                year: "numeric",
+                                month: "long",
+                                day: "numeric",
+                                hour: "numeric",
+                                minute: "numeric",
+                                second: "numeric",
+                            })}>
+                                <span className={classes.subheaderDate}>{timeAgo.format(timestamp)}</span>
+                            </Tooltip>
+                        ),
+                        // a plural count goes in as { word: { word: n } } (utils/text readPluralSpec)
+                        chain_transaction: { chain_transaction: txCount }
+                    })}
                 </span>
             </div>
         );
@@ -619,13 +632,21 @@ class GDAttributes extends React.PureComponent {
         const pxsSupply        = globalProps ? parseAsset(globalProps.current_pxs_supply) : 0;
         const rewardPool       = rewardFund ? parseAsset(rewardFund.reward_balance) : 0;
 
-        // Network metrics (fetched from proxy API)
-        const { pxsPrice, pixaPrice, conversionRate, pxsApr, debt } = this.state.networkMetrics;
+        // Network metrics (fetched from proxy API), formatted in the app's language
+        const { pxsUsd, pxaUsd, conversionRate, pxsApr, debt } = this.state.networkMetrics;
+        const pxsPrice = pxsUsd > 0 ? "$ " + fixed(pxsUsd, 2) : "–";
+        const pixaPrice = pxaUsd > 0 ? "$ " + fixed(pxaUsd, 2) : "–";
+        const conversionText = Number.isFinite(conversionRate) ? `1 : ${conversionRate.toLocaleString(getLocaleCode())}` : "–";
+        const pxsAprText = pxsApr !== null && Number.isFinite(pxsApr) ? percent(pxsApr, 1) : "–";
 
-        // "Next block" label
+        // "Next block" label: one sentence per case, so each translation can order its words
         const nextLabel = _nextBlockCountdown > 0
-            ? `In ${_nextBlockCountdown}s${_nextWitness ? ` by @${_nextWitness}` : ""}`
-            : `Now${_nextWitness ? ` by @${_nextWitness}` : ""}`;
+            ? (_nextWitness
+                ? t("components.gdattributes.next_block_in_n_s_by", { seconds: _nextBlockCountdown, witness: _nextWitness })
+                : t("components.gdattributes.next_block_in_n_s", { seconds: _nextBlockCountdown }))
+            : (_nextWitness
+                ? t("components.gdattributes.next_block_now_by", { witness: _nextWitness })
+                : t("words.now"));
 
         return (
             <React.Fragment>
@@ -660,11 +681,11 @@ class GDAttributes extends React.PureComponent {
                             <span className={classes.boxSecondary}>{t("components.gdattributes.pxs_supply")}</span>
                         </div>
                         <div className={classes.box}>
-                            <span className={classes.boxPrimary}>9.5%</span>
+                            <span className={classes.boxPrimary}>{percent(9.5, 1)}</span>
                             <span className={classes.boxSecondary}>{t("words.inflation_per_year")}</span>
                         </div>
                         <div className={classes.box}>
-                            <span className={classes.boxPrimary}>3.0s</span>
+                            <span className={classes.boxPrimary}>{fixed(3, 1)}s</span>
                             <span className={classes.boxSecondary}>{t("words.block_interval_time")}</span>
                         </div>
                         <div className={classes.box}>
@@ -703,7 +724,7 @@ class GDAttributes extends React.PureComponent {
                         } interactive arrow>
                             <div className={classes.box}>
                                 <span className={classes.boxPrimary}>
-                                    {loading ? "..." : `1 : ${conversionRate}`}
+                                    {loading ? "..." : conversionText}
                                 </span>
                                 <span className={classes.boxSecondary}>{t("components.gdattributes.conversion_rate_pxs_pxa")}</span>
                             </div>
@@ -724,7 +745,7 @@ class GDAttributes extends React.PureComponent {
                             </div>
                         } interactive arrow>
                             <div className={classes.box}>
-                                <span className={classes.boxPrimary}>{loading ? "..." : pxsApr}</span>
+                                <span className={classes.boxPrimary}>{loading ? "..." : pxsAprText}</span>
                                 <span className={classes.boxSecondary}>{t("components.gdattributes.pixasupra_apr")}</span>
                             </div>
                         </Tooltip>
@@ -737,7 +758,11 @@ class GDAttributes extends React.PureComponent {
                                 <span className={classes.boxPrimary}>
                                     {loading
                                         ? "..."
-                                        : `${debt.ratio}% / ${debt.limit}% (${debt.margin}x margin)`}
+                                        : t("components.gdattributes.debt_ratio_of_limit_margin", {
+                                            ratio: debt.ratio.toLocaleString(getLocaleCode(), { maximumFractionDigits: 1 }),
+                                            limit: debt.limit.toLocaleString(getLocaleCode()),
+                                            margin: fixed(debt.margin, 1)
+                                        })}
                                 </span>
                                 <LinearProgress
                                     className={classes.linearProgress}

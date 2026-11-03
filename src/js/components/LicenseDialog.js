@@ -24,7 +24,7 @@ import SubdirectoryArrowRight from "@material-ui/icons/SubdirectoryArrowRight";
 // requested, not when the license text is shown.
 import { safeHTML } from "../utils/api/sanitizer";
 
-import { t } from "../utils/text";
+import { t, tnode, useLanguage } from "../utils/text";
 
 const styles = theme => ({
     dialog: {
@@ -79,6 +79,8 @@ const WhiteCheckbox = withStyles({
 })((props) => <Checkbox disabled color="default" {...props} />);
 
 const LicenseDialog = ({ classes, open, onClose, licenseBase, customization, data }) => {
+    // Re-render (and re-run the renderLicense memo below) on a language switch.
+    const lang = useLanguage();
     const [downloading, setDownloading] = useState(false);
 
     const handleDownloadPdf = useCallback(async () => {
@@ -120,7 +122,7 @@ const LicenseDialog = ({ classes, open, onClose, licenseBase, customization, dat
         }
     }, [licenseBase, customization, data, downloading]);
 
-    const renderMarkdown = (md) => { try { return micromark(md, { extensions: [gfm()], htmlExtensions: [gfmHtml()] }); } catch { return '<p>Error</p>'; } };
+    const renderMarkdown = (md) => { try { return micromark(md, { extensions: [gfm()], htmlExtensions: [gfmHtml()] }); } catch { return '<p>' + t("words.error") + '</p>'; } };
     const applyCustomization = (content, c) => {
         if (!c) return content; let r = content;
         if (c.royaltyPercentage !== undefined) r = r.replace('{royaltyPercentage}', c.royaltyPercentage);
@@ -156,7 +158,7 @@ const LicenseDialog = ({ classes, open, onClose, licenseBase, customization, dat
                                             {right.note && <span style={{ fontSize: '0.75rem', display: "block", color: '#aaa', marginBottom: '4px', fontStyle: 'italic' }}>{right.note}</span>}
                                         </td>
                                         <td className={`${classes.rightValue} ${isGranted ? classes.granted : classes.denied}`}>
-                                            <FormControlLabel control={<WhiteCheckbox checked={isGranted} icon={<Cancel />} checkedIcon={<CheckBoxRounded />} style={{ marginRight: "8px" }} />} label={isGranted ? 'CAN' : "CAN'T"} />
+                                            <FormControlLabel control={<WhiteCheckbox checked={isGranted} icon={<Cancel />} checkedIcon={<CheckBoxRounded />} style={{ marginRight: "8px" }} />} label={isGranted ? t("components.license_dialog.can", { TUC: true }) : t("components.license_dialog.can_t", { TUC: true })} />
                                         </td>
                                     </tr>
                                 );
@@ -189,17 +191,28 @@ const LicenseDialog = ({ classes, open, onClose, licenseBase, customization, dat
                 })}
             </>
         );
-    }, [licenseBase, customization, classes]);
+    }, [licenseBase, customization, classes, lang]);
 
     return (
         <Dialog PaperProps={{ classes: { root: classes.dialog } }} maxWidth="md" fullWidth keepMounted={false} open={open} scroll="paper" onClose={onClose}>
             <DialogTitle disableTypography>
                 <div className={classes.dialogTitleRow}>
                     <div>
-                        <Typography component="h2" variant="h4" style={{ fontWeight: 500 }}>{licenseBase?.shortName || 'License Agreement'}</Typography>
+                        <Typography component="h2" variant="h4" style={{ fontWeight: 500 }}>{licenseBase?.shortName || t("components.license_dialog.license_agreement")}</Typography>
                         {customization?.isCustomized && (
                             <div style={{ fontSize: '1.0rem', fontWeight: 400, color: '#bbb', marginTop: '4px' }}>
-                                {t("components.license_dialog.customized_for")} <Tooltip arrow title={customization.artworkInfo?.title}><strong>0x8BE5125</strong></Tooltip>from <Tooltip arrow title={customization.authorInfo?.name || 'Author'}><strong>@{customization.authorInfo?.username || 'username'}</strong></Tooltip>
+                                {tnode("components.license_dialog.customized_for_from", {
+                                    // Was a fixed "0x8BE5125" for every artwork: the NFT
+                                    // contract when there is one, else the artwork's title.
+                                    artwork: <Tooltip key="artwork" arrow title={customization.artworkInfo?.title || ""}><strong>{
+                                        customization.artworkInfo?.nftContract
+                                            ? (String(customization.artworkInfo.nftContract).length > 12
+                                                ? String(customization.artworkInfo.nftContract).slice(0, 9) + "…"
+                                                : String(customization.artworkInfo.nftContract))
+                                            : (customization.artworkInfo?.title || "—")
+                                    }</strong></Tooltip>,
+                                    author: <Tooltip key="author" arrow title={customization.authorInfo?.name || t("components.license_dialog.author")}><strong>{customization.authorInfo?.username ? "@" + customization.authorInfo.username : t("words.username_2")}</strong></Tooltip>
+                                })}
                             </div>
                         )}
                     </div>

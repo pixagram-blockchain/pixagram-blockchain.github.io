@@ -13,20 +13,32 @@
 // viewport has room to its right). Its right margin shrinks by the same amount,
 // so the toolbar's layout does not move: the open search simply grows over the
 // (backdrop-dimmed) toolbar buttons next to it.
+//
+// Scrolled into the posts and artworks, the bar becomes the full-screen panel
+// (searchBarFull, fullScreen.js) — a centred sheet on desktop, the whole screen
+// on phones — the dropdown inside it; a hidden copy of the open bar
+// (searchBarSpacer) holds its place in the toolbar meanwhile.
 
-import { EXAMPLE_FADE_MS } from "./config";
+import { EXAMPLE_FADE_MS, FULL_HEIGHT, FULL_WIDTH } from "./config";
 
 const EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
 const EXTRA = "var(--search-extra, 0px)";
+// The desktop panel's margins: what FULL_WIDTH / FULL_HEIGHT leave, shared by both sides.
+const FULL_SIDE = `${+((1 - FULL_WIDTH) * 50).toFixed(3)}%`;
+const FULL_END = `${+((1 - FULL_HEIGHT) * 50).toFixed(3)}%`;
 
 // Bar box: content height + vertical padding (desktop / phone). The open-state
-// shadow box reaches up by exactly the bar's height.
+// shadow box reaches up by exactly the bar's height; full screen, the dropdown
+// starts that far down the panel.
 const BAR_CONTENT_H = 32;
 const BAR_PAD_Y = 12;
 const BAR_CONTENT_H_SM = 24;
 const BAR_PAD_Y_SM = 8;
-const BAR_H = BAR_CONTENT_H + 2 * BAR_PAD_Y;          // 56
-const BAR_H_SM = BAR_CONTENT_H_SM + 2 * BAR_PAD_Y_SM; // 40
+export const BAR_H = BAR_CONTENT_H + 2 * BAR_PAD_Y;          // 56
+export const BAR_H_SM = BAR_CONTENT_H_SM + 2 * BAR_PAD_Y_SM; // 40
+// The results' scrolling window is inset this far from the dropdown's sides.
+export const SCROLL_MARGIN = 16;
+export const SCROLL_MARGIN_SM = 12;
 
 // Flat when closed (no inset); open, bar + dropdown lift off the page together.
 const OPEN_SHADOW = "0 18px 40px rgba(0,0,0,0.5), 0 6px 14px rgba(0,0,0,0.35)";
@@ -149,10 +161,14 @@ export const searchStyles = (theme) => {
         },
 
         // ── dropdown ──
-        // Width (the bar's live width) and max height (bar bottom → viewport
-        // bottom) are set inline by SearchBar. The panel is pinned at the top;
-        // the results scroll below it.
+        // Rendered inside the bar, it hangs right under it, as wide as it; its
+        // max height (bar bottom → viewport bottom) is set inline by SearchBar.
+        // The filter panel is pinned at the top; the results scroll below it.
         searchBarOpenMenu: {
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            right: 0,
             zIndex: 9,
             maxWidth: "100vw",
             // The open search's one outer shadow, around bar + dropdown as a single
@@ -190,6 +206,48 @@ export const searchStyles = (theme) => {
             maxHeight: "min(75vh, 386px)", // replaced inline by the measured value
             [theme.breakpoints.down("sm")]: { borderRadius: "0 0 16px 16px" },
         },
+
+        // ── full screen (fullScreen.js) ──
+        // The bar as the panel, the dropdown filling it under the input row:
+        // bar + dropdown were one rounded shape with one shadow already, now it
+        // is one box. Desktop: a centred sheet, FULL_WIDTH of the viewport's
+        // width and FULL_HEIGHT of its height, rounded. Phones: the whole
+        // screen, square (the hero transition takes the corners there). The
+        // transition animates this box (top/left/width/height/radius, from where
+        // bar + dropdown stood); `contain` keeps each frame's layout inside it.
+        // Defined after the bar's and the dropdown's rules, so it wins over
+        // their breakpoint rules.
+        searchBarFull: {
+            position: "fixed",
+            top: FULL_END,
+            right: FULL_SIDE,
+            bottom: FULL_END,
+            left: FULL_SIDE,
+            width: "auto",
+            height: "auto",
+            maxWidth: "none",
+            margin: 0,
+            boxSizing: "border-box",
+            borderRadius: 28,
+            overflow: "hidden",
+            contain: "strict",
+            boxShadow: OPEN_SHADOW,
+            transition: "none",
+            "& $searchBarOpenMenu": { top: BAR_H, bottom: 0, maxWidth: "none", "&::before": { display: "none" } },
+            "& $searchBarResult": { height: "100%", maxHeight: "none", borderRadius: 0 },
+            [theme.breakpoints.down("sm")]: {
+                top: 0,
+                right: 0,
+                bottom: 0,
+                left: 0,
+                borderRadius: 0,
+                "& $searchBarOpenMenu": { top: BAR_H_SM },
+            },
+        },
+        // The bar's place in the toolbar while it is the panel: an empty copy of
+        // the open bar, never seen; the panel shrinks back onto it.
+        searchBarSpacer: { visibility: "hidden", pointerEvents: "none" },
+
         filterCollapse: { flex: "0 0 auto" },
         // The results scroll in a rounded window inset from the dropdown's sides (the
         // same inset as the filter panel above it). Section headers are dark rounded
@@ -198,9 +256,9 @@ export const searchStyles = (theme) => {
             flex: "1 1 auto",
             minHeight: 0,
             overflowY: "auto",
-            margin: "0 16px",
+            margin: `0 ${SCROLL_MARGIN}px`,
             borderRadius: 16,
-            [theme.breakpoints.down("sm")]: { margin: "0 12px" },
+            [theme.breakpoints.down("sm")]: { margin: `0 ${SCROLL_MARGIN_SM}px` },
             "& .MuiListSubheader-sticky": { backgroundColor: PANEL_BG, borderRadius: 16, margin: "8px 0" },
             "& .MuiList-padding": { paddingTop: 0 },
         },

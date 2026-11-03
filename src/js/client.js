@@ -47,6 +47,9 @@
 // is no longer written; it is cleared below so the fallback path in Index.js
 // that still understands it goes quiet after one boot.
 
+// First: publishes the measured visible height as --app-h on <html> before
+// any style that sizes itself with it is rendered (see utils/viewport).
+import "./utils/viewport";
 import * as api from "./utils/settings";
 
 import * as React from "preact/compat";
@@ -56,6 +59,10 @@ import { setLanguage } from "./utils/text";
 import { ThemeProvider as MuiThemeProvider } from '@material-ui/core/styles';
 import CssBaseline from '@material-ui/core/CssBaseline';
 import { lightTheme } from "./theme/index";
+import { bindThemeLocale } from "./theme/locale";
+// MUI's built-in texts (Autocomplete "Clear"/"Open", Alert "Close"…) follow
+// the UI language; see theme/locale.js.
+bindThemeLocale(lightTheme);
 
 // Pages
 import Index from "../js/pages/Index";

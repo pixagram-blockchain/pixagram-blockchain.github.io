@@ -91,19 +91,19 @@ const styles = (theme) => ({
             }
         },
         "& .react-swipeable-view-container": {
-            height: "min(80vh, calc(-420px + 100vh)) !important",
+            height: "min(calc(var(--app-h, 100vh) * 0.8), calc(var(--app-h, 100vh) - 420px)) !important",
             // fullScreen (≤960px): the -420px budget assumed a floating paper;
             // in fullscreen only the header (title + tabs) and actions (~220px)
             // sit outside the swipeable area.
             [theme.breakpoints.down("sm")]: {
-                height: "calc(100vh - 220px) !important"
+                height: "calc(var(--app-h, 100vh) - 220px) !important"
             }
         },
         "& .react-swipeable-view-container > div": {
-            height: "min(80vh, calc(-420px + 100vh)) !important",
+            height: "min(calc(var(--app-h, 100vh) * 0.8), calc(var(--app-h, 100vh) - 420px)) !important",
             overflow: "hidden overlay !important",
             [theme.breakpoints.down("sm")]: {
-                height: "calc(100vh - 220px) !important"
+                height: "calc(var(--app-h, 100vh) - 220px) !important"
             }
         }
     },
@@ -245,24 +245,26 @@ const styles = (theme) => ({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// `title` is a translation KEY (this table is built at import time; t() here
+// would freeze the language): resolve it with t() at render.
 const KEY_CONFIG = {
     posting: {
-        title: "Posting Key",
+        title: "components.unlock_key_dialog.posting_key",
         descriptionKeys: ["posting_description_1", "posting_description_2"],
         permissionKeys: ["perm_publish_a_post_or_comment", "perm_edit_a_post_or_comment", "perm_upvote_or_downvote", "perm_reblog_content", "perm_follow_people", "perm_mute_accounts"],
     },
     active: {
-        title: "Active Key",
+        title: "components.unlock_key_dialog.active_key",
         descriptionKeys: ["active_description_1", "active_description_2"],
         permissionKeys: ["perm_transfer_tokens", "perm_power_pixa_up_or_down", "perm_token_conversion", "perm_vote_for_witnesses", "perm_place_an_order_on_an", "perm_certain_profile_changes", "perm_publish_a_witness_price_feed", "perm_create_a_new_user"],
     },
     owner: {
-        title: "Owner Key",
+        title: "components.unlock_key_dialog.owner_key",
         descriptionKeys: ["owner_description_1"],
         permissionKeys: ["perm_reset_owner_active_and_posting", "perm_recover_your_account", "perm_decline_voting_rights"],
     },
     memo: {
-        title: "Memo Key",
+        title: "components.unlock_key_dialog.memo_key",
         descriptionKeys: ["memo_description_1"],
         permissionKeys: ["perm_send_an_encrypted_message", "perm_view_an_encrypted_message"],
     },
@@ -282,11 +284,12 @@ const TAB_CONFIG = [
 // Key Section — supports "unknown" state with Reveal button
 // ─────────────────────────────────────────────────────────────────────────────
 const KeySection = memo(function KeySection({ classes, keyType, keyValue, publicKeyValue, isAvailable, isLocked, isVisible, onToggleVisibility, onCopyKey, onRevealKey, isOwnProfile }) {
-    useLanguage();
+    const lang = useLanguage();
     const config = KEY_CONFIG[keyType];
+    const title = t(config.title);
     const handleToggle = React.useCallback(() => onToggleVisibility(keyType), [keyType, onToggleVisibility]);
-    const handleCopy = React.useCallback(() => onCopyKey(keyValue, config.title), [keyValue, config.title, onCopyKey]);
-    const handleCopyPublic = React.useCallback(() => onCopyKey(publicKeyValue, `Public ${config.title}`), [publicKeyValue, config.title, onCopyKey]);
+    const handleCopy = React.useCallback(() => onCopyKey(keyValue, title), [keyValue, title, onCopyKey]);
+    const handleCopyPublic = React.useCallback(() => onCopyKey(publicKeyValue, t("components.pixa_wallet_keys_dialog.public", { title })), [publicKeyValue, title, onCopyKey]);
     const handleReveal = React.useCallback(() => onRevealKey(keyType), [keyType, onRevealKey]);
 
     const endAdornment = useMemo(() => {
@@ -316,40 +319,40 @@ const KeySection = memo(function KeySection({ classes, keyType, keyValue, public
                 <Tooltip title={isVisible ? t("components.pixa_wallet_keys_dialog.hide_key") : t("components.pixa_wallet_keys_dialog.reveal_key")}><IconButton edge="end" onClick={handleToggle}>{isVisible ? <Visibility /> : <VisibilityOff />}</IconButton></Tooltip>
             </InputAdornment>
         );
-    }, [classes, isAvailable, isLocked, isVisible, handleToggle, handleCopy, handleReveal]);
+    }, [classes, isAvailable, isLocked, isVisible, handleToggle, handleCopy, handleReveal, lang]);
 
     const publicKeyEndAdornment = useMemo(() => (
         <InputAdornment position="end" className={classes.inputEndAdornment}>
             <Tooltip title={t("components.pixa_wallet_keys_dialog.copy_public_key")}><IconButton edge="end" onClick={handleCopyPublic} size="small"><FileCopyOutlined fontSize="small" /></IconButton></Tooltip>
         </InputAdornment>
-    ), [classes, handleCopyPublic]);
+    ), [classes, handleCopyPublic, lang]);
 
     const tooltipContent = useMemo(() => (
         <span className={classes.tooltipContent}>
-            <T k="components.pixa_wallet_keys_dialog.permissions_use_your_key_to" vars={{ title: config.title }} />
+            <T k="components.pixa_wallet_keys_dialog.permissions_use_your_key_to" vars={{ title }} />
             <ul>{config.permissionKeys.map((p, i) => <li key={i}>{t("components.pixa_wallet_keys_dialog." + p)}</li>)}</ul>
         </span>
-    ), [classes, config]);
+    ), [classes, config, title, lang]);
 
     const displayValue = useMemo(() => {
         if (isLocked) return t("components.pixa_wallet_keys_dialog.hidden_confirm_pin");
         if (!isAvailable) return t("components.pixa_wallet_keys_dialog.unknown_not_in_current_session");
         if (!isVisible) return "••••••••••••••••••••••••••••••••••••••••••••••••••••";
         return keyValue;
-    }, [keyValue, isAvailable, isLocked, isVisible]);
+    }, [keyValue, isAvailable, isLocked, isVisible, lang]);
 
     return (
         <div className={classes.keySection}>
             <div className={classes.keySectionGrid}>
                 <div className={classes.keySectionLeft}>
                     <div className={classes.keyTitleMobile}>
-                        <KeyIcon /><Typography variant="h6" component="h3" style={{ flex: 1 }}>{config.title}</Typography>
+                        <KeyIcon /><Typography variant="h6" component="h3" style={{ flex: 1 }}>{title}</Typography>
                         <span className={classes.mobileInfoIcon}><Tooltip interactive enterTouchDelay={200} leaveTouchDelay={4000} classes={{ tooltip: classes.tooltipRoot }} title={tooltipContent}><IconButton><InfoOutlined /></IconButton></Tooltip></span>
                     </div>
                     {config.descriptionKeys.map((desc, idx) => <Typography key={idx} className={classes.keyDescription} component="p">{t("components.pixa_wallet_keys_dialog." + desc)}</Typography>)}
                     {isOwnProfile !== false && <FormControl fullWidth variant="outlined" className={classes.keyInput}>
                         <InputLabel htmlFor={`key-input-${keyType}`}>{t("components.pixa_wallet_keys_dialog.private", {
-                            title: config.title
+                            title
                         })}</InputLabel>
                         <OutlinedInput
                             id={`key-input-${keyType}`}
@@ -363,15 +366,15 @@ const KeySection = memo(function KeySection({ classes, keyType, keyValue, public
                     </FormControl>}
                     <FormControl fullWidth variant="outlined" className={classes.publicKeyInput}>
                         <InputLabel htmlFor={`public-key-input-${keyType}`}>{t("components.pixa_wallet_keys_dialog.public", {
-                            title: config.title
+                            title
                         })}</InputLabel>
                         <OutlinedInput disabled={true} id={`public-key-input-${keyType}`} type="text" value={publicKeyValue || t("components.pixa_wallet_keys_dialog.not_available")} readOnly endAdornment={publicKeyEndAdornment} labelWidth={keyType === "posting" ? 115 : keyType === "active" ? 105 : keyType === "owner" ? 105 : 100} />
                     </FormControl>
                 </div>
                 <div className={classes.keySectionRight}>
-                    <div className={classes.permissionsTitle}><KeyIcon />{config.title}</div>
+                    <div className={classes.permissionsTitle}><KeyIcon />{title}</div>
                     <Typography className={classes.permissionsSubtitle}>{t("components.pixa_wallet_keys_dialog.use_your_to", {
-                        title: config.title
+                        title
                     })}</Typography>
                     <ul className={classes.permissionsList}>{config.permissionKeys.map((p, i) => <li key={i}>{t("components.pixa_wallet_keys_dialog." + p)}</li>)}</ul>
                 </div>
@@ -1156,14 +1159,16 @@ class PixaWalletKeysDialog extends React.PureComponent {
                                 <div className={classes.recoveryCurrentBox}>
                                     <span style={{ color: "#777" }}>{t("components.pixa_wallet_keys_dialog.current_recovery_account")} </span>
                                     <strong style={{ color: "#fff", fontFamily: "monospace" }}>
-                                        {_currentRecovery ? `@${_currentRecovery}` : "— none configured —"}
+                                        {_currentRecovery ? `@${_currentRecovery}` : t("components.pixa_wallet_keys_dialog.none_configured")}
                                     </strong>
                                 </div>
 
                                 {_pendingRecovery && (
                                     <div className={classes.recoveryPendingBox}>
-                                        <strong>{t("components.pixa_wallet_keys_dialog.pending_change")}</strong>{' '}
-                                        to <span style={{ fontFamily: "monospace" }}>@{_pendingRecovery.recovery_account}</span>
+                                        <T
+                                            k="components.pixa_wallet_keys_dialog.pending_change_to"
+                                            vars={{ account: _pendingRecovery.recovery_account }}
+                                            slots={[<span style={{ fontFamily: "monospace" }} key="0" />]} />
                                         {recoveryDaysRemaining !== null && (
                                             <><T
                                                 k="components.pixa_wallet_keys_dialog.effective_in_strong_strong_day"
@@ -1362,12 +1367,13 @@ class PixaWalletKeysDialog extends React.PureComponent {
                             <div className={classes.recoveryPendingBox}><T
                                 k="components.pixa_wallet_keys_dialog.this_will_strong_cancel_any_pending_recovery" /></div>
                         ) : (
-                            <div className={classes.recoveryWarning}><T
+                            <div className={classes.recoveryWarning}>{_currentRecovery ? <T
                                 k="components.pixa_wallet_keys_dialog.once_broadcast_the_chain_will_create_a"
                                 vars={{
-                                    currentRecovery: _currentRecovery || 'none'
+                                    currentRecovery: _currentRecovery
                                 }}
-                                slots={[<span style={{ fontFamily: "monospace" }} key="0" />]} /></div>
+                                slots={[<span style={{ fontFamily: "monospace" }} key="0" />]} /> : <T
+                                k="components.pixa_wallet_keys_dialog.once_broadcast_no_current_recovery" />}</div>
                         )}
                         {_recovery_error && (
                             <Typography style={{ fontSize: 12, color: "#cccccc", fontStyle: "italic", margin: "8px 4px" }}>{_recovery_error}</Typography>
@@ -1376,7 +1382,7 @@ class PixaWalletKeysDialog extends React.PureComponent {
                     <DialogActions style={{ padding: "8px 16px 16px 16px" }}>
                         <Button variant="text" color="primary" onClick={this._close_recovery_confirm} disabled={_recovery_loading}>{t("words.cancel", {TUC: true})}</Button>
                         <Button variant="contained" className={classes.whiteButton} onClick={this._confirm_recovery_change} disabled={_recovery_loading}>
-                            {_recovery_loading ? "BROADCASTING..." : "CONFIRM"}
+                            {_recovery_loading ? t("words.broadcasting", { TUC: true }) : t("words.confirm", { TUC: true })}
                         </Button>
                     </DialogActions>
                 </Dialog>

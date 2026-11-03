@@ -4,22 +4,14 @@ import Dialog from "@material-ui/core/Dialog";
 import DialogContent from "@material-ui/core/DialogContent";
 import DialogActions from "@material-ui/core/DialogActions";
 import Button from "@material-ui/core/Button";
-import List from '@material-ui/core/List';
-import ListItem from '@material-ui/core/ListItem';
-import ListItemText from '@material-ui/core/ListItemText';
-import ListItemAvatar from '@material-ui/core/ListItemAvatar';
-import Avatar from '@material-ui/core/Avatar';
 import { HISTORY } from "../utils/constants";
-import ListItemSecondaryAction from "@material-ui/core/ListItemSecondaryAction";
-import Checkbox from "@material-ui/core/Checkbox";
 import CircularProgress from "@material-ui/core/CircularProgress";
 import Tab from "@material-ui/core/Tab";
 import Tabs from "@material-ui/core/Tabs";
 import SwipeableViews from "react-swipeable-views";
 import * as actions from "../actions/utils";
 import { PagedLoader } from "../utils/api/paged-list";
-import { getProfiles } from "../utils/api/account-cache";
-import { useScrollParentWindowing, useEndReached } from "../hooks/useScrollParentWindowing";
+import { AccountList, AccountImageStore, FollowableAccountRow, followTargetOf } from "./list/AccountList";
 
 import { t } from "../utils/text";
 import { FollowHistory } from "./AccountCharts";
@@ -61,6 +53,14 @@ import { withLanguage } from "../utils/withLanguage";
 //      Tab labels show the chain's follow counts (get_follow_count) right
 //      away instead of counting up with the pages.
 //
+//   6. SHARED LIST (components/list/AccountList) — the windowing and the
+//      rows moved to the shared account list (also used by the voters
+//      and members lists): memoised rows of plain elements with one
+//      delegated click handler, so a follow toggle or an avatar landing
+//      re-renders one row, not every row in view with fresh closures.
+//      Avatars hydrate for the rows on screen (both tabs share one
+//      AccountImageStore) instead of for every page that streamed in.
+//
 // Public props are unchanged:
 //   { open, onClose, api, account, isFollowing, onCountsUpdated }.
 // ───────────────────────────────────────────────────────────────────────
@@ -72,9 +72,14 @@ const styles = theme => ({
         "& .MuiDialog-paperScrollPaper": {
             height: "calc(100% - 64px)",
             maxHeight: 760,
+            // 12px off every edge on phones: a 100% paper plus MUI's 32px
+            // margins overflowed the screen top and bottom.
             [theme.breakpoints.down("sm")]: {
-                height: "100%",
-                maxHeight: "100%"
+                margin: 12,
+                width: "calc(100% - 24px)",
+                maxWidth: "none",
+                height: "calc(100% - 24px)",
+                maxHeight: "none",
             },
         },
     },
@@ -123,93 +128,19 @@ const styles = theme => ({
         // The slide around it scrolls; never let this become a second scroller.
         overflowY: "visible",
     },
-    listItem: {
-        "&.MuiListItem-root": {
-            borderRadius: "16px",
-            backgroundColor: "#ffffff00",
-            transition: "background-color 225ms cubic-bezier(0.4, 0, 0.2, 1) 5ms",
-        },
-        "&.MuiListItem-root:hover": {
-            borderRadius: "16px",
-            backgroundColor: "#ffffff14",
-            transition: "background-color 225ms cubic-bezier(0.4, 0, 0.2, 1) 5ms",
-        },
-    },
-    listItemTitle: {
-        fontWeight: 'bold',
-        fontFamily: '"Industry Book", "Normative Pro"',
-        color: '#fff',
-        cursor: 'pointer',
-    },
-    listItemSubTitle: {
-        display: 'inline-block',
-        textOverflow: 'ellipsis',
-        overflow: 'hidden',
-        whiteSpace: 'nowrap'
-    },
-    action: {
-        display: "inline-flex",
-        justifyContent: "right",
-        right: "0px !important",
-        left: "auto !important",
-        width: "64px !important",
-        paddingRight: 16,
-        transform: "translateY(0px)",
-        "& .MuiIconButton-edgeEnd": {
-            marginRight: "0px !important"
-        }
-    },
     loadingContainer: {
         display: "flex",
         justifyContent: "center",
         alignItems: "center",
         height: 480
     },
-    moreRow: {
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        height: 64,
-    },
 });
 
-const ROW_H = 64;
-const ACTION_STYLE = { top: 0, height: ROW_H };
 // Each slide is the dialog's scroll area (one scrollbar, like the wallet).
 const SLIDE_STYLE = { height: "100%", overflowY: "auto", overflowX: "hidden" };
-
-/**
- * Windowed rows against the dialog's own scrollbar (same technique as
- * WalletHistory), plus the load-more trigger and its footer:
- * spinner while a page is in flight, nothing once the list has ended.
- */
-function WindowedUserList({ users, renderRow, hasMore, loading, onLoadMore, emptyText, classes }) {
-    const { listRef, start, end } = useScrollParentWindowing(users.length, ROW_H);
-    useEndReached({
-        end,
-        count: users.length,
-        enabled: hasMore && !loading,
-        onEndReached: onLoadMore,
-    });
-
-    const slice = users.slice(start, end);
-    return (
-        <div ref={listRef}>
-            {users.length === 0 && !hasMore ? (
-                <ListItem component="div"><ListItemText secondary={emptyText} /></ListItem>
-            ) : (
-                <List component="div" disablePadding>
-                    <div style={{ height: start * ROW_H }} />
-                    {slice.map((u) => (u ? renderRow(u) : null))}
-                    <div style={{ height: Math.max(0, (users.length - end) * ROW_H) }} />
-                </List>
-            )}
-            {hasMore && loading ? (
-                <div className={classes.moreRow}><CircularProgress size={24} color={"secondary"} /></div>
-            ) : null}
-        </div>
-    );
-}
+const FILL_STYLE = { height: "100%" };
+const SPRING = { tension: 450, friction: 60, duration: '120ms', easeFunction: 'cubic-bezier(0.280, 0.840, 0.420, 1)', delay: '5ms' };
+const getUsername = (u) => (u && (u.username || u.name)) || "";
 
 class FollowListModal extends React.PureComponent {
 
@@ -238,6 +169,10 @@ class FollowListModal extends React.PureComponent {
         this._listLoaders = {};   // listKey → on-demand PagedLoader
         this._countsReported = false;
         this._swipeRoot = null;
+        // Avatars for the rows on screen, shared by both tabs (one per open).
+        this._images = null;
+        // One-slot memo for the row renderer (see _getRenderRow).
+        this._rowCache = { followingSet: null, user: null, fn: null };
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────
@@ -268,6 +203,9 @@ class FollowListModal extends React.PureComponent {
         for (const l of this._loaders) l.cancel();
         this._loaders = [];
         this._listLoaders = {};
+        // Stops its requests; the URLs it has stay readable for the rows
+        // still fading out with the dialog. Replaced on the next open.
+        if (this._images) this._images.dispose();
     };
 
     // ── Data loading ──────────────────────────────────────────────────
@@ -281,6 +219,7 @@ class FollowListModal extends React.PureComponent {
         const gen = this._gen;
         const username = account.name;
         this._countsReported = false;
+        this._images = new AccountImageStore(api);
 
         this.setState({
             _tab: this.props.isFollowing ? 1 : 0,
@@ -368,8 +307,8 @@ class FollowListModal extends React.PureComponent {
     /**
      * Spawn one progressive list loader (followers OR following of the
      * viewed account). Each page maps raw follow records to the row
-     * shape, renders immediately, and kicks a non-blocking avatar
-     * hydration for just that page's names.
+     * shape and renders immediately; avatars are hydrated by the list for
+     * the rows on screen (AccountImageStore).
      */
     _spawnUserListLoader = ({ gen, fetchPage, itemKey, pickName, listKey, firstKey, doneKey }) => {
         const mapped = [];
@@ -383,14 +322,13 @@ class FollowListModal extends React.PureComponent {
                 if (gen !== this._gen) return;
                 for (const f of fresh) {
                     const name = pickName(f);
-                    mapped.push({ username: name, name, image: '', reputation: 0 });
+                    mapped.push({ username: name, name, reputation: 0 });
                 }
                 this.setState({
                     [listKey]: mapped.slice(),
                     [firstKey]: true,
                     [doneKey]: done,
                 }, this._maybeReportCounts);
-                this._hydrateAvatars(gen, mapped, listKey, fresh.map(pickName));
             },
             onError: (e) => {
                 if (gen !== this._gen) return;
@@ -429,37 +367,6 @@ class FollowListModal extends React.PureComponent {
     _loadMoreFollowing = () => this._loadMore("_following");
 
     /**
-     * Per-page avatar hydration through the shared account-cache:
-     * batched and deduped app-wide. Patches only rows still missing an
-     * image, with fresh object identities for correct re-rendering.
-     */
-    _hydrateAvatars = (gen, mapped, listKey, names) => {
-        const api = this.props.api;
-        if (!api || !names || names.length === 0) return;
-
-        getProfiles(api, names)
-            .then((profiles) => {
-                if (gen !== this._gen) return;
-                let changed = false;
-                for (let i = 0; i < mapped.length; i++) {
-                    const u = mapped[i];
-                    if (u.image) continue;
-                    const p = profiles.get(String(u.username).toLowerCase());
-                    if (p && p.image) {
-                        mapped[i] = { ...u, image: p.image };
-                        changed = true;
-                    }
-                }
-                if (changed && gen === this._gen) {
-                    this.setState({ [listKey]: mapped.slice() });
-                }
-            })
-            .catch((e) => {
-                console.warn('[FollowListModal] hydrate error:', e && e.message);
-            });
-    };
-
-    /**
      * Report counts exactly once per open: the chain totals as soon as
      * they arrive, or the list lengths if both lists end first (or the
      * count call failed).
@@ -484,11 +391,19 @@ class FollowListModal extends React.PureComponent {
         this.props.onCountsUpdated(followers, following);
     };
 
-    /** "412 Followers" with the chain total; "200+ Followers" without it. */
-    _tabLabel = (len, total, done, word) => {
-        if (done) return `${len} ${word}`;
-        if (total != null) return `${Math.max(len, total)} ${word}`;
-        return `${len}+ ${word}`;
+    /** "412 followers" with the chain total; "200+ followers" without it. */
+    _tabLabel = (len, total, done, kind) => {
+        const settled = done || total != null;
+        const n = done || total == null ? len : Math.max(len, total);
+        // Plural counts go in as { word: { word: n } } (see readPluralSpec).
+        if (kind === "followers") {
+            return settled
+                ? t("components.follow_list_modal.follower_count", { follower: { follower: n } })
+                : t("components.follow_list_modal.follower_count_more", { follower: { follower: n } });
+        }
+        return settled
+            ? t("components.follow_list_modal.following_count", { following: { following: n } })
+            : t("components.follow_list_modal.following_count_more", { following: { following: n } });
     };
 
     // ── Actions ───────────────────────────────────────────────────────
@@ -517,7 +432,7 @@ class FollowListModal extends React.PureComponent {
             this.setState({ _followingSet: new Set(_followingSet) });
         } catch (e) {
             console.error('[FollowListModal] toggle follow error:', e);
-            actions.trigger_snackbar(e.message || "Failed to update follow status");
+            actions.trigger_snackbar(e.message || t("components.follow_list_modal.failed_to_update_follow_status"));
         }
     };
 
@@ -536,40 +451,35 @@ class FollowListModal extends React.PureComponent {
         }
     };
 
-    // ── Row renderer (factory bound to the rendered list) ─────────────
+    _onToggleFollow = (e) => {
+        const username = followTargetOf(e);
+        if (username) this._toggleFollow(username);
+    };
 
-    _renderUserRow = (user) => {
-        const { classes } = this.props;
+    // ── Rows ──────────────────────────────────────────────────────────
+    // Rebuilt only when what the rows read from state does (the follow set,
+    // the session user): AccountList re-offers its visible rows then and the
+    // memoised rows decide which actually changed.
+    _getRenderRow = () => {
         const { _followingSet, _loggedInUser } = this.state;
-        if (!user) return null;
-        const username = user.username || user.name;
-        const image = user.image || '';
-        const isFollowing = _followingSet.has(username);
-        const isOwnAccount = _loggedInUser && _loggedInUser.toLowerCase() === username.toLowerCase();
-
-        return (
-            <ListItem classes={{ root: classes.listItem }} ContainerComponent={"div"} key={username} style={{ height: ROW_H }} component={"div"}>
-                <ListItemAvatar>
-                    <Avatar onClick={() => this._open_author(username)} src={image} style={{ borderRadius: "14px", cursor: "pointer" }} className={"pixelated"} />
-                </ListItemAvatar>
-                <ListItemText
-                    id={`@${username}`}
-                    primary={<span className={classes.listItemTitle} onClick={() => this._open_author(username)}>{`@${username}`}</span>}
+        const c = this._rowCache;
+        if (c.fn && c.followingSet === _followingSet && c.user === _loggedInUser) return c.fn;
+        const me = _loggedInUser ? String(_loggedInUser).toLowerCase() : "";
+        const fn = (user, index, classes, image) => {
+            const username = getUsername(user);
+            return (
+                <FollowableAccountRow
+                    classes={classes}
+                    username={username}
+                    image={image}
+                    canFollow={!!me && me !== username.toLowerCase()}
+                    following={_followingSet.has(username)}
+                    onToggleFollow={this._onToggleFollow}
                 />
-                {_loggedInUser && !isOwnAccount && (
-                    <ListItemSecondaryAction className={classes.action} style={ACTION_STYLE}>
-                        <Checkbox
-                            size="medium"
-                            color="primary"
-                            checked={isFollowing}
-                            onChange={() => this._toggleFollow(username)}
-                            edge="end"
-                            inputProps={{ 'aria-labelledby': `@${username}` }}
-                        />
-                    </ListItemSecondaryAction>
-                )}
-            </ListItem>
-        );
+            );
+        };
+        this._rowCache = { followingSet: _followingSet, user: _loggedInUser, fn };
+        return fn;
     };
 
     _setChartSummary = (kind) => (text) => {
@@ -607,34 +517,41 @@ class FollowListModal extends React.PureComponent {
     _get_views = () => {
         const { classes } = this.props;
         const {
-            _followers, _following, _followersFirst, _followingFirst,
+            _tab, _followers, _following, _followersFirst, _followingFirst,
             _followersDone, _followingDone, _followersLoading, _followingLoading,
         } = this.state;
+        const renderRow = this._getRenderRow();
 
-        const renderList = (users, firstPageLanded, done, loading, onLoadMore, emptyText, kind) => (
+        const renderList = (users, firstPageLanded, done, loading, onLoadMore, emptyText, kind, active) => (
             <DialogContent scroll={"paper"} className={classes.dialogContent} key={kind}>
                 {this._renderChart(kind)}
                 {!firstPageLanded ? (
                     <div className={classes.loadingContainer}><CircularProgress color={"secondary"} /></div>
                 ) : (
-                    <WindowedUserList
-                        users={users}
-                        renderRow={this._renderUserRow}
+                    <AccountList
+                        items={users}
+                        getName={getUsername}
+                        renderRow={renderRow}
+                        imageStore={this._images}
+                        active={active}
+                        slot={kind}
                         hasMore={!done}
                         loading={loading}
-                        onLoadMore={onLoadMore}
+                        onEndReached={onLoadMore}
+                        onOpenAccount={this._open_author}
                         emptyText={emptyText}
-                        classes={classes}
                     />
                 )}
             </DialogContent>
         );
 
         return [
-            renderList(_followers, _followersFirst, _followersDone, _followersLoading, this._loadMoreFollowers, "No followers yet", "followers"),
-            renderList(_following, _followingFirst, _followingDone, _followingLoading, this._loadMoreFollowing, "Not following anyone yet", "following"),
+            renderList(_followers, _followersFirst, _followersDone, _followersLoading, this._loadMoreFollowers, t("components.follow_list_modal.no_followers_yet"), "followers", _tab === 0),
+            renderList(_following, _followingFirst, _followingDone, _followingLoading, this._loadMoreFollowing, t("components.follow_list_modal.not_following_anyone_yet"), "following", _tab === 1),
         ];
     };
+
+    _onChangeIndex = (v) => this._handleTabChange(null, v);
 
     render() {
         const { classes, open } = this.props;
@@ -658,24 +575,23 @@ class FollowListModal extends React.PureComponent {
                     indicatorColor="primary"
                     textColor="primary"
                     onChange={this._handleTabChange}
-                    fullwidth={true}
                 >
-                    <Tab label={this._tabLabel(_followers.length, _followerCount, _followersDone, "Followers")} />
-                    <Tab label={this._tabLabel(_following.length, _followingCount, _followingDone, "Following")} />
+                    <Tab label={this._tabLabel(_followers.length, _followerCount, _followersDone, "followers")} />
+                    <Tab label={this._tabLabel(_following.length, _followingCount, _followingDone, "following")} />
                 </Tabs>
                 <div className={classes.swipeRoot} ref={this._setSwipeRoot}>
                 <SwipeableViews
                     ignoreNativeScroll={true}
-                    style={{ height: "100%" }}
-                    containerStyle={{ height: "100%" }}
+                    style={FILL_STYLE}
+                    containerStyle={FILL_STYLE}
                     slideStyle={SLIDE_STYLE}
                     animateHeight={false}
                     animateTransitions={true}
                     disableLazyLoading={true}
                     resistance={true}
-                    springConfig={{ tension: 450, friction: 60, duration: '120ms', easeFunction: 'cubic-bezier(0.280, 0.840, 0.420, 1)', delay: '5ms' }}
+                    springConfig={SPRING}
                     index={_tab}
-                    onChangeIndex={(v) => this._handleTabChange({}, v)}
+                    onChangeIndex={this._onChangeIndex}
                     disabled={false}
                     key={"swipe-able-view-follows"}
                 >

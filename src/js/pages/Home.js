@@ -147,12 +147,18 @@ const styles = theme => ({
         flexDirection: "column",
         justifyContent: "flex-start",
         alignItems: "flex-start",
-        // dvh keeps the bottom-anchored CTA inside the VISIBLE viewport on
-        // mobile (100vh kept as JSS fallback).
-        fallbacks: { height: "100vh" },
-        height: "100dvh",
-        width: "100vw",
-        position: "relative",
+        // Pinned to the viewport by its four insets instead of sized with
+        // 100dvh × 100vw. dvh is the visible height in Chrome, but in Brave
+        // it is the TOOLBAR-HIDDEN height (its bottom toolbar is not
+        // subtracted), so the box — and the CTA anchored 64px above its
+        // bottom — reached under the toolbar. A fixed box with all insets at
+        // 0 is the area the browser keeps clear of its own bars, in every
+        // engine; in Chrome it is the same box as before, pixel for pixel.
+        position: "fixed",
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
         padding: "32px",
         fontFamily: `"Industry Book", "Normative Pro"`,
         // No willChange: filter here — nothing ever animates a filter on the
@@ -674,11 +680,11 @@ const styles = theme => ({
         left: 0,
         width: "100vw",
         // The WebGL backing buffer is sized from window.innerHeight (the
-        // visible viewport); dvh makes the CSS box match it 1:1 so the
-        // starfield isn't vertically stretched on mobile (vh = URL-bar-
-        // hidden height there). 100vh kept as JSS fallback.
-        fallbacks: { height: "100vh" },
-        height: "100dvh",
+        // visible viewport); the CSS box has to match it 1:1 so the starfield
+        // isn't vertically stretched on mobile (vh = URL-bar-hidden height
+        // there, and so is dvh in Brave). --app-h is that visible height,
+        // measured once per resize (utils/viewport, set before first render).
+        height: "var(--app-h, 100vh)",
         zIndex: -1,
         background: "#000"
         // No CSS `filter: grayscale()` here on purpose: stars are greyscaled inside
@@ -2121,7 +2127,7 @@ class Home extends React.PureComponent {
                     onLoad={art.w ? undefined : this._scheduleStripMeasure}
                     alt={copy
                         ? t("components.home.artwork_duplicate", { i: i + 1 })
-                        : `Artwork ${i + 1}`}
+                        : t("components.home.artwork_number", { i: i + 1 })}
                 />
             </div>
         );

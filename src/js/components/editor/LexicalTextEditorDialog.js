@@ -71,7 +71,7 @@ import { previewDialogStyles } from './PreviewDialog';
 import { dialogStyles } from './Dialogs';
 import { formatMenuStyles } from './FormatMenus';
 
-import { t, subscribe as subscribe_language } from "../../utils/text";
+import { t, tx, getLocaleCode, subscribe as subscribe_language } from "../../utils/text";
 
 // Hoisted so SwipeableViews receives stable references across renders
 const SWIPE_SPRING_CONFIG = {tension: 450, friction: 60, duration: '120ms', easeFunction: 'cubic-bezier(0.280, 0.840, 0.420, 1)', delay: '5ms'};
@@ -214,7 +214,7 @@ const styles = (theme) => ({
             [theme.breakpoints.up("md")]: {
                 maxWidth: "90vw",
                 width: 1200,
-                height: "85vh"
+                height: "calc(var(--app-h, 100vh) * 0.85)"
             }
         },
         "& .MuiBackdrop-root": {
@@ -1094,12 +1094,13 @@ class LexicalTextEditorDialog extends PureComponent {
         });
     };
 
-    // Delete confirmation handlers
+    // Delete confirmation handlers. The "Untitled Draft" fallback is applied
+    // in render, so it follows the language rather than freezing in state.
     showDeleteConfirmDialog = (draftId, draftTitle) => {
         this.setState({
             deleteConfirmDialogOpen: true,
             deleteConfirmDraftId: draftId,
-            deleteConfirmDraftTitle: draftTitle || t("components.lexical_text_editor_dialog.untitled_draft")
+            deleteConfirmDraftTitle: draftTitle || ""
         });
     };
 
@@ -1405,15 +1406,21 @@ class LexicalTextEditorDialog extends PureComponent {
                 imageUrlDialogOpen: false,
                 imageUrlDialogValue: ""
             });
-            actions.trigger_snackbar(
-                `Image stored on Arweave (${Math.max(1, Math.round(stored.bytes / 1024))} kB${stored.withinFreeBudget ? ', free tier' : ''})`
-            );
+            const sizeKb = Math.max(1, Math.round(stored.bytes / 1024)).toLocaleString(getLocaleCode());
+            actions.trigger_snackbar(stored.withinFreeBudget
+                ? t("components.lexical_text_editor_dialog.image_stored_on_arweave_kb_free_tier", { size: sizeKb })
+                // Existing key: {{max}} is the size, {{value}} an optional suffix
+                // that this variant leaves empty.
+                : t("components.lexical_text_editor_dialog.image_stored_on_arweave_kb", { max: sizeKb, value: "" }));
         } catch (error) {
             console.error('Arweave image upload failed:', error);
             this.setState({ imageUploading: false });
-            actions.trigger_snackbar(
-                'Image upload failed: ' + (error && error.message ? error.message : 'unknown error')
-            );
+            // An upload rejection carries its translated text in `i18n`
+            // (utils/lexical/arweaveImage); anything else only has `message`.
+            const message = error && error.i18n ? tx(error.i18n) : (error && error.message);
+            actions.trigger_snackbar(message
+                ? t("components.lexical_text_editor_dialog.image_upload_failed", { message })
+                : t("components.lexical_text_editor_dialog.image_upload_failed_unknown_error"));
         }
     };
 
@@ -1509,7 +1516,7 @@ class LexicalTextEditorDialog extends PureComponent {
             const { author, permlink: editPermlink } = this.props.editPost;
             const { editProposal } = this.state;
             if (activeAccount !== author) {
-                actions.trigger_snackbar(`Only @${author} can edit this post.`);
+                actions.trigger_snackbar(t("components.lexical_text_editor_dialog.only_can_edit_this_post", { author }));
                 return;
             }
 
@@ -1539,7 +1546,9 @@ class LexicalTextEditorDialog extends PureComponent {
                 // The chain rejects raising daily_pay; catch it here with a clear
                 // message instead of a cryptic broadcast failure.
                 if (isFinite(origDaily) && daily > origDaily + 1e-9) {
-                    actions.trigger_snackbar(`Daily pay can only be lowered (currently ${origDaily} PXS/day).`);
+                    actions.trigger_snackbar(t("components.lexical_text_editor_dialog.daily_pay_can_only_be_lowered_currently", {
+                        origDaily: origDaily.toLocaleString(getLocaleCode(), { maximumFractionDigits: 3 })
+                    }));
                     return;
                 }
                 proposalUpdate = {
@@ -1599,7 +1608,7 @@ class LexicalTextEditorDialog extends PureComponent {
                     this.closePreview();
                     this.props.onUpdated?.({ author, permlink: editPermlink, title: title.trim() });
                     actions.trigger_snackbar(error.message
-                        ? `Post updated, but the proposal update failed: ${error.message}`
+                        ? t("components.lexical_text_editor_dialog.post_updated_but_the_proposal_update_failed", { message: error.message })
                         : t("components.lexical_text_editor_dialog.post_updated_but_the_proposal_update_failed_2"));
                 } else {
                     actions.trigger_snackbar(error.message || t("components.lexical_text_editor_dialog.failed_to_update_post"));
@@ -1751,7 +1760,7 @@ class LexicalTextEditorDialog extends PureComponent {
                 // the user knows the content survived the proposal failure.
                 actions.trigger_snackbar(
                     (error && error.message)
-                        ? `Post published, but proposal failed: ${error.message}`
+                        ? t("components.lexical_text_editor_dialog.post_published_but_proposal_failed", { message: error.message })
                         : t("components.lexical_text_editor_dialog.post_published_but_the_proposal_submission_faile")
                 );
                 return;
@@ -1774,7 +1783,10 @@ class LexicalTextEditorDialog extends PureComponent {
             });
         } catch (error) {
             console.error('Error rendering markdown:', error);
-            return '<p>Error rendering content</p>';
+            // This string is injected as HTML: escape the translation.
+            const text = t("components.lexical_text_editor_dialog.error_rendering_content")
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return '<p>' + text + '</p>';
         }
     };
 
@@ -2023,8 +2035,13 @@ class LexicalTextEditorDialog extends PureComponent {
                                     {editMode ? t("components.lexical_text_editor_dialog.edit_blog_post") : t("components.lexical_text_editor_dialog.write_a_new_blog_post")}
                                 </Typography>
                                 <Typography variant="caption" style={APPBAR_CAPTION_STYLE}>
-                                    {wordCount} words · {readingTime} min read
-                                    {currentDraftId && ' · Draft saved'}
+                                    {currentDraftId
+                                        ? t("components.lexical_text_editor_dialog.words_min_read_draft_saved", {
+                                            word: { word: wordCount }, minutes: readingTime
+                                        })
+                                        : t("components.lexical_text_editor_dialog.words_min_read_count", {
+                                            word: { word: wordCount }, minutes: readingTime
+                                        })}
                                 </Typography>
                             </Box>
                             <IconButton color="inherit" onClick={onClose}>
@@ -2107,7 +2124,9 @@ class LexicalTextEditorDialog extends PureComponent {
                     classes={classes}
                     open={deleteConfirmDialogOpen}
                     title={t("components.lexical_text_editor_dialog.delete_draft")}
-                    message={`Are you sure you want to delete "${deleteConfirmDraftTitle}"? This action cannot be undone.`}
+                    message={t("components.lexical_text_editor_dialog.are_you_sure_you_want_to_delete", {
+                        deleteConfirmDraftTitle: deleteConfirmDraftTitle || t("components.lexical_text_editor_dialog.untitled_draft")
+                    })}
                     onClose={this.closeDeleteConfirmDialog}
                     onConfirm={this.handleDeleteConfirm}
                 />

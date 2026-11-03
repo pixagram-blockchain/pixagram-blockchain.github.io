@@ -32,7 +32,7 @@ import dispatcher from "../dispatcher";
 import { ToxicityWatcher } from "./ToxicityHint";
 import { lazyDialog } from "./LazyDialog";
 import { T } from "../utils/T";
-import { t, useLanguage } from "../utils/text";
+import { t, tk, tx, useLanguage } from "../utils/text";
 import JSLoader from "../utils/JSLoader";
 const ImageWizard = lazyDialog(() => import("./ImageWizard"), { name: "ImageWizard" });
 
@@ -346,14 +346,20 @@ const MAX_ITEM_VALUE_LEN = 256;
 
 // Permanence warning shown above every field whose contents are broadcast to the
 // chain. Greyscale only, per the global UI rule.
-const PermanenceNotice = memo(({ classes }) => (
-    <div className={classes.permanenceNotice}>
-        <InfoOutlinedIcon className={classes.permanenceNoticeIcon} />
-        <Typography variant="body2" className={classes.permanenceNoticeText}><T k="components.edit_profile_dialog.everything_you_add_below_is_written_to" /></Typography>
-    </div>
-));
+const PermanenceNotice = memo(({ classes }) => {
+    useLanguage();
+    return (
+        <div className={classes.permanenceNotice}>
+            <InfoOutlinedIcon className={classes.permanenceNoticeIcon} />
+            <Typography variant="body2" className={classes.permanenceNoticeText}><T k="components.edit_profile_dialog.everything_you_add_below_is_written_to" /></Typography>
+        </div>
+    );
+});
 
 // Memoized Name/Value List Component (reused for crypto addresses, links and contacts)
+// emptyText / addLabel are tk() descriptors resolved here: the comparator
+// below only looks at `items`, so text computed by the parent would keep the
+// language it was rendered in.
 const NameValueList = memo(({
                                 classes,
                                 items,
@@ -371,7 +377,7 @@ const NameValueList = memo(({
                     <div className={classes.addressListEmpty}>
                         <EmptyIcon style={{ fontSize: 32, color: "#444", marginBottom: 8 }} />
                         <Typography variant="body2" style={{ color: "#666" }}>
-                            {emptyText}
+                            {tx(emptyText)}
                         </Typography>
                     </div>
                 ) : (
@@ -413,7 +419,7 @@ const NameValueList = memo(({
                 onClick={onAddClick}
                 fullWidth
             >
-                {addLabel}
+                {tx(addLabel)}
             </Button>
         </div>
     );
@@ -444,35 +450,59 @@ const normalizeItems = (arr) => {
     }));
 };
 
-// Config for the generic "Add Item" dialog (shared by addresses and links)
+// Config for the generic "Add Item" dialog (shared by addresses and links).
+// Texts are tk() descriptors, resolved with tx() where they are rendered.
 const ADD_DIALOG_CONFIG = {
     address: {
-        title: "Add Crypto Address",
-        nameLabel: "Network Name",
-        namePlaceholder: "e.g., Ethereum, Bitcoin, HIVE",
-        valueLabel: "Public Address",
-        valuePlaceholder: "e.g., 0x1234...abcd",
+        title: tk("components.edit_profile_dialog.add_crypto_address"),
+        nameLabel: tk("components.edit_profile_dialog.network_name"),
+        namePlaceholder: tk("components.edit_profile_dialog.eg_ethereum_bitcoin_hive"),
+        valueLabel: tk("components.edit_profile_dialog.public_address"),
+        valuePlaceholder: tk("components.edit_profile_dialog.eg_0x1234_abcd"),
         valueMultiline: true,
-        buttonLabel: "Add Address"
+        buttonLabel: tk("components.edit_profile_dialog.add_address")
     },
     contact: {
-        title: "Add Contact Info",
-        nameLabel: "App / Protocol",
-        namePlaceholder: "e.g., Email, Telegram, Threema, Matrix",
-        valueLabel: "User ID / Handle",
-        valuePlaceholder: "e.g., @username or ABCD1234",
+        title: tk("components.edit_profile_dialog.add_contact_info"),
+        nameLabel: tk("components.edit_profile_dialog.app_protocol"),
+        namePlaceholder: tk("components.edit_profile_dialog.eg_email_telegram_threema_matrix"),
+        valueLabel: tk("components.edit_profile_dialog.user_id_handle"),
+        valuePlaceholder: tk("components.edit_profile_dialog.eg_username_or_abcd1234"),
         valueMultiline: false,
-        buttonLabel: "Add Contact Info"
+        buttonLabel: tk("components.edit_profile_dialog.add_contact_info")
     },
     link: {
-        title: "Add Link",
-        nameLabel: "Label",
-        namePlaceholder: "e.g., Twitter, GitHub, Portfolio",
-        valueLabel: "URL",
-        valuePlaceholder: "e.g., https://twitter.com/username",
+        title: tk("components.edit_profile_dialog.add_link"),
+        nameLabel: tk("components.edit_profile_dialog.label"),
+        namePlaceholder: tk("components.edit_profile_dialog.eg_twitter_github_portfolio"),
+        valueLabel: tk("components.edit_profile_dialog.url"),
+        valuePlaceholder: tk("components.edit_profile_dialog.eg_https_twitter_com_username"),
         valueMultiline: false,
-        buttonLabel: "Add Link"
+        buttonLabel: tk("components.edit_profile_dialog.add_link")
     }
+};
+
+// Empty-state and add-button texts of the three lists (see NameValueList).
+const LIST_TEXTS = {
+    link: {
+        empty: tk("components.edit_profile_dialog.no_links_added_yet"),
+        add: tk("components.edit_profile_dialog.add_new_link"),
+    },
+    address: {
+        empty: tk("components.edit_profile_dialog.no_crypto_addresses_added_yet"),
+        add: tk("components.edit_profile_dialog.add_new_address"),
+    },
+    contact: {
+        empty: tk("components.edit_profile_dialog.no_contact_info_added_yet"),
+        add: tk("components.edit_profile_dialog.add_contact_info"),
+    },
+};
+
+// Title of the delete confirmation, one whole sentence per list type.
+const DELETE_TITLES = {
+    link: tk("components.edit_profile_dialog.delete_link"),
+    address: tk("components.edit_profile_dialog.delete_address"),
+    contact: tk("components.edit_profile_dialog.delete_contact_info"),
 };
 
 // Maps a list type to its state setter. Kept out of the component so the
@@ -486,6 +516,7 @@ const LIST_SETTERS = (type, setters) => (
 
 function EditProfileDialog(props) {
     const { classes, open, onClose, onSave, api } = props;
+    useLanguage();
 
     // Logged-in user state
     const [username, setUsername] = useState(null);
@@ -612,7 +643,7 @@ function EditProfileDialog(props) {
             } catch (error) {
                 console.error('EditProfileDialog: Failed to load profile:', error);
                 setLoadError(t("components.edit_profile_dialog.failed_to_load_profile", {
-                    message: (error.message || "Unknown error")
+                    message: (error.message || t("components.create_account_dialog.unknown_error"))
                 }));
             } finally {
                 setLoadingProfile(false);
@@ -766,7 +797,7 @@ function EditProfileDialog(props) {
         setPictureError("");
 
         if (!file.type.startsWith("image/")) {
-            setPictureError("Please upload an image file");
+            setPictureError(tk("components.edit_profile_dialog.please_upload_an_image_file"));
             return;
         }
 
@@ -790,7 +821,7 @@ function EditProfileDialog(props) {
                 }
             } catch (e) {
                 console.error('[EditProfileDialog] Pixel art check failed:', e);
-                setPictureError("Could not read this image. Please try another file.");
+                setPictureError(tk("components.image_wizard.could_not_read_this_image_please_try"));
                 return;
             }
         }
@@ -910,7 +941,7 @@ function EditProfileDialog(props) {
     const handleConfirm = useCallback(async () => {
         if (!api || !username) {
             console.error("Missing API or username");
-            setPictureError("Cannot save: not logged in");
+            setPictureError(tk("components.edit_profile_dialog.cannot_save_not_logged_in"));
             return;
         }
 
@@ -929,7 +960,8 @@ function EditProfileDialog(props) {
                         type: "UNLOCK",
                         data: {
                             requiredKeyType: 'posting',
-                            actionDescription: 'Update profile',
+                            // UnlockKeyDialog renders this as-is: translated here.
+                            actionDescription: t("components.edit_profile_dialog.update_profile"),
                             username: username,
                             keyMissing: unlockStatus.unlockType === 'key',
                             onUnlock: () => {
@@ -994,7 +1026,9 @@ function EditProfileDialog(props) {
             onClose();
         } catch (error) {
             console.error("EditProfileDialog: Failed to update profile", error);
-            setPictureError("Update failed: " + (error.message || "Unknown error"));
+            setPictureError(tk("components.edit_profile_dialog.update_failed", {
+                message: error.message || tk("components.create_account_dialog.unknown_error")
+            }));
         } finally {
             setIsSaving(false);
         }
@@ -1101,7 +1135,7 @@ function EditProfileDialog(props) {
 
             {pictureError && (
                 <Typography color="error" variant="caption" style={{display:'block', marginBottom: 16}}>
-                    {pictureError}
+                    {tx(pictureError)}
                 </Typography>
             )}
 
@@ -1161,8 +1195,8 @@ function EditProfileDialog(props) {
                             classes={classes}
                             items={links}
                             emptyIcon={LinkIcon}
-                            emptyText="No links added yet"
-                            addLabel="Add New Link"
+                            emptyText={LIST_TEXTS.link.empty}
+                            addLabel={LIST_TEXTS.link.add}
                             onDeleteClick={(item) => handleDeleteItemClick(item, "link")}
                             onAddClick={(!isSaving && links.length < MAX_ITEMS_PER_LIST) ? () => handleOpenAddDialog("link") : undefined}
                         />
@@ -1187,8 +1221,8 @@ function EditProfileDialog(props) {
                             classes={classes}
                             items={addresses}
                             emptyIcon={AccountBalanceWalletIcon}
-                            emptyText="No crypto addresses added yet"
-                            addLabel="Add New Address"
+                            emptyText={LIST_TEXTS.address.empty}
+                            addLabel={LIST_TEXTS.address.add}
                             onDeleteClick={(item) => handleDeleteItemClick(item, "address")}
                             onAddClick={(!isSaving && addresses.length < MAX_ITEMS_PER_LIST) ? () => handleOpenAddDialog("address") : undefined}
                         />
@@ -1213,8 +1247,8 @@ function EditProfileDialog(props) {
                             classes={classes}
                             items={contacts}
                             emptyIcon={ContactMailIcon}
-                            emptyText="No contact info added yet"
-                            addLabel="Add Contact Info"
+                            emptyText={LIST_TEXTS.contact.empty}
+                            addLabel={LIST_TEXTS.contact.add}
                             onDeleteClick={(item) => handleDeleteItemClick(item, "contact")}
                             onAddClick={(!isSaving && contacts.length < MAX_ITEMS_PER_LIST) ? () => handleOpenAddDialog("contact") : undefined}
                         />
@@ -1267,9 +1301,9 @@ function EditProfileDialog(props) {
                             {isSaving ? (
                                 <CircularProgress size={24} color="inherit" />
                             ) : hasChanges ? (
-                                "Save Changes"
+                                t("components.edit_profile_dialog.save_changes")
                             ) : (
-                                "No Changes"
+                                t("components.edit_profile_dialog.no_changes")
                             )}
                         </Button>
                     </DialogActions>
@@ -1289,9 +1323,7 @@ function EditProfileDialog(props) {
                         style={{ marginTop: 8, marginBottom: 16 }}
                         component="h2"
                         variant="h6"
-                    >{t("components.edit_profile_dialog.delete", {
-                            text: itemToDelete?.listType === "link" ? "Link" : "Address"
-                        })}</Typography>
+                    >{tx(DELETE_TITLES[itemToDelete?.listType] || DELETE_TITLES.address)}</Typography>
                     <Typography variant="body2" color="textPrimary" component="p"><T
                             k="components.edit_profile_dialog.are_you_sure_you_want_to_remove"
                             vars={{
@@ -1334,27 +1366,27 @@ function EditProfileDialog(props) {
                         component="h2"
                         variant="h6"
                     >
-                        {addDialogConfig.title}
+                        {tx(addDialogConfig.title)}
                     </Typography>
 
                     <TextField
-                        label={addDialogConfig.nameLabel}
+                        label={tx(addDialogConfig.nameLabel)}
                         variant="outlined"
                         fullWidth
                         value={newItemName}
                         onChange={(e) => setNewItemName(e.target.value)}
-                        placeholder={addDialogConfig.namePlaceholder}
+                        placeholder={tx(addDialogConfig.namePlaceholder)}
                         style={{ marginBottom: 16 }}
                         autoFocus
                     />
 
                     <TextField
-                        label={addDialogConfig.valueLabel}
+                        label={tx(addDialogConfig.valueLabel)}
                         variant="outlined"
                         fullWidth
                         value={newItemValue}
                         onChange={(e) => setNewItemValue(e.target.value)}
-                        placeholder={addDialogConfig.valuePlaceholder}
+                        placeholder={tx(addDialogConfig.valuePlaceholder)}
                         multiline={addDialogConfig.valueMultiline}
                         minRows={addDialogConfig.valueMultiline ? 2 : undefined}
                     />
@@ -1369,7 +1401,7 @@ function EditProfileDialog(props) {
                         onClick={handleAddItem}
                         disabled={!isAddItemValid}
                     >
-                        {addDialogConfig.buttonLabel}
+                        {tx(addDialogConfig.buttonLabel)}
                     </Button>
                 </DialogActions>
             </Dialog>

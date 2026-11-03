@@ -203,7 +203,7 @@ const PaperCardMenuOption = React.memo(({ classes, data, xy = [], onClose, api, 
 
         if (navigator.share) {
             navigator.share({
-                title: data?.title || 'Check this out',
+                title: data?.title || t("components.paper_card_menu_option.check_this_out"),
                 text: data?.body?.substring(0, 100) || '',
                 url: postUrl
             }).catch(() => { /* user cancelled or error */ });

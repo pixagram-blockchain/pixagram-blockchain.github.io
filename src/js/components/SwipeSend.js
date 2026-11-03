@@ -5,6 +5,7 @@ import LockOutlined from "@material-ui/icons/LockOutlined";
 import LockOpenRounded from "@material-ui/icons/LockOpenRounded";
 import CheckRounded from "@material-ui/icons/CheckRounded";
 import CircularProgress from "@material-ui/core/CircularProgress";
+import { t, useLanguage } from "../utils/text";
 
 const getWindowDimensions = () => {
     const documentElement = document.documentElement;
@@ -111,6 +112,7 @@ const styles = theme => ({
 });
 
 const SwipeSend = ({ classes, unlocked: initialUnlocked = false, completed: initialCompleted = 0, onUnlock, onLock }) => {
+    useLanguage();
     const [unlocked, setUnlocked] = useState(initialUnlocked);
     const [completed, setCompleted] = useState(initialCompleted);
     const [left, setLeft] = useState(-12);
@@ -306,7 +308,8 @@ const SwipeSend = ({ classes, unlocked: initialUnlocked = false, completed: init
         >
             <div className={classes.textContainer}>
                 <span className={classes.text}>
-                    Slide to Confirm >>>
+                    {/* The arrows point the way the slider moves — the same in every language. */}
+                    {t("components.swipe_send.slide_to_confirm")} &gt;&gt;&gt;
                 </span>
                 <div
                     className={classes.textMask}

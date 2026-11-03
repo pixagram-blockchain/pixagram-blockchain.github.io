@@ -21,19 +21,29 @@ export const overrides = {
                 height: "100%",
                 maxHeight: "100%",
                 backgroundColor: "#000",
+                // Dark UI end to end: native controls, autofill tints and the
+                // browser's field pop-ups render dark instead of as light
+                // boxes inside dark fields (also declared in template.html,
+                // so it holds from the first paint).
+                colorScheme: "dark",
+                // Inherited by everything: no translucent blue tap square on
+                // Chromium (Android Chrome, Brave, Samsung). MUI buttons keep
+                // their ripple as touch feedback.
+                WebkitTapHighlightColor: "transparent",
+                WebkitTextSizeAdjust: "100%",
+                textSizeAdjust: "100%",
             },
             "body.loaded": {
                 fontFamily: `"Red Hat Display", "Geist Mono"`,
                 fontSize: "auto !important",
                 overflow: "hidden",
                 backgroundColor: "#000",
+                // The 100% chain (html → body → #app) IS the visible layout
+                // viewport. The former min(100dvh, 100%) clamp only restated
+                // it — and dvh is not the visible height in every engine
+                // (Brave leaves its bottom toolbar out).
                 height: "100%",
-                // dvh = the VISIBLE viewport on mobile (100vh is the
-                // URL-bar-hidden height on Android Chrome / iOS Safari).
-                // JSS emits `fallbacks` first, so old engines keep the
-                // vh clamp and modern ones take the dvh one.
-                fallbacks: { maxHeight: "min(100vh, 100%)" },
-                maxHeight: "min(100dvh, 100%)",
+                maxHeight: "100%",
             },
             "div.MuiChip-root": {
                 backgroundColor: "#212121"
@@ -196,10 +206,14 @@ export const overrides = {
                 animationFillMode: "both",
                 animationDelay: "50ms",
                 "@global": {
+                    // opacity, not filter: opacity() — same fade, run by the
+                    // compositor, and with fill-mode both the old final
+                    // `filter: opacity(1)` stayed on every video for good (a
+                    // filter layer each, re-filtered on every frame played).
                     "@keyframes fadin": {
-                        "0%": {filter: "opacity(0)", animationTimingFunction: "linear"},
-                        "20%": {filter: "opacity(0)", animationTimingFunction: "cubic-bezier(0.280, 0.840, 0.420, 1)"},
-                        "100%": {filter: "opacity(1)", animationTimingFunction: "cubic-bezier(0.280, 0.840, 0.420, 1)"},
+                        "0%": {opacity: 0, animationTimingFunction: "linear"},
+                        "20%": {opacity: 0, animationTimingFunction: "cubic-bezier(0.280, 0.840, 0.420, 1)"},
+                        "100%": {opacity: 1, animationTimingFunction: "cubic-bezier(0.280, 0.840, 0.420, 1)"},
                     }
                 },
             },
@@ -406,13 +420,35 @@ export const overrides = {
                 backgroundColor: "#000000",
                 color: "#eee",
             },
-            ".MuiOutlinedInput-input:-webkit-autofill": {
-                WebkitBoxShadow: "0 0 0 100px #000000 inset !important",
-                WebkitTextFillColor: "#fff !important"
+            // ── Text fields: no light boxes on focus / autofill ──────────
+            // Chromium and WebKit paint an autofilled or previewed field with
+            // their own background and text colour from a UA rule marked
+            // !important — no author rule can override it. What CAN be done
+            // is to stall the change: with a transition this long the field
+            // keeps its own (transparent) background and its own text colour
+            // for good. (The old rule boxed outlined fields in solid black
+            // and left filled / standard fields to the UA's light tint; the
+            // `-internal-autofill-selected` selector it shipped with is
+            // UA-only and was dropped by every browser.) Firefox tints with a
+            // filter instead, which an author rule can reset.
+            "input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:focus, input:-webkit-autofill:active, textarea:-webkit-autofill, textarea:-webkit-autofill:hover, textarea:-webkit-autofill:focus, select:-webkit-autofill, select:-webkit-autofill:focus": {
+                transition: "background-color 600000s 0s, color 600000s 0s",
+                caretColor: "currentColor",
             },
-            "input:-internal-autofill-selected": {
-                color: "#fff !important",
-                background: "transparent !important"
+            "input:autofill, textarea:autofill, select:autofill": {
+                filter: "none",
+            },
+            // Selection inside a field: a translucent grey that reads on the
+            // dark fields AND on the white dialogs' fields, over the field's
+            // own text colour — instead of the page-wide near-white block with
+            // dark text, which turned a field into a white square whenever
+            // its text got selected on focus (share links, long-press).
+            // currentColor, not inherit: with highlight inheritance (Chrome
+            // 134+) `inherit` reads the PARENT's ::selection — the page-wide
+            // #171717 — while currentColor is the field's own text colour.
+            "input::selection, textarea::selection, .MuiInputBase-input::selection": {
+                background: "rgba(140, 140, 140, 0.45)",
+                color: "currentColor",
             },
             ".MuiCheckbox-colorSecondary.Mui-checked": {
                 color: "#fff !important"
@@ -515,26 +551,69 @@ export const overrides = {
                 color: "#ffffffCC",
                 transition: "color 225ms cubic-bezier(0.4, 0, 0.2, 1) 75ms"
             },
+            // MUI fades every backdrop in and out itself (an opacity
+            // transition). The former `filter: opacity(1)` here kept a filter
+            // layer on every backdrop for its whole life, and the extra
+            // animation's keyframes were invalid (`transform: opacity(…)` is
+            // not a transform), so it composited nothing but cost a layer.
             ".MuiBackdrop-root": {
                 backgroundColor: "#1010105c",
-                filter: "opacity(1)",
-                animation: "$fadeBlur 225ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
-                "@global": {
-                    "@keyframes fadeBlur": {
-                        "0%": {
-                            transform: "opacity(0)",
-                        },
-                        "100%": {
-                            transform: "opacity(1)",
-                        },
-                    }
-                }
             },
             ".MuiFormGroup-row": {
                 flexWrap: "wrap",
                 alignContent: "stretch",
                 justifyContent: "space-between",
             }
+        },
+    },
+
+    // ── Text-field focus states ──────────────────────────────────────────
+    // Merged by MUI into the components' own sheets (same rule, same
+    // specificity), so they win without !important.
+
+    // A focused select painted a 5% white rectangle with square corners
+    // (borderRadius: 0) inside the rounded field — the "white square" on every
+    // select once an option was picked, since the field keeps focus.
+    MuiSelect: {
+        select: {
+            "&:focus": { backgroundColor: "transparent", borderRadius: "inherit" },
+        },
+    },
+    MuiNativeSelect: {
+        select: {
+            "&:focus": { backgroundColor: "transparent", borderRadius: "inherit" },
+        },
+    },
+    // Filled fields rest at 4.5% white (global rule above) and hover at 6%,
+    // but MUI's focused state jumped to 9% — a lighter block appearing the
+    // moment the field was focused — and disabled ones to 12%. Focus is shown
+    // by the underline; the fill stays at the hover level.
+    MuiFilledInput: {
+        root: {
+            "&$focused": { backgroundColor: "rgba(255, 255, 255, 0.06)" },
+            "&$disabled": { backgroundColor: "rgba(255, 255, 255, 0.03)" },
+        },
+        // See MuiOutlinedInput below.
+        input: {
+            "&:-webkit-autofill": {
+                WebkitBoxShadow: "none",
+                WebkitTextFillColor: "currentColor",
+                caretColor: "auto",
+            },
+        },
+    },
+    // In the dark palette MUI covers an autofilled outlined / filled field
+    // with a solid blue box (inset box-shadow #266798) and forces white text
+    // and caret — a blue rectangle in a dark form, invisible text in the white
+    // dialogs. The global autofill rule above already keeps the field's own
+    // background and text colour, so the cover is simply removed.
+    MuiOutlinedInput: {
+        input: {
+            "&:-webkit-autofill": {
+                WebkitBoxShadow: "none",
+                WebkitTextFillColor: "currentColor",
+                caretColor: "auto",
+            },
         },
     },
 }

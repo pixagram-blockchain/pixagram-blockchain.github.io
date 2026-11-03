@@ -41,10 +41,13 @@ import EmojiEventsRounded from "@material-ui/icons/EmojiEventsRounded";
 //   taxReport        — ReportBundle          → PDF (pdf-lib) + CSV
 import { defaultConfig, accountHistoryToTaxEvents } from "../utils/tax/pixa-tax-ingest";
 import { buildAllReports, PxsAnchoredPriceProvider, summarizeCounterparties, incomeTimingFor } from "../utils/tax/pixa-tax-engine";
-import { generateTaxReportPdf, generateTaxReportCsvs } from "../utils/tax/taxReport";
+import { generateTaxReportPdf, generateTaxReportCsvs, printableInReport } from "../utils/tax/taxReport";
 
 import { T } from "../utils/T";
-import { t } from "../utils/text";
+import { t, tk } from "../utils/text";
+// Engine/ingest text arrives as tk() descriptors: uiText() shows them in the
+// UI language; the PDF is written in the document language (docLanguage.js).
+import { uiText, renderInDocLanguage, uiDocTranslator } from "../utils/docLanguage";
 import { formatNumber, formatInteger, formatAmount } from "../utils/numberFormat";
 
 import { withLanguage } from "../utils/withLanguage";
@@ -184,6 +187,14 @@ const HISTORY_PAGE = 1000;   // ops fetched per API call
 
 // Friendly labels for the itemized account-movement kinds (engine bundle.movements).
 // power_up is resolved per-leg in movementLabel() below (start vs completed).
+// Engine codes shown in the report lists: the same words the PDF uses
+// (taxReport.js CATEGORY_LABELS / SOURCE_LABELS); an unknown code as it came.
+const CATEGORY_CODES = new Set(["reward_author", "reward_curation", "reward_benefactor", "reward_claim",
+    "proposal_income", "savings_interest", "transfer_out", "swap", "market_fill"]);
+const SOURCE_CODES = new Set(["fta_list", "platform_price", "cost_basis", "market_oracle"]);
+const categoryText = (c) => (CATEGORY_CODES.has(c) ? t("components.tax_report.category_" + c) : c);
+const sourceText = (s) => (SOURCE_CODES.has(s) ? t("components.tax_report.source_" + s) : s);
+
 const MOVEMENT_LABELS = {
     fee_payment: 'movement_fee_paid',
     savings_fill: 'movement_savings_withdrawal',
@@ -899,11 +910,12 @@ class PixaWalletTaxesDialog extends React.Component {
     _rangeSlug = () => `${ymd(this.state._startDate)}_to_${ymd(this.state._endDate)}`;
     _fileBase = () => `pixa-tax-${this._rangeSlug()}-${this.state._jurisdiction}`;
 
-    _exportCsv = () => {
+    _exportCsv = async () => {
         const b = this._filteredBundle(this._recompute());
         if (!b) return;
         try {
-            const c = generateTaxReportCsvs(b);
+            // The CSV's text columns (tax treatment, notes) in the UI language.
+            const c = generateTaxReportCsvs(b, { i18n: await uiDocTranslator() });
             // One downloadable file, split into clearly-labelled sections. Each
             // section is itself a clean table an accountant can lift into a sheet.
             // Every translated fragment goes through csvCell, so a comma in a
@@ -950,21 +962,12 @@ class PixaWalletTaxesDialog extends React.Component {
         this._download(JSON.stringify(payload, null, 2), `${this._fileBase()}.json`, 'application/json');
     };
 
-    // Pricing caveat text, shared by the on-screen footnote and the PDF.
+    // Pricing caveat for the PDF, as a descriptor: the report resolves it in the
+    // document's language, which may differ from the UI's (see docLanguage.js).
     _pricingNote = (b) => (
         String(b.priceDataVersion || '').indexOf('wallet-live') === 0
-            ? t(
-                "components.pixa_wallet_taxes_dialog.values_use_the_wallets_current_price_a",
-                {
-                    fiat: b.fiat
-                }
-            )
-            : t(
-                "components.pixa_wallet_taxes_dialog.fiat_values_come_from_the_engines_pxs",
-                {
-                    priceDataVersion: b.priceDataVersion
-                }
-            )
+            ? tk("components.pixa_wallet_taxes_dialog.values_use_the_wallets_current_price_a", { fiat: b.fiat })
+            : tk("components.pixa_wallet_taxes_dialog.fiat_values_come_from_the_engines_pxs", { priceDataVersion: b.priceDataVersion })
     );
 
     _exportPdf = async () => {
@@ -972,12 +975,16 @@ class PixaWalletTaxesDialog extends React.Component {
         if (!b) return;
         try {
             const { _ingest } = this.state;
-            const bytes = await generateTaxReportPdf(b, {
+            // Written in the UI language when Helvetica (WinAnsi) can print all
+            // of it, in English otherwise; notes go in as descriptors so they
+            // follow the document's language too.
+            const bytes = await renderInDocLanguage((i18n) => generateTaxReportPdf(b, {
+                i18n,
                 csvFilename: `${this._fileBase()}.csv`,
                 ingest: _ingest ? { skipped: _ingest.skipped, warnings: _ingest.warnings } : null,
                 pricingNote: this._pricingNote(b),
-                jurisdictionNote: t("components.pixa_wallet_taxes_dialog." + this._jurisdictionMeta().noteKey),
-            });
+                jurisdictionNote: tk("components.pixa_wallet_taxes_dialog." + this._jurisdictionMeta().noteKey),
+            }), { canPrint: printableInReport });
             this._download(bytes, `${this._fileBase()}.pdf`, 'application/pdf');
         } catch (e) {
             this._setError((e && e.message) || t("components.pixa_wallet_taxes_dialog.pdf_export_failed"));
@@ -1109,11 +1116,11 @@ class PixaWalletTaxesDialog extends React.Component {
                                 <ListItem key={i}>
                                     <ListItemText classes={{ primary: classes.rowMono }}
                                                   primary={`${fmtQty(l.qty)} ${l.asset}  ·  ${fmtFiat(l.valueFiat)} ${fiat}`}
-                                                  secondary={`@ ${fmtQty(l.fiatPerUnit)} ${fiat} · ${l.source}`} />
+                                                  secondary={`@ ${fmtQty(l.fiatPerUnit)} ${fiat} · ${sourceText(l.source)}`} />
                                 </ListItem>
                             ))}
                         </List>
-                        {w.note ? <Typography style={{ color: "#6f6f6f", fontSize: "0.72rem", padding: "0px 16px 10px" }}>{w.note}</Typography> : null}
+                        {w.note ? <Typography style={{ color: "#6f6f6f", fontSize: "0.72rem", padding: "0px 16px 10px" }}>{uiText(w.note)}</Typography> : null}
                     </div>
                 ))}
                 {_bundle.tokenSummary && _bundle.tokenSummary.length > 0 && this._renderSection('tokens', t("components.pixa_wallet_taxes_dialog.section_per_token_summary"), _bundle.tokenSummary.length, (
@@ -1155,7 +1162,7 @@ class PixaWalletTaxesDialog extends React.Component {
                                                   primary={t("components.pixa_wallet_taxes_dialog.gain_line", { qty: fmtQty(l.qtyOut), asset: l.asset, gain: fmtFiat(l.gainFiat), fiat: fiat }) + (l.taxable ? '' : t("components.pixa_wallet_taxes_dialog.tax_free_suffix"))}
                                                   secondary={t("components.pixa_wallet_taxes_dialog.proceeds_basis", {
                                                       fmtDate: fmtDate(l.ts),
-                                                      category: l.category,
+                                                      category: categoryText(l.category),
                                                       fmtFiat: fmtFiat(l.proceedsFiat),
                                                       fmtFiat_2: fmtFiat(l.basisFiat)
                                                   })} />
@@ -1183,7 +1190,7 @@ class PixaWalletTaxesDialog extends React.Component {
                         })}</Typography>
                         {tx.deductionSteps ? (
                             <Typography style={{ color: "#9a9a9a", fontSize: "0.72rem", padding: "0 16px 2px", fontFamily: "monospace" }}>
-                                {tx.deductionSteps.map((s, i) => `${i ? '→ ' : ''}${s.label} ${fmtFiat(s.value)}`).join('  ')}
+                                {tx.deductionSteps.map((s, i) => `${i ? '→ ' : ''}${uiText(s.label)} ${fmtFiat(s.value)}`).join('  ')}
                             </Typography>
                         ) : null}
                         <Typography style={{ color: "#e8e8e8", fontSize: "0.84rem", padding: "2px 16px 10px", fontFamily: "monospace", fontWeight: 600 }}>{t("components.pixa_wallet_taxes_dialog.taxable_amount", {
@@ -1236,7 +1243,7 @@ class PixaWalletTaxesDialog extends React.Component {
                                     </div>
                                     <ListItemText classes={{ primary: classes.rowMono }}
                                                   primary={`+${fmtQty(l.qtyIn)} ${l.asset}  ·  ${fmtFiat(l.fmvFiat)} ${fiat}`}
-                                                  secondary={`${fmtDate(l.ts)} · ${l.category} · ${l.source}`} />
+                                                  secondary={`${fmtDate(l.ts)} · ${categoryText(l.category)} · ${sourceText(l.source)}`} />
                                 </ListItem>
                             ))}
                         </List>
@@ -1265,7 +1272,7 @@ class PixaWalletTaxesDialog extends React.Component {
                                         </div>
                                         <ListItemText classes={{ primary: classes.rowMono }}
                                                       primary={`${m.direction === 'out' ? '\u2212' : '+'}${fmtQty(m.amount)} ${m.asset}  ·  ${label}`}
-                                                      secondary={`${fmtDate(m.ts)}${m.note ? ' · ' + m.note : ''}`} />
+                                                      secondary={[fmtDate(m.ts), m.memo, uiText(m.note)].filter(Boolean).join(' · ')} />
                                     </ListItem>
                                 );
                             })}
@@ -1281,10 +1288,10 @@ class PixaWalletTaxesDialog extends React.Component {
                 {reviewCount > 0 && this._renderSection('review', t("components.pixa_wallet_taxes_dialog.section_review_notes"), reviewCount, (
                     <div className={classes.reportList} style={{ padding: "8px 16px" }}>
                         {engineWarnings.map((wn, i) => (
-                            <Typography key={'e' + i} style={{ color: "#9a9a9a", fontSize: "0.8rem", lineHeight: 1.5 }}>• {wn}</Typography>
+                            <Typography key={'e' + i} style={{ color: "#9a9a9a", fontSize: "0.8rem", lineHeight: 1.5 }}>• {uiText(wn)}</Typography>
                         ))}
                         {ingestWarnings.map((wn, i) => (
-                            <Typography key={'i' + i} style={{ color: "#9a9a9a", fontSize: "0.8rem", lineHeight: 1.5 }}>• {wn}</Typography>
+                            <Typography key={'i' + i} style={{ color: "#9a9a9a", fontSize: "0.8rem", lineHeight: 1.5 }}>• {uiText(wn)}</Typography>
                         ))}
                         {skippedEntries.length > 0 && (
                             <div style={{ marginTop: engineWarnings.length || ingestWarnings.length ? 10 : 0 }}>

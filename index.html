@@ -8,6 +8,13 @@
     <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin" />
     <meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp" />
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <!-- The UI is dark end to end: the browser's own form controls, autofill
+         tints, scrollbars and field pop-ups follow it from the first paint
+         instead of drawing light boxes inside dark fields. -->
+    <meta name="color-scheme" content="dark">
+    <!-- PWA launches (shortcuts, file/share/protocol handlers) carry ?pwa=…;
+         record the address before the router can rewrite it. Read by /pwa.js. -->
+    <script>window.__pxgLaunchHref = location.href;</script>
 
     <!-- ══════════════════════════════════════════════════════════════════
          STARTUP HINTS
@@ -69,6 +76,15 @@
         html {
             background-color: #000;
             height: 100%;
+            color-scheme: dark;
+            /* Chromium (Android Chrome, Brave, Samsung) draws a translucent
+               blue box over anything tappable — the square that flashed on the
+               vote dial. The property is inherited, so this one line clears it
+               everywhere; MUI buttons keep their ripple as touch feedback. */
+            -webkit-tap-highlight-color: transparent;
+            /* No font inflation when a phone rotates. */
+            -webkit-text-size-adjust: 100%;
+            text-size-adjust: 100%;
         }
         html, body {
             overscroll-behavior-y: contain;
@@ -77,20 +93,25 @@
         }
         body {
             background-color: #000;
-            min-height: 100%;
+            height: 100%;
             margin: 0;
             padding: 0;
         }
         #app {
             background-color: #000;
-            /* 100vh on mobile Chrome/Safari = the URL-bar-HIDDEN (large)
-               viewport, so the bottom ~56px sat below the visible fold and,
-               because the document itself never scrolls (html overflow:
-               hidden), the URL bar never collapses to reveal it. 100dvh
-               tracks the actual visible viewport; plain 100vh stays as the
-               fallback for pre-2023 engines. */
-            min-height: 100vh;
-            min-height: 100dvh;
+            /* Sized by the 100% chain (html → body → #app): the initial
+               containing block, i.e. the viewport the browser actually lays
+               the page out in — on phones, the area between its toolbars.
+               This used to be a min-height: 100vh / 100dvh floor. 100vh is the
+               toolbar-HIDDEN height on mobile, and Brave's dvh with its bottom
+               toolbar is that large height too, so the floor made #app taller
+               than the screen and everything anchored to its bottom hung below
+               the fold — the feed's CREATE button sat half under Brave's
+               toolbar. The document never scrolls (html overflow: hidden), so
+               the toolbars never collapse and that extra height was never
+               reachable. The app shell itself is pinned with position: fixed
+               (Index.js), which no viewport unit can get wrong. */
+            height: 100%;
         }
 
         img, video, canvas {
@@ -238,11 +259,12 @@
                box instead, i.e. ~56px too low on Android Chrome. And since
                #app is never off-screen, the auto-skip never engages, so the
                property had zero rendering upside here; the masonry
-               containers carry their own containment where it pays off. */
+               containers carry their own containment where it pays off.
+               No viewport-unit floor either (see #app above): the box is the
+               100% chain, never taller than what is on screen. */
             overflow: hidden;
             position: relative;
-            min-height: 100vh;
-            min-height: 100dvh;
+            height: 100%;
         }
 
         body.loading {
@@ -336,7 +358,8 @@
         }
     </script>
 
-    <link rel="icon" href="/src/images/favicon.ico">
+    <link rel="icon" href="/src/images/favicon.ico" sizes="32x32">
+    <link rel="icon" href="/src/images/favicon.svg" type="image/svg+xml">
 
     <link rel="manifest" href="/manifest.json">
     <meta name="mobile-web-app-capable" content="yes">
@@ -345,10 +368,42 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Pixagram">
 
-    <link rel="apple-touch-icon" href="/src/images/manifest/logo-shadow.png">
+    <link rel="apple-touch-icon" href="/src/images/manifest/icons/apple-touch-icon-180.png">
 
-    <meta name="msapplication-TileImage" content="/src/images/manifest/logo-white.png">
-    <meta name="msapplication-TileColor" content="#ffffff">
+    <meta name="msapplication-TileImage" content="/src/images/manifest/icons/icon-144.png">
+    <meta name="msapplication-TileColor" content="#000000">
+
+    <!-- Window Controls Overlay: when a desktop user hides the title bar of the
+         installed app, draw a draggable black strip in the title-bar area
+         (#pwa-titlebar, added by /pwa.js) and move the app below it. -->
+    <style>
+        #pwa-titlebar { display: none; }
+        @media (display-mode: window-controls-overlay) {
+            #pwa-titlebar {
+                display: flex; align-items: center; gap: 8px;
+                position: fixed; z-index: 2147483647;
+                left: env(titlebar-area-x, 0); top: env(titlebar-area-y, 0);
+                width: env(titlebar-area-width, 100%); height: env(titlebar-area-height, 33px);
+                padding: 0 12px; box-sizing: border-box;
+                background: #000; color: #fff;
+                font: 700 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif; letter-spacing: .12em;
+                -webkit-app-region: drag; app-region: drag; -webkit-user-select: none; user-select: none;
+            }
+            #pwa-titlebar img { width: 16px; height: 16px; }
+            /* Same selectors as the preloader rules above, so these win in
+               both states (body.loaded sets position: relative). height and
+               min-height are reset: with top and bottom set, the 100% chain
+               would push the bottom of the app below the window edge. */
+            body, body.loading, body.loaded {
+                position: fixed;
+                top: env(titlebar-area-height, 33px); right: 0; bottom: 0; left: 0;
+                width: auto; height: auto; min-width: 0; min-height: 0;
+                margin: 0; overflow: hidden;
+                transform: translateZ(0); /* containing block for the fixed app shell, FABs and dialogs */
+            }
+        }
+    </style>
+    <script src="/pwa.js" defer></script>
     <meta name="msapplication-tap-highlight" content="no">
 
     <script type="text/javascript">

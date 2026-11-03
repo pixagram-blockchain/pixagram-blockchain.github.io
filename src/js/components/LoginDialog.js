@@ -57,7 +57,7 @@ import WarningRounded from "@material-ui/icons/WarningRounded";
 
 
 import { T } from "../utils/T";
-import { t, useLanguage } from "../utils/text";
+import { t, tk, tx, useLanguage } from "../utils/text";
 import * as actions from "../actions/utils";
 
 
@@ -540,34 +540,78 @@ const normalizeName = (name) => String(name || '').replace(/^@/, '').toLowerCase
 const SESSION_TIMEOUT_MIN = 3 * 24 * 60;
 const SESSION_TIMEOUT_DEFAULT = 7 * 24 * 60;
 const SESSION_TIMEOUT_MAX = 14 * 24 * 60;
+// Labelled at render (withDurationLabels): a label made here would stay in
+// the language of the module's load.
 const SESSION_TIMEOUT_MARKS = [
-    { value: 3 * 24 * 60, label: '3d' },
-    { value: 5 * 24 * 60, label: '5d' },
-    { value: 7 * 24 * 60, label: '7d' },
-    { value: 10 * 24 * 60, label: '10d' },
-    { value: 14 * 24 * 60, label: '14d' },
+    { value: 3 * 24 * 60 },
+    { value: 5 * 24 * 60 },
+    { value: 7 * 24 * 60 },
+    { value: 10 * 24 * 60 },
+    { value: 14 * 24 * 60 },
 ];
 
-// Strings added after the locale files (components.login_dialog.add_another_account,
-// add_account_button, master_password_derives_key, master_password_lacks_key,
-// master_password_works_too), with an English fallback for a build whose
-// locale files predate them.
-const tr = (key, fallback, params) => {
-    let s = null;
-    try { s = t(key, params); } catch (e) { s = null; }
-    // utils/text.js renders a missing key as its last segment ("title_account").
-    const last = key.slice(key.lastIndexOf(".") + 1);
-    return typeof s === "string" && s && s !== key && s !== last ? s : fallback;
+// PIN timeout marks (in minutes) — labelled at render too.
+const PIN_TIMEOUT_MARKS = [
+    { value: 15 },
+    { value: 30 },
+    { value: 60 },
+    { value: 90 },
+    { value: 120 },
+];
+
+// A duration in minutes, abbreviated: "15 min" / "1h 30m" / "7d 12h" next to
+// a slider, or "15m" / "1h30m" (compact) on its marks and value label.
+// Call at render only — the result is translated text.
+const durationShort = (min, compact) => {
+    if (min < 60) {
+        return compact
+            ? t("components.login_dialog.duration_minutes_compact", { minutes: min })
+            : t("components.login_dialog.duration_minutes_short", { minutes: min });
+    }
+    if (min < 1440) {
+        const hours = Math.floor(min / 60);
+        const minutes = min % 60;
+        if (!minutes) return t("components.login_dialog.duration_hours_short", { hours });
+        return compact
+            ? t("components.login_dialog.duration_hours_minutes_compact", { hours, minutes })
+            : t("components.login_dialog.duration_hours_minutes_short", { hours, minutes });
+    }
+    const days = Math.floor(min / 1440);
+    const hours = Math.floor((min % 1440) / 60);
+    return hours
+        ? t("components.login_dialog.duration_days_hours_short", { days, hours })
+        : t("components.login_dialog.duration_days_short", { days });
 };
 
-// PIN timeout marks (in minutes)
-const PIN_TIMEOUT_MARKS = [
-    { value: 15, label: '15m' },
-    { value: 30, label: '30m' },
-    { value: 60, label: '1h' },
-    { value: 90, label: '1h30m' },
-    { value: 120, label: '2h' },
-];
+// The same in words, for the review step: "45 minutes", "2 hours 30 minutes",
+// "7 days". Call at render only.
+const durationLong = (min) => {
+    if (min < 60) return t("components.login_dialog.duration_n_minutes", { minute: { minute: min } });
+    if (min < 1440) {
+        const hours = Math.floor(min / 60);
+        const minutes = min % 60;
+        return minutes
+            ? t("components.login_dialog.duration_n_hours_n_minutes", { hour: { hour: hours }, minute: { minute: minutes } })
+            : t("components.login_dialog.duration_n_hours", { hour: { hour: hours } });
+    }
+    const days = Math.floor(min / 1440);
+    const hours = Math.floor((min % 1440) / 60);
+    return hours
+        ? t("components.login_dialog.duration_n_days_n_hours", { day: { day: days }, hour: { hour: hours } })
+        : t("components.login_dialog.duration_n_days", { day: { day: days } });
+};
+
+const withDurationLabels = (marks) => marks.map((m) => ({ value: m.value, label: durationShort(m.value, true) }));
+
+// The role names the messages below speak of, translated where they are shown
+// (a tk() descriptor; tx() resolves one nested in another's variables).
+const roleName = (role) => (KEY_TYPES[role] ? tk(KEY_TYPES[role].label) : String(role || ""));
+
+// An error's text for the user: its translation (`i18n`, or the API's
+// `errorKey` + `errorVars`) when it has one, else its message.
+const errorText = (error, fallback) => (error && (error.i18n
+    || (error.errorKey ? tk(error.errorKey, error.errorVars) : null)
+    || error.message)) || fallback;
 
 
 // RC (Resource Credits) Display Component
@@ -636,7 +680,7 @@ const StepAuthenticate = memo(function StepAuthenticate({
                                                             onMouseDownPassword,
                                                             onOpenQRScanner,
                                                         }) {
-    useLanguage();
+    const lang = useLanguage();
     // Resolved avatar for the current input
     const resolvedImage = (selectedAuthor && selectedAuthor.username === username)
         ? selectedAuthor.image
@@ -648,7 +692,11 @@ const StepAuthenticate = memo(function StepAuthenticate({
             {pendingKeyValidation ? (
                 <CircularProgress size={20} color="secondary" />
             ) : primaryKey.length > 0 ? (
-                <Tooltip title={keyDetectionMessage || (primaryKeyValid ? "Key format is valid" : "Invalid key format")}>
+                <Tooltip title={keyDetectionMessage
+                    ? tx(keyDetectionMessage)
+                    : (primaryKeyValid
+                        ? t("components.login_dialog.key_format_is_valid")
+                        : t("components.login_dialog.invalid_key_format"))}>
                     <IconButton edge="end" disabled className={classes.buttonNotDisabled}>
                         {primaryKeyValid ? <CheckRounded style={{ color: "#ffffff" }} /> : <ErrorRounded style={{ color: "#a5a5a5" }} />}
                     </IconButton>
@@ -663,7 +711,7 @@ const StepAuthenticate = memo(function StepAuthenticate({
                     <CropFreeIcon />
                 </IconButton>
             </Tooltip>
-            <Tooltip title={showPrimaryKey ? "Hide key" : "Show key"}>
+            <Tooltip title={showPrimaryKey ? t("components.pixa_wallet_keys_dialog.hide_key") : t("components.login_dialog.show_key")}>
                 <IconButton
                     edge="end"
                     aria-label={t("words.toggle_key_visibility")}
@@ -674,7 +722,7 @@ const StepAuthenticate = memo(function StepAuthenticate({
                 </IconButton>
             </Tooltip>
         </InputAdornment>
-    ), [classes, pendingKeyValidation, primaryKey, primaryKeyValid, keyDetectionMessage, showPrimaryKey, onToggleShowPrimaryKey, onMouseDownPassword, onOpenQRScanner]);
+    ), [classes, pendingKeyValidation, primaryKey, primaryKeyValid, keyDetectionMessage, showPrimaryKey, onToggleShowPrimaryKey, onMouseDownPassword, onOpenQRScanner, lang]);
 
     const keyTypeConfig = KEY_TYPES[selectedKeyType] || KEY_TYPES.master;
 
@@ -704,7 +752,7 @@ const StepAuthenticate = memo(function StepAuthenticate({
                 onClose={onAutocompleteClose}
                 loading={searching}
                 loadingText={t("words.searching")}
-                noOptionsText={username.length > 0 ? "No accounts found" : "Type a username"}
+                noOptionsText={username.length > 0 ? t("words.no_accounts_found") : t("words.type_a_username")}
                 renderOption={(option) => (
                     <div style={{ display: "flex", alignItems: "center" }}>
                         <Avatar
@@ -733,7 +781,7 @@ const StepAuthenticate = memo(function StepAuthenticate({
                             ...params.inputProps,
                             autoComplete: 'username',
                             name: 'username',
-                            'aria-label': 'Username',
+                            'aria-label': t("words.username"),
                         }}
                         InputProps={{
                             ...params.InputProps,
@@ -753,7 +801,7 @@ const StepAuthenticate = memo(function StepAuthenticate({
                                     {searching || pendingUsernameValidation ? <CircularProgress color="inherit" size={18} /> : null}
                                     {!searching && !pendingUsernameValidation && usernameExists && (
                                         <Tooltip title={t("components.login_dialog.account_found_reputation", {
-                                            accountReputation: accountReputation || 'N/A'
+                                            accountReputation: accountReputation || t("components.login_dialog.not_available_short")
                                         })}>
                                             <AccountCheck style={{ color: "#e0e0e0", fontSize: 20 }} />
                                         </Tooltip>
@@ -769,11 +817,12 @@ const StepAuthenticate = memo(function StepAuthenticate({
                         }}
                     />
                 )}
-                style={{ marginBottom: usernameMessage.length > 0 ? 8 : 16 }}
+                style={{ marginBottom: usernameMessage ? 8 : 16 }}
             />
-            <Collapse in={usernameMessage.length > 0 && username.length > 0}>
+            {/* usernameMessage: "" or a message (a tk() descriptor or a string) */}
+            <Collapse in={!!usernameMessage && username.length > 0}>
                 <Typography style={{ fontSize: "14px", marginBottom: "16px", color: "#9b9b9b", textAlign: "right" }}>
-                    {usernameMessage}
+                    {tx(usernameMessage)}
                 </Typography>
             </Collapse>
             {/* Primary key input — accepts master password OR any WIF key.
@@ -806,25 +855,25 @@ const StepAuthenticate = memo(function StepAuthenticate({
                         autoComplete="current-password"
                         name="password"
                         inputProps={{
-                            'aria-label': 'Master password or private key',
+                            'aria-label': t("components.login_dialog.master_password_or_private_key"),
                         }}
                     />
                 </FormControl>
                 <Typography style={{ fontSize: 12, color: "#7b7b7b", marginTop: 8, textAlign: "right", minHeight: 18 }}>
                     {keyDetectionMessage
-                        ? keyDetectionMessage
+                        ? tx(keyDetectionMessage)
                         : (!usernameExists && username.length > 0
-                            ? "Enter a valid account name to enable key detection"
+                            ? t("components.login_dialog.enter_a_valid_account_name_to_enable_key")
                             : primaryKey.length === 0
                                 ? t("components.login_dialog.any_of_master_password_posting_active_owner")
-                                : keyTypeConfig.description)}
+                                : t(keyTypeConfig.description))}
                 </Typography>
                 {requiredKeyType && requiredKeyType !== 'master' && (
                     <Typography style={{ fontSize: 12, color: "#9b9b9b", marginTop: 4, textAlign: "right" }}><T
                         k="components.login_dialog.this_action_specifically_requires_the_strong_str"
                         vars={{
                             requiredKeyType: KEY_TYPES[requiredKeyType]?.label ? t(KEY_TYPES[requiredKeyType].label) : requiredKeyType
-                        }} />{" "}{tr("components.login_dialog.master_password_works_too", "Your master password works too.")}</Typography>
+                        }} />{" "}{t("components.login_dialog.master_password_works_too")}</Typography>
                 )}
             </div>
         </DialogContent>
@@ -841,16 +890,16 @@ const StepSecurity = memo(function StepSecurity({
                                                     onPINHintChange, onAdditionalKeyChange, onKeyPINProtectionChange,
                                                     onAccordionChange, onMouseDownPassword, onOpenQRScanner,
                                                 }) {
-    useLanguage();
+    const lang = useLanguage();
     const pinEndAdornment = useMemo(() => (
-        <Tooltip title={showPIN ? "Hide password" : "Show password"}>
+        <Tooltip title={showPIN ? t("components.login_dialog.hide_password") : t("components.login_dialog.show_password")}>
             <InputAdornment position="end">
                 <IconButton edge="end" onClick={onToggleShowPIN} onMouseDown={onMouseDownPassword}>
                     {showPIN ? <Visibility /> : <VisibilityOff />}
                 </IconButton>
             </InputAdornment>
         </Tooltip>
-    ), [showPIN, onToggleShowPIN, onMouseDownPassword]);
+    ), [showPIN, onToggleShowPIN, onMouseDownPassword, lang]);
 
     const analysis = useMemo(() => analyzePassword(pin), [pin]);
     const pinsMatch    = pinConfirmation.length > 0 && pin === pinConfirmation;
@@ -876,10 +925,10 @@ const StepSecurity = memo(function StepSecurity({
         ? [] : ['posting', 'active', 'owner', 'memo'].filter(k => k !== selectedKeyType);
 
     const charChecks = [
-        { label: '1 lowercase letter',  met: analysis.hasLower },
-        { label: '1 uppercase letter',  met: analysis.hasUpper },
-        { label: '1 number',            met: analysis.hasDigit },
-        { label: '1 symbol (!@$...)',   met: analysis.hasSymbol },
+        { id: 'lower',  label: t("components.login_dialog.one_lowercase_letter"), met: analysis.hasLower },
+        { id: 'upper',  label: t("components.login_dialog.one_uppercase_letter"), met: analysis.hasUpper },
+        { id: 'digit',  label: t("components.login_dialog.one_number"),           met: analysis.hasDigit },
+        { id: 'symbol', label: t("components.login_dialog.one_symbol"),           met: analysis.hasSymbol },
     ];
 
     return (
@@ -901,7 +950,9 @@ const StepSecurity = memo(function StepSecurity({
                             {t("components.login_dialog.keep_credentials_alive_across_sessions")}
                         </Typography>
                         <Typography variant="caption" style={{ color: "#7b7b7b" }}>
-                            {persistSession ? "Your keys will survive page reloads" : "Session ends when the tab closes"}
+                            {persistSession
+                                ? t("components.login_dialog.your_keys_will_survive_page_reloads")
+                                : t("components.login_dialog.session_ends_when_the_tab_closes")}
                         </Typography>
                     </Box>
                 }
@@ -921,8 +972,8 @@ const StepSecurity = memo(function StepSecurity({
 
                         {/* Character type guidance */}
                         <Box display="flex" flexWrap="wrap" style={{ gap: 6, marginBottom: 12 }}>
-                            {charChecks.map(({ label, met }) => (
-                                <Chip key={label} label={label} size="small"
+                            {charChecks.map(({ id, label, met }) => (
+                                <Chip key={id} label={label} size="small"
                                       icon={met ? <CheckRounded style={{ fontSize: 14 }} /> : undefined}
                                       variant={met ? "default" : "outlined"}
                                       style={{
@@ -946,7 +997,7 @@ const StepSecurity = memo(function StepSecurity({
                                            labelWidth={analysis.typeCount >= 2 ? 180 : 70}
                                            autoComplete="new-password"
                                            name="new-password"
-                                           inputProps={{ 'aria-label': 'Vault password' }} />
+                                           inputProps={{ 'aria-label': t("components.login_dialog.vault_password") }} />
                         </FormControl>
 
                         {/* Real-time feedback */}
@@ -984,7 +1035,7 @@ const StepSecurity = memo(function StepSecurity({
                                                value={pinConfirmation} onChange={onPINConfirmationChange} labelWidth={130}
                                                autoComplete="new-password"
                                                name="confirm-password"
-                                               inputProps={{ 'aria-label': 'Confirm vault password' }} />
+                                               inputProps={{ 'aria-label': t("components.login_dialog.confirm_vault_password") }} />
                             </FormControl>
                             <Collapse in={pinsMatch}>
                                 <Typography style={{ fontSize: 12, color: "#b0b0b0", textAlign: "right", marginBottom: 4 }}>
@@ -1031,7 +1082,7 @@ const StepSecurity = memo(function StepSecurity({
                                                placeholder={t("components.login_dialog.e_g_my_favorite_italian_word")}
                                                autoComplete="off"
                                                name="hint"
-                                               inputProps={{ maxLength: 100, 'aria-label': 'Password hint' }} />
+                                               inputProps={{ maxLength: 100, 'aria-label': t("components.login_dialog.password_hint") }} />
                             </FormControl>
                             <Typography style={{ fontSize: 11, color: "#5b5b5b", textAlign: "right" }}>
                                 {t("components.login_dialog.stored_unencrypted_dont_put_your_password_here")}
@@ -1047,12 +1098,12 @@ const StepSecurity = memo(function StepSecurity({
                                         <Typography variant="body2">{t("components.login_dialog.password_timeout")}</Typography>
                                     </Box>
                                     <Typography variant="body2" style={{ color: "#fff" }}>
-                                        {pinTimeout < 60 ? `${pinTimeout} min` : `${Math.floor(pinTimeout / 60)}h${pinTimeout % 60 > 0 ? ` ${pinTimeout % 60}m` : ''}`}
+                                        {durationShort(pinTimeout)}
                                     </Typography>
                                 </div>
                                 <Slider value={pinTimeout} onChange={onPINTimeoutChange}
-                                        min={12} max={120} marks={PIN_TIMEOUT_MARKS} step={null}
-                                        valueLabelDisplay="auto" valueLabelFormat={(v) => v < 60 ? `${v}m` : `${Math.floor(v / 60)}h${v % 60 > 0 ? `${v % 60}m` : ''}`} />
+                                        min={12} max={120} marks={withDurationLabels(PIN_TIMEOUT_MARKS)} step={null}
+                                        valueLabelDisplay="auto" valueLabelFormat={(v) => durationShort(v, true)} />
                             </div>
                         </Collapse>
                     </div>
@@ -1084,7 +1135,7 @@ const StepSecurity = memo(function StepSecurity({
                                                            labelWidth={t(config.label).length * 8} placeholder={t(config.placeholder)}
                                                            autoComplete="off"
                                                            name={`additional-key-${keyType}`}
-                                                           inputProps={{ 'aria-label': `${t(config.label)} private key` }}
+                                                           inputProps={{ 'aria-label': t("components.login_dialog.label_private_key", { label: t(config.label) }) }}
                                                            endAdornment={
                                                                <InputAdornment position="end">
                                                                    <Tooltip title={t("words.scan_qr_code")}>
@@ -1128,16 +1179,12 @@ const StepSecurity = memo(function StepSecurity({
                             <div className={classes.sliderLabel}>
                                 <Typography variant="body2">{t("components.login_dialog.timeout")}</Typography>
                                 <Typography variant="body2" style={{ color: "#fff" }}>
-                                    {sessionTimeout < 60
-                                        ? `${sessionTimeout} min`
-                                        : sessionTimeout < 1440
-                                            ? `${Math.floor(sessionTimeout / 60)}h${sessionTimeout % 60 > 0 ? ` ${sessionTimeout % 60}m` : ''}`
-                                            : `${Math.floor(sessionTimeout / 1440)}d${(sessionTimeout % 1440) > 0 ? ` ${Math.floor((sessionTimeout % 1440) / 60)}h` : ''}`}
+                                    {durationShort(sessionTimeout)}
                                 </Typography>
                             </div>
                             <Slider value={sessionTimeout} onChange={onSessionTimeoutChange}
-                                    min={SESSION_TIMEOUT_MIN} max={SESSION_TIMEOUT_MAX} marks={SESSION_TIMEOUT_MARKS} step={null}
-                                    valueLabelDisplay="auto" valueLabelFormat={(v) => v < 1440 ? `${Math.floor(v / 60)}h` : `${Math.floor(v / 1440)}d`} />
+                                    min={SESSION_TIMEOUT_MIN} max={SESSION_TIMEOUT_MAX} marks={withDurationLabels(SESSION_TIMEOUT_MARKS)} step={null}
+                                    valueLabelDisplay="auto" valueLabelFormat={(v) => durationShort(v, true)} />
                         </div>
                     </div>
                 </AccordionDetails>
@@ -1226,7 +1273,7 @@ const StepConfirm = memo(function StepConfirm({
                         <span className="summary-label">{t("components.login_dialog.password_protection")}</span>
                     </Tooltip>
                     <span className="summary-value" style={{ color: pinEnabled ? "#FFF" : "#9b9b9b" }}>
-                        {pinEnabled ? "Enabled" : "Disabled"}
+                        {pinEnabled ? t("components.login_dialog.enabled") : t("components.login_dialog.disabled")}
                     </span>
                 </div>
                 <div className="summary-row">
@@ -1234,7 +1281,11 @@ const StepConfirm = memo(function StepConfirm({
                         <span className="summary-label">{t("components.login_dialog.session_storage")}</span>
                     </Tooltip>
                     <span className="summary-value" style={{ color: persistSession ? (pinEnabled ? "#FFF" : "#b8b8b8") : "#9b9b9b" }}>
-                        {persistSession ? (pinEnabled ? "Encrypted (vault)" : "Persistent (unencrypted)") : "Temporary (tab only)"}
+                        {persistSession
+                            ? (pinEnabled
+                                ? t("components.login_dialog.storage_encrypted_vault")
+                                : t("components.login_dialog.storage_persistent_unencrypted"))
+                            : t("components.login_dialog.storage_temporary_tab_only")}
                     </span>
                 </div>
                 <div className="summary-row">
@@ -1242,12 +1293,7 @@ const StepConfirm = memo(function StepConfirm({
                         <span className="summary-label">{t("components.login_dialog.session_timeout")}</span>
                     </Tooltip>
                     <span className="summary-value">
-                        {sessionTimeout < 60
-                            ? `${sessionTimeout} minutes`
-                            : sessionTimeout < 1440
-                                ? `${Math.floor(sessionTimeout / 60)} hours${sessionTimeout % 60 > 0 ? ` ${sessionTimeout % 60}m` : ''}`
-                                : `${Math.floor(sessionTimeout / 1440)} day(s)${(sessionTimeout % 1440) > 0 ? ` ${Math.floor((sessionTimeout % 1440) / 60)}h` : ''}`
-                        }
+                        {durationLong(sessionTimeout)}
                     </span>
                 </div>
                 {pinEnabled && (
@@ -1255,7 +1301,7 @@ const StepConfirm = memo(function StepConfirm({
                         <Tooltip interactive enterTouchDelay={200} leaveTouchDelay={4000} classes={{ tooltip: classes.tooltipRoot }} title={<span className={classes.tooltip}>{t("components.login_dialog.after_a_while_not_using_any_keys")}</span>}>
                             <span className="summary-label">{t("components.login_dialog.password_timeout")}</span>
                         </Tooltip>
-                        <span className="summary-value">{pinTimeout} minutes</span>
+                        <span className="summary-value">{t("components.login_dialog.duration_n_minutes", { minute: { minute: pinTimeout } })}</span>
                     </div>
                 )}
                 {selectedKeyType !== 'master' && additionalKeyCount > 0 && (
@@ -1285,7 +1331,7 @@ const StepConfirm = memo(function StepConfirm({
                     {loginStatus === 'pending' && (
                         <>
                             <CircularProgress size={20} color="inherit" />
-                            <Typography variant="body2">{loginProgress || "Authenticating..."}</Typography>
+                            <Typography variant="body2">{tx(loginProgress) || t("components.login_dialog.authenticating")}</Typography>
                         </>
                     )}
                     {loginStatus === 'success' && (
@@ -1297,13 +1343,13 @@ const StepConfirm = memo(function StepConfirm({
                     {loginStatus === 'error' && (
                         <>
                             <ErrorRounded />
-                            <Typography variant="body2">{loginError || "Login failed"}</Typography>
+                            <Typography variant="body2">{tx(loginError) || t("components.login_dialog.login_failed")}</Typography>
                         </>
                     )}
                     {loginStatus === 'warning' && (
                         <>
                             <ErrorRounded />
-                            <Typography variant="body2">{loginError}</Typography>
+                            <Typography variant="body2">{tx(loginError)}</Typography>
                         </>
                     )}
                 </div>
@@ -1358,7 +1404,10 @@ class LoginDialog extends React.PureComponent {
             _show_primary_key: false,
             _primary_key_valid: false,
             _pending_key_validation: false,
-            _key_detection_message: "", // user-facing feedback ("Detected: Posting Key", "Master password format")
+            // User-facing feedback ("Detected: Posting key", "Master password
+            // format"): "" or a tk() descriptor, resolved with tx() at render
+            // (so is _username_message, and _login_progress / _login_error).
+            _key_detection_message: "",
             _account_data: null,        // full on-chain account (key_auths, memo_key) used for detection
             _account_reputation: null,
             _rc_percent: null,
@@ -1621,7 +1670,7 @@ class LoginDialog extends React.PureComponent {
         if (input.length < 3) {
             this.setState({
                 _pending_username_validation: false,
-                _username_message: "Username must be at least 3 characters",
+                _username_message: tk("components.login_dialog.username_must_be_at_least_3_characters"),
                 _authors: [],
                 _searching: false,
             });
@@ -1670,7 +1719,7 @@ class LoginDialog extends React.PureComponent {
                     _selected_author: null,
                     _pending_username_validation: false,
                     _username_exists: false,
-                    _username_message: "Account not found",
+                    _username_message: tk("components.login_dialog.account_not_found"),
                 });
                 return;
             }
@@ -1710,7 +1759,7 @@ class LoginDialog extends React.PureComponent {
                 _selected_author: exactMatch || this.state._selected_author,
                 _pending_username_validation: false,
                 _username_exists: exists,
-                _username_message: exists ? "" : (currentInput.length > 0 ? "Account not found" : ""),
+                _username_message: exists ? "" : (currentInput.length > 0 ? tk("components.login_dialog.account_not_found") : ""),
                 _account_reputation: reputation,
                 _account_data: matchedAccount, // full account: key_auths + memo_key
                 // The debounced search only resolves once the user has
@@ -1832,7 +1881,7 @@ class LoginDialog extends React.PureComponent {
         if (username.length < 3) {
             this.setState({
                 _pending_username_validation: false,
-                _username_message: username.length > 0 ? "Username must be at least 3 characters" : "",
+                _username_message: username.length > 0 ? tk("components.login_dialog.username_must_be_at_least_3_characters") : "",
             });
             return;
         }
@@ -1849,7 +1898,7 @@ class LoginDialog extends React.PureComponent {
         if (!api || !client) {
             this.setState({
                 _pending_username_validation: false,
-                _username_message: "API not available",
+                _username_message: tk("components.login_dialog.api_not_available"),
             });
             return;
         }
@@ -1897,7 +1946,7 @@ class LoginDialog extends React.PureComponent {
             this.setState({
                 _pending_username_validation: false,
                 _username_exists: exists,
-                _username_message: exists ? "" : "Account not found",
+                _username_message: exists ? "" : tk("components.login_dialog.account_not_found"),
                 _account_reputation: reputation,
                 _account_data: exists ? accounts[0] : null,
                 _rc_percent: rcPercent,
@@ -1914,7 +1963,7 @@ class LoginDialog extends React.PureComponent {
             this.setState({
                 _pending_username_validation: false,
                 _username_exists: false,
-                _username_message: error.message || "Error checking account",
+                _username_message: errorText(error, tk("components.login_dialog.error_checking_account")),
             });
         }
     };
@@ -2016,7 +2065,7 @@ class LoginDialog extends React.PureComponent {
                 this.setState({
                     _pending_key_validation: false,
                     _primary_key_valid: true,
-                    _key_detection_message: "Key format OK — waiting for account…",
+                    _key_detection_message: tk("components.login_dialog.key_format_ok_waiting_for_account"),
                 });
                 return;
             }
@@ -2032,7 +2081,7 @@ class LoginDialog extends React.PureComponent {
                 this.setState({
                     _pending_key_validation: false,
                     _primary_key_valid: false,
-                    _key_detection_message: "Invalid key format",
+                    _key_detection_message: tk("components.login_dialog.invalid_key_format"),
                 });
                 return;
             }
@@ -2061,9 +2110,9 @@ class LoginDialog extends React.PureComponent {
                 this.setState({
                     _pending_key_validation: false,
                     _primary_key_valid: false,
-                    _key_detection_message: t("components.login_dialog.this_is_a_key_the_action_requires", {
-                        detected: detected,
-                        requiredKeyType: requiredKeyType
+                    _key_detection_message: tk("components.login_dialog.this_is_a_key_the_action_requires", {
+                        detected: roleName(detected),
+                        requiredKeyType: roleName(requiredKeyType)
                     }),
                 });
                 return;
@@ -2076,8 +2125,8 @@ class LoginDialog extends React.PureComponent {
                 _selected_key_type: detected,
                 _pending_key_validation: false,
                 _primary_key_valid: true,
-                _key_detection_message: t("components.login_dialog.detected_key", {
-                    detected: KEY_TYPES[detected]?.label ? t(KEY_TYPES[detected].label) : detected
+                _key_detection_message: tk("components.login_dialog.detected_key", {
+                    detected: roleName(detected)
                 }),
                 ...(roleChanged ? {
                     _additional_keys: { posting: "", active: "", owner: "", memo: "" },
@@ -2101,7 +2150,7 @@ class LoginDialog extends React.PureComponent {
             _selected_key_type: 'master',
             _pending_key_validation: false,
             _primary_key_valid: true,
-            _key_detection_message: "Master password — will derive all keys",
+            _key_detection_message: tk("components.login_dialog.master_password_will_derive_all_keys"),
             ...(roleChanged ? {
                 _additional_keys: { posting: "", active: "", owner: "", memo: "" },
             } : {}),
@@ -2129,8 +2178,8 @@ class LoginDialog extends React.PureComponent {
     _detectMasterPassword = (key, accountData, auth, wifShaped) => {
         const { requiredKeyType } = this.props;
         const roleRequired = !!requiredKeyType && requiredKeyType !== 'master';
-        const roleLabel = roleRequired && KEY_TYPES[requiredKeyType]?.label
-            ? t(KEY_TYPES[requiredKeyType].label) : requiredKeyType;
+        const roleLabel = roleName(requiredKeyType);
+        const willDeriveAll = tk("components.login_dialog.master_password_will_derive_all_keys");
         const refuse = (message) => this.setState({
             _pending_key_validation: false,
             _primary_key_valid: false,
@@ -2148,37 +2197,34 @@ class LoginDialog extends React.PureComponent {
                 } : {}),
             });
         };
-        const derivesRequired = () => tr("components.login_dialog.master_password_derives_key",
-            `Master password — your ${roleLabel} key will be derived from it`, { requiredKeyType: roleLabel });
+        const derivesRequired = () => tk("components.login_dialog.master_password_derives_key", { requiredKeyType: roleLabel });
 
         if (!accountData) {
             // Path B before the account is in: checked once it is.
-            accept(roleRequired ? "Key format OK — waiting for account…" : "Master password — will derive all keys");
+            accept(roleRequired ? tk("components.login_dialog.key_format_ok_waiting_for_account") : willDeriveAll);
             return;
         }
         const derived = this._deriveRolePublicKeysFromMaster(accountData.name, key, auth);
         if (!derived) {
             if (roleRequired) {
-                refuse(t("components.login_dialog.the_action_requires_the_key_wif_not", { requiredKeyType }));
+                refuse(tk("components.login_dialog.the_action_requires_the_key_wif_not", { requiredKeyType: roleLabel }));
                 return;
             }
             // A wrong role WIF and a WIF-shaped master are indistinguishable
             // here: accept provisionally, validateCredentials decides.
-            accept(wifShaped ? "Master password format — verified at login" : "Master password — will derive all keys");
+            accept(wifShaped ? tk("components.login_dialog.master_password_format_verified_at_login") : willDeriveAll);
             return;
         }
         const matched = MASTER_ROLES.filter((role) => this._roleHasPublicKey(accountData, role, derived[role]));
         if (matched.length === 0) {
-            refuse(t("components.login_dialog.key_doesnt_match_any_of_s_authorities", { name: accountData.name }));
+            refuse(tk("components.login_dialog.key_doesnt_match_any_of_s_authorities", { name: accountData.name }));
             return;
         }
         if (roleRequired && !matched.includes(requiredKeyType)) {
-            refuse(tr("components.login_dialog.master_password_lacks_key",
-                `@${accountData.name}'s ${roleLabel} key was changed on-chain: this master password no longer gives it. Enter the ${roleLabel} key itself.`,
-                { name: accountData.name, requiredKeyType: roleLabel }));
+            refuse(tk("components.login_dialog.master_password_lacks_key", { name: accountData.name, requiredKeyType: roleLabel }));
             return;
         }
-        accept(roleRequired ? derivesRequired() : "Master password — will derive all keys");
+        accept(roleRequired ? derivesRequired() : willDeriveAll);
     };
 
     /**
@@ -2292,12 +2338,12 @@ class LoginDialog extends React.PureComponent {
 
     _getSimpleButtonText = () => {
         switch (this.state._login_status) {
-            case 'pending': return 'LOGGING IN...';
-            case 'success': return 'DONE';
-            case 'error': return 'RETRY';
+            case 'pending': return t("components.login_dialog.logging_in", { TUC: true });
+            case 'success': return t("words.done", { TUC: true });
+            case 'error': return t("components.login_dialog.retry", { TUC: true });
             default: return this.props.addingAccount
-                ? tr("components.login_dialog.add_account_button", "ADD ACCOUNT")
-                : 'LOG IN';
+                ? t("components.login_dialog.add_account_button")
+                : t("components.login_dialog.log_in", { TUC: true });
         }
     };
 
@@ -2566,14 +2612,14 @@ class LoginDialog extends React.PureComponent {
         if (!api) {
             this.setState({
                 _login_status: 'error',
-                _login_error: 'API not available',
+                _login_error: tk("components.login_dialog.api_not_available"),
             });
             return;
         }
 
         this.setState({
             _login_status: 'pending',
-            _login_progress: 'Initializing...',
+            _login_progress: tk("components.login_dialog.initializing"),
         });
 
         // ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ FIX: Track if event was emitted to prevent duplicates
@@ -2590,11 +2636,14 @@ class LoginDialog extends React.PureComponent {
 
             // Initialize vault if PIN is enabled
             if (_enable_pin) {
+                // Thrown errors carry their translation in `i18n` (see
+                // errorText); the English message is for the console.
                 if (!api.initialized) {
-                    throw new Error('API not initialized. Please refresh the page.');
+                    throw Object.assign(new Error('API not initialized. Please refresh the page.'),
+                        { i18n: tk("components.login_dialog.api_not_initialized_please_refresh_the_page") });
                 }
 
-                this.setState({ _login_progress: 'Setting up secure vault...' });
+                this.setState({ _login_progress: tk("components.login_dialog.setting_up_secure_vault") });
                 console.time('initializeVault');
                 try {
                     await api.initializeVault(_pin, {
@@ -2602,7 +2651,11 @@ class LoginDialog extends React.PureComponent {
                     });
                 } catch (vaultError) {
                     console.error('Vault initialization failed:', vaultError);
-                    throw new Error('Failed to initialize secure storage: ' + vaultError.message);
+                    throw Object.assign(new Error('Failed to initialize secure storage: ' + vaultError.message), {
+                        i18n: tk("components.login_dialog.failed_to_initialize_secure_storage", {
+                            message: errorText(vaultError, ""),
+                        }),
+                    });
                 }
                 console.timeEnd('initializeVault');
 
@@ -2649,13 +2702,15 @@ class LoginDialog extends React.PureComponent {
                     wif = auth && typeof auth.toWif === 'function' ? auth.toWif(name, _primary_key, requiredKeyType) : null;
                 } catch (_) { wif = null; }
                 if (!wif) {
-                    throw new Error(t("components.login_dialog.the_action_requires_the_key_wif_not", { requiredKeyType }));
+                    throw Object.assign(new Error(`The action requires the ${requiredKeyType} key (WIF), not a master password`), {
+                        i18n: tk("components.login_dialog.the_action_requires_the_key_wif_not", { requiredKeyType: roleName(requiredKeyType) }),
+                    });
                 }
                 loginKey = wif;
                 loginKeyType = requiredKeyType;
             }
 
-            this.setState({ _login_progress: 'Validating credentials...' });
+            this.setState({ _login_progress: tk("components.login_dialog.validating_credentials") });
             console.time('validateCredentials');
 
             // Validate credentials first
@@ -2663,10 +2718,14 @@ class LoginDialog extends React.PureComponent {
             console.timeEnd('validateCredentials');
 
             if (!validation.valid) {
-                throw new Error(validation.error || 'Invalid credentials');
+                throw Object.assign(new Error(validation.error || 'Invalid credentials'), {
+                    i18n: validation.errorKey
+                        ? tk(validation.errorKey, validation.errorVars)
+                        : (validation.error || tk("components.login_dialog.invalid_credentials")),
+                });
             }
 
-            this.setState({ _login_progress: 'Storing keys...' });
+            this.setState({ _login_progress: tk("components.login_dialog.storing_keys") });
             console.time('storeKeys');
 
             // Check if vault was successfully initialized
@@ -2743,7 +2802,7 @@ class LoginDialog extends React.PureComponent {
                     }
                 }
 
-                this.setState({ _login_progress: 'Creating session...' });
+                this.setState({ _login_progress: tk("components.login_dialog.creating_session") });
                 console.timeEnd('storeKeys');
                 console.time('createSession');
 
@@ -2763,7 +2822,9 @@ class LoginDialog extends React.PureComponent {
                         eventEmitted = true;
                     } catch (e) {
                         console.error('Session creation failed:', e);
-                        throw new Error('Failed to create session: ' + e.message);
+                        throw Object.assign(new Error('Failed to create session: ' + e.message), {
+                            i18n: tk("components.login_dialog.failed_to_create_session", { message: errorText(e, "") }),
+                        });
                     }
                 }
                 console.timeEnd('createSession');
@@ -2898,12 +2959,12 @@ class LoginDialog extends React.PureComponent {
 
             // Warn user about mismatched keys (master password doesn't derive all on-chain keys)
             if (loginKeyType === 'master' && validation.mismatchedTypes && validation.mismatchedTypes.length > 0) {
-                const missing = validation.mismatchedTypes.join(', ');
+                const missing = validation.mismatchedTypes.map((role) => tx(roleName(role))).join(', ');
                 if (actions && typeof actions.trigger_snackbar === 'function') {
                     actions.trigger_snackbar(
                         t("components.login_dialog.your_key_s_were_changed_on_chain", {
                             missing: missing
-                        }) +
+                        }) + " " +
                         t("components.login_dialog.operations_requiring_those_keys_e_g_transfers"),
                         'warning'
                     );
@@ -2920,23 +2981,29 @@ class LoginDialog extends React.PureComponent {
             console.error('Error code:', error.code);
             console.error('Error stack:', error.stack);
 
-            // Handle specific error types
-            let errorMessage = error.message || 'Login failed';
+            // Handle specific error types. A message is a tk() descriptor (or
+            // an error's own text), resolved with tx() where it is shown.
+            let errorMessage = errorText(error, tk("components.login_dialog.login_failed"));
 
             if (error.code === 'PIN_TOO_SHORT') {
-                errorMessage = 'PIN must be at least 6 characters';
+                // The API states its own minimum (MIN_PIN_LENGTH is 8; this
+                // said 6) — take its message, not a second copy of the number.
+                errorMessage = tk(error.errorKey || "components.pixaproxyapi.pin_must_be_at_least_characters", error.errorVars || { min: 8 });
             } else if (error.code === 'PIN_REQUIRED') {
-                errorMessage = 'PIN is required';
+                errorMessage = tk("components.login_dialog.pin_is_required");
             } else if (error.code === 'NOT_INITIALIZED') {
-                errorMessage = 'API not properly initialized. Please refresh and try again.';
+                errorMessage = tk("components.login_dialog.api_not_properly_initialized");
             } else if (error.code === 'VAULT_INIT_FAILED') {
-                errorMessage = 'Failed to initialize secure storage. ' + (error.message || '');
+                errorMessage = tk("components.login_dialog.failed_to_initialize_secure_storage", { message: errorText(error, "") });
             } else if (error.code === 'VALIDATION_FAILED') {
-                errorMessage = 'Invalid credentials. Please check your key.';
+                errorMessage = tk("components.login_dialog.invalid_credentials_please_check_your_key");
             } else if (error.code === 'INVALID_KEY') {
-                errorMessage = 'Invalid key format';
+                errorMessage = tk("components.login_dialog.invalid_key_format");
             } else if (error.code === 'KEY_NOT_FOUND') {
-                errorMessage = `Key not found for ${error.data?.account}/${error.data?.keyType}`;
+                errorMessage = tk("components.login_dialog.key_not_found_for", {
+                    account: error.data?.account,
+                    keyType: error.data?.keyType,
+                });
             }
 
             this.setState({
@@ -2965,13 +3032,13 @@ class LoginDialog extends React.PureComponent {
 
         if (_tab_value === 2) {
             switch (_login_status) {
-                case 'pending': return 'LOGGING IN...';
-                case 'success': return 'DONE';
-                case 'error': return 'RETRY';
-                default: return 'LOGIN';
+                case 'pending': return t("components.login_dialog.logging_in", { TUC: true });
+                case 'success': return t("words.done", { TUC: true });
+                case 'error': return t("components.login_dialog.retry", { TUC: true });
+                default: return t("components.login_dialog.log_in", { TUC: true });
             }
         }
-        return 'NEXT';
+        return t("words.next", { TUC: true });
     };
 
     // ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
@@ -3035,7 +3102,7 @@ class LoginDialog extends React.PureComponent {
                         mode and while the mobile keyboard is open. */}
                     <div className={`${classes.header} ${compactHeader ? classes.headerCompact : ""}`}>
                         <IconButton
-                            aria-label="close"
+                            aria-label={t("words.close")}
                             className={classes.closeButton}
                             onClick={onClose}
                             disabled={_login_status === 'pending'}
@@ -3054,7 +3121,7 @@ class LoginDialog extends React.PureComponent {
                         <Collapse in={!compactHeader}>
                             <Typography className={classes.headerTagline}>
                                 {this.props.addingAccount
-                                    ? tr("components.login_dialog.add_another_account", "Add another account — the ones logged in stay logged in")
+                                    ? t("components.login_dialog.add_another_account")
                                     : t("components.login_dialog.inherit_eternity_shape_infinity")}
                             </Typography>
                         </Collapse>
@@ -3213,7 +3280,7 @@ class LoginDialog extends React.PureComponent {
                                     {_login_status === 'pending' && (
                                         <React.Fragment>
                                             <CircularProgress size={20} color="inherit" />
-                                            <Typography variant="body2">{_login_progress || "Authenticating..."}</Typography>
+                                            <Typography variant="body2">{tx(_login_progress) || t("components.login_dialog.authenticating")}</Typography>
                                         </React.Fragment>
                                     )}
                                     {_login_status === 'success' && (
@@ -3225,7 +3292,7 @@ class LoginDialog extends React.PureComponent {
                                     {(_login_status === 'error' || _login_status === 'warning') && (
                                         <React.Fragment>
                                             <ErrorRounded />
-                                            <Typography variant="body2">{_login_error || "Login failed"}</Typography>
+                                            <Typography variant="body2">{tx(_login_error) || t("components.login_dialog.login_failed")}</Typography>
                                         </React.Fragment>
                                     )}
                                 </div>

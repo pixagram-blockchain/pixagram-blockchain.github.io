@@ -19,7 +19,7 @@ import InfoOutlined from "@material-ui/icons/InfoOutlined";
 import Tooltip from "@material-ui/core/Tooltip";
 import Divider from "@material-ui/core/Divider";
 
-import { t } from "../utils/text";
+import { t, tk, tx, useLanguage } from "../utils/text";
 
 const styles = theme => ({
     dialog: {
@@ -190,7 +190,10 @@ const styles = theme => ({
 });
 
 const LicenseCustomizationDialog = ({ classes, open, onClose, onSave, licenseBase, initialCustomization }) => {
+    useLanguage();
     const [customization, setCustomization] = useState(null);
+    // Error values are tk() descriptors (rendered with tx()), so a language
+    // switch while an error is shown re-translates it.
     const [errors, setErrors] = useState({});
 
     // Initialize customization state
@@ -276,7 +279,7 @@ const LicenseCustomizationDialog = ({ classes, open, onClose, onSave, licenseBas
             }));
             setErrors(prev => ({ ...prev, royalty: null }));
         } else {
-            setErrors(prev => ({ ...prev, royalty: 'Must be between 0 and 100' }));
+            setErrors(prev => ({ ...prev, royalty: tk("components.license_customization_dialog.must_be_between_0_and_100") }));
         }
     };
 
@@ -297,7 +300,7 @@ const LicenseCustomizationDialog = ({ classes, open, onClose, onSave, licenseBas
         if (customization.royaltyPercentage === '' ||
             customization.royaltyPercentage < 0 ||
             customization.royaltyPercentage > 100) {
-            setErrors(prev => ({ ...prev, royalty: 'Royalty percentage is required and must be between 0 and 100' }));
+            setErrors(prev => ({ ...prev, royalty: tk("components.license_customization_dialog.royalty_percentage_is_required_and_must_be") }));
             return;
         }
 
@@ -311,12 +314,19 @@ const LicenseCustomizationDialog = ({ classes, open, onClose, onSave, licenseBas
 
             holderRightsCategory.rights.forEach(right => {
                 if (right.dependsOn && holderRights[right.id] && !holderRights[right.dependsOn]) {
-                    dependencyErrors.push(`"${right.label}" requires "${right.dependsOn}" to be enabled`);
+                    // Name the parent right by its label, not its internal id.
+                    const parent = holderRightsCategory.rights.find(r => r.id === right.dependsOn);
+                    dependencyErrors.push(tk("components.license_customization_dialog.requires_to_be_enabled", {
+                        right: right.label,
+                        parent: (parent && parent.label) || right.dependsOn
+                    }));
                 }
             });
 
             if (dependencyErrors.length > 0) {
-                setErrors(prev => ({ ...prev, dependencies: dependencyErrors.join(', ') }));
+                // One sentence per line (rendered with tx()) instead of an
+                // English ", " join.
+                setErrors(prev => ({ ...prev, dependencies: dependencyErrors }));
                 return;
             }
         }
@@ -493,7 +503,9 @@ const LicenseCustomizationDialog = ({ classes, open, onClose, onSave, licenseBas
                                 value={customization.royaltyPercentage}
                                 onChange={handleRoyaltyChange}
                                 error={Boolean(errors.royalty)}
-                                helperText={errors.royalty || "Percentage you'll receive on secondary sales (0-100)"}
+                                helperText={errors.royalty
+                                    ? tx(errors.royalty)
+                                    : t("components.license_customization_dialog.percentage_you_ll_receive_on_secondary_sales")}
                                 inputProps={{ min: 0, max: 100, step: 0.1 }}
                             />
                         </div>
@@ -547,9 +559,11 @@ const LicenseCustomizationDialog = ({ classes, open, onClose, onSave, licenseBas
                     </div>
 
                     {/* Error Messages */}
-                    {errors.dependencies && (
-                        <Typography style={{ color: '#ff6b6b', fontSize: '0.875rem', marginTop: '16px' }}>
-                            {errors.dependencies}
+                    {errors.dependencies && errors.dependencies.length > 0 && (
+                        <Typography component="div" style={{ color: '#ff6b6b', fontSize: '0.875rem', marginTop: '16px' }}>
+                            {errors.dependencies.map((error, index) => (
+                                <div key={index}>{tx(error)}</div>
+                            ))}
                         </Typography>
                     )}
                 </DialogContent>

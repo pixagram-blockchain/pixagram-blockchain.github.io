@@ -92,7 +92,7 @@ import { pngdby } from "../utils/png-db";
 import PostOriginality from "./PostOriginality";
 
 import { T } from "../utils/T";
-import { t, useLanguage } from "../utils/text";
+import { t, tk, tx, tnode, getLocaleCode, useLanguage } from "../utils/text";
 
 /**
  * Render user-supplied markdown at the correct trust tier.
@@ -222,11 +222,13 @@ const totalVolume = soldEditions.reduce((sum, e) => sum + (e.soldPrice || 0), 0)
 const avgSalePrice = soldEditions.length > 0 ? totalVolume / soldEditions.length : 0;
 const lastSalePrice = soldEditions.length > 0 ? soldEditions.sort((a, b) => (b.soldDate || 0) - (a.soldDate || 0))[0].soldPrice : null;
 
+// Module scope: the labels are deferred (tk) and resolved where the chip
+// renders (tx), so they follow the language instead of freezing at import.
 const getRarity = (max) => {
-    if (max === 1) return { label: "Unique", color: "#FFD700" };
-    if (max <= 10) return { label: "Rare", color: "#C0C0C0" };
-    if (max <= 100) return { label: "Common", color: "#CD7F32" };
-    return { label: "Standard", color: "#888888" };
+    if (max === 1) return { label: tk("components.post_dialog.rarity_unique"), color: "#FFD700" };
+    if (max <= 10) return { label: tk("components.post_dialog.rarity_rare"), color: "#C0C0C0" };
+    if (max <= 100) return { label: tk("components.post_dialog.rarity_common"), color: "#CD7F32" };
+    return { label: tk("components.post_dialog.rarity_standard"), color: "#888888" };
 };
 
 const rarity = getRarity(maxEditions);
@@ -321,7 +323,18 @@ const LiveTimeAgo = React.memo(function LiveTimeAgo({ date, options = LIVE_TIME_
     return useLiveTimeAgo(date, options);
 });
 
-const ParentComment = React.memo(({ comment, index, classes, locales, onOpenAuthor, api }) => (
+// tnode() hands a sentence back as [text, element, text, …]. The words take
+// `style` (the muted colour the lone " said " span used to have); the
+// elements spliced in keep their own styles.
+const STYLE_MUTED_WORDS = Object.freeze({ color: "#999" });
+const mutedWords = (parts, style) => (Array.isArray(parts)
+    ? parts.map((p, i) => (typeof p === "string" ? <span key={"w" + i} style={style}>{p}</span> : p))
+    : <span style={style}>{parts}</span>);
+
+// File size on the Details tab ("PNG of 12.34 kB"), in the UI's number format.
+const KB_FORMAT = Object.freeze({ minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const ParentComment = React.memo(({ comment, index, classes, locales, onOpenAuthor, api }) => { useLanguage(); return (
         <div key={"comment" + index} style={{
             position: "relative",
             padding: "12px 12px 12px 12px",
@@ -342,22 +355,27 @@ const ParentComment = React.memo(({ comment, index, classes, locales, onOpenAuth
                 color="textPrimary"
                 style={{ marginBottom: 4, display: "block" }}
             >
-                <Tooltip title={"@" + (comment.author || {}).username}>
-                <span className={classes.subheaderName} onClick={(event) => { onOpenAuthor((comment.author || {}).username) }}>
-                    {(comment.author || {}).name}
-                </span>
-                </Tooltip>
-                <span style={{ color: "#999" }}> said </span>
-                <Tooltip arrow title={new Date(comment.date || Date.now()).toLocaleDateString(locales, {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                    hour: 'numeric',
-                    minute: 'numeric'
-                })}>
-                    <span><LiveTimeAgo date={comment.date || Date.now()} /></span>
-                </Tooltip>
+                {mutedWords(tnode("components.post_dialog.author_said_time", {
+                    author: (
+                        <Tooltip title={"@" + (comment.author || {}).username}>
+                        <span className={classes.subheaderName} onClick={(event) => { onOpenAuthor((comment.author || {}).username) }}>
+                            {(comment.author || {}).name}
+                        </span>
+                        </Tooltip>
+                    ),
+                    time: (
+                        <Tooltip arrow title={new Date(comment.date || Date.now()).toLocaleDateString(locales, {
+                            weekday: 'long',
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric',
+                            hour: 'numeric',
+                            minute: 'numeric'
+                        })}>
+                            <span><LiveTimeAgo date={comment.date || Date.now()} /></span>
+                        </Tooltip>
+                    ),
+                }), STYLE_MUTED_WORDS)}
             </Typography>
             <Typography
                 component="div"
@@ -367,7 +385,7 @@ const ParentComment = React.memo(({ comment, index, classes, locales, onOpenAuth
                 dangerouslySetInnerHTML={{ __html: safeHTML(renderCommentBody(api, comment.body)) }}
             />
         </div>
-    ), (a, b) =>
+    ); }, (a, b) =>
         a.index === b.index
         && a.locales === b.locales
         && a.classes === b.classes
@@ -375,7 +393,7 @@ const ParentComment = React.memo(({ comment, index, classes, locales, onOpenAuth
         && a.comment === b.comment // identity is enough; new comment object ⇒ new render
 );
 
-const EditionRow = React.memo(({ edition }) => (
+const EditionRow = React.memo(({ edition }) => { useLanguage(); return (
     <div key={edition.edition} style={{
         display: "flex",
         justifyContent: "space-between",
@@ -425,7 +443,7 @@ const EditionRow = React.memo(({ edition }) => (
             )}
         </div>
     </div>
-), (a, b) => {
+); }, (a, b) => {
     const x = a.edition, y = b.edition;
     return x === y || (
         x && y
@@ -438,7 +456,27 @@ const EditionRow = React.memo(({ edition }) => (
     );
 });
 
-const OwnershipEvent = React.memo(({ event, index }) => (
+// One sentence per event type, with and without a price ("… for 180 PXS"
+// used to be appended as an English fragment).
+const ownershipEventText = (event) => {
+    const vars = { edition: event.edition, price: event.price, currency: currency };
+    const priced = event.price > 0;
+    if (event.type === "minted") {
+        return priced
+            ? t("components.post_dialog.minted_editions_for_price", vars)
+            : t("components.post_dialog.minted_editions");
+    }
+    if (event.type === "transfer") {
+        return priced
+            ? t("components.post_dialog.transferred_edition_for_price", vars)
+            : t("components.post_dialog.transferred_edition", vars);
+    }
+    return priced
+        ? t("components.post_dialog.purchased_edition_for_price", vars)
+        : t("components.post_dialog.purchased_edition", vars);
+};
+
+const OwnershipEvent = React.memo(({ event, index }) => { useLanguage(); return (
     <div key={index} style={{
         position: "relative",
         marginBottom: 24,
@@ -468,18 +506,11 @@ const OwnershipEvent = React.memo(({ event, index }) => (
                 </Typography>
             </div>
             <Typography variant="caption" style={{ color: "#888" }}>
-                {event.type === "minted" ? "Minted editions" :
-                    event.type === "transfer" ? t("components.post_dialog.transferred_edition", {
-                            edition: event.edition
-                        }) :
-                        t("components.post_dialog.purchased_edition", {
-                            edition: event.edition
-                        })}
-                {event.price > 0 && ` for ${event.price} ${currency}`}
+                {ownershipEventText(event)}
             </Typography>
         </div>
     </div>
-), (a, b) => {
+); }, (a, b) => {
     if (a.index !== b.index) return false;
     const x = a.event, y = b.event;
     return x === y || (
@@ -492,7 +523,7 @@ const OwnershipEvent = React.memo(({ event, index }) => (
     );
 });
 
-const CollectionItem = React.memo(({ collection }) => (
+const CollectionItem = React.memo(({ collection }) => { useLanguage(); return (
     <ListItem key={collection.id} button style={{ borderRadius: 8 }}>
         <ListItemIcon>
             <FolderSpecialRounded style={{ color: "#666" }} />
@@ -507,7 +538,7 @@ const CollectionItem = React.memo(({ collection }) => (
         />
         <ChevronRightRounded style={{ color: "#444" }} />
     </ListItem>
-), (a, b) => {
+); }, (a, b) => {
     // Previous comparator read `a.id` / `b.id` — but the prop is `collection`,
     // so it compared `undefined === undefined` and *always* skipped re-render.
     // That meant a parent updating a collection in-place (same array slot,
@@ -597,7 +628,10 @@ const ArtworkSection = React.memo(function ArtworkSection({ type, kb, onDownload
             <Tooltip title={t("components.post_dialog.download_the_original_image")}>
                 <ListItem onClick={onDownloadArtwork} style={STYLE_POINTER}>
                     <ListItemIcon><Info /></ListItemIcon>
-                    <ListItemText>{type.toUpperCase()} of {kb.toFixed(2)} kB</ListItemText>
+                    <ListItemText>{t("components.post_dialog.type_of_size_kb", {
+                        type: type.toUpperCase(),
+                        size: kb.toLocaleString(getLocaleCode(), KB_FORMAT)
+                    })}</ListItemText>
                 </ListItem>
             </Tooltip>
             <Tooltip title={t("components.post_dialog.view_the_artworks_license")}>
@@ -666,9 +700,13 @@ const ActionsSection = React.memo(function ActionsSection({ isFavorite, onToggle
     return (
         <React.Fragment>
             <ListSubheader disableSticky>{t("components.post_dialog.actions")}</ListSubheader>
-            <Tooltip title={isFavorite ? "Remove this artwork from your favorites" : "Save this artwork to your favorites"}>
+            <Tooltip title={isFavorite
+                ? t("components.post_dialog.remove_this_artwork_from_your_favorites")
+                : t("components.post_dialog.save_this_artwork_to_your_favorites")}>
                 <ListItem onClick={onToggleFavorite} style={STYLE_POINTER}>
-                    <ListItemText>{isFavorite ? "Remove from favorites" : "Add to favorites"}</ListItemText>
+                    <ListItemText>{isFavorite
+                        ? t("components.post_dialog.remove_from_favorites")
+                        : t("components.post_dialog.add_to_favorites")}</ListItemText>
                     {isFavorite
                         ? <FavoriteRounded style={STYLE_FAVORITE_ON} />
                         : <FavoriteBorderRounded style={STYLE_FAVORITE_OFF} />}
@@ -754,7 +792,14 @@ const STYLE_SORT_FIELDSET = Object.freeze({ display: "flow", position: "relative
 const STYLE_SORT_LEGEND = Object.freeze({ color: "#fff", margin: "10px 8px 8px 0px", float: "left", fontWeight: "bold" });
 const STYLE_SORT_GROUP = Object.freeze({ justifyContent: "end", float: "right" });
 const STYLE_SORT_OPTION = Object.freeze({ color: "#888" });
+// Sort values: sortedComments compares them, so they stay English
+// identifiers; only the radio labels are translated, at render.
 const SORT_OPTIONS = Object.freeze(["Hype", "Votes", "New"]);
+const sortLabel = (value) => (value === "Votes"
+    ? t("words.votes")
+    : value === "New"
+        ? t("components.post_dialog.sort_new")
+        : t("components.post_dialog.sort_hype"));
 const STYLE_COMMENTS_LOADING = Object.freeze({ display: "flex", justifyContent: "center", padding: "32px 0" });
 const STYLE_COMMENTS_SPINNER = Object.freeze({ color: "#888" });
 const STYLE_COMMENTS_EMPTY = Object.freeze({ textAlign: "center", padding: "32px 16px" });
@@ -802,7 +847,7 @@ const SortControl = React.memo(function SortControl({ sorting, onSortingChange }
                 defaultValue={"Hype"}
                 onChange={onSortingChange}
                 row
-                aria-label="sorting"
+                aria-label={t("components.post_dialog.sorting")}
                 name="sorting"
                 style={STYLE_SORT_GROUP}
             >
@@ -813,7 +858,7 @@ const SortControl = React.memo(function SortControl({ sorting, onSortingChange }
                         key={label}
                         value={label}
                         control={<Radio color="primary" />}
-                        label={label}
+                        label={sortLabel(label)}
                     />
                 ))}
             </RadioGroup>
@@ -966,14 +1011,14 @@ const NFTView = React.memo(function NFTView({ id, data }) {
                                     })}</Typography>
                                     <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
                                         <Chip
-                                            label={rarity.label}
+                                            label={tx(rarity.label)}
                                             style={{
                                                 color: rarity.color,
                                                 fontWeight: "bold"
                                             }}
                                         />
                                         <Typography variant="body2" style={{ color: "#aaa" }}>
-                                            {maxEditions} editions
+                                            {t("components.post_dialog.edition_count", { edition: { edition: maxEditions } })}
                                         </Typography>
                                     </div>
                                     <div style={{ display: "flex", gap: 20, marginTop: 8 }}>
@@ -982,7 +1027,7 @@ const NFTView = React.memo(function NFTView({ id, data }) {
                                                 {t("components.post_dialog.floor_price")}
                                             </Typography>
                                             <Typography variant="body2" style={{ color: "#fff", fontWeight: "bold" }}>
-                                                {floorPrice ? `${floorPrice} ${currency}` : "No offers"}
+                                                {floorPrice ? `${floorPrice} ${currency}` : t("components.post_dialog.no_offers")}
                                             </Typography>
                                         </div>
                                         <div>
@@ -1042,7 +1087,9 @@ const NFTView = React.memo(function NFTView({ id, data }) {
                                             </Typography>
                                         </div>
                                         <Typography variant="body2" style={{ color: "#888" }}>
-                                            Edition #{availableEditions.find(e => e.price === floorPrice)?.edition}
+                                            {t("components.post_dialog.edition_number", {
+                                                edition: availableEditions.find(e => e.price === floorPrice)?.edition
+                                            })}
                                         </Typography>
                                     </div>
                                 </div>
@@ -1233,7 +1280,7 @@ const BottomBarComments = React.memo(function BottomBarComments({
     const padding = (replyTarget || editTarget) ? "8px 16px 12px" : "12px 16px";
     const rootStyle = useMemo(() => ({ ...barStyle, padding }), [barStyle, padding]);
     const fieldLabel = editTarget
-        ? "Edit your comment"
+        ? t("components.post_dialog.edit_your_comment")
         : replyTarget
             ? t("words.reply_to", {
                 username: replyTarget.username || (replyTarget.author || {}).username
@@ -1301,7 +1348,7 @@ const BottomBarComments = React.memo(function BottomBarComments({
                                 </span>
                             </Tooltip>
                         ) : (
-                            <Tooltip title={editTarget ? "Save the edit" : "Send"} arrow>
+                            <Tooltip title={editTarget ? t("components.post_dialog.save_the_edit") : t("words.send")} arrow>
                                 <span>
                                     <IconButton className={classes.commentSendButton} onClick={onSubmitComment} disabled={commentSending}>
                                         {commentSending ? <CircularProgress size={24} style={STYLE_REPLY_CAPTION} /> : editTarget ? <EditRounded /> : <SendRounded />}
@@ -1342,7 +1389,7 @@ const BottomBarNFT = React.memo(function BottomBarNFT({ visible, barStyle }) {
                                         </div>
                                         <div>
                                             <Typography variant="caption" style={STYLE_NFT_BAR_LABEL}>{t("components.post_dialog.available")}</Typography>
-                                            <Typography variant="body2" style={STYLE_NFT_BAR_AVAILABLE}>{availableEditions.length} editions</Typography>
+                                            <Typography variant="body2" style={STYLE_NFT_BAR_AVAILABLE}>{t("components.post_dialog.edition_count", { edition: { edition: availableEditions.length } })}</Typography>
                                         </div>
                                     </div>
                                 </Grid>
@@ -1413,6 +1460,7 @@ const DrawerHeader = React.memo(function DrawerHeader({
                                                           authorImage, authorName, authorUsername, title, date,
                                                           showClose, onOpenAuthor, onMenuToggle
                                                       }) {
+    useLanguage(); // memo'd: subscribe so the "by" line follows a language switch
     const fadeKey = hidden ? "0" : "1";
     return (
         <CardHeader
@@ -1422,14 +1470,21 @@ const DrawerHeader = React.memo(function DrawerHeader({
             title={<Fade in={!hidden} timeout={FADE_TIMEOUT_TITLE} key={fadeKey}><span>{title}</span></Fade>}
             subheader={
                 <Fade in={!hidden} timeout={FADE_TIMEOUT_SUBHEADER} key={fadeKey}>
-                    <span>
-                        <Tooltip arrow title={new Date(date).toLocaleDateString(locales, TOOLTIP_DATE_OPTIONS)}>
-                            <span className={classes.subheaderDate}><LiveTimeAgo date={date || Date.now()} /></span>
-                        </Tooltip>
-                        <span className={classes.subheaderBy}> by </span>
-                        <Tooltip title={"@" + authorUsername}>
-                            <span className={classes.subheaderName} onClick={onOpenAuthor}>{authorName}</span>
-                        </Tooltip>
+                    {/* One sentence, "{{date}} by {{author}}": the words take
+                        subheaderBy's colour, date and name keep their own. */}
+                    <span className={classes.subheaderBy}>
+                        {tnode("components.post_dialog.date_by_author", {
+                            date: (
+                                <Tooltip arrow title={new Date(date).toLocaleDateString(locales, TOOLTIP_DATE_OPTIONS)}>
+                                    <span className={classes.subheaderDate}><LiveTimeAgo date={date || Date.now()} /></span>
+                                </Tooltip>
+                            ),
+                            author: (
+                                <Tooltip title={"@" + authorUsername}>
+                                    <span className={classes.subheaderName} onClick={onOpenAuthor}>{authorName}</span>
+                                </Tooltip>
+                            ),
+                        })}
                     </span>
                 </Fade>
             } />
@@ -4421,8 +4476,11 @@ function PostDialog(props) {
             _license_dialog_opened: true,
             _license_customization: {
                 isCustomized: license.isCustomized ?? true, customizedDate: new Date().toISOString(),
-                authorInfo: { username: author.username || 'unknown', name: author.name || 'Unknown Artist', url: `https://pixagram.com/@${author.username || 'unknown'}` },
-                artworkInfo: { title: st.data.title || `Artwork #${st.data.id}`, creationDate: st.data.created || st.data.date || new Date().toISOString(), nftContract: st.data.nftContract || st.data.contractAddress },
+                // Fallback name/title: translated now, as the dialog opens — they
+                // become text of the license document (PDF, file name), which
+                // takes plain strings. 'unknown' is a URL/handle placeholder.
+                authorInfo: { username: author.username || 'unknown', name: author.name || t("components.post_dialog.unknown_artist"), url: `https://pixagram.com/@${author.username || 'unknown'}` },
+                artworkInfo: { title: st.data.title || t("components.post_dialog.artwork_number", { id: st.data.id }), creationDate: st.data.created || st.data.date || new Date().toISOString(), nftContract: st.data.nftContract || st.data.contractAddress },
                 rightsConfiguration: {
                     holderRights: { "personal-display": hr["personal-display"] ?? true, "commercial-use": hr["commercial-use"] ?? false, "social-media": hr["social-media"] ?? false, "physical-goods": hr["physical-goods"] ?? false, "third-party-licensing": hr["third-party-licensing"] ?? false, "modify": hr["modify"] ?? false, "derivatives": hr["derivatives"] ?? false, "mint-new-nfts": hr["mint-new-nfts"] ?? false, "metaverse": hr["metaverse"] ?? false, "games-apps": hr["games-apps"] ?? false, "music-video-film": hr["music-video-film"] ?? false, "exhibitions": hr["exhibitions"] ?? false, "educational": hr["educational"] ?? false, "ai-training": hr["ai-training"] ?? false },
                     visitorRights: { "share-with-attribution": vr["share-with-attribution"] ?? true, "share-without-attribution": vr["share-without-attribution"] ?? false, "modify-and-share": vr["modify-and-share"] ?? false, "ai-training": vr["ai-training"] ?? false }
@@ -4569,7 +4627,7 @@ function PostDialog(props) {
                 })
                 .catch((e) => {
                     console.warn('[PostDialog] comment update failed:', e.message);
-                    actions.trigger_snackbar(e.message || "Failed to update comment");
+                    actions.trigger_snackbar(e.message || t("components.post_dialog.failed_to_update_comment"));
                     dispatch({ _comment_sending: false });
                 });
             return;
@@ -5298,7 +5356,10 @@ function PostDialog(props) {
                         <Avatar src={author.image} style={STYLE_VOTER_AVATAR} className="pixelated" onClick={() => openAuthor(author.username)} />
                     </Tooltip>
                 </ListItemAvatar>
-                <ListItemText primary={author.name} secondary="0.1 PS with 100%" />
+                {/* No secondary line: the voter entries carry no vote data
+                    (weight / value) to show — it used to print a fixed
+                    "0.1 PS with 100%" placeholder under every voter. */}
+                <ListItemText primary={author.name} />
             </ListItem>
         );
     }, [authorsEntries, openAuthor]);

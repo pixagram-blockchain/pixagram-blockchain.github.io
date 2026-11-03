@@ -31,7 +31,7 @@ import { fold, splitSuggestion } from "./intent";
 //                                          pointer happens to rest on)
 //   ↖ on a row, → on the highlighted one    put its text in the box to go on typing
 //   ↗ on a documentation row, Ctrl/⌘ + Enter on the highlighted one
-//                                          open the page on GitHub
+//                                          open the page in the wiki (pixa.org)
 //
 // The rows are options of a listbox the input controls (aria-activedescendant),
 // and they never take the focus: the input keeps it while the mouse picks. The

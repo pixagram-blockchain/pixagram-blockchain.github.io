@@ -8,7 +8,7 @@ import ArrowBackRounded from "@material-ui/icons/ArrowBackRounded";
 import ArrowForwardRounded from "@material-ui/icons/ArrowForwardRounded";
 import CheckRounded from "@material-ui/icons/CheckRounded";
 
-import { t } from "../utils/text";
+import { t, useLanguage } from "../utils/text";
 
 // ─── Tour ─────────────────────────────────────────────────────────────────────
 // First-visit guided tour. Renders a dimmed overlay with a "spotlight" cut
@@ -202,6 +202,7 @@ function arrowStyle(arrow) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const Tour = ({ steps, onFinish }) => {
+    useLanguage();
     const [index, setIndex] = useState(0);
     const [layout, setLayout] = useState(null);
     const [entered, setEntered] = useState(false);
@@ -376,7 +377,7 @@ const Tour = ({ steps, onFinish }) => {
             <div
                 ref={tipRef}
                 role="dialog"
-                aria-label={step.title || "Tour"}
+                aria-label={step.title || t("components.tour.tour")}
                 style={{
                     ...TIP_BASE,
                     top: layout ? layout.tip.top : -9999,

@@ -1,6 +1,8 @@
 "use strict";
 import React from "preact/compat";
 
+import { wikiUrl } from "./wiki";
+
 // ── AnswerMarkdown ────────────────────────────────────────────────────────────
 // The light Markdown the Worker's answers are written in (v4.8), as React nodes —
 // never HTML: every piece of text becomes a text node, so whatever the model
@@ -8,7 +10,8 @@ import React from "preact/compat";
 //
 //   blocks    paragraphs (blank lines apart), "### " headings, "- " bullet lists,
 //             "1. " numbered lists
-//   inline    **bold**, `code`, [text](https://…) links (https only, new tab),
+//   inline    **bold**, `code`, [text](https://…) links (https only, new tab; one
+//             to the documentation on GitHub opens the wiki's page instead),
 //             "@author" mentions (links to the profile), and the citations:
 //               [E12] [E12, E201]   an /ask body's evidence ids — the ones that name
 //                                   a post the answer holds become small numbered
@@ -147,7 +150,7 @@ export function renderInline(text, ctx) {
             out.push(<code key={"k" + m.index} className={classes.answerCode}>{m[4]}</code>);
         } else {
             out.push(
-                <a key={"l" + m.index} href={m[6]} target="_blank" rel="noopener noreferrer" className={classes.answerLink}>
+                <a key={"l" + m.index} href={wikiUrl(m[6])} target="_blank" rel="noopener noreferrer" className={classes.answerLink}>
                     {m[5]}
                 </a>,
             );

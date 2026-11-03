@@ -13,7 +13,20 @@
  * modelled on public guidance but must be signed off by qualified counsel before
  * production use — especially the open PXP (utility token) and PXS (supracoin)
  * characterisation questions, which are exposed here as configurable flags.
+ *
+ * TEXT: every user-facing string the engine emits (ruleset names and notes,
+ * deduction step labels, warnings, movement notes) is a translation
+ * descriptor { $t: key, v: vars } — the shape utils/text.js tk() builds — not
+ * prose. The engine imports nothing, so it still runs in Node (see the demo at
+ * the end); the dialog resolves descriptors on screen (utils/docLanguage.js
+ * uiText) and the PDF/CSV resolve them in the document's language. Number
+ * variables stay numbers, so they are formatted in that language too.
  * ===========================================================================*/
+
+/** Deferred translation — same shape as utils/text.js tk(), resolved by the caller. */
+function tk(key, vars) {
+  return vars ? { $t: key, v: vars } : { $t: key };
+}
 
 // ---------------------------------------------------------------------------
 // 1. DOMAIN MODEL  (jurisdiction-invariant)
@@ -345,18 +358,19 @@ function applyDeductions(ruleset, profile, shortT, longT) {
   const priorLoss = carryAllowed ? Math.max(0, profile.lossCarryforwardFiat || 0) : 0;
   const exemptionUsed = Math.max(0, profile.exemptionUsedFiat || 0);
 
-  const steps = [{ label: "Taxable gain", value: round2(shortT + longT) }];
+  // Step labels are descriptors (see TEXT in the header); numbers stay numbers.
+  const steps = [{ label: tk("components.pixa_tax_engine.taxable_gain"), value: round2(shortT + longT) }];
   let base = shortT + longT;
   let carryOut = 0, anyApplied = false;
 
   if (priorLoss > 0) {
     const applied = Math.min(priorLoss, Math.max(0, base));
     base -= applied; carryOut = priorLoss - applied; anyApplied = true;
-    steps.push({ label: "After losses carried forward", value: round2(base) });
+    steps.push({ label: tk("components.pixa_tax_engine.after_losses_carried_forward"), value: round2(base) });
   }
   if (base < 0) {
     if (carryAllowed) carryOut += -base;
-    else { steps.push({ label: "Net loss — not carried forward", value: 0 }); anyApplied = true; }
+    else { steps.push({ label: tk("components.pixa_tax_engine.net_loss_not_carried_forward"), value: 0 }); anyApplied = true; }
     base = 0;
   }
 
@@ -369,23 +383,23 @@ function applyDeductions(ruleset, profile, shortT, longT) {
     if (exemptionType !== "allowance" || base <= 0) return;
     const avail = Math.max(0, exemption - exemptionUsed);
     base -= Math.min(avail, base); anyApplied = true;
-    steps.push({ label: "After annual exemption", value: round2(base) });
+    steps.push({ label: tk("components.pixa_tax_engine.after_annual_exemption"), value: round2(base) });
   };
   if (ruleset.exemptionBeforeInclusion) applyAllowance();
 
   if (discountRate > 0 && longT > 0 && base > 0) {
     const longPortion = Math.min(base, Math.max(0, longT));
     base -= longPortion * discountRate; anyApplied = true;
-    steps.push({ label: `After ${Math.round(discountRate * 100)}% long-term discount`, value: round2(base) });
+    steps.push({ label: tk("components.pixa_tax_engine.after_long_term_discount", { pct: Math.round(discountRate * 100) }), value: round2(base) });
   }
   if (inclusionRate !== 1 && base > 0) {
     base *= inclusionRate; anyApplied = true;
-    steps.push({ label: `After ${Math.round(inclusionRate * 100)}% inclusion rate`, value: round2(base) });
+    steps.push({ label: tk("components.pixa_tax_engine.after_inclusion_rate", { pct: Math.round(inclusionRate * 100) }), value: round2(base) });
   }
   if (!ruleset.exemptionBeforeInclusion) applyAllowance();
   if (exemptionType === "freigrenze" && base > 0 && base <= exemption) {
     base = 0; anyApplied = true;
-    steps.push({ label: `Within ${round2(exemption)} exemption threshold`, value: 0 });
+    steps.push({ label: tk("components.pixa_tax_engine.within_exemption_threshold", { amount: round2(exemption) }), value: 0 });
   }
 
   const taxableAmount = round2(Math.max(0, base));
@@ -396,21 +410,21 @@ function applyDeductions(ruleset, profile, shortT, longT) {
 const CH_RULESET = {
   code: "CH",
   giftIsDisposal: false,
-  name: "Switzerland (private investor)",
+  name: tk("components.pixa_tax_engine.jurisdiction_private_investor", { country: tk("components.pixa_wallet_taxes_dialog.jur_ch") }),
   fiat: "CHF",
   version: "CH-2025.1-illustrative",
   reports: {
     wealth: {
       enabled: true,
-      note: "Cantonal wealth tax on 31 Dec holdings."
+      note: tk("components.pixa_tax_engine.ch_wealth_note")
     },
     transactions: {
       enabled: true,
-      note: "In Switzerland, gains on privately held assets are generally tax-free for private investors (FTA Circular 36). The disposals below are listed for your records."
+      note: tk("components.pixa_tax_engine.ch_transactions_note")
     },
     operations: {
       enabled: true,
-      note: "Reward/interest income taxable as 'Einkommen aus beweglichem Vermögen'."
+      note: tk("components.pixa_tax_engine.ch_operations_note")
     }
   },
   categoryRules: baseCategoryRules(),
@@ -428,21 +442,21 @@ const US_RULESET = {
   code: "US",
   giftIsDisposal: false,
   charityGiftExempt: true,
-  name: "United States",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_us"),
   fiat: "USD",
   version: "US-2026.1-illustrative",
   reports: {
     wealth: {
       enabled: false,
-      note: "No federal wealth tax — report omitted."
+      note: tk("components.pixa_tax_engine.us_wealth_note")
     },
     transactions: {
       enabled: true,
-      note: "Disposals and crypto-to-crypto swaps are taxable (Form 8949 / Schedule D). Lots held over one year are long-term; the split is shown below. Tax rates are not applied here — confirm with your preparer."
+      note: tk("components.pixa_tax_engine.us_transactions_note")
     },
     operations: {
       enabled: true,
-      note: "Rewards are ordinary income at FMV on receipt."
+      note: tk("components.pixa_tax_engine.us_operations_note")
     }
   },
   categoryRules: baseCategoryRules(),
@@ -469,21 +483,21 @@ const DE_RULESET = {
   giftIsDisposal: false,
   annualExemptionFiat: 1000,
   annualExemptionType: "freigrenze",
-  name: "Germany (private investor)",
+  name: tk("components.pixa_tax_engine.jurisdiction_private_investor", { country: tk("components.pixa_wallet_taxes_dialog.jur_de") }),
   fiat: "EUR",
   version: "DE-2025.1-illustrative",
   reports: {
     wealth: {
       enabled: false,
-      note: "No German wealth tax — report omitted."
+      note: tk("components.pixa_tax_engine.de_wealth_note")
     },
     transactions: {
       enabled: true,
-      note: "Private sales under §23 EStG: disposals (including crypto-to-crypto) are taxable as 'sonstige Einkünfte' only when the asset was held under one year; lots held one year or more are tax-free and shown as exempt below. A small annual exemption (Freigrenze) applies but is not computed here — confirm with a Steuerberater."
+      note: tk("components.pixa_tax_engine.de_transactions_note")
     },
     operations: {
       enabled: true,
-      note: "Staking / lending rewards are taxable other income (§22) at value on receipt."
+      note: tk("components.pixa_tax_engine.de_operations_note")
     }
   },
   categoryRules: baseCategoryRules(),
@@ -504,21 +518,21 @@ const DE_RULESET = {
 const FR_RULESET = {
   code: "FR",
   giftIsDisposal: false,
-  name: "France (occasional investor)",
+  name: tk("components.pixa_tax_engine.jurisdiction_occasional_investor", { country: tk("components.pixa_wallet_taxes_dialog.jur_fr") }),
   fiat: "EUR",
   version: "FR-2025.1-illustrative",
   reports: {
     wealth: {
       enabled: false,
-      note: "No wealth tax on crypto (IFI covers real estate only) — report omitted."
+      note: tk("components.pixa_tax_engine.fr_wealth_note")
     },
     transactions: {
       enabled: true,
-      note: "For occasional investors, crypto-to-crypto exchanges are NOT taxable events — they are shown below for your records only. The flat 30% levy (PFU) applies solely when you convert crypto to euros or spend it, computed on the whole portfolio via the official cession formula. Those fiat off-ramps happen off-platform and are not in this on-chain history — compute them separately or with an adviser."
+      note: tk("components.pixa_tax_engine.fr_transactions_note")
     },
     operations: {
       enabled: true,
-      note: "For occasional investors, rewards received are generally NOT taxed at receipt — they enter your portfolio at ZERO acquisition cost, and the full value is taxed at the eventual conversion to euros (via the portfolio cession formula, off-platform). The lines below are your record of what was received; none of it is counted as income here. If your activity is regular/professional, BNC treatment at receipt applies instead — confirm with an adviser."
+      note: tk("components.pixa_tax_engine.fr_operations_note")
     }
   },
   categoryRules: baseCategoryRules(),
@@ -530,7 +544,7 @@ const FR_RULESET = {
   longTermExempt: false,
   taxesCryptoToCrypto: false,
   taxableOnlyOnFiatOfframp: true,
-  assumptionNote: "Crypto-to-crypto deferral assumes PXS qualifies as a digital asset (actif numérique), not electronic money. If PXS were recharacterised as fiat-referencing e-money, PXA→PXS conversions could become taxable cessions — an open characterisation question."
+  assumptionNote: tk("components.pixa_tax_engine.fr_assumption_note")
 };
 
 /** United Kingdom: no wealth tax; CGT on disposals using section-104 pooled cost. */
@@ -539,22 +553,22 @@ const UK_RULESET = {
   charityGiftExempt: true,
   annualExemptionFiat: 3000,
   annualExemptionType: "allowance",
-  name: "United Kingdom",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_uk"),
   fiat: "GBP",
   version: "UK-2025.1-illustrative",
   methodLocked: true, // pooling is mandatory — profile method preferences do not apply
   reports: {
     wealth: {
       enabled: false,
-      note: "No wealth tax — report omitted."
+      note: tk("components.pixa_tax_engine.no_wealth_tax_report_omitted")
     },
     transactions: {
       enabled: true,
-      note: "Capital Gains Tax applies to disposals, including crypto-to-crypto. Each disposal is matched per HMRC's ordering: same-day acquisitions first, then acquisitions in the following 30 days ('bed and breakfasting'), and only the remainder against the section-104 pooled average — the match columns below show the split. The annual exempt amount is applied in the deduction steps. Illustrative — confirm with an adviser."
+      note: tk("components.pixa_tax_engine.uk_transactions_note")
     },
     operations: {
       enabled: true,
-      note: "Staking / mining rewards are taxable (miscellaneous or trading income) at value on receipt."
+      note: tk("components.pixa_tax_engine.uk_operations_note")
     }
   },
   categoryRules: baseCategoryRules(),
@@ -572,16 +586,16 @@ const UK_RULESET = {
 const AT_RULESET = {
   code: "AT",
   giftIsDisposal: false,
-  name: "Austria",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_at"),
   fiat: "EUR",
   version: "AT-2025.1-illustrative",
   reports: {
-    wealth: { enabled: false, note: "No wealth tax — report omitted." },
+    wealth: { enabled: false, note: tk("components.pixa_tax_engine.no_wealth_tax_report_omitted") },
     transactions: {
       enabled: true,
-      note: "Since the 2022 reform, crypto gains are taxed at a flat 27.5%. Crypto-to-crypto exchanges are tax-NEUTRAL (not a realisation) — they are shown below for your records only; the charge arises when you convert to euros or spend, which happens off-platform and is not in this on-chain history. Illustrative — confirm with a Steuerberater."
+      note: tk("components.pixa_tax_engine.at_transactions_note")
     },
-    operations: { enabled: true, note: "Since the 2022 reform, staking-style rewards are NOT taxed at receipt — they enter your holdings at ZERO acquisition cost, and the full value is taxed at 27.5% when later converted to euros or spent (off-platform). The lines below are your record of what was received; none of it is counted as income here. Illustrative — confirm with a Steuerberater." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.at_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: [],
@@ -598,19 +612,19 @@ const AT_RULESET = {
 const NL_RULESET = {
   code: "NL",
   giftIsDisposal: false,
-  name: "Netherlands",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_nl"),
   fiat: "EUR",
   version: "NL-2025.1-illustrative",
   reports: {
     wealth: {
       enabled: true,
-      note: "Box 3 taxes a deemed return on the value of your assets at the peildatum — 1 January of the filing year, NOT 31 December. The holdings below are your balance as of that date, valued at that date's prices; activity later in the year does not change this figure (it feeds NEXT year's peildatum instead)."
+      note: tk("components.pixa_tax_engine.nl_wealth_note")
     },
     transactions: {
       enabled: true,
-      note: "Realised gains are generally NOT taxed for private holders — wealth is taxed instead (Box 3, above). The disposals below are for your records. Illustrative — confirm with an adviser."
+      note: tk("components.pixa_tax_engine.nl_transactions_note")
     },
-    operations: { enabled: true, note: "For private holders, rewards usually fall under Box 3 wealth rather than income — confirm your situation." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.nl_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: ["platform_price", "cost_basis"],
@@ -626,17 +640,17 @@ const NL_RULESET = {
 /** Spain: gains taxed as savings income; crypto-to-crypto taxable; FIFO mandated. */
 const ES_RULESET = {
   code: "ES",
-  name: "Spain",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_es"),
   fiat: "EUR",
   version: "ES-2025.1-illustrative",
   methodLocked: true, // FIFO is mandatory — profile method preferences do not apply
   reports: {
-    wealth: { enabled: false, note: "Regional wealth tax (Patrimonio) may apply above high thresholds — not computed here; report omitted." },
+    wealth: { enabled: false, note: tk("components.pixa_tax_engine.es_wealth_note") },
     transactions: {
       enabled: true,
-      note: "Gains are taxed in the savings base at progressive rates (19–28%). Crypto-to-crypto exchanges (permutas) ARE taxable disposals. Cost basis uses FIFO. Illustrative — confirm with an asesor; note also the Modelo 721 reporting duty."
+      note: tk("components.pixa_tax_engine.es_transactions_note")
     },
-    operations: { enabled: true, note: "Rewards are taxable income at value on receipt." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.es_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: [],
@@ -651,16 +665,16 @@ const ES_RULESET = {
 /** Portugal: gains on holdings <1yr taxed at 28%; holdings >=1yr exempt. */
 const PT_RULESET = {
   code: "PT",
-  name: "Portugal",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_pt"),
   fiat: "EUR",
   version: "PT-2025.1-illustrative",
   reports: {
-    wealth: { enabled: false, note: "No wealth tax — report omitted." },
+    wealth: { enabled: false, note: tk("components.pixa_tax_engine.no_wealth_tax_report_omitted") },
     transactions: {
       enabled: true,
-      note: "Since 2023, gains on assets held UNDER one year are taxed at 28%; holdings of one year or more are exempt and shown as tax-free below. Crypto-to-crypto in the same category may be deferred — treatment is unsettled. Illustrative — confirm with a contabilista."
+      note: tk("components.pixa_tax_engine.pt_transactions_note")
     },
-    operations: { enabled: true, note: "Staking / validation rewards may be taxable income — confirm your situation." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.pt_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: [],
@@ -676,17 +690,17 @@ const PT_RULESET = {
 const CA_RULESET = {
   code: "CA",
   inclusionRate: 0.5,
-  name: "Canada",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_ca"),
   fiat: "CAD",
   version: "CA-2025.1-illustrative",
   methodLocked: true, // ACB is mandatory — profile method preferences do not apply
   reports: {
-    wealth: { enabled: false, note: "No wealth tax — report omitted." },
+    wealth: { enabled: false, note: tk("components.pixa_tax_engine.no_wealth_tax_report_omitted") },
     transactions: {
       enabled: true,
-      note: "Crypto-to-crypto exchanges are barter transactions and ARE disposals. Cost uses the adjusted cost base (average), shown below. Only 50% of net capital gains is taxable (the inclusion rate) — apply that to the figure here; this tool reports the full gain. Business-income treatment can apply to active traders. Illustrative — confirm with an accountant."
+      note: tk("components.pixa_tax_engine.ca_transactions_note")
     },
-    operations: { enabled: true, note: "Rewards are generally income at value on receipt (or business income) — confirm your situation." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.ca_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: [],
@@ -703,16 +717,16 @@ const AU_RULESET = {
   code: "AU",
   longTermDiscountRate: 0.5,
   charityGiftExempt: true,
-  name: "Australia",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_au"),
   fiat: "AUD",
   version: "AU-2025.1-illustrative",
   reports: {
-    wealth: { enabled: false, note: "No wealth tax — report omitted." },
+    wealth: { enabled: false, note: tk("components.pixa_tax_engine.no_wealth_tax_report_omitted") },
     transactions: {
       enabled: true,
-      note: "CGT applies to disposals, including crypto-to-crypto. A 50% CGT discount applies to gains on assets held over 12 months — those appear as 'long-term' below, but the discount is NOT applied to the figures (apply it yourself to the long-term part). Illustrative — confirm with a registered tax agent."
+      note: tk("components.pixa_tax_engine.au_transactions_note")
     },
-    operations: { enabled: true, note: "Staking / reward income is assessable at value on receipt." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.au_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: [],
@@ -727,16 +741,16 @@ const AU_RULESET = {
 /** Japan: crypto gains & rewards are miscellaneous income (雑所得) at progressive rates; total-average cost basis; losses die with the year. */
 const JP_RULESET = {
   code: "JP",
-  name: "Japan",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_jp"),
   fiat: "JPY",
   version: "JP-2026.1-illustrative",
   reports: {
-    wealth: { enabled: false, note: "No wealth tax — report omitted. If your total foreign-held assets exceed ¥50M on 31 December, the overseas assets report (国外財産調書) may apply — track that separately." },
+    wealth: { enabled: false, note: tk("components.pixa_tax_engine.jp_wealth_note") },
     transactions: {
       enabled: true,
-      note: "Gains on disposals — including crypto-to-crypto swaps — are MISCELLANEOUS INCOME (雑所得), aggregated with your other income at progressive rates (up to ~55% including inhabitant tax); there is no separate capital-gains rate and no long-term relief. Cost basis uses the TOTAL AVERAGE method (総平均法), the NTA default for individuals: every disposal in a year is priced at that year's overall average cost, so an early-year sale is affected by purchases made later the same year. If you have filed the election for the moving-average method (移動平均法), your figures will differ from this report. Losses offset other crypto gains in the SAME year only — no offset against salary or other income categories, and no carryforward. Salaried filers: total miscellaneous income of ¥200,000 or less may be exempt from income-tax filing (conditions apply; inhabitant tax is still due). Reform watch: a 20.315% flat separate-taxation regime has been proposed (targeted around 2028) but is NOT current law. Illustrative — confirm with a 税理士."
+      note: tk("components.pixa_tax_engine.jp_transactions_note")
     },
-    operations: { enabled: true, note: "Author, curation and interest rewards are miscellaneous income at market value when received; that value becomes the acquisition cost entering the year's total-average pool." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.jp_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: [],
@@ -754,19 +768,19 @@ const JP_RULESET = {
 /** Brazil: Pixagram holdings treated as FOREIGN-held — Law 14.754/2023 flat 15% regime; DIRPF declares holdings at acquisition cost. */
 const BR_RULESET = {
   code: "BR",
-  name: "Brazil",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_br"),
   fiat: "BRL",
   version: "BR-2026.1-illustrative",
   reports: {
     wealth: {
       enabled: true,
-      note: "The DIRPF 'Bens e Direitos' declaration lists crypto at ACQUISITION COST, not market value — the lines below are your 31 December holdings at their cost basis (source column: cost_basis), ready for the declaration (grupo 08)."
+      note: tk("components.pixa_tax_engine.br_wealth_note")
     },
     transactions: {
       enabled: true,
-      note: "Holdings on Pixagram are treated as FOREIGN-held financial investments under Law 14.754/2023: realised gains — including crypto-to-crypto swaps (permuta) — are taxed at a FLAT 15% annually via the DIRPF. The R$35,000 monthly exemption does NOT apply here — it belongs to the domestic regime (crypto held in Brazil), which reverted after MP 1303/2025 lapsed in October 2025. Losses on foreign investments may offset gains from other foreign investments, including in later periods. Illustrative — confirm with a contador."
+      note: tk("components.pixa_tax_engine.br_transactions_note")
     },
-    operations: { enabled: true, note: "Rewards and interest are taxable under the 15% foreign-investment regime at value on receipt; that value becomes the tokens' acquisition cost. Self-reporting: monthly IN RFB 1888 filings may apply when your volume on non-Brazilian platforms exceeds R$30,000 in a month; DeCripto expands reporting from 2026." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.br_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: ["cost_basis"],
@@ -778,22 +792,22 @@ const BR_RULESET = {
   longTermExempt: false,
   taxesCryptoToCrypto: true,
   taxableOnlyOnFiatOfframp: false,
-  assumptionNote: "Treats Pixagram holdings as located ABROAD: the platform is operated by Pixa Rex S.A. (Panama) on a foreign chain — so the foreign characterisation holds under either the operator or the chain analysis. If characterised as domestic self-custody instead, the old regime (monthly R$35,000 exemption, 15–22.5% progressive rates) would apply — an open characterisation question."
+  assumptionNote: tk("components.pixa_tax_engine.br_assumption_note")
 };
 
 /** South Korea: virtual-asset gains tax DEFERRED to 1 Jan 2027 — nothing taxable for individuals in 2026; this report is the cost-basis record for the transition. */
 const KR_RULESET = {
   code: "KR",
-  name: "South Korea",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_kr"),
   fiat: "KRW",
   version: "KR-2026.1-illustrative",
   reports: {
-    wealth: { enabled: false, note: "No wealth tax — report omitted." },
+    wealth: { enabled: false, note: tk("components.pixa_tax_engine.no_wealth_tax_report_omitted") },
     transactions: {
       enabled: true,
-      note: "Virtual-asset gains are NOT taxable for individuals in 2026: the tax legislated in 2020 has been deferred three times and is now scheduled to start 1 January 2027 — 22% (20% income tax + 2% local) on annual gains above ₩2.5 million, with crypto-to-crypto swaps taxable under the future regime. Key implementation rules — including how acquisition prices will be set for holdings acquired before 2027 — remain undefined, and a fourth deferral has been publicly discussed but is not law. The disposals below are RECORDS, not tax lines: a complete cost-basis history is exactly what you will need when the regime starts. Illustrative — confirm with a 세무사."
+      note: tk("components.pixa_tax_engine.kr_transactions_note")
     },
-    operations: { enabled: true, note: "Reward and interest income treatment for individuals is still being studied by the NTS ahead of the 2027 start; nothing here is counted as taxable income, and received tokens are booked at ZERO acquisition cost (the conservative convention pending NTS rules). Each line still records the market value at receipt — keep it: it is your acquisition evidence if the final rules allow a receipt-value basis." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.kr_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: [],
@@ -810,16 +824,16 @@ const KR_RULESET = {
 /** India: flat 30% (+4% cess) on VDA transfers under §115BBH — losses disregarded entirely; 1% TDS trail under §194S; rewards at slab rates on receipt. */
 const IN_RULESET = {
   code: "IN",
-  name: "India",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_in"),
   fiat: "INR",
   version: "IN-2026.1-illustrative",
   reports: {
-    wealth: { enabled: false, note: "No wealth tax — report omitted." },
+    wealth: { enabled: false, note: tk("components.pixa_tax_engine.no_wealth_tax_report_omitted") },
     transactions: {
       enabled: true,
-      note: "Income from transferring VDAs — sales AND crypto-to-crypto swaps — is taxed at a FLAT 30% (plus 4% cess and any surcharge) under §115BBH, carried forward into the Income-tax Act 2025 (effective April 2026); no holding-period relief exists. Only the cost of acquisition is deductible — no fees or other expenses. LOSSES ARE DISREGARDED ENTIRELY: a loss on one transfer cannot offset the gain on another (even the same asset) and cannot be carried forward — the taxable total below therefore sums only positive per-transfer gains, with disallowed losses shown for the record. Separately, a 1% TDS under §194S applies on transfer consideration (annual thresholds ₹50,000 / ₹10,000); on P2P and foreign platforms the BUYER must deduct and deposit it, and Schedule VDA must reconcile with Form 26AS. Illustrative — confirm with a CA."
+      note: tk("components.pixa_tax_engine.in_transactions_note")
     },
-    operations: { enabled: true, note: "Rewards received without purchase (author/curation rewards, interest) are generally taxable as income from other sources at your SLAB rates at market value on receipt; that value becomes the acquisition cost for the later 30% transfer computation. Gifts of VDAs worth over ₹50,000 from non-relatives are taxable for the recipient." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.in_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: [],
@@ -837,16 +851,16 @@ const IN_RULESET = {
 /** Singapore: no capital gains tax for individuals — disposals are records unless the activity amounts to a trade; reward taxability is fact-specific. */
 const SG_RULESET = {
   code: "SG",
-  name: "Singapore",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_sg"),
   fiat: "SGD",
   version: "SG-2026.1-illustrative",
   reports: {
-    wealth: { enabled: false, note: "No wealth tax — report omitted. IRAS expects transaction records to be kept for five years." },
+    wealth: { enabled: false, note: tk("components.pixa_tax_engine.sg_wealth_note") },
     transactions: {
       enabled: true,
-      note: "Singapore has no capital gains tax: disposals of tokens held as personal investments — including crypto-to-crypto swaps — are generally NOT taxable, and the lines below are records. The exception is activity amounting to a TRADE under IRAS's badges-of-trade factors (frequency, volume, holding periods, organisation, intent): business-classified trading is taxable at income rates — this report treats gains as taxable if you enable professional/trader status. FIFO and weighted-average cost are both accepted by IRAS; LIFO is not. Illustrative — confirm with a tax adviser."
+      note: tk("components.pixa_tax_engine.sg_transactions_note")
     },
-    operations: { enabled: true, note: "Whether rewards are taxable in Singapore is FACT-SPECIFIC: tokens earned for providing something (content-creation rewards can resemble payment for services) or through business-like activity are income at market value on receipt, while casual hobby-level receipts and pure windfalls (airdrops without services) are generally not. IRAS has no standalone staking rule. The totals below are your market-value record at receipt — whether they are declarable depends on your classification; confirm with a tax adviser." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.sg_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: [],
@@ -862,16 +876,16 @@ const SG_RULESET = {
 /** United Arab Emirates: no personal income tax — individuals' gains and rewards are untaxed; the 9% Corporate Tax only reaches business-level activity. */
 const AE_RULESET = {
   code: "AE",
-  name: "United Arab Emirates",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_ae"),
   fiat: "AED",
   version: "AE-2026.1-illustrative",
   reports: {
-    wealth: { enabled: false, note: "No wealth tax — report omitted." },
+    wealth: { enabled: false, note: tk("components.pixa_tax_engine.no_wealth_tax_report_omitted") },
     transactions: {
       enabled: true,
-      note: "The UAE levies no personal income tax: disposals — including crypto-to-crypto swaps — are NOT taxable for individuals investing in a personal capacity, and the lines below are records. The exception is activity that constitutes a BUSINESS: natural persons whose business turnover exceeds AED 1 million fall within the 9% Corporate Tax regime — this report treats gains as taxable if you enable professional/trader status. Crypto transfers are VAT-exempt (Cabinet Decision 100/2024, retroactive to 2018). Illustrative — confirm with a tax adviser."
+      note: tk("components.pixa_tax_engine.ae_transactions_note")
     },
-    operations: { enabled: true, note: "Rewards and interest received by individuals acting in a personal capacity are not subject to personal income tax; the lines below are your market-value record at receipt (useful as cost evidence, and if another jurisdiction's rules ever apply). Business-classified activity falls under Corporate Tax instead — confirm your situation." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.ae_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: [],
@@ -887,16 +901,16 @@ const AE_RULESET = {
 /** Hong Kong: no capital gains tax — capital-nature gains are not chargeable; profits tax reaches only a trade or business of dealing (DIPN 39, badges of trade). */
 const HK_RULESET = {
   code: "HK",
-  name: "Hong Kong",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_hk"),
   fiat: "HKD",
   version: "HK-2026.1-illustrative",
   reports: {
-    wealth: { enabled: false, note: "No wealth tax — report omitted." },
+    wealth: { enabled: false, note: tk("components.pixa_tax_engine.no_wealth_tax_report_omitted") },
     transactions: {
       enabled: true,
-      note: "Hong Kong has no capital gains tax: disposals of tokens held as capital investments — including crypto-to-crypto swaps — are NOT chargeable, and the lines below are records. Gains that are REVENUE in nature — from a trade or business of dealing in digital assets carried on in Hong Kong (badges of trade; IRD guidance in DIPN 39) — are chargeable to profits tax instead; this report treats gains as taxable if you enable professional/trader status. The territorial source principle can also carve out offshore profits — fact-specific. Illustrative — confirm with a tax adviser."
+      note: tk("components.pixa_tax_engine.hk_transactions_note")
     },
-    operations: { enabled: true, note: "Whether rewards are chargeable in Hong Kong is FACT-SPECIFIC: tokens earned through a business, or as payment for services, are taxable receipts at market value; casual hobby-level receipts are generally not chargeable. The totals below are your market-value record at receipt — whether they are declarable depends on your classification; confirm with a tax adviser." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.hk_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: [],
@@ -912,16 +926,16 @@ const HK_RULESET = {
 /** New Zealand: no general CGT, but IRD presumes cryptoassets are acquired FOR DISPOSAL — sale proceeds are taxable INCOME; rewards taxable on receipt; April–March tax year. */
 const NZ_RULESET = {
   code: "NZ",
-  name: "New Zealand",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_nz"),
   fiat: "NZD",
   version: "NZ-2026.1-illustrative",
   reports: {
-    wealth: { enabled: false, note: "No wealth tax — report omitted." },
+    wealth: { enabled: false, note: tk("components.pixa_tax_engine.no_wealth_tax_report_omitted") },
     transactions: {
       enabled: true,
-      note: "New Zealand has no general capital gains tax, but Inland Revenue's position is that cryptoassets are typically ACQUIRED FOR THE PURPOSE OF DISPOSAL — which makes the gain on every disposal (including crypto-to-crypto swaps) taxable as ordinary INCOME at marginal rates, with no holding-period relief. The presumption is rebuttable only in narrow cases (tokens genuinely acquired to use, not to sell). Losses on revenue-account cryptoassets are generally deductible. NOTE: the NZ tax year runs 1 APRIL – 31 MARCH — set the date range to your tax year rather than the calendar year. Illustrative — confirm with a tax adviser."
+      note: tk("components.pixa_tax_engine.nz_transactions_note")
     },
-    operations: { enabled: true, note: "Author, curation and interest rewards are taxable income at market value when received; that value becomes the tokens' cost base. IRD accepts FIFO or weighted-average cost where specific identification is impossible." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.nz_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: [],
@@ -941,19 +955,19 @@ const ZA_RULESET = {
   annualExemptionFiat: 40000,
   annualExemptionType: "allowance",
   exemptionBeforeInclusion: true, // SARS ordering: losses → annual exclusion → 40% inclusion
-  name: "South Africa",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_za"),
   fiat: "ZAR",
   version: "ZA-2026.1-illustrative",
   reports: {
     wealth: {
       enabled: true,
-      note: "No wealth tax, but the ITR12 statement of assets and liabilities lists year-end holdings at COST — the lines below are your holdings at cost basis (source column: cost_basis), ready for that statement. NOTE: the SA tax year runs 1 MARCH – END FEBRUARY; set the date range accordingly."
+      note: tk("components.pixa_tax_engine.za_wealth_note")
     },
     transactions: {
       enabled: true,
-      note: "SARS treats crypto as intangible assets: for CAPITAL-nature holdings, disposals — including crypto-to-crypto swaps — produce capital gains; the deduction steps below apply the R40,000 annual exclusion FIRST and then the 40% inclusion rate (SARS ordering), so the taxable amount is what enters your income at marginal rates (maximum effective 18%). From the 2027 tax year (disposals on or after 1 March 2026) the exclusion rises to R50,000 — this report uses R40,000, the conservative figure; adjust with your adviser. REVENUE-nature activity (frequent trading, profit-scheme intent) is instead taxed IN FULL at income rates — this report treats gains that way if you enable professional/trader status. Losses offset gains and carry forward. NOTE: the SA tax year runs 1 MARCH – END FEBRUARY — set the date range to your tax year, not the calendar year. Illustrative — confirm with a tax practitioner."
+      note: tk("components.pixa_tax_engine.za_transactions_note")
     },
-    operations: { enabled: true, note: "Rewards and interest are gross income at market value on receipt; that value becomes the base cost for the later disposal computation." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.za_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: ["cost_basis"],
@@ -969,16 +983,16 @@ const ZA_RULESET = {
 /** Mexico: no dedicated crypto regime — disposals fall under the general LISR 'enajenación de bienes' rules at progressive rates; swaps (permuta) are disposals. */
 const MX_RULESET = {
   code: "MX",
-  name: "Mexico",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_mx"),
   fiat: "MXN",
   version: "MX-2026.1-illustrative",
   reports: {
-    wealth: { enabled: false, note: "No wealth tax — report omitted." },
+    wealth: { enabled: false, note: tk("components.pixa_tax_engine.no_wealth_tax_report_omitted") },
     transactions: {
       enabled: true,
-      note: "Mexico has no dedicated crypto tax regime: the SAT applies the general Income Tax Law, under which disposals of assets ('enajenación de bienes') — including crypto-to-crypto swaps, which are barter (permuta) — produce taxable gains at progressive rates up to 35%, declared in the annual return. Losses from disposals may be creditable against similar gains under conditions (with a limited carryforward) — not computed here. Several details are UNSETTLED in the absence of specific SAT guidance; this report takes the conservative reading. Illustrative — confirm with a contador."
+      note: tk("components.pixa_tax_engine.mx_transactions_note")
     },
-    operations: { enabled: true, note: "Rewards and interest are taxable income at market value on receipt; that value becomes the acquisition cost for the later disposal computation." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.mx_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: [],
@@ -994,20 +1008,20 @@ const MX_RULESET = {
 /** Argentina: flat 15% on digital-currency gains (foreign-source reading for Pixagram holdings); Bienes Personales declares holdings at ACQUISITION COST; oldest-first costing mandated. */
 const AR_RULESET = {
   code: "AR",
-  name: "Argentina",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_ar"),
   fiat: "ARS",
   version: "AR-2026.1-illustrative",
   methodLocked: true, // the LIG regulatory decree mandates oldest-first costing for digital currencies — FIFO is enforced
   reports: {
     wealth: {
       enabled: true,
-      note: "ARCA's criterion (Dictamen DI ALIR 2/2022) is that crypto ARE financial assets within the Bienes Personales base — the intangibles exemption does not apply (part of the doctrine disputes this). Valuation follows the fisco's rule: ACQUISITION COST plus applicable updates/FX differences to 31 December, NOT market value — the lines below are your 31 December holdings at cost basis (source column: cost_basis). Taxpayers who prepaid under the REIBP regime are outside the annual tax; the mínimo no imponible and rates are not computed here. Illustrative — confirm with a contador."
+      note: tk("components.pixa_tax_engine.ar_wealth_note")
     },
     transactions: {
       enabled: true,
-      note: "For individuals, gains on disposals of digital currencies — including crypto-to-crypto swaps — are taxed at a FLAT 15%: Pixagram holdings are treated as FOREIGN-SOURCE (foreign chain, foreign operator), where 15% applies in all cases (art. 94); Argentine-source sales in pesos without an adjustment clause would instead fall under the 5% cedular rate (art. 98 inc. a). Cost basis is OLDEST-FIRST by regulation — this report enforces FIFO. Figures are NOMINAL: with high inflation, nominal ARS gains can overstate real ones — whether indexation applies to your operations is for your adviser. Losses (quebrantos) are specific: they offset only gains of the same kind and source, with a five-year carryforward. Illustrative — confirm with a contador."
+      note: tk("components.pixa_tax_engine.ar_transactions_note")
     },
-    operations: { enabled: true, note: "Rewards and interest are taxable income at market value on receipt (interest-type yields under art. 48); that value becomes the acquisition cost for the later 15% computation." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.ar_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: ["cost_basis"],
@@ -1018,22 +1032,22 @@ const AR_RULESET = {
   longTermExempt: false,
   taxesCryptoToCrypto: true,
   taxableOnlyOnFiatOfframp: false,
-  assumptionNote: "Treats Pixagram holdings as FOREIGN-source for the 15% rate (art. 94): the chain and the Panamanian operator are outside Argentina. If characterised as Argentine-source instead, peso sales without an adjustment clause would fall under the 5% cedular rate (art. 98 inc. a) — an open characterisation question."
+  assumptionNote: tk("components.pixa_tax_engine.ar_assumption_note")
 };
 
 /** Thailand: the 2025–2029 exemption covers ONLY Thai SEC-licensed operators — foreign-platform gains stay taxable at progressive rates; losses here don't offset; remittance timing applies. */
 const TH_RULESET = {
   code: "TH",
-  name: "Thailand",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_th"),
   fiat: "THB",
   version: "TH-2026.1-illustrative",
   reports: {
-    wealth: { enabled: false, note: "No wealth tax — report omitted. Keep transaction records for five years." },
+    wealth: { enabled: false, note: tk("components.pixa_tax_engine.th_wealth_note") },
     transactions: {
       enabled: true,
-      note: "Gains on disposals — including crypto-to-crypto swaps — are assessable income at progressive rates (5–35%). The five-year exemption (Ministerial Regulation No. 399: 1 Jan 2025 – 31 Dec 2029) applies ONLY to transfers through Thai SEC-LICENSED exchanges, brokers or dealers — Pixagram is not one, so NOTHING in this report qualifies. Loss offsetting is likewise reserved for licensed-exchange trades: losses here are DISREGARDED — the taxable total sums only positive per-disposal gains, with disallowed losses shown for the record. For Thai residents, activity on a foreign platform is generally FOREIGN-SOURCE income, assessable when REMITTED to Thailand (remittance-timing rules have been changing since 2024) — this report computes gains on an arising basis; the remittance question is separate. Illustrative — confirm with a Thai tax adviser."
+      note: tk("components.pixa_tax_engine.th_transactions_note")
     },
-    operations: { enabled: true, note: "Author, curation and interest rewards are ordinary assessable income at market value on receipt — reward income is NOT covered by the licensed-exchange exemption even where that exemption applies. The receipt value becomes the tokens' acquisition cost." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.th_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: [],
@@ -1051,16 +1065,16 @@ const TH_RULESET = {
 /** Israel: crypto = asset (Circular 05/2018) — 25% CGT on the real gain for individuals; crypto-to-crypto taxable; surtaxes for high incomes; business dealing at marginal rates. */
 const IL_RULESET = {
   code: "IL",
-  name: "Israel",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_il"),
   fiat: "ILS",
   version: "IL-2026.1-illustrative",
   reports: {
-    wealth: { enabled: false, note: "No wealth tax — report omitted." },
+    wealth: { enabled: false, note: tk("components.pixa_tax_engine.no_wealth_tax_report_omitted") },
     transactions: {
       enabled: true,
-      note: "The Tax Authority treats crypto as an ASSET (Circular 05/2018): disposals — including crypto-to-crypto swaps — are capital gains taxed at 25% for individuals, computed on the REAL gain (the inflationary component is exempt — the figures below are NOMINAL; the indexation adjustment is not computed here). High incomes add surtax (the 3% yisuf, plus the additional 2% on capital-source income above the threshold since 2025). Business-nature dealing is taxed at marginal rates instead — this report treats gains that way if you enable professional/trader status. Capital losses offset capital gains and carry forward. Report on Form 1399 with the annual return. Illustrative — confirm with a רואה חשבון."
+      note: tk("components.pixa_tax_engine.il_transactions_note")
     },
-    operations: { enabled: true, note: "Rewards and interest are taxable income at market value on receipt (business vs miscellaneous classification is fact-specific); that value becomes the acquisition cost for the later capital-gain computation." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.il_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: [],
@@ -1076,19 +1090,19 @@ const IL_RULESET = {
 /** Indonesia: PMK 50/2025 final tax on GROSS transaction value — 1% via foreign platforms (self-assessed), 0.21% domestic; gain figures are records; SPT asset list at cost. */
 const ID_RULESET = {
   code: "ID",
-  name: "Indonesia",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_id"),
   fiat: "IDR",
   version: "ID-2026.1-illustrative",
   reports: {
     wealth: {
       enabled: true,
-      note: "No wealth tax, but the annual SPT's asset list (daftar harta) declares holdings at ACQUISITION COST — the lines below are your 31 December holdings at cost basis (source column: cost_basis), ready for the declaration."
+      note: tk("components.pixa_tax_engine.id_wealth_note")
     },
     transactions: {
       enabled: true,
-      note: "Since PMK 50/2025 (1 August 2025), crypto is a financial asset and seller-side tax is a FINAL income tax on the GROSS transaction value — NOT on the gain: 0.21% through registered domestic platforms (withheld), and 1% through FOREIGN or unregistered platforms, SELF-assessed and paid by the seller where no collector is appointed. Pixagram is a foreign platform, so the 1% self-assessment applies to disposals here, INCLUDING crypto-to-crypto swaps. The gain/loss figures below are therefore RECORDS (no gains tax applies); the jurisdiction annex totals your monthly gross proceeds with the indicative 1%. VAT no longer applies to the crypto transfer itself. Illustrative — confirm with a konsultan pajak."
+      note: tk("components.pixa_tax_engine.id_transactions_note")
     },
-    operations: { enabled: true, note: "Platform rewards and interest are not the 'crypto sale' the final tax targets — general income-tax rules likely apply at market value on receipt (fact-specific; social-platform rewards are not squarely addressed). Each line records the market value at receipt — keep it as acquisition evidence; confirm with a konsultan pajak." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.id_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: ["cost_basis"],
@@ -1104,16 +1118,16 @@ const ID_RULESET = {
 /** Nigeria: NTA 2025 (from 1 Jan 2026) — digital/virtual assets are chargeable assets; individuals' gains taxed at progressive PIT rates on a worldwide basis. */
 const NG_RULESET = {
   code: "NG",
-  name: "Nigeria",
+  name: tk("components.pixa_wallet_taxes_dialog.jur_ng"),
   fiat: "NGN",
   version: "NG-2026.1-illustrative",
   reports: {
-    wealth: { enabled: false, note: "No wealth tax — report omitted." },
+    wealth: { enabled: false, note: tk("components.pixa_tax_engine.no_wealth_tax_report_omitted") },
     transactions: {
       enabled: true,
-      note: "Under the Nigeria Tax Act 2025 (effective 1 January 2026), chargeable assets EXPRESSLY include digital and virtual assets (s.34): gains on disposals — including crypto-to-crypto swaps — are taxable for individuals at the PROGRESSIVE personal rates (top 25%; the first ₦800,000 band of total annual income is exempt), replacing the flat 10% digital-assets CGT that applied through 2025. Residents are taxable on WORLDWIDE gains whether or not the proceeds are brought into Nigeria. Loss-relief mechanics under the new Act are still being clarified — this report nets losses within your crypto activity; confirm the treatment. Illustrative — confirm with a tax adviser."
+      note: tk("components.pixa_tax_engine.ng_transactions_note")
     },
-    operations: { enabled: true, note: "The Act brings digital-asset income and non-traditional income into the tax net: rewards and interest are taxable income at market value on receipt; that value becomes the acquisition cost for the later gains computation." }
+    operations: { enabled: true, note: tk("components.pixa_tax_engine.ng_operations_note") }
   },
   categoryRules: baseCategoryRules(),
   wealthValuation: [],
@@ -1428,11 +1442,11 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
       rulesVersion: "none",
       priceDataVersion: prices.version,
       generatedAt: new Date().toISOString(),
-      warnings: ["No tax residence on record for this year — cannot classify. Add a residence period."]
+      warnings: [tk("components.pixa_tax_engine.no_tax_residence_on_record_for_this_year")]
     };
   }
   if (residence.midYearMove) {
-    warnings.push("Residence changed during the year — wealth tax is pro-rated from the arrival date; review manually.");
+    warnings.push(tk("components.pixa_tax_engine.residence_changed_during_the_year"));
   }
   const ruleset = RULESETS[residence.code];
   // The tax ruleset is keyed to a filing currency (CH→CHF, US→USD), but the
@@ -1515,7 +1529,7 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
     // for this window's holdings, and only in-scope events appear in the reports.
     if (Date.parse(ev.ts) > periodEndMs) continue;
     if (!profile.ownWallets.includes(ev.wallet)) {
-      warnings.push(`Event ${ev.id}: wallet ${ev.wallet} is not tagged as yours — confirm ownership.`);
+      warnings.push(tk("components.pixa_tax_engine.event_wallet_not_tagged_as_yours", { id: String(ev.id), wallet: String(ev.wallet) }));
     }
     // Inbound from your own wallet is an internal move — no new basis event.
     if (ev.counterpartyIsOwn === true && ev.category === "transfer_in") continue;
@@ -1571,11 +1585,14 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
         // realise no gain.
         for (const leg of ev.legs) {
           book.consume(profile.account, leg.asset, leg.amount, method, ev.ts);
+          // The user's memo stays its own field; the explanation is a descriptor.
+          // Displays join them as "memo · note".
           if (inScope(ev.ts)) movements.push({
             id: ev.id, block: ev.block, ts: ev.ts, kind: intent === "charity" ? "charity_donation" : "gift_out",
-            note: (ev.memo ? ev.memo + " · " : "") + (intent === "charity"
-                ? "charitable donation — no gain realised here"
-                : "gift — not a disposal here; basis carries to the recipient"),
+            note: intent === "charity"
+                ? tk("components.pixa_tax_engine.charitable_donation_no_gain_realised_here")
+                : tk("components.pixa_tax_engine.gift_not_a_disposal_here_basis_carries"),
+            memo: ev.memo || undefined,
             asset: leg.asset, amount: round4(leg.amount), direction: "out"
           });
         }
@@ -1853,13 +1870,15 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
     });
   }
   for (const a of seenAssetsMissingBasis) {
-    warnings.push(`${a}: more ${a} was sent or swapped out than the fetched history shows you acquiring. The unmatched amount is treated as having zero purchase cost, which makes the reported gain too high. If you already held ${a} before this account's earliest transaction, set an opening balance and its cost to correct it.`);
+    warnings.push(tk("components.pixa_tax_engine.asset_more_sent_than_acquired", { asset: a }));
   }
   if (offPlatformBasis.length) {
     const byAsset = {};
     for (const m of offPlatformBasis) byAsset[m.asset] = (byAsset[m.asset] || 0) + m.qty;
-    const parts = Object.entries(byAsset).map(([a, q]) => `${round4(q)} ${a}`).join(", ");
-    warnings.push(`You moved ${parts} to an account marked as your own exchange. That move is not taxed here, but the eventual SALE on the exchange is a taxable disposal that happens off-platform and is not in this history. The cost basis that left the chain is listed so you can carry it into your exchange records.`);
+    // An array variable: the resolver formats each amount and joins them as a
+    // list in the reader's language.
+    const amounts = Object.entries(byAsset).map(([a, q]) => tk("components.pixa_tax_engine.amount_asset", { amount: round4(q), asset: a }));
+    warnings.push(tk("components.pixa_tax_engine.you_moved_to_your_own_exchange", { amounts }));
   }
 
   // ---- WEALTH (point-in-time holdings) ----
@@ -1872,7 +1891,7 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
     const wealthDate = wantYearStart ? peildatum : refDate;
     const holdings = wantYearStart ? snapshotHoldings : book.remaining(profile.account);
     if (wantYearStart && period) {
-      warnings.push(`The Box 3 peildatum is statutory (1 January ${year}) and does not follow the selected date range — the wealth statement is valued at ${peildatum} regardless of the report period.`);
+      warnings.push(tk("components.pixa_tax_engine.box_3_peildatum_is_statutory", { year: String(year) }));
     }
     const lines = [];
     for (const [asset, {
@@ -1884,7 +1903,9 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
         source
       } = valueAtRefDate(asset, fiat, year, wealthDate, qty, basisFiat, ruleset.wealthValuation, prices);
       if (source === "unavailable") {
-        warnings.push(`${asset}: no ${wantYearStart ? "peildatum" : "year-end"} value could be determined — wealth line omitted.`);
+        warnings.push(wantYearStart
+            ? tk("components.pixa_tax_engine.asset_no_peildatum_value", { asset })
+            : tk("components.pixa_tax_engine.asset_no_year_end_value", { asset }));
         continue;
       }
       lines.push({
@@ -1941,7 +1962,7 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
       costBasisMethod: method,
       safeHarbourCheck: residence.code === "CH" ? {
         disposalCount: disposals.length,
-        note: "This tax-free treatment assumes you count as a private investor rather than a professional trader. FTA Circular 36 decides that using five combined tests — how long you hold, how much you trade, how much of your income comes from trading, whether you use borrowed money, and whether you use derivatives. Those need your whole portfolio (not just this account), so this tool can't confirm them — treat the tax-free status as likely, not certain."
+        note: tk("components.pixa_tax_engine.ch_safe_harbour_note")
       } : undefined,
       note: ruleset.reports.transactions.note
     };
@@ -2212,12 +2233,40 @@ function demoEvents(account, wallet) {
       memo: "to my cold wallet"
     }];
 }
-function printBundle(b) {
+// Demo only (Node): English console text, read from locales/en.js — the
+// catalogue the app resolves the same descriptors from. webpackIgnore keeps
+// the bundler away from this Node-only import; without it (older Node, a key
+// not yet in en.js) a descriptor prints as its key.
+async function demoCatalogue() {
+  try {
+    const { pathToFileURL } = process.getBuiltinModule("url");
+    const href = new URL("../../locales/en.js", pathToFileURL(process.argv[1])).href;
+    return (await import(/* webpackIgnore: true */ href)).default;
+  } catch (e) {
+    return null;
+  }
+}
+function demoText(cat) {
+  const get = (path) => path.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), cat);
+  const say = (x) => {
+    if (Array.isArray(x)) return x.map(say).join(", ");
+    if (!x || typeof x !== "object" || typeof x.$t !== "string") return x == null ? "" : String(x);
+    const s = cat ? get(x.$t) : undefined;
+    if (typeof s !== "string") return x.$t;
+    const v = x.v || {};
+    return s.replace(/\{\{(\w+)\}\}/g, (m, k) => {
+      if (!(k in v)) return m;
+      return typeof v[k] === "number" ? v[k].toLocaleString("en-US", { maximumFractionDigits: 4 }) : say(v[k]);
+    });
+  };
+  return say;
+}
+function printBundle(b, say) {
   const c = b.fiat;
   console.log(`\n=== Tax report bundle — ${b.account} — ${b.year} — ${b.jurisdiction} ===`);
   console.log(`rules=${b.rulesVersion}  prices=${b.priceDataVersion}`);
   if (b.wealth) {
-    console.log(`\n[1] WEALTH @ ${b.wealth.refDate}  (${b.wealth.note})`);
+    console.log(`\n[1] WEALTH @ ${b.wealth.refDate}  (${say(b.wealth.note)})`);
     for (const l of b.wealth.lines) console.log(`    ${l.asset.padEnd(4)} ${String(l.qty).padStart(9)} @ ${l.fiatPerUnit.toFixed(4)} ${c}  = ${l.valueFiat.toFixed(2)} ${c}  [${l.source}]`);
     console.log(`    TOTAL WEALTH: ${b.wealth.totalFiat.toFixed(2)} ${c}`);
   } else {
@@ -2225,23 +2274,24 @@ function printBundle(b) {
   }
   if (b.transactions) {
     const t = b.transactions;
-    console.log(`\n[2] TRANSACTIONS ${t.periodStart}..${t.periodEnd}  (${t.note})`);
+    console.log(`\n[2] TRANSACTIONS ${t.periodStart}..${t.periodEnd}  (${say(t.note)})`);
     for (const l of t.lines) console.log(`    ${l.ts.slice(0, 10)} ${l.category.padEnd(13)} -${l.qtyOut} ${l.asset}  proceeds ${l.proceedsFiat.toFixed(2)} - basis ${l.basisFiat.toFixed(2)} = gain ${l.gainFiat.toFixed(2)} ${c}  ${l.taxable ? "[TAXABLE]" : "[tax-free]"}`);
     console.log(`    total gain ${t.totalGainFiat.toFixed(2)} ${c} | taxable ${t.taxableGainFiat.toFixed(2)} ${c}`);
-    if (t.safeHarbourCheck) console.log(`    safe-harbour: ${t.safeHarbourCheck.disposalCount} disposals — ${t.safeHarbourCheck.note}`);
+    if (t.safeHarbourCheck) console.log(`    safe-harbour: ${t.safeHarbourCheck.disposalCount} disposals — ${say(t.safeHarbourCheck.note)}`);
   }
   if (b.operations) {
     const o = b.operations;
-    console.log(`\n[3] OPERATIONS ${o.periodStart}..${o.periodEnd}  (${o.note})`);
+    console.log(`\n[3] OPERATIONS ${o.periodStart}..${o.periodEnd}  (${say(o.note)})`);
     for (const l of o.lines) console.log(`    ${l.ts.slice(0, 10)} ${l.category.padEnd(15)} +${l.qtyIn} ${l.asset}  income ${l.fmvFiat.toFixed(2)} ${c}  [${l.source}]`);
     console.log(`    TOTAL INCOME: ${o.totalIncomeFiat.toFixed(2)} ${c}`);
   }
   if (b.warnings.length) {
     console.log(`\n[!] WARNINGS (${b.warnings.length}):`);
-    for (const w of b.warnings) console.log(`    - ${w}`);
+    for (const w of b.warnings) console.log(`    - ${say(w)}`);
   }
 }
-function main() {
+async function main() {
+  const say = demoText(await demoCatalogue());
   const prices = new PxsAnchoredPriceProvider();
   const events = demoEvents("primerz", "primerz-main");
   const swissUser = {
@@ -2261,8 +2311,8 @@ function main() {
       from: "2023-01-01"
     }]
   };
-  printBundle(buildAllReports(swissUser, events, 2025, prices));
-  printBundle(buildAllReports(usUser, events, 2025, prices));
+  printBundle(buildAllReports(swissUser, events, 2025, prices), say);
+  printBundle(buildAllReports(usUser, events, 2025, prices), say);
 }
 
 // Demo runner — Node only; guarded so importing this module into the app or a

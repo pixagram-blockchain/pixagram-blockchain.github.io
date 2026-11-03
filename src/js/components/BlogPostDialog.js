@@ -63,7 +63,7 @@ import { cssBackgroundImage } from "../utils/safeUrl";
 import { articleTableStyles } from "./editor/tableStyles";
 
 import { T } from "../utils/T";
-import { t, useLanguage } from "../utils/text";
+import { t, tnode, useLanguage } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
 
@@ -1088,7 +1088,7 @@ const styles = theme => ({
         zIndex: 100,
         width: "36px",
         maxWidth: "calc(100vw - 48px)",
-        maxHeight: "calc(100vh - 160px)",
+        maxHeight: "calc(var(--app-h, 100vh) - 160px)",
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
@@ -1352,7 +1352,21 @@ const DATE_TOOLTIP_FORMAT = {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: 'numeric'
 };
 const LAZY_IMG_PROPS = { decoding: 'async', loading: 'lazy' };
+// Comment sort values. _get_sorted_comments compares them, so they stay
+// English identifiers; only their radio labels are translated, at render.
 const SORT_LABELS = ["Hype", "Votes", "New"];
+const sortLabel = (value) => (value === "Votes"
+    ? t("words.votes")
+    : value === "New"
+        ? t("components.blog_post_dialog.sort_new")
+        : t("components.blog_post_dialog.sort_hype"));
+
+// tnode() hands a sentence back as [text, element, text, …]. The words take
+// `style` (the muted colour the lone " said " span used to have); the
+// elements spliced in keep their own styles.
+const mutedWords = (parts, style) => (Array.isArray(parts)
+    ? parts.map((p, i) => (typeof p === "string" ? <span key={"w" + i} style={style}>{p}</span> : p))
+    : <span style={style}>{parts}</span>);
 
 // Memoized Tag Chip Component
 const TagChip = memo(({ tag, index, onClick }) => (
@@ -1376,7 +1390,7 @@ const LiveTimeAgo = memo(function LiveTimeAgo({ date, options = LIVE_TIME_AGO_OP
 });
 
 // Parent Comment (ported from PostDialog)
-const ParentComment = memo(({ comment, index, classes, locales, onOpenAuthor }) => (
+const ParentComment = memo(({ comment, index, classes, locales, onOpenAuthor }) => { useLanguage(); return (
     <div key={"comment" + index} style={ST_POS_RELATIVE__P_12PX_12PX_12PX__M_32PX_4PX_0PX_4}>
         {index > 0 && <ArrowForwardIosIcon key={"arrow-" + index} style={{
             color: "#575757",
@@ -1391,15 +1405,20 @@ const ParentComment = memo(({ comment, index, classes, locales, onOpenAuthor }) 
             color="textPrimary"
             style={ST_MB_4__D_BLOCK}
         >
-            <Tooltip title={"@" + (comment.author || {}).username}>
-                <span className={classes.subheaderName} onClick={() => { onOpenAuthor((comment.author || {}).username) }}>
-                    {(comment.author || {}).name}
-                </span>
-            </Tooltip>
-            <span style={ST_C_999}> said </span>
-            <Tooltip arrow title={new Date(comment.date || Date.now()).toLocaleDateString(locales, DATE_TOOLTIP_FORMAT)}>
-                <span><LiveTimeAgo date={comment.date || Date.now()} /></span>
-            </Tooltip>
+            {mutedWords(tnode("components.blog_post_dialog.author_said_time", {
+                author: (
+                    <Tooltip title={"@" + (comment.author || {}).username}>
+                        <span className={classes.subheaderName} onClick={() => { onOpenAuthor((comment.author || {}).username) }}>
+                            {(comment.author || {}).name}
+                        </span>
+                    </Tooltip>
+                ),
+                time: (
+                    <Tooltip arrow title={new Date(comment.date || Date.now()).toLocaleDateString(locales, DATE_TOOLTIP_FORMAT)}>
+                        <span><LiveTimeAgo date={comment.date || Date.now()} /></span>
+                    </Tooltip>
+                ),
+            }), ST_C_999)}
         </Typography>
         <Typography
             component="div"
@@ -1409,7 +1428,7 @@ const ParentComment = memo(({ comment, index, classes, locales, onOpenAuthor }) 
             dangerouslySetInnerHTML={{ __html: safeHTML(renderCommentBody(comment.body)) }}
         />
     </div>
-));
+); });
 
 // Comment Input Component (with reply + edit target support)
 const CommentInput = memo(({
@@ -1498,7 +1517,7 @@ const CommentInput = memo(({
                             </span>
                         </Tooltip>
                     ) : (
-                        <Tooltip title={editTarget ? "Save the edit" : "Send"} arrow>
+                        <Tooltip title={editTarget ? t("components.blog_post_dialog.save_the_edit") : t("words.send")} arrow>
                             <span>
                                 <IconButton className={classes.commentSendButton} onClick={onSubmit} disabled={sending}>
                                     {sending ? <CircularProgress size={24} style={ST_C_888} /> : editTarget ? <EditRounded /> : <SendRounded />}
@@ -2952,7 +2971,7 @@ class BlogPostDialog extends React.PureComponent {
                 })
                 .catch((e) => {
                     console.warn('[BlogPostDialog] comment update failed:', e.message);
-                    actions.trigger_snackbar(e.message || "Failed to update comment");
+                    actions.trigger_snackbar(e.message || t("components.blog_post_dialog.failed_to_update_comment"));
                     this.setSt4te({ _comment_sending: false });
                 });
             return;
@@ -3328,6 +3347,16 @@ class BlogPostDialog extends React.PureComponent {
         // empty title means the chain lookup is still in flight
         // (_backfill_portal_title); the segment waits for it.
         const postPortal = resolvePortal(data, this.st4te.portal);
+        // The post's live date on the author line — alone, or as the
+        // {{date}} of "3h in Portal" once the portal's title is known.
+        const postDateNode = (
+            <Tooltip arrow classes={{ tooltip: classes.tooltipRoot }}
+                     title={this._date_tooltip(data.date || Date.now(), locales)}>
+                <span className={classes.subheaderDate}>
+                    <LiveTimeAgo date={data.date || Date.now()} options={TIME_AGO_NARROW} />
+                </span>
+            </Tooltip>
+        );
         const payout = parseFloat((data.payout || "0$").replace("$", "")) || 0.0;
         const upVotesNumber = (data.upVotesNumber || 0) + (_voted === 1 ? 1 : 0) - (_initialVoted === 1 ? 1 : 0);
         const downVotesNumber = (data.downVotesNumber || 0) + (_voted === -1 ? 1 : 0) - (_initialVoted === -1 ? 1 : 0);
@@ -3375,7 +3404,7 @@ class BlogPostDialog extends React.PureComponent {
         const accountImage = this._get_account_image();
 
         const commentPlaceholder = _edit_target
-            ? "Edit your comment"
+            ? t("components.blog_post_dialog.edit_your_comment")
             : _reply_target
                 ? t("words.reply_to", {
                     username: _reply_target.username || (_reply_target.author || {}).username
@@ -3492,29 +3521,28 @@ class BlogPostDialog extends React.PureComponent {
                                                             imgProps={LAZY_IMG_PROPS}
                                                         />
                                                         <div className={classes.authorDetails}>
-                                                            <Tooltip title={'@' + (author.username || 'author')}>
+                                                            <Tooltip title={'@' + (author.username || t("components.blog_post_dialog.author"))}>
                                                                 <span className={classes.authorName} onClick={this._open_post_author}>
-                                                                    {author.name || "Anonymous"}
+                                                                    {author.name || t("components.blog_post_dialog.anonymous")}
                                                                 </span>
                                                             </Tooltip>
                                                             <span className={classes.authorMeta}>
-                                                                <Tooltip arrow classes={{ tooltip: classes.tooltipRoot }}
-                                                                         title={this._date_tooltip(data.date || Date.now(), locales)}>
-                                                                    <span className={classes.subheaderDate}>
-                                                                        <LiveTimeAgo date={data.date || Date.now()} options={TIME_AGO_NARROW} />
+                                                                {/* "3h in Portal's Name" — the card's line, minus the author,
+                                                                    who has the line above — as one sentence, so a translation
+                                                                    can reorder it (its words take subheaderBy's colour). The
+                                                                    reading time follows; its string carries its own separator. */}
+                                                                {postPortal && postPortal.title !== "" ? (
+                                                                    <span className={classes.subheaderBy}>
+                                                                        {tnode("components.blog_post_dialog.date_in_portal", {
+                                                                            date: postDateNode,
+                                                                            portal: (
+                                                                                <span className={classes.subheaderPortal} onClick={this._open_portal}>
+                                                                                    {postPortal.title}
+                                                                                </span>
+                                                                            ),
+                                                                        })}
                                                                     </span>
-                                                                </Tooltip>
-                                                                {/* "in Portal's Name" — the card's line, minus the author,
-                                                                    who has the line above. Sits between the date and the
-                                                                    reading time, whose string carries its own separator. */}
-                                                                {postPortal && postPortal.title !== "" && (
-                                                                    <React.Fragment>
-                                                                        <span className={classes.subheaderBy}> {t("words.in")} </span>
-                                                                        <span className={classes.subheaderPortal} onClick={this._open_portal}>
-                                                                            {postPortal.title}
-                                                                        </span>
-                                                                    </React.Fragment>
-                                                                )}
+                                                                ) : postDateNode}
                                                                 <span className={classes.subheaderBy}>{t("components.blog_post_dialog.min_read", {
                                                                     readingTime: readingTime
                                                                 })}</span>
@@ -3680,13 +3708,13 @@ class BlogPostDialog extends React.PureComponent {
                                                     <RadioGroup
                                                         value={_sorting} defaultValue={"Hype"}
                                                         onChange={this._handle_sorting_change}
-                                                        row aria-label="sorting" name="blog-sorting"
+                                                        row aria-label={t("components.blog_post_dialog.sorting")} name="blog-sorting"
                                                         style={ST_JC_END__FLOAT_RIGHT}>
                                                         {SORT_LABELS.map((label) => (
                                                             <FormControlLabel
                                                                 style={ST_C_888} labelPlacement="end"
                                                                 key={label} value={label}
-                                                                control={<Radio color="primary" />} label={label}
+                                                                control={<Radio color="primary" />} label={sortLabel(label)}
                                                             />
                                                         ))}
                                                     </RadioGroup>

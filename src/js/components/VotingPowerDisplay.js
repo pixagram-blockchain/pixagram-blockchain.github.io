@@ -152,10 +152,12 @@ const VotingPowerDisplay = React.memo(({ classes, timeAgo, postsCount, account, 
         : 25;
 
     // --- Last Active ---
+    // No timestamp → a sentence of its own (last_active_never / joined_unknown
+    // below) instead of an English word spliced into "Last active {{date}}".
     const lastActiveTs = getLastActive(account);
     const lastActiveStr = lastActiveTs
         ? (timeAgo ? timeAgo.format(lastActiveTs, { labels: 'long' }) : new Date(lastActiveTs).toLocaleDateString(getLocaleCode()))
-        : 'Never';
+        : null;
     const lastActiveFull = lastActiveTs
         ? new Date(lastActiveTs).toLocaleDateString(getLocaleCode(), FULL_DATE_OPTS)
         : null;
@@ -164,7 +166,7 @@ const VotingPowerDisplay = React.memo(({ classes, timeAgo, postsCount, account, 
     const createdTs = getCreatedTime(account);
     const joinedStr = createdTs
         ? (timeAgo ? timeAgo.format(createdTs, { labels: 'long' }) : new Date(createdTs).toLocaleDateString(getLocaleCode()))
-        : 'Unknown';
+        : null;
     const joinedFull = createdTs
         ? new Date(createdTs).toLocaleDateString(getLocaleCode(), FULL_DATE_OPTS)
         : null;
@@ -172,8 +174,7 @@ const VotingPowerDisplay = React.memo(({ classes, timeAgo, postsCount, account, 
     const count = typeof postsCount === 'number' ? postsCount : (account?.post_count || 0);
 
     // Render a relative-time string as a Tooltip-wrapped span when a full
-    // date is available; otherwise return the plain text. Avoids wrapping
-    // 'Never' / 'Unknown' in a hover target that has nothing to reveal.
+    // date is available; otherwise return the plain text.
     //
     // The result goes through tnode(), never t(): t() is a string function and
     // deliberately leaves object-valued variables as literal "{{date}}" tokens.
@@ -208,7 +209,7 @@ const VotingPowerDisplay = React.memo(({ classes, timeAgo, postsCount, account, 
                     <ListItemText
                         primary={
                             <Typography style={{lineHeight: "1.618rem", display: "block", fontSize: "13px", color: "#aaa"}} component="span" variant="body2">
-                                {"Reputation: " + reputationScore}
+                                {t("components.voting_power_display.reputation_score", { score: reputationScore })}
                             </Typography>
                         }
                     />
@@ -219,9 +220,11 @@ const VotingPowerDisplay = React.memo(({ classes, timeAgo, postsCount, account, 
                     </ListItemIcon>
                     <ListItemText
                         primary={
-                            <Typography style={{lineHeight: "1.618rem", display: "block", fontSize: "13px", color: "#aaa"}} component="span" variant="body2">{tnode("components.voting_power_display.last_active", {
-                                date: withDateTooltip(lastActiveStr, lastActiveFull)
-                            })}</Typography>
+                            <Typography style={{lineHeight: "1.618rem", display: "block", fontSize: "13px", color: "#aaa"}} component="span" variant="body2">{lastActiveStr === null
+                                ? t("components.voting_power_display.last_active_never")
+                                : tnode("components.voting_power_display.last_active", {
+                                    date: withDateTooltip(lastActiveStr, lastActiveFull)
+                                })}</Typography>
                         }
                     />
                 </ListItem>
@@ -231,9 +234,11 @@ const VotingPowerDisplay = React.memo(({ classes, timeAgo, postsCount, account, 
                     </ListItemIcon>
                     <ListItemText
                         primary={
-                            <Typography style={{lineHeight: "1.618rem", display: "block", fontSize: "13px", color: "#aaa"}} component="span" variant="body2">{tnode("components.voting_power_display.joined", {
-                                date: withDateTooltip(joinedStr, joinedFull)
-                            })}</Typography>
+                            <Typography style={{lineHeight: "1.618rem", display: "block", fontSize: "13px", color: "#aaa"}} component="span" variant="body2">{joinedStr === null
+                                ? t("components.voting_power_display.joined_unknown")
+                                : tnode("components.voting_power_display.joined", {
+                                    date: withDateTooltip(joinedStr, joinedFull)
+                                })}</Typography>
                         }
                     />
                 </ListItem>
@@ -244,7 +249,7 @@ const VotingPowerDisplay = React.memo(({ classes, timeAgo, postsCount, account, 
                     <ListItemText
                         primary={
                             <Typography style={{lineHeight: "1.618rem", display: "block", fontSize: "13px", color: "#aaa"}} component="span" variant="body2">
-                                {count} post{count !== 1 ? 's' : ''}
+                                {t("components.voting_power_display.post_count", { post: { post: Number(count) || 0 } })}
                             </Typography>
                         }
                     />

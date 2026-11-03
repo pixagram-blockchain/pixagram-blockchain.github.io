@@ -1,68 +1,527 @@
 {
-  "manifest_version": 2,
-  "version": "1.0.0.0",
-  "author": "Affolter Matias",
+  "id": "pixagram",
   "name": "Pixagram",
-  "start_url": "/",
-  "scope": "/",
-  "serviceworker": {
-    "src": "/service-worker.js",
-    "scope": "/"
-  },
   "short_name": "Pixa",
   "description": "Create pixel art on the blockchain, get paid to post, vote, and sell your artworks as NFTs. You can convert your pictures and prompt into real pixelated artworks.",
+  "lang": "en",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
   "display": "fullscreen",
+  "display_override": [
+    "window-controls-overlay",
+    "tabbed",
+    "fullscreen",
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "any",
   "theme_color": "#000000",
-  "background_color": "#ffffff",
-  "browser_action": {
-    "default_icon": "/src/images/manifest/logo-shadow.png",
-    "default_popup": "index.html"
-  },
+  "background_color": "#000000",
+  "categories": [
+    "social",
+    "photo",
+    "entertainment",
+    "finance"
+  ],
   "icons": [
     {
-      "src": "/src/images/manifest/logo.png",
-      "sizes": "1152x1152",
-      "type": "image/png"
+      "src": "/src/images/manifest/icons/icon-16.png",
+      "sizes": "16x16",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/src/images/manifest/icons/icon-24.png",
+      "sizes": "24x24",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/src/images/manifest/icons/icon-32.png",
+      "sizes": "32x32",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/src/images/manifest/icons/icon-48.png",
+      "sizes": "48x48",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/src/images/manifest/icons/icon-64.png",
+      "sizes": "64x64",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/src/images/manifest/icons/icon-72.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/src/images/manifest/icons/icon-96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/src/images/manifest/icons/icon-128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/src/images/manifest/icons/icon-144.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/src/images/manifest/icons/icon-152.png",
+      "sizes": "152x152",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/src/images/manifest/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/src/images/manifest/icons/icon-256.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/src/images/manifest/icons/icon-384.png",
+      "sizes": "384x384",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/src/images/manifest/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/src/images/manifest/icons/icon-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/src/images/manifest/icons/maskable-48.png",
+      "sizes": "48x48",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/src/images/manifest/icons/maskable-72.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/src/images/manifest/icons/maskable-96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/src/images/manifest/icons/maskable-128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/src/images/manifest/icons/maskable-144.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/src/images/manifest/icons/maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/src/images/manifest/icons/maskable-256.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/src/images/manifest/icons/maskable-384.png",
+      "sizes": "384x384",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/src/images/manifest/icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/src/images/manifest/icons/monochrome-96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "monochrome"
+    },
+    {
+      "src": "/src/images/manifest/icons/monochrome-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "monochrome"
+    },
+    {
+      "src": "/src/images/manifest/icons/monochrome-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "monochrome"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/src/images/manifest/screenshots/wide-1-feed.webp",
+      "sizes": "1920x1080",
+      "type": "image/webp",
+      "form_factor": "wide",
+      "label": "Trending pixel art on the Pixagram feed"
+    },
+    {
+      "src": "/src/images/manifest/screenshots/wide-2-convert.webp",
+      "sizes": "1920x1080",
+      "type": "image/webp",
+      "form_factor": "wide",
+      "label": "Any photo converted to pixel art in the creation wizard"
+    },
+    {
+      "src": "/src/images/manifest/screenshots/wide-3-post.webp",
+      "sizes": "1920x1080",
+      "type": "image/webp",
+      "form_factor": "wide",
+      "label": "An artwork with its palette, size and license details"
+    },
+    {
+      "src": "/src/images/manifest/screenshots/wide-4-metrics.webp",
+      "sizes": "1920x1080",
+      "type": "image/webp",
+      "form_factor": "wide",
+      "label": "Live Pixa chain metrics in the governance panel"
+    },
+    {
+      "src": "/src/images/manifest/screenshots/narrow-1-feed.webp",
+      "sizes": "1080x1920",
+      "type": "image/webp",
+      "form_factor": "narrow",
+      "label": "Trending pixel art on the Pixagram feed"
+    },
+    {
+      "src": "/src/images/manifest/screenshots/narrow-2-convert.webp",
+      "sizes": "1080x1920",
+      "type": "image/webp",
+      "form_factor": "narrow",
+      "label": "Any photo converted to pixel art in the creation wizard"
+    },
+    {
+      "src": "/src/images/manifest/screenshots/narrow-3-post.webp",
+      "sizes": "1080x1920",
+      "type": "image/webp",
+      "form_factor": "narrow",
+      "label": "An artwork with its palette, size and license details"
+    },
+    {
+      "src": "/src/images/manifest/screenshots/narrow-4-metrics.webp",
+      "sizes": "1080x1920",
+      "type": "image/webp",
+      "form_factor": "narrow",
+      "label": "Live Pixa chain metrics in the governance panel"
     }
   ],
   "shortcuts": [
     {
-      "name": "Pixagram",
-      "short_name": "Pixa",
-      "description": "Create pixel art on the blockchain, get paid to post, vote, and sell your artworks as NFTs. You can convert your pictures and prompt into real pixelated artworks.",
-      "url": "/",
+      "name": "Create pixel art",
+      "short_name": "Create",
+      "description": "Convert a photo or a prompt into pixel art",
+      "url": "/trending/?pwa=create",
       "icons": [
         {
-          "src": "/src/images/manifest/logo.png",
-          "sizes": "1152x1152",
-          "type": "image/png"
+          "src": "/src/images/manifest/icons/shortcut-create-96.png",
+          "sizes": "96x96",
+          "type": "image/png",
+          "purpose": "any"
+        },
+        {
+          "src": "/src/images/manifest/icons/shortcut-create-192.png",
+          "sizes": "192x192",
+          "type": "image/png",
+          "purpose": "any"
+        },
+        {
+          "src": "/src/images/manifest/icons/shortcut-create-maskable-96.png",
+          "sizes": "96x96",
+          "type": "image/png",
+          "purpose": "maskable"
+        },
+        {
+          "src": "/src/images/manifest/icons/shortcut-create-maskable-192.png",
+          "sizes": "192x192",
+          "type": "image/png",
+          "purpose": "maskable"
+        }
+      ]
+    },
+    {
+      "name": "Trending artworks",
+      "short_name": "Trending",
+      "description": "The pixel art trending on Pixagram right now",
+      "url": "/trending/",
+      "icons": [
+        {
+          "src": "/src/images/manifest/icons/shortcut-trending-96.png",
+          "sizes": "96x96",
+          "type": "image/png",
+          "purpose": "any"
+        },
+        {
+          "src": "/src/images/manifest/icons/shortcut-trending-192.png",
+          "sizes": "192x192",
+          "type": "image/png",
+          "purpose": "any"
+        },
+        {
+          "src": "/src/images/manifest/icons/shortcut-trending-maskable-96.png",
+          "sizes": "96x96",
+          "type": "image/png",
+          "purpose": "maskable"
+        },
+        {
+          "src": "/src/images/manifest/icons/shortcut-trending-maskable-192.png",
+          "sizes": "192x192",
+          "type": "image/png",
+          "purpose": "maskable"
+        }
+      ]
+    },
+    {
+      "name": "My feed",
+      "short_name": "Feed",
+      "description": "New posts from the artists you follow",
+      "url": "/feed/",
+      "icons": [
+        {
+          "src": "/src/images/manifest/icons/shortcut-feed-96.png",
+          "sizes": "96x96",
+          "type": "image/png",
+          "purpose": "any"
+        },
+        {
+          "src": "/src/images/manifest/icons/shortcut-feed-192.png",
+          "sizes": "192x192",
+          "type": "image/png",
+          "purpose": "any"
+        },
+        {
+          "src": "/src/images/manifest/icons/shortcut-feed-maskable-96.png",
+          "sizes": "96x96",
+          "type": "image/png",
+          "purpose": "maskable"
+        },
+        {
+          "src": "/src/images/manifest/icons/shortcut-feed-maskable-192.png",
+          "sizes": "192x192",
+          "type": "image/png",
+          "purpose": "maskable"
+        }
+      ]
+    },
+    {
+      "name": "Search",
+      "short_name": "Search",
+      "description": "Search artworks, artists and portals",
+      "url": "/trending/+search",
+      "icons": [
+        {
+          "src": "/src/images/manifest/icons/shortcut-search-96.png",
+          "sizes": "96x96",
+          "type": "image/png",
+          "purpose": "any"
+        },
+        {
+          "src": "/src/images/manifest/icons/shortcut-search-192.png",
+          "sizes": "192x192",
+          "type": "image/png",
+          "purpose": "any"
+        },
+        {
+          "src": "/src/images/manifest/icons/shortcut-search-maskable-96.png",
+          "sizes": "96x96",
+          "type": "image/png",
+          "purpose": "maskable"
+        },
+        {
+          "src": "/src/images/manifest/icons/shortcut-search-maskable-192.png",
+          "sizes": "192x192",
+          "type": "image/png",
+          "purpose": "maskable"
         }
       ]
     }
   ],
-  "id": "pixagram",
-  "dir": "ltr",
-  "lang": "en",
-  "orientation": "any",
-  "prefer_related_applications": true,
+  "launch_handler": {
+    "client_mode": [
+      "focus-existing",
+      "auto"
+    ]
+  },
+  "file_handlers": [
+    {
+      "action": "/trending/?pwa=open-file",
+      "accept": {
+        "image/png": [
+          ".png"
+        ],
+        "image/jpeg": [
+          ".jpg",
+          ".jpeg"
+        ],
+        "image/webp": [
+          ".webp"
+        ],
+        "image/gif": [
+          ".gif"
+        ],
+        "image/bmp": [
+          ".bmp"
+        ],
+        "image/avif": [
+          ".avif"
+        ],
+        "image/heic": [
+          ".heic"
+        ],
+        "image/heif": [
+          ".heif"
+        ]
+      },
+      "icons": [
+        {
+          "src": "/src/images/manifest/icons/icon-256.png",
+          "sizes": "256x256",
+          "type": "image/png",
+          "purpose": "any"
+        }
+      ],
+      "launch_type": "single-client"
+    }
+  ],
+  "protocol_handlers": [
+    {
+      "protocol": "web+pixagram",
+      "url": "/trending/?pwa=protocol&uri=%s"
+    }
+  ],
+  "share_target": {
+    "action": "/share-target/",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "image",
+          "accept": [
+            "image/*",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+            ".gif",
+            ".avif",
+            ".heic",
+            ".heif"
+          ]
+        }
+      ]
+    }
+  },
+  "note_taking": {
+    "new_note_url": "/trending/?pwa=create"
+  },
+  "tab_strip": {
+    "home_tab": {
+      "scope_patterns": [
+        {
+          "pathname": "/"
+        }
+      ]
+    },
+    "new_tab_button": {
+      "url": "/trending/"
+    }
+  },
+  "scope_extensions": [
+    {
+      "type": "origin",
+      "origin": "https://pixa.org"
+    }
+  ],
+  "widgets": [
+    {
+      "name": "Pixagram trending",
+      "short_name": "Trending",
+      "description": "The three artworks trending on Pixagram right now, with quick links to create and browse.",
+      "tag": "pixagram-trending",
+      "template": "pixagram-trending",
+      "ms_ac_template": "/widgets/trending-template.json",
+      "data": "/widgets/trending-data.json",
+      "type": "application/json",
+      "auth": false,
+      "update": 3600,
+      "multiple": false,
+      "icons": [
+        {
+          "src": "/src/images/manifest/icons/icon-96.png",
+          "sizes": "96x96",
+          "type": "image/png",
+          "purpose": "any"
+        },
+        {
+          "src": "/src/images/manifest/icons/icon-256.png",
+          "sizes": "256x256",
+          "type": "image/png",
+          "purpose": "any"
+        }
+      ],
+      "screenshots": [
+        {
+          "src": "/src/images/manifest/widgets/trending-widget.png",
+          "sizes": "300x304",
+          "type": "image/png",
+          "label": "Pixagram trending widget"
+        }
+      ]
+    }
+  ],
+  "handle_links": "preferred",
+  "edge_side_panel": {
+    "preferred_width": 960
+  },
+  "prefer_related_applications": false,
   "related_applications": [
     {
       "platform": "webapp",
-      "url": "https://pixagram.com/",
-      "id": "pixagram.com"
+      "url": "https://pixagram.com/manifest.json"
     }
-  ],
-  "categories": [
-    "social",
-    "media",
-    "entertainment",
-    "blockchain",
-    "finance",
-    "payments",
-    "blogging",
-    "photography"
-  ],
-  "edge_side_panel": {
-    "preferred_width": 960
-  }
+  ]
 }

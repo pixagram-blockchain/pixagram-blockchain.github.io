@@ -129,9 +129,12 @@
     "webpack-dev-server": "^4.15.2"
   },
   "scripts": {
-    "help": "echo 'npm run: dev | build'",
+    "help": "echo 'npm run: dev | build | i18n:home'",
     "start": "electron .",
+    "i18n:home": "node scripts/i18n-home.js",
+    "predev": "node scripts/i18n-home.js",
     "dev": "NODE_OPTIONS=--openssl-legacy-provider NODE_ENV=development webpack-dev-server",
+    "prebuild": "node scripts/i18n-home.js",
     "build": "NODE_OPTIONS=--openssl-legacy-provider NODE_ENV=production webpack --node-env \"production\"",
     "build-twemoji": "svgr ./src/js/twemoji/original -d ./src/js/twemoji/react",
     "optimize-twemoji": "svgo  -f ./src/js/twemoji/original",

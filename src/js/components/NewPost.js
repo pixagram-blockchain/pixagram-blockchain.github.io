@@ -53,7 +53,13 @@ import AddPhotoAlternateIcon from "@material-ui/icons/AddPhotoAlternate";
 import Portal from "@material-ui/core/Portal";
 import Autocomplete from "@material-ui/lab/Autocomplete";
 
-import { t, useLanguage } from "../utils/text";
+import { t, tk, tx, useLanguage, getLocaleCode } from "../utils/text";
+
+// A weight shown to the user, with the app locale's decimal separator.
+const formatKb = (kb) => Number(kb).toLocaleString(getLocaleCode(), {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+});
 
 // ============================================================================
 // NSFW AUTO-DETECTION (final step)
@@ -148,13 +154,17 @@ const RECOMMENDED_TAGS = ["selfies", "gaming", "fantasy", "landscape", "retro", 
 // ============================================================================
 // VALIDATION FUNCTIONS
 // ============================================================================
+// Every `error` is a tk() descriptor, not a string: errors are kept in the
+// reducer state (validationErrors) and shown later, so they are resolved with
+// tx() where they render — a language switch re-translates them, and nothing
+// here depends on the language file having loaded.
 
 const validateTitle = (title) => {
     if (!title || !title.trim()) {
-        return { valid: false, error: "Title is required" };
+        return { valid: false, error: tk("components.new_post.title_is_required") };
     }
     if (title.length > VALIDATION.TITLE_MAX_LENGTH) {
-        return { valid: false, error: t("components.new_post.title_must_be_characters_or_less_currently", {
+        return { valid: false, error: tk("components.new_post.title_must_be_characters_or_less_currently", {
                 TITLE_MAX_LENGTH: VALIDATION.TITLE_MAX_LENGTH,
                 title_count: title.length
             }) };
@@ -167,7 +177,7 @@ const validateTitle = (title) => {
 const validateDescription = (description) => {
     const value = description || "";
     if (value.length > VALIDATION.DESCRIPTION_MAX_LENGTH) {
-        return { valid: false, error: t("components.new_post.description_must_be_characters_or_less_currently", {
+        return { valid: false, error: tk("components.new_post.description_must_be_characters_or_less_currently", {
                 DESCRIPTION_MAX_LENGTH: VALIDATION.DESCRIPTION_MAX_LENGTH,
                 description_count: value.length
             }) };
@@ -177,30 +187,30 @@ const validateDescription = (description) => {
 
 const validateSingleTag = (tag) => {
     if (!tag || tag.length < VALIDATION.TAG_MIN_LENGTH) {
-        return { valid: false, error: t("words.tag_must_be_at_least_tag_min", {
+        return { valid: false, error: tk("words.tag_must_be_at_least_tag_min", {
                 TAG_MIN_LENGTH: VALIDATION.TAG_MIN_LENGTH
             }) };
     }
     if (VALIDATION.TAG_STARTS_WITH_NUMBER_OR_MINUS.test(tag)) {
-        return { valid: false, error: "Tag cannot begin with a number or minus sign" };
+        return { valid: false, error: tk("components.new_post.tag_cannot_begin_with_a_number_or_minus_sign") };
     }
     if (VALIDATION.TAG_CONTAINS_DOT.test(tag)) {
-        return { valid: false, error: "Tag cannot contain dots" };
+        return { valid: false, error: tk("components.new_post.tag_cannot_contain_dots") };
     }
     if (!VALIDATION.TAG_PATTERN.test(tag)) {
-        return { valid: false, error: "Tag can only contain lowercase letters, numbers, and hyphens" };
+        return { valid: false, error: tk("components.new_post.tag_can_only_contain_lowercase_letters_numbers") };
     }
     return { valid: true, error: null };
 };
 
 const validateTags = (tags) => {
     if (!tags || tags.length < VALIDATION.TAGS_MIN_COUNT) {
-        return { valid: false, error: t("components.new_post.at_least_tag_is_required", {
+        return { valid: false, error: tk("components.new_post.at_least_tag_is_required", {
                 TAGS_MIN_COUNT: VALIDATION.TAGS_MIN_COUNT
             }) };
     }
     if (tags.length > VALIDATION.TAGS_MAX_COUNT) {
-        return { valid: false, error: t("words.maximum_tags_max_count_tags_allowed", {
+        return { valid: false, error: tk("words.maximum_tags_max_count_tags_allowed", {
                 TAGS_MAX_COUNT: VALIDATION.TAGS_MAX_COUNT
             }) };
     }
@@ -208,7 +218,11 @@ const validateTags = (tags) => {
     for (const tag of tags) {
         const tagValidation = validateSingleTag(tag);
         if (!tagValidation.valid) {
-            return { valid: false, error: `Tag "${tag}": ${tagValidation.error}` };
+            // The nested descriptor is resolved by tx() along with this one.
+            return { valid: false, error: tk("components.new_post.tag_error", {
+                    tag: tag,
+                    error: tagValidation.error
+                }) };
         }
     }
 
@@ -273,7 +287,7 @@ const styles = theme => ({
         width: "100%",
         height: "100%",
         minHeight: "384px",
-        maxHeight: "70vh",
+        maxHeight: "calc(var(--app-h, 100vh) * 0.7)",
         border: "2px dashed #555",
         textAlign: "center",
         verticalAlign: "middle",
@@ -374,7 +388,7 @@ const styles = theme => ({
         borderRadius: "19px",
         display: "block",
         width: "100%",
-        maxHeight: "70vh",
+        maxHeight: "calc(var(--app-h, 100vh) * 0.7)",
         objectFit: "contain",
         userSelect: "none",
         WebkitUserDrag: "none",
@@ -1099,6 +1113,11 @@ const DEFAULT_AI_STYLE = AI_STYLES[0].value;
 // STATE REDUCER
 // ============================================================================
 
+// The upload zone's message under the upload button. Kept in state as a tk()
+// descriptor (never as English text, never as a t() result) and resolved with
+// tx() where UploadZone renders it, so it follows the active language.
+const UPLOAD_MESSAGE_DEFAULT = tk("components.new_post.we_don_t_store_uploaded_images");
+
 const initialState = {
     // Wizard state
     tabValue: 0,
@@ -1141,7 +1160,7 @@ const initialState = {
 
     // UI states
     dropzoneActive: false,
-    message: "We don't store uploaded images",
+    message: UPLOAD_MESSAGE_DEFAULT,
     inputFileUrl: "",
     inputFile: null,
     // The upload as picked (after HEIC normalisation) and the crop/rotation
@@ -1271,7 +1290,7 @@ const reducer = (state, action) => {
                 quantizeDialogOpen: false,
                 quantizeDownscale: 4,
                 quantizeColors: 64,
-                message: "We don't store uploaded images",
+                message: UPLOAD_MESSAGE_DEFAULT,
                 processName: "Click to upload",
                 processStart: 0,
                 processFinish: 0
@@ -1539,8 +1558,8 @@ const UploadZone = memo(({
                                 size="small"
                                 onClick={onEdit}
                                 disabled={!!probing}
-                                aria-label="Edit picture"
-                                title="Edit picture"
+                                aria-label={t("components.new_post.edit_picture")}
+                                title={t("components.new_post.edit_picture")}
                             >
                                 <EditIcon fontSize="small" />
                             </IconButton>
@@ -1549,8 +1568,8 @@ const UploadZone = memo(({
                                 size="small"
                                 onClick={onRemove}
                                 disabled={!!probing}
-                                aria-label="Remove picture"
-                                title="Remove picture"
+                                aria-label={t("components.new_post.remove_picture")}
+                                title={t("components.new_post.remove_picture")}
                             >
                                 <CloseIcon fontSize="small" />
                             </IconButton>
@@ -1670,13 +1689,18 @@ const UploadZone = memo(({
                                         color: "#999",
                                         marginRight: "16px"
                                     }}>
-                                        {processName || "Upload Image"}
+                                        {/* processName is an internal status value. Here (not
+                                            converting) it is either the idle "Click to upload"
+                                            or empty, so it is only used to pick the label. */}
+                                        {processName
+                                            ? t("components.new_post.click_to_upload")
+                                            : t("components.new_post.upload_image")}
                                     </span>
                                     <AddPhotoAlternateIcon style={{ display: "inline", fontSize: 48, color: "#666" }} />
                                 </Button>
                             </Fade>
                             <Fade in timeout={900}>
-                                <p style={{ textAlign: "center", color: "#a7a7a7" }}>{message}</p>
+                                <p style={{ textAlign: "center", color: "#a7a7a7" }}>{tx(message)}</p>
                             </Fade>
                             {SHOW_DROP_PASTE_HINT && (
                                 <Fade in timeout={1200}>
@@ -1960,7 +1984,7 @@ const CanvasPreview = memo(({
                     <RadioGroup
                         row
                         defaultValue="top"
-                        aria-label="size"
+                        aria-label={t("components.new_post.size")}
                         name="SIZE"
                         color="primary"
                         value={preferredSize}
@@ -2047,12 +2071,14 @@ const CanvasPreview = memo(({
             }}>
                 <Fade in timeout={600}>
                     <Button variant="text" style={{ color: "#ffffff88" }} onClick={onApplyQuantize}>
-                        {quantizedData ? "ADJUST" : "QUANTIZE"}
+                        {quantizedData
+                            ? t("components.new_post.adjust", { TUC: true })
+                            : t("components.new_post.quantize", { TUC: true })}
                     </Button>
                 </Fade>
                 <Fade in timeout={800}>
                     <Button variant="text" style={{ color: "#ffffff88" }} onClick={onDownload}>{t("components.new_post.download_kb", {
-                        base64Kb: base64Kb.toFixed(2)
+                        base64Kb: formatKb(base64Kb)
                     })}</Button>
                 </Fade>
                 <Fade in timeout={1000}>
@@ -2127,13 +2153,17 @@ const LicenseSection = memo(({
                         <div className={classes.licenseStat}>
                             <span className={classes.licenseStatLabel}>{t("components.new_post.holder_rights")}</span>
                             <span className={classes.licenseStatValue}>
-                                {licenseSummary.holderRights} granted
+                                {t("components.new_post.count_granted", {
+                                    granted: { granted: licenseSummary.holderRights }
+                                })}
                             </span>
                         </div>
                         <div className={classes.licenseStat}>
                             <span className={classes.licenseStatLabel}>{t("components.new_post.visitor_rights")}</span>
                             <span className={classes.licenseStatValue}>
-                                {licenseSummary.visitorRights} granted
+                                {t("components.new_post.count_granted", {
+                                    granted: { granted: licenseSummary.visitorRights }
+                                })}
                             </span>
                         </div>
                         <div className={classes.licenseStat}>
@@ -2145,7 +2175,7 @@ const LicenseSection = memo(({
                         <div className={classes.licenseStat}>
                             <span className={classes.licenseStatLabel}>{t("words.jurisdiction")}</span>
                             <span className={classes.licenseStatValue}>
-                                {licenseCustomization.governingLaw?.jurisdiction || 'Not set'}
+                                {licenseCustomization.governingLaw?.jurisdiction || t("components.new_post.not_set")}
                             </span>
                         </div>
                     </div>
@@ -2158,7 +2188,9 @@ const LicenseSection = memo(({
                     style={{ marginTop: 8 }}
                     onClick={onOpenLicense}
                 >
-                    {isLicenseCustomized ? 'Edit License' : 'Configure License'}
+                    {isLicenseCustomized
+                        ? t("components.new_post.edit_license")
+                        : t("components.new_post.configure_license")}
                 </Button>
             </Paper>
         </div>
@@ -2291,7 +2323,7 @@ const PublishForm = memo(({
                 <Box display="flex" justifyContent="space-between" alignItems="flex-start">
                     {touched.title && validationErrors.title ? (
                         <Typography className={classes.errorText}>
-                            {validationErrors.title}
+                            {tx(validationErrors.title)}
                         </Typography>
                     ) : <span />}
                     <Typography className={getTitleCharCounterClass()}>
@@ -2315,7 +2347,7 @@ const PublishForm = memo(({
                         {t("components.new_post.encoded_image")}
                     </Typography>
                     <Typography className={getDescriptionCharCounterClass()}>
-                        {base64 ? `${(base64.length / 1000 * 3 / 4).toFixed(2)} kB` : ''}
+                        {base64 ? `${formatKb(base64.length / 1000 * 3 / 4)} kB` : ''}
                     </Typography>
                 </Box>
                 <TextField
@@ -2335,7 +2367,7 @@ const PublishForm = memo(({
                 <Box display="flex" justifyContent="space-between" alignItems="flex-start">
                     {touched.description && validationErrors.description ? (
                         <Typography className={classes.errorText}>
-                            {validationErrors.description}
+                            {tx(validationErrors.description)}
                         </Typography>
                     ) : <span />}
                     <Typography className={getDescriptionCharCounterClass()}>
@@ -2399,7 +2431,7 @@ const PublishForm = memo(({
                                 inputProps={{ ...params.inputProps, onKeyDown: handleTagKeyDown }}
                                 variant="outlined"
                                 label={t("words.tags")}
-                                placeholder={tags.length < VALIDATION.TAGS_MAX_COUNT ? "Add tag and press Space or Enter" : ""}
+                                placeholder={tags.length < VALIDATION.TAGS_MAX_COUNT ? t("components.new_post.add_tag_and_press_space_or_enter") : ""}
                                 onBlur={() => onFieldBlur('tags')}
                                 error={touched.tags && !!validationErrors.tags}
                                 className={touched.tags && validationErrors.tags ? classes.errorField : ''}
@@ -2409,7 +2441,7 @@ const PublishForm = memo(({
                     <Box display="flex" justifyContent="space-between" alignItems="flex-start" mt={0.5}>
                         {touched.tags && validationErrors.tags ? (
                             <Typography className={classes.errorText}>
-                                {validationErrors.tags}
+                                {tx(validationErrors.tags)}
                             </Typography>
                         ) : (
                             <Typography className={classes.charCounter} style={{ color: '#666' }}>
@@ -2442,10 +2474,11 @@ const PublishForm = memo(({
                     />
                     <Typography variant="caption" style={{ color: nsfwAutoFlagged ? '#aaa' : '#888', display: 'block', marginLeft: 48 }}>
                         {nsfwDetecting
-                            ? 'Analyzing image for sensitive content…'
+                            ? t("components.new_post.analyzing_image_for_sensitive_content")
                             : nsfwAutoFlagged
-                                ? 'Automatically flagged from image analysis — turn it off if this is wrong.'
-                                : 'Enable this if your content contains mature or sensitive material'}
+                                ? t("components.new_post.automatically_flagged_from_image_analysis")
+                                // same sentence as EditPostDialog's NSFW switch: its key is reused
+                                : t("components.edit_post_dialog.enable_this_if_your_content_contains_mature")}
                     </Typography>
                 </Box>
 
@@ -2476,6 +2509,9 @@ const PublishForm = memo(({
 
 function NewPost(props) {
     const { classes, open, onClose, api } = props;
+    // The dialog chrome below renders t() itself (the memoized subcomponents
+    // subscribe on their own).
+    useLanguage();
 
     // Use reducer for complex state management
     const [state, dispatch] = useReducer(reducer, initialState);
@@ -2973,12 +3009,12 @@ function NewPost(props) {
             });
             const unreadable = error?.message === "EMPTY_FILE" || error?.name === "NotReadableError";
             actions.trigger_snackbar(unreadable
-                ? "This picture couldn't be read from your phone. If it's in the cloud, download it to the device first (or take a screenshot of it), then try again."
-                : "This picture can't be opened on this device. Try a JPEG or PNG — a screenshot of it works too.");
+                ? t("components.new_post.this_picture_couldn_t_be_read_from_your_phone")
+                : t("components.new_post.this_picture_can_t_be_opened_on_this_device"));
             dispatch({
                 type: actionTypes.SET_FIELD,
                 field: 'message',
-                value: "We don't store uploaded images"
+                value: UPLOAD_MESSAGE_DEFAULT
             });
         }
     }, []);
@@ -2989,7 +3025,7 @@ function NewPost(props) {
     const handlePreviewImageError = useCallback(() => {
         uploadTokenRef.current++;
         dispatch({ type: actionTypes.RESET_UPLOAD, keepInput: false });
-        actions.trigger_snackbar("This picture can't be displayed on this device. Try a smaller JPEG or PNG.");
+        actions.trigger_snackbar(t("components.new_post.this_picture_can_t_be_displayed_on_this_device"));
     }, []);
 
     // "Next" on the Create step with a picked picture: probe it, then either
@@ -3023,7 +3059,7 @@ function NewPost(props) {
                 dispatch({
                     type: actionTypes.SET_FIELD,
                     field: 'message',
-                    value: "The image appears to be already optimized!"
+                    value: tk("components.new_post.the_image_appears_to_be_already_optimized")
                 });
                 // Encode base64 directly from the ImageData we already have.
                 // Don't rely on the CanvasPreview's onCanvasReady effect — with
@@ -3214,7 +3250,7 @@ function NewPost(props) {
                     payload: {
                         isGenerating: false,
                         currentStep: 0,
-                        message: "We don't store uploaded images",
+                        message: UPLOAD_MESSAGE_DEFAULT,
                         processName: "Click to upload",
                         processStart: 0,
                         processFinish: 0,
@@ -3549,8 +3585,10 @@ function NewPost(props) {
         dispatch({ type: actionTypes.SET_FIELD, field: 'isPublishing', value: true });
 
         try {
+            // These messages reach the user through the snackbar in the catch
+            // below (nothing compares them), so they are translated here.
             if (!api || !api.broadcast) {
-                throw new Error('API not available');
+                throw new Error(t("components.new_post.api_not_available"));
             }
 
             // Guard against empty body. A zero-length comment body is
@@ -3559,7 +3597,7 @@ function NewPost(props) {
             // Authority" rather than "body required", which is actively
             // misleading. We check here to fail fast with a clear message.
             if (!base64 || base64.length === 0) {
-                throw new Error('Image not ready yet — please wait a moment and try again.');
+                throw new Error(t("components.new_post.image_not_ready_yet_please_wait_a_moment_and"));
             }
 
             const permlink = generatePermlink(title);
@@ -3592,7 +3630,7 @@ function NewPost(props) {
             // Get active account from session
             const activeAccount = await api.sessionManager?.getActiveAccount();
             if (!activeAccount) {
-                throw new Error('No active account. Please log in first.');
+                throw new Error(t("components.new_post.no_active_account_please_log_in_first"));
             }
             // Broadcast the comment/post
             await api.broadcast.comment({
@@ -3638,7 +3676,7 @@ function NewPost(props) {
         } catch (error) {
             console.error('Error publishing post:', error);
             dispatch({ type: actionTypes.SET_FIELD, field: 'isPublishing', value: false });
-            actions.trigger_snackbar(error.message || "Failed to publish post. Please try again.");
+            actions.trigger_snackbar(error.message || t("components.new_post.failed_to_publish_post_please_try_again"));
         }
     }, [api, title, description, tags, nsfw, base64, preview, quantizedData, licenseCustomization, resetProps, onClose]);
 
@@ -3781,8 +3819,14 @@ function NewPost(props) {
     // RENDER
     // ========================================================================
 
+    // Footer step label: one key per step, with the step number and the
+    // total as variables (upper-cased by the footer's CSS).
     const totalStep = 3;
-    const stepNames = ["Create", "Adjust", "Post"];
+    const stepLabel = currentStep === 0
+        ? t("components.new_post.create_step", { step: 1, total: totalStep })
+        : currentStep === 1
+            ? t("components.new_post.adjust_step", { step: 2, total: totalStep })
+            : t("components.new_post.post_step", { step: 3, total: totalStep });
 
     // Render step content
     let view = null;
@@ -3972,7 +4016,7 @@ function NewPost(props) {
                 }}>
                     <Box style={{ textAlign: "left" }}>
                         <Typography variant="body2" style={{ textTransform: "uppercase", marginBottom: "8px", fontWeight: 600, marginTop: 0, fontSize: "1rem", color: "#ccc", lineHeight: 1 }}>
-                            {stepNames[currentStep]} ({currentStep + 1}/{totalStep})
+                            {stepLabel}
                         </Typography>
                         <Typography variant="caption" style={{ color: "#999", display: "block", fontSize: "0.875rem", lineHeight: 1.125 }}>
                             {t("components.new_post.wizard_of_creation")}
@@ -4010,7 +4054,11 @@ function NewPost(props) {
                         >
                             {isPublishing || isProbing ? (
                                 <CircularProgress size={24} style={{ color: "#fff" }} />
-                            ) : currentStep === 2 ? "Publish" : currentStep === 0 && tabValue === 1 ? "Generate" : "Next"}
+                            ) : currentStep === 2
+                                ? t("components.new_post.publish")
+                                : currentStep === 0 && tabValue === 1
+                                    ? t("words.generate")
+                                    : t("words.next")}
                         </Button>
                     </Box>
                 </DialogActions>
@@ -4062,7 +4110,7 @@ function NewPost(props) {
                     <FormControl component="fieldset" style={{ marginTop: 24, marginBottom: 8 }}>
                         <FormLabel component="legend">{t("words.style")}</FormLabel>
                         <RadioGroup
-                            aria-label="ai style"
+                            aria-label={t("components.new_post.ai_style")}
                             name="AI_STYLE"
                             value={aiStyle}
                             onChange={handleAiStyleChange}

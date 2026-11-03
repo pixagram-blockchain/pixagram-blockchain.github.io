@@ -13,7 +13,16 @@
  *
  * In your repo: `import type { TaxEvent } from "./pixa-tax-engine"` and delete
  * the re-declared types here. They are inlined only so this file runs stand-alone.
+ *
+ * TEXT: event notes and warnings are translation descriptors { $t: key, v }
+ * (the shape utils/text.js tk() builds), resolved where they are shown — this
+ * file imports nothing so it still runs stand-alone in Node.
  * ===========================================================================*/
+
+/** Deferred translation — same shape as utils/text.js tk(), resolved by the caller. */
+function tk(key, vars) {
+  return vars ? { $t: key, v: vars } : { $t: key };
+}
 
 // ---- shared types (mirror pixa-tax-engine.ts) -----------------------------
 
@@ -177,7 +186,7 @@ const HANDLERS = {
     if (!a) return null;
     return {
       category: "power_up",
-      note: "power-up (PXA staked to PXP)",
+      note: tk("components.pixa_tax_ingest.power_up_pxa_staked_to_pxp"),
       legs: [{
         asset: "PXA",
         amount: a.amount,
@@ -196,7 +205,7 @@ const HANDLERS = {
     if (!withdrawn || !deposited) return null;
     return {
       category: "power_down",
-      note: "power-down (PXP unstaked to PXA)",
+      note: tk("components.pixa_tax_ingest.power_down_pxp_unstaked_to_pxa"),
       legs: [{
         asset: withdrawn.asset,
         amount: withdrawn.amount,
@@ -309,7 +318,7 @@ const HANDLERS = {
     const a = parseAsset(op.fee, cfg);
     return a ? {
       category: "fee_payment",
-      note: "proposal fee",
+      note: tk("components.pixa_tax_ingest.proposal_fee"),
       legs: [{ asset: a.asset, amount: a.amount, direction: "out" }]
     } : null;
   },
@@ -322,7 +331,7 @@ const HANDLERS = {
     const a = parseAsset(op.amount, cfg);
     return a ? {
       category: "savings_fill",
-      note: "savings withdrawal completed",
+      note: tk("components.pixa_tax_ingest.savings_withdrawal_completed"),
       legs: [{ asset: a.asset, amount: a.amount, direction: "in" }]
     } : null;
   },
@@ -344,7 +353,7 @@ const HANDLERS = {
     const cancelled = a.amount === 0;
     return {
       category: "request_powerdown",
-      note: cancelled ? "power-down cancelled" : "power-down requested (unstakes over ~13 weeks)",
+      note: cancelled ? tk("components.pixa_tax_ingest.power_down_cancelled") : tk("components.pixa_tax_ingest.power_down_requested_unstakes_over_13_weeks"),
       legs: [{ asset: a.asset, amount: a.amount, direction: "out" }]
     };
   },
@@ -355,7 +364,7 @@ const HANDLERS = {
     const a = parseAsset(op.amount, cfg);
     return a ? {
       category: "request_convert",
-      note: "conversion requested (settles at fill)",
+      note: tk("components.pixa_tax_ingest.conversion_requested_settles_at_fill"),
       legs: [{ asset: a.asset, amount: a.amount, direction: "out" }]
     } : null;
   },
@@ -368,7 +377,7 @@ const HANDLERS = {
     const a = parseAsset(op.amount, cfg);
     return a ? {
       category: "request_collateralized",
-      note: "collateralized conversion requested",
+      note: tk("components.pixa_tax_ingest.collateralized_conversion_requested"),
       legs: [{ asset: a.asset, amount: a.amount, direction: "out" }]
     } : null;
   },
@@ -390,8 +399,8 @@ const HANDLERS = {
     return {
       category: isDelegator ? "delegation_out" : "delegation_in",
       note: isDelegator
-          ? (removed ? "delegation removed (stake returns after cooldown)" : "PXP delegated — still yours, not a disposal")
-          : (removed ? "incoming delegation removed" : "PXP delegated to you — not yours, not income"),
+          ? (removed ? tk("components.pixa_tax_ingest.delegation_removed_stake_returns_after") : tk("components.pixa_tax_ingest.pxp_delegated_still_yours_not_a_disposal"))
+          : (removed ? tk("components.pixa_tax_ingest.incoming_delegation_removed") : tk("components.pixa_tax_ingest.pxp_delegated_to_you_not_yours_not_income")),
       counterparty: isDelegator ? op.delegatee : op.delegator,
       counterpartyIsOwn: cfg.ownAccounts.includes(isDelegator ? op.delegatee : op.delegator),
       legs: [{ asset: a.asset, amount: a.amount, direction: isDelegator ? "out" : "in" }]
@@ -404,7 +413,7 @@ const HANDLERS = {
     const a = parseAsset(op.vesting_shares, cfg);
     return a ? {
       category: "delegation_return",
-      note: "delegated PXP returned (cooldown complete)",
+      note: tk("components.pixa_tax_ingest.delegated_pxp_returned_cooldown_complete"),
       legs: [{ asset: a.asset, amount: a.amount, direction: "in" }]
     } : null;
   },
@@ -417,7 +426,7 @@ const HANDLERS = {
     const legs = inboundFromAllAssetFields(op, cfg);
     return legs.length ? {
       category: "immediate_conversion",
-      note: "collateralized convert — immediate PXS received",
+      note: tk("components.pixa_tax_ingest.collateralized_convert_immediate_pxs"),
       legs
     } : null;
   }
@@ -483,16 +492,16 @@ export function accountHistoryToTaxEvents(history, cfg) {
     });
   }
   if (sawPowerUp && (cfg.pixaPerVest == null || cfg.pixaPerVest === 1) && !cfg.vestingRateReliable) {
-    warnings.push("Vesting ratio is the placeholder 1 (VESTS treated 1:1 with PXP). If the chain's vesting fund has drifted from parity, set the real rate so PXP amounts and values are correct — or read PXP holdings from the account's year-end vesting balance.");
+    warnings.push(tk("components.pixa_tax_ingest.vesting_ratio_is_the_placeholder_1"));
   }
   if (!cfg.naiMap) {
-    warnings.push("No naiMap set — any {amount,precision,nai} asset objects (non-condenser APIs) are skipped. Use condenser_api/get_account_history (legacy strings) or add naiMap.");
+    warnings.push(tk("components.pixa_tax_ingest.no_naimap_set_nai_asset_objects_are_skipped"));
   }
   if (skipped.recurrent_transfer) {
-    warnings.push(`recurrent_transfer set-up ops (×${skipped.recurrent_transfer}) carry no fund movement on their own — each scheduled payment is booked at its fill_recurrent_transfer execution, so totals are not double-counted.`);
+    warnings.push(tk("components.pixa_tax_ingest.recurrent_transfer_set_up_ops", { count: skipped.recurrent_transfer }));
   }
   if (skipped.collateralized_convert) {
-    warnings.push(`collateralized_convert requests (×${skipped.collateralized_convert}) are recognised at settlement: each fill_collateralized_convert_request is booked as a PXA→PXS swap (amount_in→amount_out). Any request still inside the conversion window has no fill yet and stays pending until it settles in a later operation.`);
+    warnings.push(tk("components.pixa_tax_ingest.collateralized_convert_requests_at_settlement", { count: skipped.collateralized_convert }));
   }
   events.sort((a, b) => a.ts.localeCompare(b.ts));
   return {
@@ -651,7 +660,25 @@ function demoHistory(account) {
       memo: "cash out to CHF"
     })];
 }
-function main() {
+// Demo only (Node): warnings in English from locales/en.js (see the engine's
+// demo); a key not yet in en.js prints as itself.
+async function demoCatalogue() {
+  try {
+    const { pathToFileURL } = process.getBuiltinModule("url");
+    const href = new URL("../../locales/en.js", pathToFileURL(process.argv[1])).href;
+    return (await import(/* webpackIgnore: true */ href)).default;
+  } catch (e) {
+    return null;
+  }
+}
+function demoText(cat, x) {
+  if (!x || typeof x !== "object" || typeof x.$t !== "string") return String(x ?? "");
+  const s = cat ? x.$t.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), cat) : undefined;
+  if (typeof s !== "string") return x.$t;
+  return s.replace(/\{\{(\w+)\}\}/g, (m, k) => (x.v && k in x.v ? String(x.v[k]) : m));
+}
+async function main() {
+  const cat = await demoCatalogue();
   const account = "primerz";
   const cfg = defaultConfig(account);
   cfg.ownAccounts = ["primerz", "my-cold"]; // cold wallet is my own Pixa account (intra)
@@ -688,7 +715,7 @@ function main() {
   console.log(`Skipped ops:`, skipped);
   if (warnings.length) {
     console.log(`\nWarnings:`);
-    warnings.forEach(w => console.log(`  - ${w}`));
+    warnings.forEach(w => console.log(`  - ${demoText(cat, w)}`));
   }
   console.log(`\n-> intra_pixa stays internal; exchange / bridge / fiat cross the boundary (flagged reportable).`);
 }

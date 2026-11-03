@@ -1,6 +1,5 @@
 "use strict";
-import React, { useCallback, useEffect, useMemo, useRef } from "preact/compat";
-import Popper from "@material-ui/core/Popper";
+import React, { useCallback, useMemo } from "preact/compat";
 import Collapse from "@material-ui/core/Collapse";
 import List from "@material-ui/core/List";
 import ListSubheader from "@material-ui/core/ListSubheader";
@@ -30,7 +29,13 @@ import { AnswerCard } from "./AnswerCard";
 // Chain sections render as soon as the node answers; posts and the artwork
 // masonry fill in when the search Worker answers (a small spinner holds their
 // place; on a filter change the previous ones stay, dimmed, until the new ones
-// land). `width` and `maxHeight` are measured live by SearchBar.
+// land). `maxHeight` is measured live by SearchBar.
+//
+// It hangs right under its positioned parent, as wide as it (SearchBar renders
+// it inside the bar: no measuring, no Popper). `full`: the bar is the
+// full-screen panel (fullScreen.js), the dropdown fills it under the input row
+// and the masonry takes `columns`. The Posts and Artworks sections carry
+// data-search-index: scrolling them into sight is what opens the panel.
 //
 // The Tags section offers the typed term itself ("#term") on a line of its own,
 // above the other matches, only when it is a valid tag (see tags.js) or a tag the
@@ -47,15 +52,10 @@ import { AnswerCard } from "./AnswerCard";
 
 const EMPTY = Object.freeze([]);
 
-const POPPER_MODIFIERS = Object.freeze({
-    flip: { enabled: false },
-    preventOverflow: { enabled: true, boundariesElement: "scrollParent" },
-    arrow: { enabled: false },
-});
-
 export const SearchResults = React.memo(
     ({
-         classes, query, results, anchorEl, width, maxHeight, history, controls,
+         classes, query, results, maxHeight, history, controls,
+         full = false, columns, scrollRef, resultsRef,
          suggestions = EMPTY, highlight = -1, onPick, onFill,
          onGoToUsername, onGoToTag, onGoToCommunity, onGoToArtwork, onGoToPost, onSetTagNavigation,
      }) => {
@@ -78,15 +78,6 @@ export const SearchResults = React.memo(
             if (corrected && controls && controls.applyText) controls.applyText(corrected);
         }, [controls, corrected]);
         const answering = !!answer && (answer.loading || !!answer.data);
-
-        // Popper positions itself on window resize; a width change without one
-        // (the bar widening, a breakpoint flip of its margins) is pushed through here.
-        const popperRef = useRef(null);
-        useEffect(() => {
-            const p = popperRef.current;
-            if (p && typeof p.scheduleUpdate === "function") p.scheduleUpdate();
-            else if (p && typeof p.update === "function") p.update();
-        }, [width]);
 
         // Community titles for the "in …" line of post rows and the community field:
         // every community the node lists, plus the bridge rows this search matched.
@@ -119,7 +110,7 @@ export const SearchResults = React.memo(
         const indexClass = artworksLoading && (artworks.length > 0 || posts.length > 0) ? classes.dimmed : undefined;
 
         const postSection = posts.length > 0 ? (
-            <div className={indexClass}>
+            <div className={indexClass} data-search-index="posts">
                 <ListSubheader className={classes.subheaderSticky}>{tr(t, "words.posts", "Posts")}</ListSubheader>
                 {posts.map((post) => (
                     <PostResult key={"p-" + post.id} classes={classes} post={post} query={query} communityTitles={communityTitles} onGoToPost={goToPost} />
@@ -134,11 +125,11 @@ export const SearchResults = React.memo(
         ) : null;
 
         const artworkSection = (artworks.length > 0 || artworksLoading) ? (
-            <div className={indexClass}>
+            <div className={indexClass} data-search-index="artworks">
                 <ListSubheader className={classes.subheaderSticky}>{tr(t, "words.artworks", "Artworks")}</ListSubheader>
                 {overviewLine}
                 {artworks.length > 0
-                    ? <ArtworkMasonry items={artworks} onOpen={openArtwork} />
+                    ? <ArtworkMasonry items={artworks} onOpen={openArtwork} columns={columns} />
                     : (
                         <div className={classes.loading} style={{ padding: "8px 0 12px 0" }}>
                             <CircularProgress size={18} style={{ color: "#666" }} />
@@ -168,17 +159,8 @@ export const SearchResults = React.memo(
         }
 
         return (
-            <Popper
-                open
-                placement="bottom-start"
-                className={classes.searchBarOpenMenu}
-                style={{ width }}
-                disablePortal
-                anchorEl={anchorEl}
-                modifiers={POPPER_MODIFIERS}
-                popperRef={popperRef}
-            >
-                <div className={classes.searchBarResult} style={maxHeight ? { maxHeight } : undefined}>
+            <div className={classes.searchBarOpenMenu} ref={resultsRef}>
+                <div className={classes.searchBarResult} style={maxHeight && !full ? { maxHeight } : undefined}>
                     {controls ? (
                         <Collapse in={!!filtersOpen} appear timeout={180} className={classes.filterCollapse}>
                             <SearchFilters
@@ -190,7 +172,7 @@ export const SearchResults = React.memo(
                             />
                         </Collapse>
                     ) : null}
-                    <div className={classes.searchScroll}>
+                    <div className={classes.searchScroll} ref={scrollRef}>
                         {suggestions.length > 0 && onPick ? (
                             <SuggestionList
                                 classes={classes}
@@ -265,7 +247,7 @@ export const SearchResults = React.memo(
                         )}
                     </div>
                 </div>
-            </Popper>
+            </div>
         );
     },
     (prev, next) =>
@@ -275,9 +257,11 @@ export const SearchResults = React.memo(
         prev.highlight === next.highlight &&
         prev.onPick === next.onPick &&
         prev.onFill === next.onFill &&
-        prev.anchorEl === next.anchorEl &&
-        prev.width === next.width &&
         prev.maxHeight === next.maxHeight &&
+        prev.full === next.full &&
+        prev.columns === next.columns &&
+        prev.scrollRef === next.scrollRef &&
+        prev.resultsRef === next.resultsRef &&
         prev.history === next.history &&
         prev.controls === next.controls &&
         prev.classes === next.classes &&

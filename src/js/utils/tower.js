@@ -3,6 +3,8 @@
 // Requests are cached in memory for `ttl` ms and identical requests in flight are shared,
 // so several cards asking for the same series cost one call.
 
+import { getLocaleCode } from "./text";
+
 export const TOWER_URL =
     (typeof window !== "undefined" && window.__PIXA_TOWER_URL__) || "https://tower-api.p1x4.workers.dev/v1";
 
@@ -94,48 +96,101 @@ export function pivot(points, dims) {
 
 // ---------------------------------------------------------------- formatting
 
+// Figures and dates follow the app's language (utils/text): "1,234.5" in English, "1 234,5" in French.
+// Read at each call, never cached, so a language switch shows on the next render.
+
+/** The app's locale code for numbers and dates, "en-US" when it cannot say. */
+export function appLocale() {
+    try {
+        return getLocaleCode() || "en-US";
+    } catch (e) {
+        return "en-US";
+    }
+}
+
+/** `n` with `minDigits` to `digits` decimals in the app's locale (toFixed, localized). */
+export function fmtNum(n, digits = 0, minDigits = digits) {
+    if (n == null || !isFinite(n)) return "–";
+    try {
+        return Number(n).toLocaleString(appLocale(), { minimumFractionDigits: minDigits, maximumFractionDigits: digits });
+    } catch (e) {
+        return Number(n).toFixed(digits);
+    }
+}
+
+/** A plain number with the locale's separators (at most 3 decimals, like toLocaleString). */
+const localized = (n) => {
+    try {
+        return n.toLocaleString(appLocale());
+    } catch (e) {
+        return String(n);
+    }
+};
+
 export function fmtCompact(n, digits = 1) {
     if (n == null || !isFinite(n)) return "–";
     const a = Math.abs(n);
-    const s = (x, u) => `${(+(n / x).toFixed(digits)).toLocaleString("en-US")}${u}`;
+    const s = (x, u) => `${localized(+(n / x).toFixed(digits))}${u}`;
     if (a >= 1e9) return s(1e9, "B");
     if (a >= 1e6) return s(1e6, "M");
     if (a >= 1e4) return s(1e3, "K");
-    if (a >= 100) return Math.round(n).toLocaleString("en-US");
-    if (a >= 1) return (+n.toFixed(digits)).toLocaleString("en-US");
+    if (a >= 100) return localized(Math.round(n));
+    if (a >= 1) return localized(+n.toFixed(digits));
     if (a === 0) return "0";
-    return n.toPrecision(2);
+    try {
+        return n.toLocaleString(appLocale(), { maximumSignificantDigits: 2 });
+    } catch (e) {
+        return n.toPrecision(2);
+    }
 }
 
 export function fmtInt(n) {
     if (n == null || !isFinite(n)) return "–";
-    return Math.round(n).toLocaleString("en-US");
+    return localized(Math.round(n));
 }
 
-export function fmtPct(r, digits = 1) {
+/** A ratio as a percentage in the app's locale ("12.5%", "12,5 %", "%12,5"), rounded as toFixed(digits). */
+function pct(r, digits, minDigits) {
+    const v = +(r * 100).toFixed(digits) || 0; // the rounding of the figure shown; never "-0"
+    try {
+        return (v / 100).toLocaleString(appLocale(), { style: "percent", minimumFractionDigits: minDigits, maximumFractionDigits: digits });
+    } catch (e) {
+        return `${v.toFixed(digits)}%`;
+    }
+}
+
+/** `minDigits` (default: `digits`) lets trailing zeros go: fmtPct(0.05, 2, 0) is "5%". */
+export function fmtPct(r, digits = 1, minDigits = digits) {
     if (r == null || !isFinite(r)) return "–";
-    return `${(r * 100).toFixed(digits)}%`;
+    return pct(r, digits, minDigits);
 }
 
 export function fmtSignedPct(r, digits = 1) {
     if (r == null || !isFinite(r)) return "";
-    const v = (r * 100).toFixed(digits);
-    return `${r > 0 ? "+" : ""}${v}%`;
+    return `${r > 0 ? "+" : ""}${pct(r, digits, digits)}`;
 }
 
+// Units (s, m, h, d) stay as symbols; the figure follows the locale.
 export function fmtAgo(iso) {
     if (!iso) return "–";
     const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
-    if (s < 90) return `${Math.round(s)}s`;
-    if (s < 5400) return `${Math.round(s / 60)}m`;
-    if (s < 172800) return `${Math.round(s / 3600)}h`;
-    return `${Math.round(s / 86400)}d`;
+    if (s < 90) return `${fmtInt(s)}s`;
+    if (s < 5400) return `${fmtInt(s / 60)}m`;
+    if (s < 172800) return `${fmtInt(s / 3600)}h`;
+    return `${fmtInt(s / 86400)}d`;
 }
 
 export function fmtBucket(bucket, grain) {
     const d = new Date(bucket * 1000);
-    const day = d.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+    const date = (opts) => {
+        try {
+            return d.toLocaleDateString(appLocale(), { timeZone: "UTC", ...opts });
+        } catch (e) {
+            return d.toLocaleDateString("en-GB", { timeZone: "UTC", ...opts });
+        }
+    };
+    const day = date({ day: "numeric", month: "short" });
     if (grain === "hour") return `${day} ${String(d.getUTCHours()).padStart(2, "0")}h`;
-    if (grain === "month") return d.toLocaleDateString("en-GB", { month: "short", year: "2-digit", timeZone: "UTC" });
+    if (grain === "month") return date({ month: "short", year: "2-digit" });
     return day;
 }

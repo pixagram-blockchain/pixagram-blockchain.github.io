@@ -25,7 +25,7 @@ import LicenseCustomizationDialog from "./LicenseCustomizationDialog";
 import { PIXA_LICENSE_BASE, createDefaultCustomization } from "../utils/pixa_license";
 import * as actions from "../actions/utils";
 
-import { t } from "../utils/text";
+import { t, tk, tx, useLanguage } from "../utils/text";
 
 const { useState, useEffect, useCallback, useMemo } = React;
 
@@ -69,22 +69,32 @@ const VALIDATION = {
     TAG_CONTAINS_DOT: /\./
 };
 
+// `error` is a tk() descriptor — resolve it with tx() where it is shown. The
+// messages are the same as NewPost's, so its keys are reused.
 const validateSingleTag = (tag) => {
     if (!tag || tag.length < VALIDATION.TAG_MIN_LENGTH) {
-        return { valid: false, error: t("words.tag_must_be_at_least_tag_min", {
+        return { valid: false, error: tk("words.tag_must_be_at_least_tag_min", {
             TAG_MIN_LENGTH: VALIDATION.TAG_MIN_LENGTH
         }) };
     }
     if (VALIDATION.TAG_STARTS_WITH_NUMBER_OR_MINUS.test(tag)) {
-        return { valid: false, error: "Tag cannot begin with a number or minus sign" };
+        return { valid: false, error: tk("components.new_post.tag_cannot_begin_with_a_number_or_minus_sign") };
     }
     if (VALIDATION.TAG_CONTAINS_DOT.test(tag)) {
-        return { valid: false, error: "Tag cannot contain dots" };
+        return { valid: false, error: tk("components.new_post.tag_cannot_contain_dots") };
     }
     if (!VALIDATION.TAG_PATTERN.test(tag)) {
-        return { valid: false, error: "Tag can only contain lowercase letters, numbers, and hyphens" };
+        return { valid: false, error: tk("components.new_post.tag_can_only_contain_lowercase_letters_numbers") };
     }
     return { valid: true, error: null };
+};
+
+// An Error that also carries its user-facing text as a tk() descriptor
+// (`i18n`); `message` stays English for the logs.
+const i18nError = (message, descriptor) => {
+    const error = new Error(message);
+    error.i18n = descriptor;
+    return error;
 };
 
 const styles = theme => ({
@@ -247,7 +257,9 @@ const findProposalForPost = async (api, author, permlink) => {
 };
 
 function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpdated }) {
+    useLanguage();
     const [loading, setLoading] = useState(false);
+    // A tk() descriptor for our own errors, or the API's message string.
     const [loadError, setLoadError] = useState(null);
     const [saving, setSaving] = useState(false);
 
@@ -286,11 +298,11 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
         (async () => {
             try {
                 if (!api?.content || !authorUsername || !permlink) {
-                    throw new Error("Missing post identifiers");
+                    throw i18nError("Missing post identifiers", tk("components.edit_post_dialog.missing_post_identifiers"));
                 }
                 const raw = await api.content.getContent(authorUsername, permlink, { raw: true });
                 if (cancelled) return;
-                if (!raw || !raw.author) throw new Error("Post not found on chain");
+                if (!raw || !raw.author) throw i18nError("Post not found on chain", tk("components.edit_post_dialog.post_not_found_on_chain"));
 
                 let meta = {};
                 try {
@@ -345,7 +357,7 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
             } catch (e) {
                 if (cancelled) return;
                 console.warn("[EditPostDialog] load failed:", e.message);
-                setLoadError(e.message || "Failed to load post");
+                setLoadError(e.i18n || e.message || tk("components.edit_post_dialog.failed_to_load_post"));
                 setLoading(false);
             }
         })();
@@ -363,17 +375,19 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
         : tags;
 
     // ── Validation ──────────────────────────────────────────────────────
+    // tk() descriptors, not t() strings: they also gate canSave, and t()
+    // answers "" until the language file has loaded. Shown with tx().
     const titleError = !title.trim()
-        ? "Title is required"
-        : title.length > titleMax ? t("components.edit_post_dialog.maximum_characters", {
+        ? tk("components.new_post.title_is_required")
+        : title.length > titleMax ? tk("components.edit_post_dialog.maximum_characters", {
         titleMax: titleMax
     }) : null;
     const descriptionError = description.length > VALIDATION.DESCRIPTION_MAX_LENGTH
-        ? t("components.edit_post_dialog.maximum_characters_2", {
+        ? tk("components.edit_post_dialog.maximum_characters_2", {
         DESCRIPTION_MAX_LENGTH: VALIDATION.DESCRIPTION_MAX_LENGTH
     }) : null;
     const tagsError = displayTags.length > VALIDATION.TAGS_MAX_COUNT
-        ? t("words.maximum_tags_max_count_tags_allowed", {
+        ? tk("words.maximum_tags_max_count_tags_allowed", {
         TAGS_MAX_COUNT: VALIDATION.TAGS_MAX_COUNT
     }) : null;
     // Blog posts edit their title / description / tags through "Edit Content"
@@ -504,7 +518,7 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
             onClose?.();
         } catch (e) {
             console.warn("[EditPostDialog] save failed:", e.message);
-            actions.trigger_snackbar(e.message || "Failed to update post");
+            actions.trigger_snackbar(e.message || t("components.edit_post_dialog.failed_to_update_post"));
             setSaving(false);
         }
     }, [canSave, api, original, tags, deleted, description, nsfw, title, eraseBody,
@@ -538,7 +552,7 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                     ) : loadError ? (
                         <div className={classes.loadingWrap}>
                             <WarningRounded style={{ fontSize: 40, color: "#666" }} />
-                            <Typography variant="body2" style={{ color: "#888" }}>{loadError}</Typography>
+                            <Typography variant="body2" style={{ color: "#888" }}>{tx(loadError)}</Typography>
                         </div>
                     ) : (
                         <Fade in timeout={300}>
@@ -572,7 +586,7 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                                         />
                                         <Box display="flex" justifyContent="space-between" alignItems="flex-start">
                                             {titleError ? (
-                                                <Typography className={classes.errorText}>{titleError}</Typography>
+                                                <Typography className={classes.errorText}>{tx(titleError)}</Typography>
                                             ) : <span />}
                                             <Typography className={getCounterClass(title.length, titleMax)}>
                                                 {title.length}/{titleMax}
@@ -593,7 +607,7 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                                         />
                                         <Box display="flex" justifyContent="space-between" alignItems="flex-start">
                                             {descriptionError ? (
-                                                <Typography className={classes.errorText}>{descriptionError}</Typography>
+                                                <Typography className={classes.errorText}>{tx(descriptionError)}</Typography>
                                             ) : <span />}
                                             <Typography className={getCounterClass(description.length, VALIDATION.DESCRIPTION_MAX_LENGTH)}>
                                                 {description.length}/{VALIDATION.DESCRIPTION_MAX_LENGTH}
@@ -617,7 +631,7 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                                                         if (category && normalized === category.toLowerCase()) return; // already the fixed category
                                                         const validation = validateSingleTag(normalized);
                                                         if (!validation.valid) {
-                                                            actions.trigger_snackbar(validation.error);
+                                                            actions.trigger_snackbar(tx(validation.error));
                                                             return;
                                                         }
                                                         if (tags.includes(normalized)) return;
@@ -671,13 +685,13 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                                                         {...params}
                                                         variant="outlined"
                                                         label={t("words.tags")}
-                                                        placeholder={displayTags.length < VALIDATION.TAGS_MAX_COUNT ? "Add tag and press Enter" : ""}
+                                                        placeholder={displayTags.length < VALIDATION.TAGS_MAX_COUNT ? t("components.edit_post_dialog.add_tag_and_press_enter") : ""}
                                                     />
                                                 )}
                                             />
                                             <Box display="flex" justifyContent="space-between" alignItems="flex-start" mt={0.5}>
                                                 {tagsError ? (
-                                                    <Typography className={classes.errorText}>{tagsError}</Typography>
+                                                    <Typography className={classes.errorText}>{tx(tagsError)}</Typography>
                                                 ) : (
                                                     <Typography className={classes.charCounter} style={{ color: "#666" }}>
                                                         {t("components.edit_post_dialog.tags_lowercase_no_dots_min_3_chars")}
@@ -725,11 +739,15 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                                         <Box style={{ marginTop: 8 }}>
                                             <div className={classes.licenseStat}>
                                                 <span className={classes.licenseStatLabel}>{t("components.edit_post_dialog.holder_rights")}</span>
-                                                <span className={classes.licenseStatValue}>{licenseSummary.holderRights} granted</span>
+                                                <span className={classes.licenseStatValue}>{t("components.new_post.count_granted", {
+                                                    granted: { granted: licenseSummary.holderRights }
+                                                })}</span>
                                             </div>
                                             <div className={classes.licenseStat}>
                                                 <span className={classes.licenseStatLabel}>{t("components.edit_post_dialog.visitor_rights")}</span>
-                                                <span className={classes.licenseStatValue}>{licenseSummary.visitorRights} granted</span>
+                                                <span className={classes.licenseStatValue}>{t("components.new_post.count_granted", {
+                                                    granted: { granted: licenseSummary.visitorRights }
+                                                })}</span>
                                             </div>
                                             <div className={classes.licenseStat}>
                                                 <span className={classes.licenseStatLabel}>{t("words.royalty")}</span>
@@ -737,7 +755,7 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                                             </div>
                                             <div className={classes.licenseStat}>
                                                 <span className={classes.licenseStatLabel}>{t("words.jurisdiction")}</span>
-                                                <span className={classes.licenseStatValue}>{licenseCustomization.governingLaw?.jurisdiction || "Not set"}</span>
+                                                <span className={classes.licenseStatValue}>{licenseCustomization.governingLaw?.jurisdiction || t("components.new_post.not_set")}</span>
                                             </div>
                                         </Box>
                                         <Button
@@ -746,7 +764,9 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                                             className={classes.licenseButton}
                                             onClick={openLicenseDialog}
                                         >
-                                            {licenseCustomization.isCustomized ? "Edit license" : "Configure license"}
+                                            {licenseCustomization.isCustomized
+                                                ? t("components.edit_post_dialog.edit_license")
+                                                : t("components.edit_post_dialog.configure_license")}
                                         </Button>
                                     </Box>
                                 )}
@@ -831,7 +851,11 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                         {t("words.cancel")}
                     </Button>
                     <Button className={classes.saveButton} onClick={handleSave} disabled={!canSave}>
-                        {saving ? "Saving…" : (eraseBody ? "Save & erase" : "Save changes")}
+                        {saving
+                            ? t("components.edit_post_dialog.saving")
+                            : (eraseBody
+                                ? t("components.edit_post_dialog.save_erase")
+                                : t("components.edit_post_dialog.save_changes"))}
                     </Button>
                 </DialogActions>
             </Dialog>
@@ -858,6 +882,7 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
  * Performs the broadcast itself so pages only have to mount it with state.
  * ════════════════════════════════════════════════════════════════════════ */
 function DeletePostDialogInner({ classes, open, onClose, api, data, onDeleted }) {
+    useLanguage();
     const [deleting, setDeleting] = useState(false);
 
     const authorUsername = getAuthorUsername(data);
@@ -900,7 +925,7 @@ function DeletePostDialogInner({ classes, open, onClose, api, data, onDeleted })
             onClose?.();
         } catch (e) {
             console.warn("[DeletePostDialog] delete failed:", e.message);
-            actions.trigger_snackbar(e.message || "Failed to delete post");
+            actions.trigger_snackbar(e.message || t("components.edit_post_dialog.failed_to_delete_post"));
             setDeleting(false);
         }
     }, [api, authorUsername, permlink, isPixelArt, data, onDeleted, onClose]);
@@ -950,7 +975,9 @@ function DeletePostDialogInner({ classes, open, onClose, api, data, onDeleted })
                     onClick={handleConfirm}
                     disabled={deleting}
                 >
-                    {deleting ? "Deleting…" : "Delete post"}
+                    {deleting
+                        ? t("components.edit_post_dialog.deleting")
+                        : t("components.edit_post_dialog.delete_post")}
                 </Button></Fade>
             </DialogActions>
         </Dialog>

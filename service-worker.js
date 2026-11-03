@@ -17,7 +17,9 @@ var ENTRY_BUNDLE = "/client/chunk_norris.min.js";
 
 var INSTALL_FILES_USEFUL = [
     "/src/images/favicon.ico",
-    "/src/images/manifest/logo-white.png",
+    "/src/images/manifest/icons/icon-192.png",
+    "/src/images/manifest/icons/badge-96.png",
+    "/pwa.js",
     "/src/fonts/industry/index.css",
     "/src/fonts/redhat/index.css",
     "/src/fonts/normative/index.css"
@@ -33,7 +35,7 @@ var INSTALL_FILES_REQUIRED = [
 ];
 
 // Cache names
-var V = "Nov-1-2026";
+var V = "Nov-3-2026";
 var REQUIRED_CACHE = "unless-update-cache-"+V+"-required";
 var USEFUL_CACHE = "unless-update-cache-"+V+"-useful";
 var STATIC_CACHE = "unless-update-cache-"+V+"-static";
@@ -157,6 +159,12 @@ self.addEventListener("fetch", function (event) {
     var request = event.request;
     var url = request.url;
 
+    // ── Web Share Target: POST from the OS share sheet (manifest share_target) ──
+    if (request.method === "POST" && PWA_SHARE_PATHS.indexOf(new URL(url).pathname) !== -1) {
+        event.respondWith(pwaHandleShareTarget(request));
+        return;
+    }
+
     // ── Skip non-GET (POST, etc.) ──
     if (request.method !== "GET") return;
 
@@ -265,5 +273,318 @@ self.addEventListener("activate", function (event) {
                 );
             })
         ])
+    );
+});
+
+// ═══════════════════════════════════════════════════
+// PWA capabilities
+//   share_target · Windows widgets · periodic background sync ·
+//   background sync · push notifications
+// Everything below is additive: the caching code above is unchanged except
+// for the share-target branch at the top of the fetch handler.
+// ═══════════════════════════════════════════════════
+var PWA_API_NODE = "https://api.pixagram.com";
+var PWA_SHARE_CACHE = "pixagram-share-target";   // one pending share at a time; read once, then deleted
+var PWA_DATA_CACHE = "pixagram-pwa-data";        // last trending snapshot (widget + offline)
+var PWA_TRENDING_KEY = "/__pwa/trending.json";
+var PWA_WIDGET_TAG = "pixagram-trending";        // = manifest widgets[0].tag
+var PWA_WIDGET_TEMPLATE = "/widgets/trending-template.json";
+var PWA_WIDGET_DATA = "/widgets/trending-data.json";
+var PWA_PERIODIC_TAG = "pixagram-refresh";       // registered by /pwa.js once installed
+var PWA_SYNC_TAG = "pixagram-resync";            // registered by /pwa.js when the device goes offline
+var PWA_ICON = "/src/images/manifest/icons/icon-192.png";
+var PWA_BADGE = "/src/images/manifest/icons/badge-96.png";
+
+// The activate handler purges every cache that is not in ALL_CACHES; these two
+// are not versioned (they hold data, not code), so they must survive a V bump.
+ALL_CACHES.push(PWA_SHARE_CACHE, PWA_DATA_CACHE);
+
+// Same-origin path from untrusted input (push payloads, widget verbs), or null.
+function pwaSafePath(value) {
+    if (typeof value !== "string" || !value) return null;
+    try {
+        var u = new URL(value, self.location.origin);
+        if (u.origin !== self.location.origin) return null;
+        return u.pathname + u.search + u.hash;
+    } catch (e) {
+        return null;
+    }
+}
+
+function pwaPostToClients(message) {
+    return self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(function (list) {
+        list.forEach(function (client) { client.postMessage(message); });
+        return list;
+    });
+}
+
+// Focus an open Pixagram window and route it client-side (no reload), or open one.
+function pwaFocusOrOpen(path) {
+    var target = pwaSafePath(path) || "/trending/";
+    return self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(function (list) {
+        for (var i = 0; i < list.length; i++) {
+            if (new URL(list[i].url).origin === self.location.origin && "focus" in list[i]) {
+                list[i].postMessage({ type: "pixagram:navigate", url: target });
+                return list[i].focus();
+            }
+        }
+        return self.clients.openWindow(target);
+    });
+}
+
+// ─── Web Share Target ───
+// manifest share_target: POST multipart/form-data to /share-target/. The host
+// (GitHub Pages) cannot answer a POST, so the worker reads the form, keeps the
+// files in Cache Storage and redirects to a GET page; /pwa.js picks them up
+// there and opens the creation wizard with the shared image.
+var PWA_SHARE_PATHS = ["/share-target/", "/share-target"];
+
+function pwaHandleShareTarget(request) {
+    return request.formData().then(function (form) {
+        var id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        var files = form.getAll("image").filter(function (f) {
+            return f && typeof f === "object" && typeof f.size === "number" && f.size > 0;
+        }).slice(0, 10);
+        var meta = {
+            id: id,
+            title: String(form.get("title") || "").slice(0, 2000),
+            text: String(form.get("text") || "").slice(0, 2000),
+            url: String(form.get("url") || "").slice(0, 2000),
+            files: []
+        };
+        return caches.open(PWA_SHARE_CACHE).then(function (cache) {
+            // A new share replaces any share that was never picked up.
+            return cache.keys().then(function (keys) {
+                return Promise.all(keys.map(function (k) { return cache.delete(k); }));
+            }).then(function () {
+                return Promise.all(files.map(function (file, i) {
+                    var key = "/__pwa/share/" + id + "/" + i;
+                    var type = file.type || "application/octet-stream";
+                    meta.files.push({ key: key, name: file.name || ("shared-" + i), type: type });
+                    return cache.put(key, new Response(file, { headers: { "Content-Type": type } }));
+                }));
+            }).then(function () {
+                return cache.put("/__pwa/share/" + id + "/meta.json", new Response(JSON.stringify(meta), {
+                    headers: { "Content-Type": "application/json" }
+                }));
+            });
+        }).then(function () {
+            return Response.redirect("/trending/?pwa=share&id=" + id, 303);
+        });
+    }).catch(function () {
+        return Response.redirect("/trending/?pwa=share&error=1", 303);
+    });
+}
+
+// ─── Trending snapshot (widget data, refreshed by periodic sync) ───
+function pwaRpc(method, params) {
+    return fetch(PWA_API_NODE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: method, params: params }),
+        cache: "no-store"
+    }).then(function (r) {
+        if (!r.ok) throw new Error("rpc " + r.status);
+        return r.json();
+    }).then(function (j) {
+        if (j.error) throw new Error(j.error.message || "rpc error");
+        return j.result;
+    });
+}
+
+// Same filtering as the app: no NSFW, deleted, hidden or grayed posts.
+function pwaBuildTrendingData(list) {
+    var out = [];
+    for (var i = 0; i < (list || []).length && out.length < 3; i++) {
+        var p = list[i] || {};
+        var meta = p.json_metadata || {};
+        if (typeof meta === "string") { try { meta = JSON.parse(meta); } catch (e) { meta = {}; } }
+        var stats = p.stats || {};
+        if (meta.nsfw || meta.deleted || stats.hide || stats.gray || p.body === "deleted") continue;
+        if (!p.url || !p.title) continue;
+        var votes = stats.total_votes != null ? stats.total_votes : (p.active_votes || []).length;
+        var payout = typeof p.payout === "number" ? p.payout : parseFloat(p.pending_payout_value || "0");
+        out.push({
+            title: String(p.title).trim().slice(0, 80),
+            author: String(p.author || ""),
+            votes: votes + (votes === 1 ? " vote" : " votes"),
+            payout: (isFinite(payout) ? payout : 0).toFixed(2) + " PXS",
+            verb: "open:" + p.url
+        });
+    }
+    var time = "";
+    try { time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); } catch (e) { /* no Intl */ }
+    return { updated: time ? "Updated " + time : "Updated", posts: out };
+}
+
+function pwaRefreshTrending() {
+    return pwaRpc("bridge.get_ranked_posts", { sort: "trending", tag: "", observer: "", limit: 6 })
+        .then(function (posts) {
+            var data = pwaBuildTrendingData(posts);
+            return caches.open(PWA_DATA_CACHE).then(function (cache) {
+                return cache.put(PWA_TRENDING_KEY, new Response(JSON.stringify(data), {
+                    headers: { "Content-Type": "application/json" }
+                }));
+            }).then(function () { return data; });
+        });
+}
+
+function pwaTrendingData() {
+    // fresh data, else the last snapshot, else the static file from the manifest
+    return pwaRefreshTrending().catch(function () {
+        return caches.match(PWA_TRENDING_KEY).then(function (r) {
+            if (r) return r.json();
+            return fetch(PWA_WIDGET_DATA).then(function (res) { return res.json(); });
+        });
+    });
+}
+
+// ─── Windows widgets (manifest "widgets") ───
+function pwaRenderWidget(widget) {
+    var def = (widget && widget.definition) || {};
+    var templateUrl = def.msAcTemplate || def.ms_ac_template || PWA_WIDGET_TEMPLATE;
+    return Promise.all([
+        fetch(templateUrl).then(function (r) { return r.text(); }),
+        pwaTrendingData()
+    ]).then(function (parts) {
+        return self.widgets.updateByTag(def.tag || PWA_WIDGET_TAG, {
+            template: parts[0],
+            data: JSON.stringify(parts[1])
+        });
+    });
+}
+
+function pwaRenderAllWidgets() {
+    if (!self.widgets) return Promise.resolve();
+    return self.widgets.getByTag(PWA_WIDGET_TAG).then(function (widget) {
+        if (widget && widget.instances && widget.instances.length) return pwaRenderWidget(widget);
+    }).catch(function () { /* no widget host */ });
+}
+
+self.addEventListener("widgetinstall", function (event) {
+    event.waitUntil(pwaRenderWidget(event.widget).then(function () {
+        var reg = self.registration;
+        var def = (event.widget && event.widget.definition) || {};
+        if (!reg.periodicSync || !def.update) return;
+        return reg.periodicSync.getTags().then(function (tags) {
+            if (tags.indexOf(PWA_WIDGET_TAG) === -1) {
+                return reg.periodicSync.register(PWA_WIDGET_TAG, { minInterval: def.update * 1000 });
+            }
+        });
+    }).catch(function () { /* rendering failures leave the host's placeholder */ }));
+});
+
+self.addEventListener("widgetresume", function (event) {
+    event.waitUntil(pwaRenderWidget(event.widget).catch(function () {}));
+});
+
+self.addEventListener("widgetuninstall", function (event) {
+    event.waitUntil(Promise.resolve().then(function () {
+        var reg = self.registration;
+        var w = event.widget;
+        if (reg.periodicSync && w && w.instances && w.instances.length <= 1) {
+            return reg.periodicSync.unregister(PWA_WIDGET_TAG);
+        }
+    }).catch(function () {}));
+});
+
+self.addEventListener("widgetclick", function (event) {
+    var action = String(event.action || "");
+    var work;
+    if (action === "create") {
+        work = pwaFocusOrOpen("/trending/?pwa=create");
+    } else if (action === "open") {
+        work = pwaFocusOrOpen("/trending/");
+    } else if (action.indexOf("open:") === 0) {
+        work = pwaFocusOrOpen(action.slice(5));
+    } else if (action === "refresh") {
+        work = pwaRenderWidget(event.widget);
+    } else {
+        work = Promise.resolve();
+    }
+    event.waitUntil(work.catch(function () {}));
+});
+
+// A new worker version re-renders widgets that were installed under the old one.
+self.addEventListener("activate", function (event) {
+    event.waitUntil(pwaRenderAllWidgets());
+});
+
+// ─── Periodic Background Sync ───
+// Keeps the trending snapshot (and the widget) fresh while the app is closed.
+self.addEventListener("periodicsync", function (event) {
+    if (event.tag === PWA_PERIODIC_TAG || event.tag === PWA_WIDGET_TAG) {
+        event.waitUntil(pwaRefreshTrending().then(pwaRenderAllWidgets).catch(function () {}));
+    }
+});
+
+// ─── Background Sync ───
+// /pwa.js registers PWA_SYNC_TAG when the device goes offline. When the
+// connection is back, the browser wakes this worker even if the tab is gone:
+// re-fill the offline shell (a first visit cut off mid-install leaves it
+// incomplete), refresh the trending snapshot and widgets, and tell any open
+// window it can refetch.
+function pwaRewarmShell() {
+    return required_cache.then(function (cache) {
+        return Promise.all(INSTALL_FILES_REQUIRED.map(function (u) {
+            return cache.match(u).then(function (hit) { return hit || fetchAndCache(u, cache); });
+        }));
+    });
+}
+
+self.addEventListener("sync", function (event) {
+    if (event.tag !== PWA_SYNC_TAG) return;
+    event.waitUntil(
+        Promise.all([
+            pwaRewarmShell().catch(function () {}),
+            pwaRefreshTrending().then(pwaRenderAllWidgets).catch(function () {})
+        ]).then(function () {
+            return pwaPostToClients({ type: "pixagram:back-online" });
+        })
+    );
+});
+
+// ─── Push notifications ───
+// Payload (JSON, all optional):
+//   { "title", "body", "url", "icon", "image", "tag", "timestamp",
+//     "actions": [{ "action": "<same-origin path>", "title": "…" }] }
+self.addEventListener("push", function (event) {
+    var payload = {};
+    if (event.data) {
+        try { payload = event.data.json() || {}; } catch (e) { payload = { body: event.data.text() }; }
+    }
+    var actions = Array.isArray(payload.actions) ? payload.actions.filter(function (a) {
+        return a && pwaSafePath(a.action) && a.title;
+    }).slice(0, 2) : [];
+    var options = {
+        body: String(payload.body || ""),
+        icon: pwaSafePath(payload.icon) || PWA_ICON,
+        badge: PWA_BADGE,
+        tag: payload.tag ? String(payload.tag) : undefined,
+        renotify: !!payload.tag,
+        timestamp: typeof payload.timestamp === "number" ? payload.timestamp : Date.now(),
+        data: { url: pwaSafePath(payload.url) || "/trending/" },
+        actions: actions.map(function (a) { return { action: pwaSafePath(a.action), title: String(a.title) }; })
+    };
+    var image = pwaSafePath(payload.image);
+    if (image) options.image = image;
+    event.waitUntil(self.registration.showNotification(String(payload.title || "Pixagram"), options));
+});
+
+self.addEventListener("notificationclick", function (event) {
+    event.notification.close();
+    var target = pwaSafePath(event.action) || (event.notification.data && event.notification.data.url) || "/trending/";
+    event.waitUntil(pwaFocusOrOpen(target));
+});
+
+// The push service rotated the subscription: subscribe again with the same
+// options and hand the new one to the open app (window.PixagramPWA re-sends it).
+self.addEventListener("pushsubscriptionchange", function (event) {
+    var options = event.oldSubscription && event.oldSubscription.options;
+    if (!options || !options.applicationServerKey) return;
+    event.waitUntil(
+        self.registration.pushManager.subscribe(options).then(function (sub) {
+            return pwaPostToClients({ type: "pixagram:push-subscription", subscription: sub.toJSON() });
+        }).catch(function () {})
     );
 });

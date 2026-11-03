@@ -22,6 +22,7 @@ import VotingPowerDisplay from "./VotingPowerDisplay";
 import Edit from "@material-ui/icons/Edit";
 import { cssBackgroundImage } from "../utils/safeUrl";
 import useMobileCardFit from "../hooks/useMobileCardFit";
+import { t, useLanguage } from "../utils/text";
 
 // The picture ButtonBases carry the SAME corner radii as the picture classes
 // they wrap (profileImageMobile / profileImageMobileOpened /
@@ -100,6 +101,9 @@ const ProfileMobileCard = React.memo(({
                                           onEditProfile,
                                           onOpenPicture
                                       }) => {
+    // sameProps ignores everything but prop identity: the labels below follow
+    // a language switch through this subscription.
+    useLanguage();
     // Measured through the sliding wrapper, the body the Collapse opens and
     // the block the lists sit in.
     const wrapperRef = React.useRef(null);
@@ -169,7 +173,7 @@ const ProfileMobileCard = React.memo(({
 
     const username = account?.name || '';
     const customDisplayName = account?._profile?.display_name || null;
-    const displayName = customDisplayName || username || 'Unknown';
+    const displayName = customDisplayName || username || t("components.profile_mobile_card.unknown");
     const fallbackAvatar = `https://images.hive.blog/u/${username}/avatar`;
     const profileBg = cssBackgroundImage(account?._profile?.profile_image, fallbackAvatar);
     const description = account?._profile?.about || '';
@@ -201,7 +205,7 @@ const ProfileMobileCard = React.memo(({
                             </ButtonBase>
                         }
                         action={
-                            <IconButton aria-label="settings">
+                            <IconButton aria-label={t("words.settings")}>
                                 <ArrowDropDown style={{transition: "transform 225ms cubic-bezier(0.4, 0, 0.2, 1) 5ms !important", transform: `rotate(${expanded ? -180: 0}deg)`}} />
                             </IconButton>
                         }

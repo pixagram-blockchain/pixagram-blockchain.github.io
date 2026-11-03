@@ -7,7 +7,7 @@ import CloseIcon from "@material-ui/icons/Close";
 import TeamAndCompany from "./TeamAndCompany";
 
 import { T } from "../utils/T";
-import { t } from "../utils/text";
+import { t, tk, tx } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
 const styles = theme => ({
@@ -18,8 +18,10 @@ const styles = theme => ({
         // "Nearly covers" the screen on desktop…
         width: "calc(100vw - 96px)",
         maxWidth: "1400px",
-        height: "calc(100vh - 96px)",
-        maxHeight: "calc(100vh - 96px)",
+        // --app-h: the measured visible height (utils/viewport) — 100vh is
+        // the toolbar-hidden height on phones and overflowed the screen.
+        height: "calc(var(--app-h, 100vh) - 96px)",
+        maxHeight: "calc(var(--app-h, 100vh) - 96px)",
         margin: 0,
         borderRadius: "24px",
         border: "none",
@@ -329,27 +331,85 @@ const styles = theme => ({
 });
 
 // One value + one label per card — the raw numbers ARE the pitch.
+// Labels are deferred translations (tk): these tables are evaluated once at
+// import time, so they are resolved with tx() at render. Values stay literal.
 const SPECS = [
-    { value: "3 s", label: "Block time — near-instant confirmations" },
-    { value: "$0", label: "Fees — Resource Credits recharge over time instead" },
-    { value: "1000+", label: "Transactions per second of capacity" },
-    { value: "72 kB", label: "Blog posts written directly on-chain" },
-    { value: "PoB", label: "Proof-of-Brain — rewards both creation and curation" },
+    { value: "3 s", label: tk("components.learn_more_dialog.block_time_near_instant_confirmations") },
+    { value: "$0", label: tk("components.learn_more_dialog.fees_resource_credits_recharge_over_time") },
+    { value: "1000+", label: tk("components.learn_more_dialog.transactions_per_second_of_capacity") },
+    { value: "72 kB", label: tk("components.learn_more_dialog.blog_posts_written_directly_on_chain") },
+    { value: "PoB", label: tk("components.learn_more_dialog.proof_of_brain_rewards_both_creation_and") },
 ];
 
-// [row label, STEEM, HIVE, PIXA]
+// [row label, STEEM, HIVE, PIXA] — tk() cells, plain strings for the
+// untranslatable ones (sizes, the dash); tx() resolves both at render.
 const TABLE_ROWS = [
-    ["Origin", "Original social blockchain (2016)", "Community hard-fork of STEEM (2020)", "New chain forked from the HIVE / STEEM codebase"],
-    ["Track record", "Valued at over $1B, top-10 cryptocurrency in 2018", "Independent and active since 2020", "Inherits ~10 years of battle-tested code"],
-    ["Governance", "Centralized stake — its takeover triggered the split", "Community-run witnesses", "Community-run witnesses from day one"],
-    ["Block time", "3 seconds", "3 seconds", "3 seconds"],
-    ["Fees", "Mostly fee-less (Resource Credits)", "Mostly fee-less (Resource Credits)", "Mostly fee-less — credits recharge over time"],
-    ["Throughput", "Thousands of TPS", "Thousands of TPS", "Thousands of TPS"],
-    ["Post size", "~64 kB", "~64 kB", "72 kB"],
-    ["Media storage", "Off-chain links", "Off-chain links / IPFS", "Fully on-chain — base64 PNG & WebP, no hashes"],
-    ["Rewards", "Proof-of-Brain: posting & curation", "Proof-of-Brain: posting & curation", "Proof-of-Brain, tuned for pixel artists & curators"],
-    ["NFTs", "—", "Second-layer apps", "Native concept — marketplace arrives in phase two"],
-    ["Focus", "General blogging", "General blogging & dApps", "Pixel art social network"],
+    [
+        tk("components.learn_more_dialog.origin"),
+        tk("components.learn_more_dialog.original_social_blockchain_2016"),
+        tk("components.learn_more_dialog.community_hard_fork_of_steem_2020"),
+        tk("components.learn_more_dialog.new_chain_forked_from_the_hive_steem_codebase"),
+    ],
+    [
+        tk("components.learn_more_dialog.track_record"),
+        tk("components.learn_more_dialog.valued_at_over_1b_top_10_cryptocurrency_in"),
+        tk("components.learn_more_dialog.independent_and_active_since_2020"),
+        tk("components.learn_more_dialog.inherits_10_years_of_battle_tested_code"),
+    ],
+    [
+        tk("words.governance"),
+        tk("components.learn_more_dialog.centralized_stake_its_takeover_triggered_the"),
+        tk("components.learn_more_dialog.community_run_witnesses"),
+        tk("components.learn_more_dialog.community_run_witnesses_from_day_one"),
+    ],
+    [
+        tk("components.learn_more_dialog.block_time"),
+        tk("components.learn_more_dialog.3_seconds"),
+        tk("components.learn_more_dialog.3_seconds"),
+        tk("components.learn_more_dialog.3_seconds"),
+    ],
+    [
+        tk("components.learn_more_dialog.fees"),
+        tk("components.learn_more_dialog.mostly_fee_less_resource_credits"),
+        tk("components.learn_more_dialog.mostly_fee_less_resource_credits"),
+        tk("components.learn_more_dialog.mostly_fee_less_credits_recharge_over_time"),
+    ],
+    [
+        tk("components.learn_more_dialog.throughput"),
+        tk("components.learn_more_dialog.thousands_of_tps"),
+        tk("components.learn_more_dialog.thousands_of_tps"),
+        tk("components.learn_more_dialog.thousands_of_tps"),
+    ],
+    [
+        tk("components.learn_more_dialog.post_size"),
+        "~64 kB",
+        "~64 kB",
+        "72 kB",
+    ],
+    [
+        tk("components.learn_more_dialog.media_storage"),
+        tk("components.learn_more_dialog.off_chain_links"),
+        tk("components.learn_more_dialog.off_chain_links_ipfs"),
+        tk("components.learn_more_dialog.fully_on_chain_base64_png_webp_no_hashes"),
+    ],
+    [
+        tk("components.learn_more_dialog.rewards"),
+        tk("components.learn_more_dialog.proof_of_brain_posting_curation"),
+        tk("components.learn_more_dialog.proof_of_brain_posting_curation"),
+        tk("components.learn_more_dialog.proof_of_brain_tuned_for_pixel_artists"),
+    ],
+    [
+        tk("components.learn_more_dialog.nfts"),
+        "—",
+        tk("components.learn_more_dialog.second_layer_apps"),
+        tk("components.learn_more_dialog.native_concept_marketplace_arrives_in_phase"),
+    ],
+    [
+        tk("components.learn_more_dialog.focus"),
+        tk("components.learn_more_dialog.general_blogging"),
+        tk("components.learn_more_dialog.general_blogging_dapps"),
+        tk("components.learn_more_dialog.pixel_art_social_network"),
+    ],
 ];
 
 class LearnMoreDialog extends React.PureComponent {
@@ -408,12 +468,12 @@ class LearnMoreDialog extends React.PureComponent {
                             <div className={classes.lineage}>
                                 <div className={classes.lineageNode}>
                                     <b>STEEM</b>
-                                    <span>2016 · where it began</span>
+                                    <span>{t("components.learn_more_dialog.2016_where_it_began")}</span>
                                 </div>
                                 <div className={classes.lineageArrow}>→</div>
                                 <div className={classes.lineageNode}>
                                     <b>HIVE</b>
-                                    <span>2020 · the community fork</span>
+                                    <span>{t("components.learn_more_dialog.2020_the_community_fork")}</span>
                                 </div>
                                 <div className={classes.lineageArrow}>→</div>
                                 <div className={`${classes.lineageNode} ${classes.lineageNodePixa}`}>
@@ -435,7 +495,7 @@ class LearnMoreDialog extends React.PureComponent {
                                 {SPECS.map((spec, i) => (
                                     <div key={i} className={classes.specCard}>
                                         <div className={classes.specValue}>{spec.value}</div>
-                                        <div className={classes.specLabel}>{spec.label}</div>
+                                        <div className={classes.specLabel}>{tx(spec.label)}</div>
                                     </div>
                                 ))}
                             </div>
@@ -451,11 +511,11 @@ class LearnMoreDialog extends React.PureComponent {
                                             <th aria-hidden="true"></th>
                                             <th>
                                                 STEEM
-                                                <small>2016 · the origin</small>
+                                                <small>{t("components.learn_more_dialog.2016_the_origin")}</small>
                                             </th>
                                             <th>
                                                 <span className={classes.headArrow}>→</span>HIVE
-                                                <small>2020 · the community fork</small>
+                                                <small>{t("components.learn_more_dialog.2020_the_community_fork")}</small>
                                             </th>
                                             <th className={classes.pixaHead}>
                                                 <span className={classes.headArrow}>→</span>PIXA
@@ -466,10 +526,10 @@ class LearnMoreDialog extends React.PureComponent {
                                     <tbody>
                                         {TABLE_ROWS.map((row, i) => (
                                             <tr key={i}>
-                                                <th scope="row">{row[0]}</th>
-                                                <td>{row[1]}</td>
-                                                <td>{row[2]}</td>
-                                                <td className={classes.pixaCol}>{row[3]}</td>
+                                                <th scope="row">{tx(row[0])}</th>
+                                                <td>{tx(row[1])}</td>
+                                                <td>{tx(row[2])}</td>
+                                                <td className={classes.pixaCol}>{tx(row[3])}</td>
                                             </tr>
                                         ))}
                                     </tbody>

@@ -24,7 +24,7 @@ import { usePrices } from "../hooks/usePrices";
 import { safeHTML } from "../utils/api/sanitizer";
 import { cssBackgroundImage } from "../utils/safeUrl";
 
-import { t } from "../utils/text";
+import { t, getLocaleCode } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
 /**
@@ -630,9 +630,22 @@ const styles = theme => ({
 // Map a chain-side proposal (list_proposals result) to the
 // UI-friendly shape the component renders. Dates come back as
 // naive UTC strings (no trailing Z), so we suffix Z to parse.
+// Dates and figures are formatted at render, in the app's locale,
+// so a language switch reaches them too.
 // ──────────────────────────────────────────────────────────────
-const _fmtDate = (d) =>
-    d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const _fmtDate = (ms) => Number.isFinite(ms)
+    ? new Date(ms).toLocaleDateString(getLocaleCode(), { month: 'short', day: 'numeric', year: 'numeric' })
+    : '—';
+
+// A figure with exactly `digits` decimals in the app's locale ("1,234.5", "1 234,5").
+const fmtNumber = (n, digits = 0) =>
+    (Number(n) || 0).toLocaleString(getLocaleCode(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
+// The card's status chip, from the UI bucket mapProposal sets (the chip's CSS upper-cases it).
+const statusLabel = (status) =>
+    status === 'active' ? t("components.gdvmproposals.status_active")
+        : status === 'expired' ? t("components.gdvmproposals.status_expired")
+            : t("components.gdvmproposals.status_pending");
 
 // Amount of a legacy asset string ("245554.228 PXS" → 245554.228) or of an
 // NAI object ({ amount: "245554228", precision: 3 }); 0 when the value is
@@ -734,10 +747,10 @@ const mapProposal = (p) => {
         id: p.proposal_id != null ? p.proposal_id : p.id,
         rawStatus: p.status,
         status: uiStatus,
-        title: p.subject || '(untitled proposal)',
-        startDate: _fmtDate(start),
-        endDate: _fmtDate(end),
-        duration: `${durationDays} days`,
+        title: p.subject || '',   // '' → "(untitled proposal)", translated at render
+        startMs: start.getTime(),
+        endMs: end.getTime(),
+        durationDays,
         totalFunding,
         dailyPay,
         votes,                 // share units, chain's last count
@@ -767,18 +780,20 @@ const decorateVotes = (p, liveVotes, vestPrice) => {
     p.recountPending = p.liveVotes != null && Math.abs(p.liveVotes - p.votes) >= 1e6;
 };
 
-// shared formatters (module-level so every card + the treasury share them)
+// shared formatters (module-level so every card + the treasury share them;
+// called at render, so the figures follow the app's locale — the b/m/k
+// suffixes stay as they are)
 const fmtVotes = (votes) => {
     const v = Number(votes) || 0;
-    if (v >= 1e9) return `${(v / 1e9).toFixed(2)}b`;
-    if (v >= 1e6) return `${(v / 1e6).toFixed(2)}m`;
-    if (v >= 1e3) return `${(v / 1e3).toFixed(1)}k`;
-    return String(Math.round(v));
+    if (v >= 1e9) return `${fmtNumber(v / 1e9, 2)}b`;
+    if (v >= 1e6) return `${fmtNumber(v / 1e6, 2)}m`;
+    if (v >= 1e3) return `${fmtNumber(v / 1e3, 1)}k`;
+    return fmtNumber(Math.round(v));
 };
 const fmtPXS = (amount) => {
     const a = Number(amount) || 0;
-    if (a >= 1000) return `${(a / 1000).toFixed(2)}k PXS`;
-    return `${Math.round(a)} PXS`;
+    if (a >= 1000) return `${fmtNumber(a / 1000, 2)}k PXS`;
+    return `${fmtNumber(Math.round(a))} PXS`;
 };
 
 // Native tooltip on the vote figure while the chain still shows the old count.
@@ -787,7 +802,7 @@ const recountHint = (p, recountAt) => {
         onChain: fmtVotes(p.powerOnChain)
     });
     if (!Number.isFinite(recountAt)) return live;
-    const time = new Date(recountAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const time = new Date(recountAt).toLocaleTimeString(getLocaleCode(), { hour: '2-digit', minute: '2-digit' });
     return `${live} ${t("components.gdvmproposals.next_recount_at", { time })}`;
 };
 
@@ -934,20 +949,22 @@ const ProposalCard = ({
             >
                 <div className={classes.proposalMainInfo}>
                     <div className={classes.proposalTitleRow}>
-                        <span className={titleClass}>{proposal.title}</span>
+                        <span className={titleClass}>{proposal.title || t("components.gdvmproposals.untitled_proposal")}</span>
                         <span className={classes.proposalId}>#{proposal.id}</span>
-                        <span className={chipClass}>{proposal.status}</span>
+                        <span className={chipClass}>{statusLabel(proposal.status)}</span>
                     </div>
                     <div className={classes.proposalMeta}>
                         <span className={classes.proposalDate}>
-                            {proposal.startDate} - {proposal.endDate} ({proposal.duration})
+                            {_fmtDate(proposal.startMs)} - {_fmtDate(proposal.endMs)} ({t("components.gdvmproposals.duration_days", {
+                                day: { day: proposal.durationDays }
+                            })})
                         </span>
                         <span className={classes.proposalFunding}>{fmtPXS(proposal.totalFunding)}</span>
                         {headerFiat ? (
                             <span className={classes.proposalFundingFiat}>≈ {headerFiat}</span>
                         ) : null}
                         <span className={classes.proposalDaily}>{t("components.gdvmproposals.daily_pxs", {
-                            round: Math.round(proposal.dailyPay)
+                            round: fmtNumber(Math.round(proposal.dailyPay))
                         })}</span>
                     </div>
                 </div>
@@ -1017,12 +1034,12 @@ const ProposalCard = ({
 
                     <div className={classes.proposalStatsRow}>
                         {StatBlock(t("components.gdvmproposals.total_requested"), fmtPXS(proposal.totalFunding), proposal.totalFunding)}
-                        {StatBlock(t("components.gdvmproposals.daily_pay"), `${Math.round(proposal.dailyPay)} PXS`, Number(proposal.dailyPay))}
+                        {StatBlock(t("components.gdvmproposals.daily_pay"), `${fmtNumber(Math.round(proposal.dailyPay))} PXS`, Number(proposal.dailyPay))}
                         {StatBlock(t("components.gdvmproposals.paid_out"), fmtPXS(proposal.paidOut), proposal.paidOut)}
                         {StatBlock(t("components.gdvmproposals.remaining"), fmtPXS(proposal.remaining), proposal.remaining)}
                         <div className={classes.proposalStatBlock}>
                             <div className={classes.proposalStatBlockLabel}>{t("words.days_left")}</div>
-                            <div className={classes.proposalStatBlockValue}>{proposal.daysRemaining}</div>
+                            <div className={classes.proposalStatBlockValue}>{fmtNumber(proposal.daysRemaining)}</div>
                         </div>
                     </div>
 
@@ -1071,12 +1088,12 @@ const DPF_TREASURY_ACCOUNT = 'pixa.omnibus';
 // the hourly maintenance periods (dhf_processor's total_amount_divider).
 const DPF_DAILY_BUDGET_DIVIDER = 100;
 
-// Stats-box figure: "PXS 245.6K" / "PXS 2.5K" / "PXS 51.3M" / "PXS 812".
+// Stats-box figure: "PXS 245.6K" / "PXS 2.5K" / "PXS 51.3M" / "PXS 812" (figures in the app's locale).
 const fmtPXSStat = (amount) => {
     const a = Number(amount) || 0;
-    if (a >= 1e6) return `PXS ${(a / 1e6).toFixed(1)}M`;
-    if (a >= 1e3) return `PXS ${(a / 1e3).toFixed(1)}K`;
-    return `PXS ${Math.round(a)}`;
+    if (a >= 1e6) return `PXS ${fmtNumber(a / 1e6, 1)}M`;
+    if (a >= 1e3) return `PXS ${fmtNumber(a / 1e3, 1)}K`;
+    return `PXS ${fmtNumber(Math.round(a))}`;
 };
 
 // Mirror of the chain's payout pass (dhf_processor::calculate_payments):

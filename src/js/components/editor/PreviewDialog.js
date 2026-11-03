@@ -52,7 +52,7 @@ export const previewDialogStyles = (theme) => ({
             borderRadius: 24,
             maxWidth: 900,
             width: "95%",
-            maxHeight: "90vh",
+            maxHeight: "calc(var(--app-h, 100vh) * 0.9)",
             overflow: "hidden"
         }
     },

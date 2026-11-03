@@ -19,6 +19,19 @@ import { HISTORY } from "../utils/constants";
 
 import { t, useLanguage } from "../utils/text";
 
+// Community role ids from the chain ("owner", "admin", "mod"…) as words in the
+// UI language; an id the catalogue doesn't know is shown as it came.
+const ROLE_KEYS = {
+    owner: "components.notifications_dialog.role_owner",
+    admin: "components.notifications_dialog.role_admin",
+    mod: "components.notifications_dialog.role_moderator",
+    moderator: "components.notifications_dialog.role_moderator",
+    member: "components.notifications_dialog.role_member",
+    guest: "components.notifications_dialog.role_guest",
+    muted: "components.notifications_dialog.role_muted",
+};
+const roleLabel = (role) => (ROLE_KEYS[role] ? t(ROLE_KEYS[role], { FLUC: true }) : role);
+
 const MembersSection = React.memo(({ members, timeAgo, isAdmin, onAddSomeone, memberListItemClass, memberBadgeClass, roleChipClass, metaListHeaderClass, addSomeoneClass }) => {
     useLanguage();
     const goToProfile = React.useCallback((username) => {
@@ -45,7 +58,7 @@ const MembersSection = React.memo(({ members, timeAgo, isAdmin, onAddSomeone, me
                                 <Badge className={memberBadgeClass}
                                        anchorOrigin={{vertical: 'bottom', horizontal: 'right'}}
                                        overlap="rectangular"
-                                       badgeContent={member.role}
+                                       badgeContent={roleLabel(member.role)}
                                        color="primary">
                                     <Avatar alt={displayName} src={member.image} className={"pixelated"} />
                                 </Badge>
@@ -56,7 +69,7 @@ const MembersSection = React.memo(({ members, timeAgo, isAdmin, onAddSomeone, me
                                         <Tooltip title={'@' + member.username} placement="top" arrow>
                                             <span style={{marginRight: "8px"}} onClick={() => goToProfile(member.username)}>{displayName}</span>
                                         </Tooltip>
-                                        <Chip className={roleChipClass} size="small" icon={roleIcon} label={member.role} />
+                                        <Chip className={roleChipClass} size="small" icon={roleIcon} label={roleLabel(member.role)} />
                                     </Typography>
                                 }
                                 secondary={member.about ? (

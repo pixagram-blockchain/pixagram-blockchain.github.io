@@ -273,7 +273,9 @@ function VoteButton({
         <div className={classes.voteButtonWrapper}>
             <IconButton
                 className={getClassName()}
-                aria-label={`${direction === 'up' ? 'Up' : 'Down'}-Vote`}
+                aria-label={direction === 'up'
+                    ? t("components.paper_card_actions.upvote")
+                    : t("components.paper_card_actions.downvote")}
                 onClick={loggedOut ? undefined : onVote}
                 disabled={loggedOut || disabled || isLoading}
             >

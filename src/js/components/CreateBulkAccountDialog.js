@@ -29,7 +29,7 @@ import * as actions from "../actions/utils";
 import { generateMnemonic, generateMasterKey, generatePDF, backupPdfOptions } from "../utils/BackUpWallet3";
 
 import { T } from "../utils/T";
-import { t, getLanguage, getLocaleCode } from "../utils/text";
+import { t, tk, tx, getLanguage, getLocaleCode } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
 /*
@@ -137,7 +137,7 @@ const renderUsernameOption = (o) => (
         <span style={AT_SIGN_STYLE}>@</span>{o.label}
         {o.valid
             ? <span style={OPTION_HINT_STYLE}>{t("components.create_bulk_account_dialog.add_username")}</span>
-            : <span style={OPTION_HINT_STYLE}>3–16 chars, start with a letter</span>}
+            : <span style={OPTION_HINT_STYLE}>{t("components.create_bulk_account_dialog.username_rules_hint")}</span>}
     </span>
 );
 const renderUsernamesInput = (params) => (
@@ -301,7 +301,9 @@ class CreateBulkAccountDialog extends React.PureComponent {
                 key={name}
                 size="small"
                 className={this._chipClass(name)}
-                label={<span><span style={TAG_AT_STYLE}>@</span>{name}{_availability[name] === "taken" ? " · taken" : ""}</span>}
+                label={<span><span style={TAG_AT_STYLE}>@</span>{_availability[name] === "taken"
+                    ? t("components.create_bulk_account_dialog.name_taken", { name })
+                    : name}</span>}
                 {...getTagProps({ index })}
             />
         ));
@@ -391,7 +393,8 @@ class CreateBulkAccountDialog extends React.PureComponent {
                 const [pdfBlob, keys] = await generatePDF(name, seed, "", masterKey, backupPdfOptions(api, getLocaleCode()));
                 const publicKeys = keys && keys.pub ? keys.pub : null;
                 if (!publicKeys || !publicKeys.owner || !publicKeys.active || !publicKeys.posting || !publicKeys.memo) {
-                    throw new Error("key derivation failed");
+                    throw Object.assign(new Error("key derivation failed"),
+                        { i18n: tk("components.create_bulk_account_dialog.key_derivation_failed") });
                 }
                 const op = api.broadcast.buildAccountCreateOp({
                     fee: feeToUse,
@@ -415,7 +418,13 @@ class CreateBulkAccountDialog extends React.PureComponent {
                 // downloads out, which keeps browsers from blocking them.
                 this._savePdf(result);
             } catch (err) {
-                results.push({ name, status: "error", message: (err && err.message) || "Failed" });
+                // message: a tk() descriptor, or the error's own text (the
+                // node's, or a translated one) — resolved with tx() at render.
+                results.push({
+                    name,
+                    status: "error",
+                    message: (err && (err.i18n || err.message)) || tk("components.create_bulk_account_dialog.failed"),
+                });
             }
             this.setState({
                 _results: results.slice(),
@@ -539,7 +548,11 @@ class CreateBulkAccountDialog extends React.PureComponent {
                     />
                     <div style={COUNTS_ROW_STYLE}>
                         <Typography variant="body2" style={COUNTS_TEXT_STYLE}>
-                            {creatable.length} ready{invalidCount ? ` · ${invalidCount} invalid` : ""}{takenCount ? ` · ${takenCount} taken` : ""}
+                            {[
+                                t("components.create_bulk_account_dialog.count_ready", { count: creatable.length }),
+                                invalidCount ? t("components.create_bulk_account_dialog.count_invalid", { count: invalidCount }) : null,
+                                takenCount ? t("components.create_bulk_account_dialog.count_taken", { count: takenCount }) : null,
+                            ].filter(Boolean).join(" · ")}
                         </Typography>
                         <Typography variant="body2" style={COUNTS_TEXT_STYLE}>
                             {t("components.create_bulk_account_dialog.fee_account")} <span className={classes.mono}>{_fee || "…"}</span>
@@ -580,7 +593,7 @@ class CreateBulkAccountDialog extends React.PureComponent {
                                                 ? t("components.create_bulk_account_dialog.block_backup_pdf_ready", {
                                                     block: r.block ?? "—"
                                                 })
-                                                : (r.message || "Failed")}
+                                                : (tx(r.message) || t("components.create_bulk_account_dialog.failed"))}
                                             secondaryTypographyProps={r.status === "ok" ? RESULT_SECONDARY_OK : RESULT_SECONDARY_BAD}
                                         />
                                         {r.status === "ok" && r.pdfBlob && (
@@ -605,10 +618,10 @@ class CreateBulkAccountDialog extends React.PureComponent {
                         </Button>
                     )}
                     <Button variant="text" color="primary" onClick={onClose} disabled={_running}>
-                        {_done ? "CLOSE" : "CANCEL"}
+                        {_done ? t("words.close", { TUC: true }) : t("words.cancel", { TUC: true })}
                     </Button>
                     {!_done && (
-                        <Tooltip title={creatable.length === 0 ? "Add at least one valid, available username" : ""} disableHoverListener={creatable.length > 0}>
+                        <Tooltip title={creatable.length === 0 ? t("components.create_bulk_account_dialog.add_at_least_one_valid_available_username") : ""} disableHoverListener={creatable.length > 0}>
                             <span>
                                 <Button
                                     variant="contained"
@@ -618,7 +631,9 @@ class CreateBulkAccountDialog extends React.PureComponent {
                                 >
                                     {_running
                                         ? <React.Fragment><CircularProgress size={16} style={CREATING_SPINNER_STYLE} /> {t("components.create_bulk_account_dialog.creating")}</React.Fragment>
-                                        : `Create ${creatable.length || ""}`.trim()}
+                                        : (creatable.length
+                                            ? t("components.create_bulk_account_dialog.create_n", { count: creatable.length })
+                                            : t("words.create"))}
                                 </Button>
                             </span>
                         </Tooltip>

@@ -20,6 +20,8 @@ import CallSplitIcon from "@material-ui/icons/CallSplit";
 import VerifiedUserIcon from "@material-ui/icons/VerifiedUser";
 import FitnessCenterIcon from "@material-ui/icons/FitnessCenter";
 import { t } from "../utils/text";
+import { T } from "../utils/T";
+import { withLanguage } from "../utils/withLanguage";
 
 const styles = theme => ({
     root: {
@@ -246,13 +248,15 @@ class CommunityPrinciples extends React.PureComponent {
 
         return (
             <div className={classes.root}>
-                <Typography className={classes.epigraph}>Uniquely we are free; together we are stronger.</Typography>
-                <Typography className={classes.foreword}>These principles are the foundation of Pixa, and of the community we build upon it — honest, fair, enduring, and united. The protocol forbids only what it must; everything good beyond that line is the character we choose. This is that character: the spirit in which we create, the way we treat one another, and the measure we hold ourselves to. They bind no one by force, and yet they bind us all.</Typography>
+                <Typography className={classes.epigraph}>{t("components.community_principles.uniquely_we_are_free_together_we_are_stronger")}</Typography>
+                <Typography className={classes.foreword}>{t("components.community_principles.these_principles_are_the_foundation_of_pixa")}</Typography>
                 {PRINCIPLE_SECTIONS.map((section, i) => this._render_section(section, i))}
-                <Typography className={classes.closing}>Free in our hands, united in our purpose — <span style={{color: "rgba(255,255,255,1.0)"}}>we build for all time.</span></Typography>
+                <Typography className={classes.closing}><T
+                        k="components.community_principles.free_in_our_hands_united_in_our_purpose"
+                        slots={[<span style={{color: "rgba(255,255,255,1.0)"}} key="0" />]} /></Typography>
             </div>
         );
     }
 }
 
-export default withStyles(styles)(CommunityPrinciples);
+export default withLanguage(withStyles(styles)(CommunityPrinciples));

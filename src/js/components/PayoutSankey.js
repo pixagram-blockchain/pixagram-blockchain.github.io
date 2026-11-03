@@ -5,7 +5,7 @@ import withStyles from '@material-ui/core/styles/withStyles';
 import Portal from '@material-ui/core/Portal';
 import timeAgo from '../utils/TimeAgo';
 
-import { t } from "../utils/text";
+import { t, tk, tx, useLanguage, getLocaleCode } from "../utils/text";
 
 const styles = () => ({
     sankeyRoot: {
@@ -87,11 +87,13 @@ const DESIGN_PXA_USD = 0.12;
  * 1000 = 10 %) off the top and the author keeps the remainder — the author
  * is not listed. Rows that were pre-computed upstream may carry `percent`
  * instead; both are accepted. Whatever the rows leave goes to the author,
- * merged into an existing author row if the list already names them.
+ * merged into an existing author row if the list already names them. The
+ * author row's `account` is null when the data names no author (the chart
+ * then labels it with the translated "Author").
  */
 export function creatorShares(data) {
     const author = (data && data.author) || {};
-    const authorName = author.username || (data && data.username) || 'author';
+    const authorName = author.username || (data && data.username) || null;
     const rows = data && Array.isArray(data.beneficiaries) ? data.beneficiaries : [];
     const bens = rows.map(b => ({
         account: b && b.account,
@@ -110,6 +112,7 @@ export function creatorShares(data) {
 }
 
 function PayoutSankey({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPrice, currency, fiatRate }) {
+    useLanguage();
     const [tip, setTip] = useState(null);
 
     const info = useMemo(() => {
@@ -247,8 +250,14 @@ function PayoutSankey({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPr
     const fiatMul = Number.isFinite(fiatRate) && fiatRate > 0 ? fiatRate : 1;
     const fiatCur = currency || 'USD';
     const approx = isEstimate ? '≈ ' : '';
-    const fmt = usd => `${approx}${(usd * fiatMul).toFixed(2)} ${fiatCur}`;
-    const fmtP = v => `${approx}${v.toFixed(2)}`;
+    // Two decimals in the user's number format ("1 234,56" in fr-CH).
+    const localeCode = getLocaleCode();
+    const fixed2 = v => v.toLocaleString(localeCode, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmt = usd => `${approx}${fixed2(usd * fiatMul)} ${fiatCur}`;
+    const fmtP = v => `${approx}${fixed2(v)}`;
+    // Tooltip titles are stored as tk() descriptors (or plain "@account"
+    // strings) and resolved with tx() when the tooltip renders.
+    const authorLabel = a => (a.account ? '@' + a.account : t("components.payout_sankey.author"));
 
     return (
         <div className={classes.sankeyRoot}>
@@ -322,7 +331,7 @@ function PayoutSankey({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPr
                 {/* ══ BARS ══ */}
 
                 {/* Reward — white, full height */}
-                <g onMouseEnter={e => show(e, { title: 'Reward', usd: info.totalUSD, pxs: info.pxsAmount, pxa: info.pxaAmount })}
+                <g onMouseEnter={e => show(e, { title: tk("components.payout_sankey.reward"), usd: info.totalUSD, pxs: info.pxsAmount, pxa: info.pxaAmount })}
                    onMouseMove={move} onMouseLeave={hide} style={{ cursor: 'pointer' }}>
                     <rect x={col0X} y={rewardY} width={barW} height={rewardH} rx={3} fill="#fff" />
                     <text x={col0X + barW / 2} y={rewardY + rewardH / 2} textAnchor="middle" dominantBaseline="central"
@@ -333,14 +342,14 @@ function PayoutSankey({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPr
 
                 {/* Creators */}
                 {showCreators && (
-                    <g onMouseEnter={e => show(e, { title: `Creators (${info.creatorsP}%)`, usd: info.creatorsUSD, pxs: info.creatorsPXS, pxa: info.creatorsPXA })}
+                    <g onMouseEnter={e => show(e, { title: tk("components.payout_sankey.creators_percent", { percent: info.creatorsP }), usd: info.creatorsUSD, pxs: info.creatorsPXS, pxa: info.creatorsPXA })}
                        onMouseMove={move} onMouseLeave={hide} style={{ cursor: 'pointer' }}>
                         <rect x={col1X} y={creatorsY} width={barW} height={creatorsH} rx={3} fill={creatorsFill} />
                         {creatorsH > 14 && (
                             <text x={col1X + barW / 2} y={creatorsY + creatorsH / 2} textAnchor="middle"
                                   dominantBaseline="central" fill={textColor(info.creatorsP)} fontSize="8" fontWeight="600"
                                   fontFamily='"Industry Book", "Normative Pro", sans-serif'>
-                                {truncate('Creators', barW, 8)}
+                                {truncate(t("words.creators"), barW, 8)}
                             </text>
                         )}
                     </g>
@@ -348,14 +357,14 @@ function PayoutSankey({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPr
 
                 {/* Curators */}
                 {showCurators && (
-                    <g onMouseEnter={e => show(e, { title: `Curators (${info.curatorsP}%)`, usd: info.curatorsUSD, pxs: info.curatorsPXS, pxa: info.curatorsPXA })}
+                    <g onMouseEnter={e => show(e, { title: tk("components.payout_sankey.curators_percent", { percent: info.curatorsP }), usd: info.curatorsUSD, pxs: info.curatorsPXS, pxa: info.curatorsPXA })}
                        onMouseMove={move} onMouseLeave={hide} style={{ cursor: 'pointer' }}>
                         <rect x={col1X} y={curatorsY} width={barW} height={curatorsH} rx={3} fill={curatorsFill} />
                         {curatorsH > 14 && (
                             <text x={col1X + barW / 2} y={curatorsY + curatorsH / 2} textAnchor="middle"
                                   dominantBaseline="central" fill={textColor(info.curatorsP)} fontSize="8" fontWeight="500"
                                   fontFamily='"Industry Book", "Normative Pro", sans-serif'>
-                                {truncate('Curators', barW, 8)}
+                                {truncate(t("words.curators"), barW, 8)}
                             </text>
                         )}
                     </g>
@@ -363,10 +372,12 @@ function PayoutSankey({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPr
 
                 {/* Author bars */}
                 {showAuthors && authorBars.map((a, i) => {
-                    const label = truncate('@' + a.account, barW, 7.5);
+                    const label = truncate(authorLabel(a), barW, 7.5);
                     return (
                         <g key={'hab'+i}
-                           onMouseEnter={e => show(e, { title: `@${a.account} (${a.pct.toFixed(0)}%)`, usd: a.usd, pxs: a.pxs, pxa: a.pxa })}
+                           onMouseEnter={e => show(e, { title: a.account
+                               ? `@${a.account} (${a.pct.toFixed(0)}%)`
+                               : tk("components.payout_sankey.author_percent", { percent: a.pct.toFixed(0) }), usd: a.usd, pxs: a.pxs, pxa: a.pxa })}
                            onMouseMove={move} onMouseLeave={hide} style={{ cursor: 'pointer' }}>
                             <rect x={col2X} y={a.y} width={barW} height={a.h} rx={2} fill={a.fill} />
                             {a.h > 12 && label && (
@@ -394,7 +405,7 @@ function PayoutSankey({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPr
                         className={classes.portalTip}
                         style={{ left: tip.x, top: tip.y, opacity: 1 }}
                     >
-                        <div><strong>{tip.content.title}</strong></div>
+                        <div><strong>{tx(tip.content.title)}</strong></div>
                         <div>{fmt(tip.content.usd)}</div>
                         <div className="sub">+{fmtP(tip.content.pxs)} PXS</div>
                         <div className="sub">+{fmtP(tip.content.pxa)} PXA</div>

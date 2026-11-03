@@ -114,14 +114,14 @@ const styles = theme => ({
             }
         },
         "& .react-swipeable-view-container": {
-            height: "max(80vh, calc(-372px + 100vh)) !important",
+            height: "max(calc(var(--app-h, 100vh) * 0.8), calc(var(--app-h, 100vh) - 372px)) !important",
             [theme.breakpoints.down("sm")]: {
                 flex: "1 1 auto !important",
                 height: "auto !important"
             }
         },
         "& .react-swipeable-view-container > div": {
-            height: "max(80vh, calc(-372px + 100vh)) !important",
+            height: "max(calc(var(--app-h, 100vh) * 0.8), calc(var(--app-h, 100vh) - 372px)) !important",
             overflow: "hidden auto !important",
             [theme.breakpoints.down("sm")]: {
                 height: "100% !important"

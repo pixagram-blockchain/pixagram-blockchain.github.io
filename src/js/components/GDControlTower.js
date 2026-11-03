@@ -30,10 +30,10 @@ import { Tooltip } from "recharts/lib/component/Tooltip";
 import { LabelList } from "recharts/lib/component/LabelList";
 
 import { withLanguage } from "../utils/withLanguage";
-import { towerGet, towerSeries, nowSec, fmtCompact, fmtInt, fmtPct, fmtAgo } from "../utils/tower";
+import { towerGet, towerSeries, nowSec, fmtCompact, fmtInt, fmtNum, fmtPct, fmtSignedPct, fmtAgo } from "../utils/tower";
 import {
     tr, trf, Card, Tile, Pill, Meter, Empty, Skeleton, Visible, ChartTip, Legend, GlyphTile, Heatmap,
-    SERIES, AXIS, GRID, BAR_CURSOR, BAR, HBAR, stackShape, axisTick, bucketLabel, fillBuckets, newestOnly,
+    SERIES, AXIS, GRID, BAR_CURSOR, BAR, HBAR, stackShape, axisTick, bucketLabel, fillBuckets, newestOnly, fmtDate,
     Masonry, StickyBar, BackButton, HUB_EASE, hubSnapshot, hubPlay, hubStop, revealTop, releaseScroll
 } from "./GDTowerKit";
 import GDReports from "./GDReports";
@@ -61,7 +61,7 @@ const GOALS = [
             const m = gov && (gov.capture_cost_pxp || []).find((x) => x.dim === "majority");
             if (!m || !m.extra) return null;
             const share = m.extra.share_of_user_stake || 0;
-            return { current: share, target: 0.5, text: `${fmtPct(share, 0)} / 50%` };
+            return { current: share, target: 0.5, text: `${fmtPct(share, 0)} / ${fmtPct(0.5, 0)}` };
         }
     },
     {
@@ -71,7 +71,7 @@ const GOALS = [
         read: ({ gov }) => {
             const p = gov ? gov.witness_vote_participation : null;
             if (p == null) return null;
-            return { current: p, target: 0.5, text: `${fmtPct(p, 0)} / 50%` };
+            return { current: p, target: 0.5, text: `${fmtPct(p, 0)} / ${fmtPct(0.5, 0)}` };
         }
     },
     {
@@ -82,7 +82,7 @@ const GOALS = [
             const r = ov && ov.supply ? ov.supply.pxs_debt_ratio : null;
             if (r == null) return null;
             // Progress = headroom left under the line; done while below it.
-            return { current: Math.max(0, 0.2 - r), target: 0.2, done: r < 0.2, text: `${fmtPct(r, 1)} / 20%` };
+            return { current: Math.max(0, 0.2 - r), target: 0.2, done: r < 0.2, text: `${fmtPct(r, 1)} / ${fmtPct(0.2, 0)}` };
         }
     },
     {
@@ -109,7 +109,7 @@ const GOALS = [
         read: ({ stickiness }) => {
             const s = stickiness && stickiness[0];
             if (!s || !s.extra) return null;
-            return { current: s.extra.mau, target: 1000, text: `${fmtInt(s.extra.mau)} / 1,000` };
+            return { current: s.extra.mau, target: 1000, text: `${fmtInt(s.extra.mau)} / ${fmtInt(1000)}` };
         }
     }
 ];
@@ -144,14 +144,24 @@ function perDim(points) {
 /** Sum of a series' overall total (dim ""). */
 const totalOf = (points) => (points || []).reduce((t, p) => t + (p.dim === "" ? p.value || 0 : 0), 0);
 
-/** Share of slots filled, with enough decimals that a witness who missed blocks never reads 100%. */
+/**
+ * Share of slots filled, with enough decimals that a witness who missed blocks never reads 100%. Decided on
+ * the rounded figure, not on the text, which follows the locale (digits, separators, where "%" goes).
+ */
 function filledShare(produced, missed) {
-    if (missed === 0) return "100%";
+    if (missed === 0) return fmtPct(1, 0);
+    const share = produced / (produced + missed);
     for (const digits of [2, 3, 4]) {
-        const v = fmtPct(produced / (produced + missed), digits);
-        if (!v.startsWith("100")) return v;
+        if (+(share * 100).toFixed(digits) < 100) return fmtPct(share, digits);
     }
-    return "> 99.99%";
+    return `> ${fmtPct(0.9999, 2)}`;
+}
+
+/** An ISO date ("2026-10-11…") as a calendar date in the app's language; as written when it cannot be read. */
+function isoDay(iso) {
+    const day = String(iso || "").slice(0, 10);
+    const ms = Date.parse(`${day}T00:00:00Z`);
+    return Number.isFinite(ms) ? fmtDate(ms / 1000, { day: "numeric", month: "short", year: "numeric" }) : day;
 }
 
 const styles = theme => ({
@@ -747,7 +757,7 @@ class GDControlTower extends React.PureComponent {
                                     <span className={classes.wName}>@{w.witness}{w.disabled ? " · " + tr(K + "off", "off") : ""}</span>
                                     <span className={classes.wNum}>{fmtCompact(w.votes_pxp)}</span>
                                     <span className={classes.wNum}>{w.missed_24h && w.elected ? <Pill level={w.miss_rate_24h > 0.04 ? "red" : w.miss_rate_24h > 0.01 ? "amber" : "muted"} icon={false}>{w.missed_24h}</Pill> : "0"}</span>
-                                    <span className={classes.wNum}>{w.feed_age_hours == null || !w.elected ? "–" : w.feed_age_hours > 24 ? <Pill level={w.feed_age_hours > 72 ? "red" : "amber"} icon={false}>{Math.round(w.feed_age_hours)}h</Pill> : `${w.feed_age_hours.toFixed(1)}h`}</span>
+                                    <span className={classes.wNum}>{w.feed_age_hours == null || !w.elected ? "–" : w.feed_age_hours > 24 ? <Pill level={w.feed_age_hours > 72 ? "red" : "amber"} icon={false}>{fmtInt(w.feed_age_hours)}h</Pill> : `${fmtNum(w.feed_age_hours, 1)}h`}</span>
                                     <span className={classes.wNum}>{w.running_version || "–"}</span>
                                 </div>
                             ))}
@@ -774,8 +784,8 @@ class GDControlTower extends React.PureComponent {
                 <Tile label={tr(K + "account_fee", "Account creation fee")} value={fee == null ? "–" : fmtCompact(fee)} unit="PIXA" sub={tr(K + "median_of_witnesses", "median of the witnesses")} loading={l} />
                 <Tile label={tr(K + "max_block", "Maximum block size")} value={blockSize ? fmtCompact(blockSize / 1048576, 1) : "–"} unit="MiB" sub={tr(K + "voted_by_witnesses", "voted by witnesses")} loading={l} />
                 <Tile label={tr(K + "debt_ratio", "PXS debt ratio")} value={s ? fmtPct(s.pxs_debt_ratio, 1) : "–"} sub={tr(K + "stop_print_at", "printing stops at 20%")} loading={l} />
-                <Tile label={tr(K + "feed", "Price feed")} value={s && s.feed_pixa_per_pxs ? s.feed_pixa_per_pxs.toFixed(3) : "–"} unit="PIXA/PXS" sub={tr(K + "median_feed", "median of the elected witnesses")} loading={l} />
-                <Tile label={tr(K + "vests_ratio", "PIXA per VESTS")} value={s ? s.vests_ratio.toFixed(6) : "–"} sub={tr(K + "no_stake_yield", "flat: no yield on stake")} loading={l} />
+                <Tile label={tr(K + "feed", "Price feed")} value={s && s.feed_pixa_per_pxs ? fmtNum(s.feed_pixa_per_pxs, 3) : "–"} unit="PIXA/PXS" sub={tr(K + "median_feed", "median of the elected witnesses")} loading={l} />
+                <Tile label={tr(K + "vests_ratio", "PIXA per VESTS")} value={s ? fmtNum(s.vests_ratio, 6) : "–"} sub={tr(K + "no_stake_yield", "flat: no yield on stake")} loading={l} />
                 <Tile label={tr(K + "curation_share", "Curation share")} value={cur == null ? "–" : fmtPct(cur, 0)} sub={tr(K + "curation_expected", "observed yesterday; 40% expected")} loading={l} />
                 <Tile label={tr(K + "chain_version", "Chain version")} value={g ? g.majority_version || "–" : "–"} sub={g ? `${g.hf_required_witnesses} ${tr(K + "witnesses_for_hardfork", "witnesses activate a hardfork")}` : ""} loading={l} />
             </div>
@@ -856,7 +866,7 @@ class GDControlTower extends React.PureComponent {
                                 <div className={classes.rowMain}>
                                     <div className={classes.rowTitle} title={p.subject}>#{p.id} · {p.subject}</div>
                                     <div className={classes.rowSub}>
-                                        @{p.receiver} · {fmtCompact(p.daily_pay_pxs)} PXS/{tr(K + "day", "day")} · {trf(K + "until_n", "until {n}", { n: p.end.slice(0, 10) })}
+                                        @{p.receiver} · {fmtCompact(p.daily_pay_pxs)} PXS/{tr(K + "day", "day")} · {trf(K + "until_n", "until {n}", { n: isoDay(p.end) })}
                                     </div>
                                     <div className={classes.rowMeter}>
                                         <Meter value={p.total_votes_vests / max} marks={ret ? [ret.total_votes_vests / max] : []} strong={p.above_return} />
@@ -889,7 +899,7 @@ class GDControlTower extends React.PureComponent {
         return (
             <Card
                 title={tr(K + "price_feeds", "Price feeds")}
-                subtitle={s && s.feed_pixa_per_pxs ? `${tr(K + "median", "median")} ${s.feed_pixa_per_pxs.toFixed(3)} PIXA ${tr(K + "per_pxs", "per PXS")}` : ""}
+                subtitle={s && s.feed_pixa_per_pxs ? `${tr(K + "median", "median")} ${fmtNum(s.feed_pixa_per_pxs, 3)} PIXA ${tr(K + "per_pxs", "per PXS")}` : ""}
                 info={tr(K + "feeds_info", "Each elected witness's last published feed and its distance to the median. A feed far from the others, or one not updated for a day, deserves a question to its operator.")}
             >
                 {list.length === 0 ? <Empty>{tr(K + "no_feeds", "No feed published yet.")}</Empty> : (
@@ -898,12 +908,12 @@ class GDControlTower extends React.PureComponent {
                             <div key={w.witness} className={classes.row}>
                                 <div className={classes.rowMain}>
                                     <div className={classes.rowTitle}>@{w.witness}</div>
-                                    <div className={classes.rowSub}>{w.feed_age_hours == null ? "" : trf(K + "updated_n_ago", "updated {n} ago", { n: w.feed_age_hours < 1 ? Math.round(w.feed_age_hours * 60) + "m" : Math.round(w.feed_age_hours) + "h" })}</div>
+                                    <div className={classes.rowSub}>{w.feed_age_hours == null ? "" : trf(K + "updated_n_ago", "updated {n} ago", { n: w.feed_age_hours < 1 ? fmtInt(w.feed_age_hours * 60) + "m" : fmtInt(w.feed_age_hours) + "h" })}</div>
                                 </div>
                                 <div className={classes.rowValue}>
-                                    {w.feed_pixa_per_pxs.toFixed(3)}
+                                    {fmtNum(w.feed_pixa_per_pxs, 3)}
                                     <span style={{ color: "#666", marginLeft: "8px" }}>
-                                        {w.feed_deviation == null ? "" : Math.abs(w.feed_deviation) < 0.0005 ? "=" : `${w.feed_deviation > 0 ? "+" : ""}${(w.feed_deviation * 100).toFixed(1)}%`}
+                                        {w.feed_deviation == null ? "" : Math.abs(w.feed_deviation) < 0.0005 ? "=" : fmtSignedPct(w.feed_deviation, 1)}
                                     </span>
                                 </div>
                             </div>
@@ -934,7 +944,7 @@ class GDControlTower extends React.PureComponent {
                                     <div className={classes.rowTitle}>{p.title || p.portal}</div>
                                     <div className={classes.rowSub}>
                                         {fmtInt(p.posts)} {tr(K + "posts", "posts")} · {fmtInt(p.replies)} {tr(K + "replies", "replies")} · {fmtInt(p.subscribers || 0)} {tr(K + "subscribers", "subscribers")}
-                                        {p.controversy_30d != null ? ` · ${tr(K + "controversy", "controversy")} ${p.controversy_30d.toFixed(2)}` : ""}
+                                        {p.controversy_30d != null ? ` · ${tr(K + "controversy", "controversy")} ${fmtNum(p.controversy_30d, 2)}` : ""}
                                     </div>
                                 </div>
                                 <div className={`${classes.rowValue} ${classes.rowValueMuted}`}>{p.last_post ? fmtAgo(p.last_post) : "–"}</div>
@@ -1239,7 +1249,7 @@ class GDControlTower extends React.PureComponent {
             .filter((v) => v.dim !== "" && v.value != null)
             .map((v) => ({ w: v.dim, rate: v.value }))
             .sort((a, b) => b.rate - a.rate || (a.w < b.w ? -1 : 1));
-        const pct = (v) => `${Number(v.toFixed(2))}%`;
+        const pct = (v) => fmtPct(v / 100, 2, 0); // a rate voted in percent: up to 2 decimals, trailing zeros dropped
         const allZero = !median && rows.every((r) => !r.rate);
         return (
             <Card
@@ -1317,7 +1327,7 @@ class GDControlTower extends React.PureComponent {
                         </div>
                         {hf.length ? (
                             <div className={classes.note}>
-                                {tr(K + "hardfork_votes", "Hardfork votes")}: {hf.map(([ver, n]) => `${ver === "unknown" ? "–" : ver} × ${n}`).join(" · ")}
+                                {tr(K + "hardfork_votes", "Hardfork votes")}: {hf.map(([ver, n]) => `${ver === "unknown" ? "–" : ver} × ${fmtInt(n)}`).join(" · ")}
                             </div>
                         ) : null}
                     </>
@@ -1357,8 +1367,9 @@ class GDControlTower extends React.PureComponent {
         );
         const facts = (rows) => (
             <div className={classes.sumFacts}>
-                {rows.map(([label, value]) => (
-                    <React.Fragment key={label}>
+                {rows.map(([label, value], i) => (
+                    // by position: a label is translated text, never a key
+                    <React.Fragment key={i}>
                         <span className={classes.sumLabel}>{label}</span>
                         <span className={classes.sumFact}>{value}</span>
                     </React.Fragment>
@@ -1432,7 +1443,7 @@ class GDControlTower extends React.PureComponent {
                     <>
                         {figure(s ? fmtPct(s.pxs_debt_ratio, 1) : "–", null, `${tr(K + "debt_ratio", "PXS debt ratio")} · ${tr(K + "stop_print_at", "printing stops at 20%")}`)}
                         {facts([
-                            [tr(K + "feed", "Price feed"), s && s.feed_pixa_per_pxs ? `${s.feed_pixa_per_pxs.toFixed(3)} PIXA/PXS` : "–"],
+                            [tr(K + "feed", "Price feed"), s && s.feed_pixa_per_pxs ? `${fmtNum(s.feed_pixa_per_pxs, 3)} PIXA/PXS` : "–"],
                             [tr(K + "account_fee", "Account creation fee"), fee == null ? "–" : `${fmtCompact(fee)} PIXA`]
                         ])}
                     </>
@@ -1470,7 +1481,7 @@ class GDControlTower extends React.PureComponent {
                         {facts([
                             [tr(K + "runway_label", "Runway"), f && f.runway_days != null ? `${fmtInt(f.runway_days)} ${tr(K + "days", "days")}` : "–"],
                             [tr(K + "funded_proposals", "Funded proposals"), funded == null ? "–" : fmtInt(funded)],
-                            [tr(K + "median_feed_label", "Median feed"), s && s.feed_pixa_per_pxs ? s.feed_pixa_per_pxs.toFixed(3) : "–"]
+                            [tr(K + "median_feed_label", "Median feed"), s && s.feed_pixa_per_pxs ? fmtNum(s.feed_pixa_per_pxs, 3) : "–"]
                         ])}
                     </>
                 );
@@ -1498,8 +1509,8 @@ class GDControlTower extends React.PureComponent {
                 return (
                     <>
                         <div className={classes.chips}>
-                            {[tr(K + "cadence_day", "Day"), tr(K + "cadence_week", "Week"), tr(K + "cadence_month", "Month")].map((x) => (
-                                <span key={x} className={classes.chip}>{x}</span>
+                            {[["day", tr(K + "cadence_day", "Day")], ["week", tr(K + "cadence_week", "Week")], ["month", tr(K + "cadence_month", "Month")]].map(([k, x]) => (
+                                <span key={k} className={classes.chip}>{x}</span>
                             ))}
                         </div>
                         <div className={classes.sumCaption} style={{ marginTop: "12px" }}>
@@ -1535,7 +1546,7 @@ class GDControlTower extends React.PureComponent {
                                 e.stopPropagation();
                                 this._select(x.id);
                             }}
-                            aria-label={`${tr(K + "details", "Details")}: ${x.title()}`}
+                            aria-label={trf(K + "details_of_n", "Details: {n}", { n: x.title() })}
                         >
                             <span>{tr(K + "details", "Details")}</span>
                             <ArrowForwardRoundedIcon className={classes.moreIcon} />

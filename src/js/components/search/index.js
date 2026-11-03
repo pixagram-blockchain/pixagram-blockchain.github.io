@@ -11,8 +11,12 @@
 //                            to a question, "did you mean" and the placeholder's examples
 //   <SearchBar …/>           input (animated examples, ghost completion, keys) + filter
 //                            button (badge) + close + click-away + dropdown; owns the styles
-//                            and measures itself (width, height, widening)
-//   <SearchResults …/>       the dropdown alone, if a page wants to embed it elsewhere
+//                            and measures itself (width, height, widening); scrolled into
+//                            the posts and artworks, it grows into a panel (a centred sheet
+//                            on desktop, the whole screen on phones) and back (fullScreen.js:
+//                            the trigger and the hero transition)
+//   <SearchResults …/>       the dropdown alone, if a page wants to embed it elsewhere (it
+//                            hangs under its positioned parent, as wide as it)
 //   <SearchFilters …/>       the filter panel (show · time · colour · authors · communities)
 //   <TokenField …/>          multi-value text field with suggestions (authors, communities)
 //   <SuggestionList/>        what the Worker proposes for the text typed (top of the dropdown)
@@ -25,6 +29,8 @@
 //   artworkPath(item)        "/<category>/@author/permlink" for history.push
 //   filters.js / tags.js     the filter state model → /search parameters; tag validity
 //   intent.js                when a text deserves an answer; the ghost text
+//   wikiUrl(url)             a documentation link on GitHub (what the Worker still sends) →
+//                            the same page in the wiki on pixa.org (wiki.js)
 //
 // Index.js wiring (see the diff shipped with this folder):
 //   const search = useSearch(apiRef, { lang: processedSettings._know_the_settings ? processedSettings._language : null });
@@ -51,6 +57,7 @@ export {
 } from "./searchApi";
 export { renderBlocks, renderInline, parseBlocks, citationNumbers } from "./AnswerMarkdown";
 export { answerPlan, looksLikeQuestion, ghostFor } from "./intent";
+export { wikiUrl } from "./wiki";
 export {
     EMPTY_FILTERS, TIME_PRESETS, TYPE_OPTIONS, COLOR_MODES,
     hasFilters, countFilters, filtersToParams, filtersKey, normalizeFilters, compactFilters, toggleIn, accountName,

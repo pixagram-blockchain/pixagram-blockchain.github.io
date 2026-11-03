@@ -42,7 +42,7 @@ export const draftsDialogStyles = (theme) => ({
             borderRadius: 24,
             maxWidth: 900,
             width: "95%",
-            maxHeight: "85vh",
+            maxHeight: "calc(var(--app-h, 100vh) * 0.85)",
             overflow: "hidden"
         }
     },

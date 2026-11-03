@@ -33,20 +33,15 @@ import CropFreeIcon from "@material-ui/icons/CropFree";
 import AddCircleOutline from "@material-ui/icons/AddCircleOutline";
 
 import { lazyDialog } from "./LazyDialog";
-import { t, useLanguage } from "../utils/text";
+import { t, tk, tx, useLanguage } from "../utils/text";
 import { withLanguage } from "../utils/withLanguage";
 const QRScannerDialog = lazyDialog(() => import("./QrScanner"), { name: "QRScanner" });
 
-// components.unlock_key_dialog.attempts_remaining_before_logout and
-// master_password_lacks_key, with an English fallback for a build whose locale
-// files predate them.
-const tr = (key, fallback, params) => {
-    let s = null;
-    try { s = t(key, params); } catch (e) { s = null; }
-    // utils/text.js renders a missing key as its last segment ("title_account").
-    const last = key.slice(key.lastIndexOf(".") + 1);
-    return typeof s === "string" && s && s !== key && s !== last ? s : fallback;
-};
+// Messages kept in state (_pin_error, _key_error, _status_message) are tk()
+// descriptors or plain strings (an API's own text): resolved with tx() at
+// render, so they follow a language switch. An API result's translation is
+// `errorKey` (+ `errorVars`); its `error` stays English for logic and logs.
+const apiError = (r, fallback) => (r && r.errorKey ? tk(r.errorKey, r.errorVars) : ((r && r.error) || fallback));
 
 const styles = theme => ({
     backdrop: {
@@ -265,10 +260,10 @@ const PinUnlockMode = memo(function PinUnlockMode({
                                                       onToggleShowPin,
                                                       onMouseDownPassword,
                                                   }) {
-    useLanguage();
+    const lang = useLanguage();
     const pinEndAdornment = useMemo(() => (
         <InputAdornment position="end" className={classes.inputEndAdornment}>
-            <Tooltip title={showPin ? "Hide PIN" : "Show PIN"}>
+            <Tooltip title={showPin ? t("components.unlock_key_dialog.hide_pin") : t("components.unlock_key_dialog.show_pin")}>
                 <IconButton
                     edge="end"
                     aria-label={t("components.unlock_key_dialog.toggle_pin_visibility")}
@@ -279,7 +274,8 @@ const PinUnlockMode = memo(function PinUnlockMode({
                 </IconButton>
             </Tooltip>
         </InputAdornment>
-    ), [classes, showPin, onToggleShowPin, onMouseDownPassword]);
+    ), [classes, showPin, onToggleShowPin, onMouseDownPassword, lang]);
+    const pinLabel = t("components.pixa_wallet_keys_dialog.pin_label");
 
     return (
         <div>
@@ -287,14 +283,14 @@ const PinUnlockMode = memo(function PinUnlockMode({
                 {t("components.unlock_key_dialog.enter_your_pin_to_unlock_the_requested")}
             </Typography>
             <FormControl fullWidth variant="outlined">
-                <InputLabel htmlFor="unlock-pin">PIN</InputLabel>
+                <InputLabel htmlFor="unlock-pin">{pinLabel}</InputLabel>
                 <OutlinedInput
                     id="unlock-pin"
                     type={showPin ? 'text' : 'password'}
                     value={pin}
                     onChange={onPinChange}
                     endAdornment={pinEndAdornment}
-                    labelWidth={32}
+                    labelWidth={Math.max(32, pinLabel.length * 9)}
                     autoFocus
                     error={!!pinError}
                 />
@@ -307,7 +303,7 @@ const PinUnlockMode = memo(function PinUnlockMode({
             ) : null}
             {pinError && (
                 <Typography style={{ fontSize: 13, color: "#7b7b7b", marginTop: 8, textAlign: "right" }}>
-                    {pinError}
+                    {tx(pinError)}
                 </Typography>
             )}
             {attemptsRemaining !== null && attemptsRemaining < 5 && (
@@ -317,10 +313,13 @@ const PinUnlockMode = memo(function PinUnlockMode({
                         (pixaproxyapi PIN wipe — log in again with the key), not
                         a wait. */}
                     <span>{wipeNext
-                        ? tr("components.unlock_key_dialog.attempts_remaining_before_logout",
-                            (attemptsRemaining === 1 ? "Last attempt" : attemptsRemaining + " attempts left")
-                            + " before " + (account ? "@" + account : "this account") + " is logged out on this device",
-                            { attempt: { attempt: attemptsRemaining }, account: account || "" })
+                        ? (account
+                            ? t("components.unlock_key_dialog.attempts_remaining_before_logout", {
+                                attempt: { attempt: attemptsRemaining }, account: account,
+                            })
+                            : t("components.unlock_key_dialog.attempts_remaining_before_logout_this_account", {
+                                attempt: { attempt: attemptsRemaining },
+                            }))
                         : t("components.unlock_key_dialog.attempt_remaining_before_lockout", {
                             attempt: { attempt: attemptsRemaining },
                         })}</span>
@@ -347,7 +346,7 @@ const AddKeyMode = memo(function AddKeyMode({
                                                 onMouseDownPassword,
                                                 onOpenQRScanner,
                                             }) {
-    useLanguage();
+    const lang = useLanguage();
     const config = KEY_TYPES[keyType] || KEY_TYPES.posting;
 
     const keyEndAdornment = useMemo(() => (
@@ -357,10 +356,10 @@ const AddKeyMode = memo(function AddKeyMode({
             ) : keyValue.length > 0 ? (
                 <Tooltip title={
                              keyIsWif
-                                 ? "Valid WIF key format"
+                                 ? t("components.unlock_key_dialog.valid_wif_key_format")
                                  : keyValid
-                                     ? "Looks like a master password — will be checked against the account"
-                                     : "Too short — enter your master password or a WIF key"
+                                     ? t("components.unlock_key_dialog.looks_like_a_master_password")
+                                     : t("components.unlock_key_dialog.too_short_enter_master_password_or_wif")
                          }>
                     <IconButton edge="end" disabled className={classes.buttonNotDisabled}>
                         {keyIsWif
@@ -380,7 +379,7 @@ const AddKeyMode = memo(function AddKeyMode({
                     <CropFreeIcon />
                 </IconButton>
             </Tooltip>
-            <Tooltip title={showKey ? "Hide key" : "Show key"}>
+            <Tooltip title={showKey ? t("components.pixa_wallet_keys_dialog.hide_key") : t("components.login_dialog.show_key")}>
                 <IconButton
                     edge="end"
                     aria-label={t("words.toggle_key_visibility")}
@@ -391,7 +390,7 @@ const AddKeyMode = memo(function AddKeyMode({
                 </IconButton>
             </Tooltip>
         </InputAdornment>
-    ), [classes, pendingValidation, keyValue, keyValid, keyIsWif, showKey, onToggleShowKey, onMouseDownPassword, onOpenQRScanner]);
+    ), [classes, pendingValidation, keyValue, keyValid, keyIsWif, showKey, onToggleShowKey, onMouseDownPassword, onOpenQRScanner, lang]);
 
     const estimatedLabelWidth = t(config.label).length * 10;
 
@@ -416,7 +415,7 @@ const AddKeyMode = memo(function AddKeyMode({
             })}</Typography>
             {keyError && (
                 <Typography style={{ fontSize: 13, color: "#a1a1a1", marginTop: 8, textAlign: "right" }}>
-                    {keyError}
+                    {tx(keyError)}
                 </Typography>
             )}
         </div>
@@ -680,13 +679,15 @@ class UnlockKeyDialog extends React.PureComponent {
         const { _mode, _pin, _key_value } = this.state;
 
         if (!api) {
-            this.setState({ _status: 'error', _status_message: 'API not available' });
+            this.setState({ _status: 'error', _status_message: tk("components.login_dialog.api_not_available") });
             return;
         }
 
         this.setState({
             _status: 'pending',
-            _status_message: _mode === 'pin' ? 'Verifying PIN...' : 'Validating key...',
+            _status_message: _mode === 'pin'
+                ? tk("components.unlock_key_dialog.verifying_pin")
+                : tk("components.unlock_key_dialog.validating_key"),
             _backdrop_opened: true,
         });
         // The dialog may be reset for another account before the answer
@@ -702,7 +703,7 @@ class UnlockKeyDialog extends React.PureComponent {
                 if (!result.success) {
                     this.setState({
                         _status: 'error',
-                        _pin_error: result.error || 'Invalid PIN',
+                        _pin_error: apiError(result, tk("components.unlock_key_dialog.invalid_pin")),
                         _status_message: null,
                         _backdrop_opened: false,
                         // Wrong PINs left before the next lockout or the wipe
@@ -714,7 +715,7 @@ class UnlockKeyDialog extends React.PureComponent {
                     });
                     return;
                 }
-                this.setState({ _status: 'success', _status_message: 'Key unlocked!', _backdrop_opened: false });
+                this.setState({ _status: 'success', _status_message: tk("components.unlock_key_dialog.key_unlocked"), _backdrop_opened: false });
                 if (onUnlock) onUnlock({ keyType: requiredKeyType, username: username });
                 setTimeout(() => { if (!stale() && onClose) onClose(); }, 800);
             } else {
@@ -744,13 +745,14 @@ class UnlockKeyDialog extends React.PureComponent {
                 // (network, account not found): shown as is — it says
                 // nothing about the key.
                 let checkError = null;
+                // Matches the API's English `error` on purpose (logic, not display).
                 const mismatch = (v) => /does not match|Invalid key format/i.test((v && v.error) || '');
 
                 const tryAsSpecificKey = async () => {
                     if (!api.validateCredentials) return _key_value; // can't check, assume valid
                     const v = await api.validateCredentials(account, _key_value, requiredKeyType);
                     if (v.valid) return _key_value;
-                    if (!mismatch(v)) checkError = v.error || null;
+                    if (!mismatch(v)) checkError = apiError(v, null);
                     return null;
                 };
 
@@ -766,7 +768,7 @@ class UnlockKeyDialog extends React.PureComponent {
                     if (!derived) return null;
                     const v = await api.validateCredentials(account, derived, requiredKeyType);
                     if (v.valid) return derived;
-                    if (!mismatch(v)) { checkError = v.error || null; return null; }
+                    if (!mismatch(v)) { checkError = apiError(v, null); return null; }
                     // The account's master password, whose key for this role
                     // was changed on chain? Say so rather than "not valid".
                     try {
@@ -793,17 +795,19 @@ class UnlockKeyDialog extends React.PureComponent {
                 }
 
                 if (stale()) return;
+                // The role's name, translated where it is shown (tx resolves
+                // a descriptor nested in another's variables).
+                const keyLabel = KEY_TYPES[requiredKeyType]
+                    ? tk(KEY_TYPES[requiredKeyType].label)
+                    : String(requiredKeyType || '');
                 if (!resolvedWif) {
-                    const keyLabel = t(KEY_TYPES[requiredKeyType]?.label) || 'key';
                     this.setState({
                         _status: 'error',
                         _key_error: masterLacksKey
-                            ? tr("components.unlock_key_dialog.master_password_lacks_key",
-                                `@${account}'s ${keyLabel} was changed on-chain: this master password no longer gives it. Enter the ${keyLabel} itself.`,
-                                { t: keyLabel, username: account })
+                            ? tk("components.unlock_key_dialog.master_password_lacks_key", { t: keyLabel, username: account })
                             : checkError
                                 ? checkError
-                                : t("components.unlock_key_dialog.not_a_valid_or_master_password_for", {
+                                : tk("components.unlock_key_dialog.not_a_valid_or_master_password_for", {
                                     t: keyLabel,
                                     username: username
                                 }),
@@ -835,10 +839,10 @@ class UnlockKeyDialog extends React.PureComponent {
                 this.setState({
                     _status: 'success',
                     _status_message: isMasterDerived
-                        ? t("components.unlock_key_dialog.derived_from_master_and_added", {
-                            t: t(KEY_TYPES[requiredKeyType]?.label) || 'Key'
+                        ? tk("components.unlock_key_dialog.derived_from_master_and_added", {
+                            t: keyLabel
                         })
-                        : 'Key added successfully!',
+                        : tk("components.unlock_key_dialog.key_added_successfully"),
                     _backdrop_opened: false,
                 });
                 // FIX: Include the resolved WIF in the callback so API can use it
@@ -848,11 +852,12 @@ class UnlockKeyDialog extends React.PureComponent {
         } catch (error) {
             console.error('Unlock/Add key error:', error);
             if (stale()) return;
-            let errorMessage = error.message || 'Operation failed';
-            if (error.code === 'INVALID_PIN') errorMessage = 'Invalid PIN';
-            else if (error.code === 'VAULT_LOCKED') errorMessage = 'Vault is locked. Please log in again.';
-            else if (error.code === 'KEY_NOT_FOUND') errorMessage = 'Key not found in vault';
-            else if (error.code === 'VALIDATION_FAILED') errorMessage = 'Key does not match account';
+            let errorMessage = apiError({ errorKey: error.errorKey, errorVars: error.errorVars, error: error.message },
+                tk("components.unlock_key_dialog.operation_failed"));
+            if (error.code === 'INVALID_PIN') errorMessage = tk("components.unlock_key_dialog.invalid_pin");
+            else if (error.code === 'VAULT_LOCKED') errorMessage = tk("components.unlock_key_dialog.vault_is_locked_please_log_in_again");
+            else if (error.code === 'KEY_NOT_FOUND') errorMessage = tk("components.unlock_key_dialog.key_not_found_in_vault");
+            else if (error.code === 'VALIDATION_FAILED') errorMessage = tk("components.unlock_key_dialog.key_does_not_match_account");
 
             this.setState({
                 _status: 'error',
@@ -865,9 +870,11 @@ class UnlockKeyDialog extends React.PureComponent {
 
     _getSubmitButtonText = () => {
         const { _mode, _status } = this.state;
-        if (_status === 'pending') return 'PROCESSING...';
-        if (_status === 'success') return 'DONE';
-        return _mode === 'pin' ? 'UNLOCK' : 'ADD KEY';
+        if (_status === 'pending') return t("components.unlock_key_dialog.processing", { TUC: true });
+        if (_status === 'success') return t("words.done", { TUC: true });
+        return _mode === 'pin'
+            ? t("components.unlock_key_dialog.unlock", { TUC: true })
+            : t("components.unlock_key_dialog.add_key", { TUC: true });
     };
 
     render() {
@@ -907,7 +914,9 @@ class UnlockKeyDialog extends React.PureComponent {
                         <div className={classes.dialogTitle}>
                             {_mode === 'pin' ? <LockOutlined /> : <VpnKeyOutlined />}
                             <Typography variant="h5" component="h2">
-                                {_mode === 'pin' ? 'Unlock Key' : 'Add Key'}
+                                {_mode === 'pin'
+                                    ? t("components.unlock_key_dialog.unlock_key")
+                                    : t("components.unlock_key_dialog.add_key")}
                             </Typography>
                         </div>
                     </DialogTitle>
@@ -918,7 +927,8 @@ class UnlockKeyDialog extends React.PureComponent {
                             <div className={classes.actionContext}>
                                 {actionDescription && (
                                     <div className={classes.actionValue}>
-                                        {actionDescription}
+                                        {/* A string, or a tk() descriptor from the caller. */}
+                                        {tx(actionDescription)}
                                     </div>
                                 )}
                                 <div className={classes.keyTypeChip}>
@@ -990,7 +1000,7 @@ class UnlockKeyDialog extends React.PureComponent {
                                 {_status === 'pending' && <CircularProgress size={20} color="inherit" />}
                                 {_status === 'success' && <CheckRounded />}
                                 {_status === 'error' && <ErrorRounded />}
-                                <Typography variant="body2">{_status_message}</Typography>
+                                <Typography variant="body2">{tx(_status_message)}</Typography>
                             </div>
                         )}
                     </DialogContent>

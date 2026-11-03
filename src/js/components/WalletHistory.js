@@ -268,7 +268,7 @@ function WalletHistory({ history, username, locales, vestToPixa, classes,
                 <div className={classes.more}><CircularProgress size={24} color="secondary" /></div>
             ) : canLoad && (loadError || autoPaused) ? (
                 <div className={classes.more}>
-                    <IconButton aria-label="Load more" onClick={manualLoad}>
+                    <IconButton aria-label={t("components.wallet_history.load_more")} onClick={manualLoad}>
                         {loadError ? <ReplayRounded /> : <ExpandMoreRounded />}
                     </IconButton>
                 </div>
