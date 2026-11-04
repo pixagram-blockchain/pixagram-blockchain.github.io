@@ -1,8 +1,18 @@
-[{
-      "relation": ["delegate_permission/common.handle_all_urls"],
-      "target": {
-        "namespace": "android_app",
-        "package_name": "com.pixagram",
-        "sha256_cert_fingerprints": ["83:27:86:D0:07:54:49:8D:84:B3:CF:0E:81:10:41:2A:7D:09:14:9A:0E:3E:B0:54:7E:7E:5A:96:02:E7:07:90"]
-      }
-    }]
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.pixagram",
+      "sha256_cert_fingerprints": [
+        "83:27:86:D0:07:54:49:8D:84:B3:CF:0E:81:10:41:2A:7D:09:14:9A:0E:3E:B0:54:7E:7E:5A:96:02:E7:07:90",
+        "DC:09:AF:9F:70:F6:B1:0C:7A:56:3B:37:CB:CF:4A:59:DD:B7:0B:AB:29:04:74:35:20:B1:56:4C:A5:43:1B:B0",
+        "BC:13:F4:EB:28:71:A9:31:E6:0B:0D:E4:DD:19:77:79:63:54:A8:80:9B:93:9E:E4:20:90:DE:C0:24:B0:5F:C4",
+        "14:40:0A:13:75:6C:CA:92:9A:95:FD:45:53:B1:5D:3C:20:8C:B3:1C:8F:FB:F6:79:7C:B5:9B:74:9E:C2:99:E8"
+      ]
+    }
+  }
+]
