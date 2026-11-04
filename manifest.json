@@ -7,18 +7,24 @@
   "dir": "ltr",
   "start_url": "/",
   "scope": "/",
-  "display": "standalone",
+  "display": "minimal-ui",
   "display_override": [
-    "standalone"
+    "fullscreen",
+    "window-controls-overlay"
   ],
-  "orientation": "any",
+  "orientation": "portrait",
   "theme_color": "#000000",
   "background_color": "#000000",
   "categories": [
-    "social",
-    "photo",
+    "design",
     "entertainment",
-    "finance"
+    "finance",
+    "lifestyle",
+    "networking",
+    "photo",
+    "photo &amp; video",
+    "social",
+    "social networking"
   ],
   "icons": [
     {
@@ -422,7 +428,7 @@
   "protocol_handlers": [
     {
       "protocol": "web+pixagram",
-      "url": "/trending/?pwa=protocol&uri=%s"
+      "url": "/trending/?pwa=protocol&amp;uri=%s"
     }
   ],
   "share_target": {
