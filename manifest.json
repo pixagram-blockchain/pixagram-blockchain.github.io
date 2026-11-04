@@ -9,12 +9,7 @@
   "scope": "/",
   "display": "standalone",
   "display_override": [
-    "window-controls-overlay",
-    "tabbed",
-    "fullscreen",
-    "standalone",
-    "minimal-ui",
-    "browser"
+    "standalone"
   ],
   "orientation": "any",
   "theme_color": "#000000",
