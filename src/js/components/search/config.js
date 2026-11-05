@@ -35,13 +35,25 @@ export const SEARCH_API_URL = (
 // wiki.js turns those links into the wiki's before the box shows them.
 export const WIKI_URL = "https://pixa.org/wiki";
 
+// `artworks` is one page of artworks (the Worker gives 50 at most); scrolled to the end of the
+// grid, the next pages come one by one (see "Loading more artworks" below), until the Worker has
+// no more or `artworksMax` are shown.
 export const LIMITS = Object.freeze({
     users: 12,
     tags: 24,
     communities: 8,
     artworks: 48,
+    artworksMax: 480,
     posts: 12,
 });
+
+// ── Loading more artworks ─────────────────────────────────────────────────────
+// The artworks are the last section of the results, so their end is the end of the list: when it
+// comes within MORE_AHEAD_PX of the list's bottom edge — before the reader gets there — the next
+// page is asked for (the Worker's next_cursor) and added under the grid. LIMITS.artworksMax keeps
+// the grid (not virtualized: every card stays in the page) to ten pages; past it, a line suggests
+// narrowing the search.
+export const MORE_AHEAD_PX = 800;
 
 // Community accounts are named portal-<id>; lookup_accounts returns them like any
 // account, but they belong in the Communities section (with title + picture), not Users.
@@ -77,7 +89,10 @@ export const SUGGEST_LIMIT = 6;
 // FULL_ENTER_PX before it grows (hiding them entirely shrinks it). The hero
 // transition takes FULL_EXPAND_MS out and FULL_COLLAPSE_MS back. Full, the
 // artworks take as many columns of about FULL_COLUMN_PX as fit, from
-// MASONRY_COLUMNS to FULL_MAX_COLUMNS.
+// MASONRY_COLUMNS to FULL_MAX_COLUMNS. On desktop (the centred sheet) fewer,
+// larger ones: about FULL_COLUMN_PX_DESKTOP each, FULL_MAX_COLUMNS_DESKTOP at
+// most — on a screen 1024 px wide 2 columns, 1280–1680 px 3, 1920 px 4,
+// 2560 px 5 (with 192 px columns it was 3, 4–5, 6 and 8).
 export const FULL_WIDTH = 0.618;
 export const FULL_HEIGHT = 0.827;
 export const FULL_ENTER_PX = 24;
@@ -85,6 +100,8 @@ export const FULL_EXPAND_MS = 450;
 export const FULL_COLLAPSE_MS = 350;
 export const FULL_COLUMN_PX = 192;
 export const FULL_MAX_COLUMNS = 8;
+export const FULL_COLUMN_PX_DESKTOP = 288;
+export const FULL_MAX_COLUMNS_DESKTOP = 6;
 
 // ── v3: the box guesses ───────────────────────────────────────────────────────
 // Suggestions are cheap (index lookups, cached at the edge): asked at every

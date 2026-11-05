@@ -655,11 +655,23 @@ export const COMMUNITY_PORTALS = Object.freeze([
 ]);
 
 // ── Community help ─────────────────────────────────────────────────────
-// The Telegram group the shell links as "Ask Help": left of Governance in the
-// desktop toolbar (Index.js) and above it in the compact ⋮ menu
-// (ToolbarMenuOption). Both read it from here, like the portal ids above, so
-// the two entry points cannot drift apart.
+// The Telegram group the shell links as "Ask Help": left of Portals and
+// Governance in the desktop toolbar (Index.js) and above them in the compact
+// ⋮ menu (ToolbarMenuOption). Both read it from here, like the portal ids
+// above, so the two entry points cannot drift apart.
 export const HELP_TELEGRAM_URL = "https://t.me/omnibus_pixagram/1";
+
+// ── Reward beneficiary ─────────────────────────────────────────────────
+// Every post (blog and artwork) and every comment published from the app
+// pays this share of its author rewards to @rex. `weight` is in basis points
+// of the author rewards (10000 = 100 %), as the chain counts it: 1500 = 15 %.
+// The API (pixaproxyapi.js, PixaProxyAPI#_broadcastOperations) sends it as a
+// `comment_options` beneficiary in the same transaction as the `comment`
+// that creates the post or comment — the only moment the chain takes one:
+// beneficiaries are set once, before the first vote. Edits keep what the
+// post or comment was created with. UI that tells authors about the share
+// (the editor, a post's payout details) should read it from here too.
+export const REWARD_BENEFICIARY = Object.freeze({ account: "rex", weight: 1500 });
 
 // ── Post overlay URL helpers ──────────────────────────────────────────
 // The optional non-capturing tail accepts a "+meta" overlay suffix (see
@@ -679,8 +691,10 @@ export function parsePostUrl(pathname) {
 }
 
 // True when the post URL lives inside a community (category is `portal-N`).
-// Community posts render via <Community> + <BlogPostDialog>; all others render
-// via <Feed>/<FeedPersonal>/<Profile> + <PostDialog>.
+// A community post opens in <BlogPostDialog> and its default page is
+// <Community>; any other post opens in <PostDialog> on <Feed>. A page already
+// on screen keeps the post over itself when it can show it — FeedPersonal and
+// Profile take both kinds (OVERLAY_HOSTS_BY_POST_KIND in Index.js).
 export function isCommunityPostUrl(pathname) {
     const p = parsePostUrl(pathname);
     return !!(p && COMMUNITY_TAG_REGEX.test(p.tag));
@@ -865,14 +879,15 @@ export function parseFeedFocusHash(rawHash) {
 }
 
 // ── Meta overlays: the "+meta" path suffix ─────────────────────────────
-// The shell-level overlays — Settings, Info, Governance, the toolbar search,
-// and the log-in and sign-up dialogs — are addressed by a suffix on whatever
-// page is showing, so they deep-link, survive a reload and answer the
-// browser's back arrow:
+// The shell-level overlays — Settings, Info, Governance, the portal
+// directory, the toolbar search, and the log-in and sign-up dialogs — are
+// addressed by a suffix on whatever page is showing, so they deep-link,
+// survive a reload and answer the browser's back arrow:
 //
 //   /trending/pixelart+settings
 //   /@primerz/comments+info-privacy
 //   /portal-156480+governance-viability-vote
+//   /hot/+portals
 //   /created+search-eyJxIjoiY2F0In0            base64url of {"q":"cat"}
 //   /trending/+signup
 //   /@primerz+login
@@ -891,6 +906,9 @@ export function parseFeedFocusHash(rawHash) {
 //   settings                          no argument
 //   login                             no argument
 //   signup                            no argument
+//   portals                           no argument: the portal directory
+//                                     (PortalsDialog); its search box is not
+//                                     carried in the address
 //   info-<tab>                        INFO_TABS
 //   governance-<tab>[-<section>]      GOVERNANCE_TABS; a tab with sub-levels
 //                                     (GOVERNANCE_SECTIONS) always names one,
@@ -991,6 +1009,7 @@ export function parseMeta(raw) {
         case "settings":
         case "login":
         case "signup":
+        case "portals":
             return { kind };
         case "info": {
             const tab = rest.split("-")[0].toLowerCase();
@@ -1026,6 +1045,7 @@ export function formatMeta(meta) {
         case "settings":
         case "login":
         case "signup":
+        case "portals":
             return meta.kind;
         case "info":
             return "info-" + (INFO_TABS.indexOf(meta.tab) >= 0 ? meta.tab : INFO_TABS[0]);

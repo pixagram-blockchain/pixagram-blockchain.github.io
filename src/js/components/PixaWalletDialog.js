@@ -141,7 +141,7 @@ import { withLanguage } from "../utils/withLanguage";
 const styles = theme => ({
     backdrop: {
         zIndex: theme.zIndex.drawer + 1,
-        backdropFilter: "blur(5px)"
+        backdropFilter: "blur(6px) grayscale(1)"
     },
     dialogCard: {
         userSelect: "none",

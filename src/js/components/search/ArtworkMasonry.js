@@ -5,10 +5,14 @@ import { MASONRY_COLUMNS, MASONRY_GAP } from "./config";
 import { ArtworkCard } from "./ArtworkCard";
 
 // ── ArtworkMasonry ────────────────────────────────────────────────────────────
-// Two equal-width columns. Because every item's aspect ratio is known up front
-// (from the search index), the layout is computed, not measured: each card
-// goes to the currently shortest column, heights counted in aspect units.
-// Deterministic, no layout thrash, no library.
+// Equal-width columns: two in the dropdown, full screen as many as the panel
+// holds (fullScreen.js; fewer, larger ones on desktop). Because every item's
+// aspect ratio is known up front (from the search index), the layout is
+// computed, not measured: each card goes to the currently shortest column,
+// heights counted in aspect units. Deterministic, no layout thrash, no library.
+// A card's column depends only on the cards before it, so a next page added at
+// the end (LoadMore) fills in under the grid without moving a card already
+// placed.
 
 function distribute(items, columns) {
     const cols = Array.from({ length: columns }, () => ({ items: [], height: 0 }));

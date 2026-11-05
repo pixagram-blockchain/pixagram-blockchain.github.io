@@ -46,6 +46,7 @@ import InfoOutlined from "@material-ui/icons/InfoOutlined";
 import useLiveTimeAgo from "../hooks/useLiveTimeAgo";
 import { HISTORY, getPostState, POST_STATE, parsePostDrawerHash, POST_DRAWER_HASH_TABS, parseCommentFocusHash } from "../utils/constants";
 import CommentInList, { applyCommentEdit, withCommentEdits } from "./CommentInList";
+import ProfileHoverAnchor from "./ProfileHoverCard";
 import { ToxicityWatcher } from "./ToxicityHint";
 import * as toxicity from "../utils/toxicity";
 import PaperCardActions from "./PaperCardActions";
@@ -632,7 +633,7 @@ const styles = theme => ({
         width: "100%",
         height: "100%",
         overflow: "auto",
-        position: "relative"
+        position: "relative",
     },
     headerWrapper: {
         position: "fixed",
@@ -1390,7 +1391,7 @@ const LiveTimeAgo = memo(function LiveTimeAgo({ date, options = LIVE_TIME_AGO_OP
 });
 
 // Parent Comment (ported from PostDialog)
-const ParentComment = memo(({ comment, index, classes, locales, onOpenAuthor }) => { useLanguage(); return (
+const ParentComment = memo(({ comment, index, classes, locales, onOpenAuthor, api }) => { useLanguage(); return (
     <div key={"comment" + index} style={ST_POS_RELATIVE__P_12PX_12PX_12PX__M_32PX_4PX_0PX_4}>
         {index > 0 && <ArrowForwardIosIcon key={"arrow-" + index} style={{
             color: "#575757",
@@ -1406,12 +1407,15 @@ const ParentComment = memo(({ comment, index, classes, locales, onOpenAuthor }) 
             style={ST_MB_4__D_BLOCK}
         >
             {mutedWords(tnode("components.blog_post_dialog.author_said_time", {
+                // Author hover card, as on every comment (CommentInList):
+                // the anchor only adds listeners to this span; the card is
+                // the host page's <ProfileHoverCardLayer/>.
                 author: (
-                    <Tooltip title={"@" + (comment.author || {}).username}>
+                    <ProfileHoverAnchor api={api} author={comment.author} onOpenProfile={onOpenAuthor}>
                         <span className={classes.subheaderName} onClick={() => { onOpenAuthor((comment.author || {}).username) }}>
                             {(comment.author || {}).name}
                         </span>
-                    </Tooltip>
+                    </ProfileHoverAnchor>
                 ),
                 time: (
                     <Tooltip arrow title={new Date(comment.date || Date.now()).toLocaleDateString(locales, DATE_TOOLTIP_FORMAT)}>
@@ -3697,6 +3701,7 @@ class BlogPostDialog extends React.PureComponent {
                                                                 comment={comment} index={i}
                                                                 classes={classes} locales={locales}
                                                                 onOpenAuthor={this._open_author}
+                                                                api={api}
                                                             />
                                                         ))}
                                                     </div>

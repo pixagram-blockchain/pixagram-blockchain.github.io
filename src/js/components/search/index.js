@@ -25,7 +25,10 @@
 //                            links), the index's facts, the reasoning trail, caveats, follow-up
 //                            chips, and a vote; AnswerMarkdown.js renders the Worker's light Markdown
 //   <UserResult/> <CommunityResult/> <TagResult/> <PostResult/>   rows
-//   <ArtworkMasonry/> <ArtworkCard/>                 two-column artwork grid + plain image card
+//   <ArtworkMasonry/> <ArtworkCard/>                 artwork grid (two columns; full screen as many
+//                                                    as fit, fewer on desktop) + plain image card
+//   <LoadMore/>              the grid's end: brings the next page of artworks as it comes in
+//                            sight (controls.loadMore → searchApi.searchMore)
 //   artworkPath(item)        "/<category>/@author/permlink" for history.push
 //   filters.js / tags.js     the filter state model → /search parameters; tag validity
 //   intent.js                when a text deserves an answer; the ghost text
@@ -47,11 +50,12 @@ export { CommunityResult } from "./CommunityResult";
 export { TagResult } from "./TagResult";
 export { ArtworkMasonry } from "./ArtworkMasonry";
 export { ArtworkCard } from "./ArtworkCard";
+export { LoadMore } from "./LoadMore";
 export { PostResult } from "./PostResult";
 export { SuggestionList } from "./SuggestionList";
 export { AnswerCard } from "./AnswerCard";
 export {
-    searchIndex, searchArtworks, artworkPath, artworkImageUrl, loadVocab, getVocab,
+    searchIndex, searchMore, searchArtworks, artworkPath, artworkImageUrl, loadVocab, getVocab,
     fetchSuggestions, loadExamples, fetchAnswer, sendFeedback,
     fetchElaboration, mergeElaboration, sendAnswerFeedback, answerVote, modelLabel,
 } from "./searchApi";
@@ -65,4 +69,4 @@ export {
 export { normalizeTag, isValidTag } from "./tags";
 export { searchStyles } from "./styles";
 export { highlightNode } from "./highlight";
-export { SEARCH_API_URL, LIMITS, DEFAULT_COLORS } from "./config";
+export { SEARCH_API_URL, LIMITS, DEFAULT_COLORS, MORE_AHEAD_PX } from "./config";

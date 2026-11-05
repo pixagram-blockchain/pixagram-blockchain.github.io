@@ -1,0 +1,57 @@
+{
+  "type": "AdaptiveCard",
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "ColumnSet",
+      "columns": [
+        {
+          "type": "Column",
+          "width": "auto",
+          "verticalContentAlignment": "Center",
+          "items": [
+            {
+              "type": "Image",
+              "url": "https://pixagram.com/src/images/manifest/icons/icon-96.png",
+              "width": "28px",
+              "height": "28px",
+              "altText": "Pixagram"
+            }
+          ]
+        },
+        {
+          "type": "Column",
+          "width": "stretch",
+          "verticalContentAlignment": "Center",
+          "items": [
+            { "type": "TextBlock", "text": "Trending on Pixagram", "weight": "Bolder", "wrap": false },
+            { "type": "TextBlock", "text": "${updated}", "isSubtle": true, "size": "Small", "spacing": "None", "wrap": false }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "$data": "${posts}",
+      "spacing": "Medium",
+      "separator": true,
+      "selectAction": { "type": "Action.Execute", "title": "Open", "verb": "${verb}" },
+      "items": [
+        { "type": "TextBlock", "text": "${title}", "weight": "Bolder", "wrap": false, "maxLines": 1 },
+        { "type": "TextBlock", "text": "@${author} · ${votes} · ${payout}", "isSubtle": true, "size": "Small", "spacing": "None", "wrap": false }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "$when": "${empty(posts)}",
+      "text": "Turn any photo into pixel art and own it 100% on-chain.",
+      "wrap": true,
+      "spacing": "Medium"
+    }
+  ],
+  "actions": [
+    { "type": "Action.Execute", "title": "Create", "verb": "create" },
+    { "type": "Action.Execute", "title": "Browse", "verb": "open" }
+  ]
+}

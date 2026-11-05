@@ -474,8 +474,8 @@ export default function PublishLogoLoader(props) {
                     // Transparent scrim — only a soft frosted blur, no dark fill,
                     // so the live page shows through behind the particles.
                     background: "#00000040",
-                    backdropFilter: "blur(8px)",
-                    WebkitBackdropFilter: "blur(8px)",
+                    backdropFilter: "blur(9px)",
+                    WebkitBackdropFilter: "blur(9px)",
                     animation: "pixaLoaderFade 320ms cubic-bezier(0.4, 0, 0.2, 1) both",
                     overflow: "hidden",
                     touchAction: "none",

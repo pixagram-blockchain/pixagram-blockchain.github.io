@@ -188,7 +188,37 @@
  *     session's keys are carried into the new session — not keys added to
  *     the tab's memory alone (UnlockKeyDialog).
  *
- * @version 4.8.1
+ * v4.9.0: Reward beneficiary. Every post (blog and artwork) and every
+ * comment created through this API pays @rex 10 % of its author rewards
+ * (REWARD_BENEFICIARY, utils/constants.js).
+ *   - PixaProxyAPI#_broadcastOperations — where comment(), _send() (so
+ *     sendOperations() and commentOptions()) and the offline queue's drain
+ *     all meet — follows each `comment` that creates a comment with a
+ *     `comment_options` carrying the beneficiary, in the same transaction:
+ *     the chain takes beneficiaries once, before the first vote, so that is
+ *     the only moment they can be set. The rest of that comment_options is
+ *     what a new comment has anyway (max payout 1 000 000.000 PXS,
+ *     percent_pxs 10000, votes and curation allowed): nothing else about the
+ *     payout changes.
+ *   - Creates or edits: read from hived itself
+ *     (database_api.get_comment_pending_payouts — an entry for every comment
+ *     that exists, paid out or not; the indexer behind get_content trails it
+ *     by a block or two and is only asked when database_api is not served).
+ *     An edit — updateComment(), or comment() on a permlink that exists —
+ *     goes out as before.
+ *   - A comment_options of the caller's that sets beneficiaries gets @rex's
+ *     share merged in (a larger one is kept), sorted by account as the chain
+ *     requires; a new comment's own comment_options gets it instead of a
+ *     second one.
+ *   - A comment queued offline gets it when it is sent, checked against the
+ *     chain then (the queue keeps the operations as the caller built them).
+ *   - commentOptions() sent `percent_hbd`. dpixa (every published version)
+ *     serializes `percent_pxs`, and the node reads `percent_pxs` too (checked
+ *     with condenser_api.get_transaction_hex): dpixa signed 0 for the missing
+ *     field while the node read its default 10000, so the signature never
+ *     matched and every call failed. It sends `percent_pxs` now.
+ *
+ * @version 4.9.0
  *
  * API Groups and Methods:
  *
@@ -370,8 +400,8 @@
  *   - updateAccount2(params) — params.externalKey bypasses keyManager
  *   - updateProfile(account, profileObject, externalKey?)
  *   - vote(voter, author, permlink, weight)
- *   - comment(params)
- *   - commentOptions(params)
+ *   - comment(params)                  // a new post/comment pays REWARD_BENEFICIARY (@rex 10 %)
+ *   - commentOptions(params)           // beneficiaries set here include @rex's share
  *   - transfer(from, to, amount, memo)
  *   - transferToVesting(from, to, amount)
  *   - withdrawVesting(account, vestingShares)
@@ -538,6 +568,9 @@
 // quickStore namespace, which nothing here touches. See the constructor.
 import { lacerta } from '../settings';
 import JSLoader from '../JSLoader';
+// v4.9.0: the reward beneficiary of every new post and comment. Lives with
+// the app's other shared literals (utils/settings.js imports the same file).
+import { REWARD_BENEFICIARY } from '../constants';
 import EventEmitter from 'events';
 import { CryptoUtils } from './crypto-utils.js';
 import { PixaEvents }  from './events.js';
@@ -1798,7 +1831,7 @@ export class PixaProxyAPI {
 
             this._wireSessionEvents();
 
-            console.log('[PixaProxyAPI] Initialized successfully v4.8.1');
+            console.log('[PixaProxyAPI] Initialized successfully v4.9.0');
             return this;
         } catch (error) {
             console.error('[PixaProxyAPI] Initialization failed:', error);
@@ -2154,6 +2187,12 @@ export class PixaProxyAPI {
      * _send's history notes a serialization difference in this fork's
      * sendOperations() that the convenience path avoided.
      *
+     * v4.9.0: every path to the chain meets here — comment(), updateComment(),
+     * _send() (so sendOperations() and commentOptions()) and the offline
+     * queue's drain — so this is where a comment the bundle creates gets the
+     * reward beneficiary (see _withRewardBeneficiary): a new post or comment
+     * goes out as [comment, comment_options], through sendOperations().
+     *
      * @param {Array} operations — [[opName, opData], ...]
      * @param {YOLOBuffer|string|object} key
      * @param {object} [opts]
@@ -2167,6 +2206,15 @@ export class PixaProxyAPI {
     async _broadcastOperations(operations, key, opts = {}) {
         const { broadcastFn = null, preferConvenience = true } = opts;
         const broadcast = this.client.broadcast;
+
+        // v4.9.0: before the key is opened. A throw here never reaches
+        // _withPrivateKey, so the key is released here.
+        try {
+            operations = await this._withRewardBeneficiary(operations);
+        } catch (e) {
+            if (key instanceof YOLOBuffer) key.destroy();
+            throw e;
+        }
 
         if (this.config?.SIGN_THEN_SEND === true && !broadcastFn && cryptoUtils
             && typeof this.broadcast?.prepareTransaction === 'function') {
@@ -2187,6 +2235,81 @@ export class PixaProxyAPI {
             }
             return broadcast.sendOperations(operations, pk);
         });
+    }
+
+    /**
+     * v4.9.0: `operations` with the reward beneficiary — REWARD_BENEFICIARY,
+     * @rex at 10 % (utils/constants.js) — for every comment the bundle
+     * creates, and in every beneficiary list it sets (applyRewardBeneficiary).
+     *
+     * A `comment` operation creates a comment, or edits the one already at
+     * that author/permlink; only the chain can tell, so the bundle's comments
+     * are looked up first (_commentsOnChain). An edit gets nothing: the chain
+     * takes beneficiaries once, before the first vote, and a post keeps what
+     * it was created with. A comment no API could vouch for counts as new, so
+     * a new post never goes out without the beneficiary. (Were it an edit
+     * after all, a comment that already has beneficiaries or votes makes the
+     * chain refuse the whole transaction, the edit with it.)
+     *
+     * Bundles without a `comment` or `comment_options` come back as they are,
+     * without a lookup.
+     *
+     * @param {Array<[string, object]>} operations
+     * @returns {Promise<Array<[string, object]>>}
+     * @private
+     */
+    async _withRewardBeneficiary(operations) {
+        if (!Array.isArray(operations)) return operations;
+        const comments = [];
+        let options = false;
+        for (const entry of operations) {
+            if (!Array.isArray(entry) || !entry[1] || typeof entry[1] !== 'object') continue;
+            if (entry[0] === 'comment') comments.push([String(entry[1].author), String(entry[1].permlink)]);
+            else if (entry[0] === 'comment_options') options = true;
+        }
+        if (!comments.length && !options) return operations;
+
+        const onChain = await this._commentsOnChain(comments);
+        const created = new Set();
+        for (const [author, permlink] of comments) {
+            const key = commentKey(author, permlink);
+            if (!onChain.has(key)) created.add(key);
+        }
+        return applyRewardBeneficiary(operations, created);
+    }
+
+    /**
+     * v4.9.0: which of `pairs` ([author, permlink]) are comments on chain, as
+     * a Set of commentKey()s. Asks hived itself:
+     * database_api.get_comment_pending_payouts answers an entry for every
+     * comment that exists — pending or paid out — and none for the others,
+     * up to the last block. (database_api.find_comments is not served by the
+     * Pixa node.) Without it, condenser_api.get_content, served by the
+     * indexer, which trails hived by a block or two and answers an error for
+     * a comment it does not have. Offline, or when neither answers, the Set
+     * is empty: see _withRewardBeneficiary.
+     *
+     * @param {Array<[string, string]>} pairs
+     * @returns {Promise<Set<string>>}
+     * @private
+     */
+    async _commentsOnChain(pairs) {
+        const found = new Set();
+        if (!pairs.length || (this.connectivity && !this.connectivity.isOnline)) return found;
+        try {
+            const res = await this.client.call('database_api', 'get_comment_pending_payouts', { comments: pairs });
+            if (Array.isArray(res?.cashout_infos)) {
+                for (const info of res.cashout_infos) found.add(commentKey(info?.author, info?.permlink));
+                return found;
+            }
+        } catch (_) { /* not served by this node: ask the indexer */ }
+        await Promise.all(pairs.map(async ([author, permlink]) => {
+            try {
+                const content = await this.client.call('condenser_api', 'get_content', [author, permlink]);
+                if (content && content.author) found.add(commentKey(author, permlink));
+            } catch (_) { /* "does not exist", or no answer */ }
+        }));
+        return found;
     }
 
     async hasVaultConfig() {
@@ -6052,6 +6175,139 @@ function makeContentEditPatch(oldText, newText) {
  */
 const RECURRENT_TRANSFER_CANCEL = Object.freeze({ recurrence: 24, executions: 2 });
 
+// ============================================
+// Reward beneficiary (v4.9.0)
+// ============================================
+// A comment that a transaction creates pays REWARD_BENEFICIARY (@rex, 10 %,
+// utils/constants.js). PixaProxyAPI#_withRewardBeneficiary finds out which of
+// a bundle's comments are new and hands them to applyRewardBeneficiary().
+
+/**
+ * The payout options a new comment has on Pixa, as a fresh post reads back
+ * (database_api.get_comment_pending_payouts, Nov 2026). The comment_options
+ * that carries the beneficiary repeats them, so it changes nothing else —
+ * and passes the evaluator, which refuses a higher payout ceiling or PXS
+ * percent than the comment has, and votes or curation turned back on.
+ * `percent_pxs`, not Hive's `percent_hbd`: the name dpixa serializes and the
+ * node reads.
+ */
+const NEW_COMMENT_PAYOUT = Object.freeze({
+    max_accepted_payout: '1000000.000 PXS',
+    percent_pxs: 10000,
+    allow_votes: true,
+    allow_curation_rewards: true,
+});
+
+/** "author/permlink": one comment, whatever case or "@" the author came with. */
+function commentKey(author, permlink) {
+    return (normalizeAccount(author) || '') + '/' + String(permlink ?? '');
+}
+
+/** The data of a `comment_options` operation tuple, else null. */
+function commentOptionsData(entry) {
+    return Array.isArray(entry) && entry[0] === 'comment_options' && entry[1] && typeof entry[1] === 'object'
+        ? entry[1] : null;
+}
+
+/**
+ * Index of the beneficiaries extension among a comment_options' extensions —
+ * `[0, { beneficiaries: [...] }]`, the static-variant form dpixa serializes
+ * and condenser_api reads — or -1.
+ */
+function beneficiariesExtensionIndex(options) {
+    const extensions = Array.isArray(options?.extensions) ? options.extensions : [];
+    return extensions.findIndex((e) => Array.isArray(e) && e[0] === 0 && Array.isArray(e[1]?.beneficiaries));
+}
+
+/**
+ * `beneficiaries` with the reward beneficiary's share in it (a larger share
+ * already given to that account is kept), sorted by account: the chain
+ * refuses any other order ("Benficiaries must be specified in sorted order
+ * (account ascending)"; byte order, which for account names is JS string
+ * order — localeCompare is not).
+ */
+function withRewardShare(beneficiaries) {
+    const { account, weight } = REWARD_BENEFICIARY;
+    let share = weight;
+    const out = [];
+    for (const b of Array.isArray(beneficiaries) ? beneficiaries : []) {
+        if (normalizeAccount(b?.account) === account) share = Math.max(share, Number(b.weight) || 0);
+        else out.push(b);
+    }
+    out.push({ account, weight: share });
+    return out.sort((a, b) => (a.account < b.account ? -1 : a.account > b.account ? 1 : 0));
+}
+
+/** comment_options data with the reward share in its beneficiaries extension (added when it has none). */
+function withRewardExtension(options) {
+    const extensions = Array.isArray(options.extensions) ? [...options.extensions] : [];
+    const at = beneficiariesExtensionIndex(options);
+    if (at < 0) extensions.push([0, { beneficiaries: withRewardShare([]) }]);
+    else extensions[at] = [0, { ...extensions[at][1], beneficiaries: withRewardShare(extensions[at][1].beneficiaries) }];
+    return { ...options, extensions };
+}
+
+/**
+ * `operations` with the reward beneficiary wherever the bundle sets
+ * beneficiaries or creates a comment:
+ *   - a comment_options that sets beneficiaries gets the share merged in;
+ *   - a comment created here that has comment_options of its own in the
+ *     bundle, none setting beneficiaries, gets the extension in the first of
+ *     them (a second comment_options could not repeat the defaults: the
+ *     caller's may have lowered the payout ceiling or the PXS percent);
+ *   - a comment created here without any is followed by one: the defaults
+ *     (NEW_COMMENT_PAYOUT) and the beneficiary.
+ * Idempotent; the caller's operation objects are not modified.
+ *
+ * @param {Array<[string, object]>} operations
+ * @param {Set<string>} created — commentKey()s of the bundle's `comment`
+ *        operations that are not on chain yet
+ * @returns {Array<[string, object]>}
+ */
+function applyRewardBeneficiary(operations, created) {
+    const optioned = new Set();  // comments the bundle has a comment_options for
+    const covered = new Set();   // comments whose beneficiaries the bundle sets
+    for (const entry of operations) {
+        const options = commentOptionsData(entry);
+        if (!options) continue;
+        const key = commentKey(options.author, options.permlink);
+        optioned.add(key);
+        if (beneficiariesExtensionIndex(options) >= 0) covered.add(key);
+    }
+
+    const out = [];
+    for (const entry of operations) {
+        const options = commentOptionsData(entry);
+        if (options) {
+            const key = commentKey(options.author, options.permlink);
+            if (beneficiariesExtensionIndex(options) >= 0 || (created.has(key) && !covered.has(key))) {
+                covered.add(key);
+                out.push(['comment_options', withRewardExtension(options)]);
+            } else {
+                out.push(entry);
+            }
+            continue;
+        }
+        out.push(entry);
+        const comment = Array.isArray(entry) && entry[0] === 'comment' && entry[1] && typeof entry[1] === 'object'
+            ? entry[1] : null;
+        if (!comment) continue;
+        const key = commentKey(comment.author, comment.permlink);
+        if (!created.has(key) || optioned.has(key) || covered.has(key)) continue;
+        covered.add(key);
+        out.push(['comment_options', {
+            author: comment.author,
+            permlink: comment.permlink,
+            max_accepted_payout: translateAssetToChain(NEW_COMMENT_PAYOUT.max_accepted_payout),
+            percent_pxs: NEW_COMMENT_PAYOUT.percent_pxs,
+            allow_votes: NEW_COMMENT_PAYOUT.allow_votes,
+            allow_curation_rewards: NEW_COMMENT_PAYOUT.allow_curation_rewards,
+            extensions: [[0, { beneficiaries: withRewardShare([]) }]],
+        }]);
+    }
+    return out;
+}
+
 class BroadcastAPI {
     constructor(proxy) {
         this.proxy = proxy;
@@ -6405,6 +6661,19 @@ class BroadcastAPI {
         return votePromise;
     }
 
+    /**
+     * Publish a post (parentAuthor '') — blog or artwork — or a comment.
+     *
+     * v4.9.0: a new one pays the reward beneficiary, @rex at 10 %
+     * (REWARD_BENEFICIARY): PixaProxyAPI#_broadcastOperations sends a
+     * comment_options carrying it in the same transaction. On a permlink that
+     * already exists the chain takes this as an edit, which goes out as
+     * before (updateComment() is the edit path).
+     *
+     * @param {object} params — { parentAuthor?, parentPermlink?, author,
+     *        permlink, title?, body, jsonMetadata? }
+     * @returns {Promise<object>} broadcast result
+     */
     async comment(params) {
         const { parentAuthor = "", parentPermlink = "", author, permlink, title = "", body, jsonMetadata = {} } = params;
         const normalizedAuthor = normalizeAccount(author);
@@ -6471,6 +6740,13 @@ class BroadcastAPI {
 
     /**
      * Set comment options (beneficiaries, payout settings, etc.)
+     *
+     * v4.9.0: beneficiaries set here include @rex's share
+     * (REWARD_BENEFICIARY, merged in by PixaProxyAPI#_broadcastOperations).
+     * The chain takes beneficiaries once, before the first vote — a post or
+     * comment published through comment() has them already — so this is for
+     * the payout settings, which can only be lowered (payout ceiling, PXS
+     * percent) or switched off (votes, curation).
      * @param {object} params
      */
     async commentOptions(params) {
@@ -6487,7 +6763,10 @@ class BroadcastAPI {
             author: normalizedAuthor,
             permlink,
             max_accepted_payout: translateAssetToChain(maxAcceptedPayout || '1000000.000 PXS'),
-            percent_hbd: percentPxs !== undefined ? percentPxs : 10000,
+            // v4.9.0: `percent_pxs`, the name dpixa serializes and the node
+            // reads. It was `percent_hbd`: dpixa signed 0 for the missing
+            // field, the node read its default 10000, no signature matched.
+            percent_pxs: percentPxs !== undefined ? percentPxs : 10000,
             allow_votes: allowVotes !== undefined ? allowVotes : true,
             allow_curation_rewards: allowCurationRewards !== undefined ? allowCurationRewards : true,
             extensions: extensions || []

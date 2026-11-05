@@ -6,7 +6,9 @@ import {
     ELABORATION_RETRY_MS, LIMITS, SUGGEST_DEBOUNCE_MS, SUGGEST_LIMIT, SUGGEST_ROWS,
 } from "./config";
 import { EMPTY_FILTERS, filtersKey, hasFilters, normalizeFilters } from "./filters";
-import { fetchAnswer, fetchElaboration, fetchSuggestions, loadExamples, mergeElaboration, searchIndex, sendAnswerFeedback, sendFeedback } from "./searchApi";
+import {
+    fetchAnswer, fetchElaboration, fetchSuggestions, loadExamples, mergeElaboration, searchIndex, searchMore, sendAnswerFeedback, sendFeedback,
+} from "./searchApi";
 import { answerPlan, ghostFor } from "./intent";
 
 // ── useSearch ─────────────────────────────────────────────────────────────────
@@ -17,7 +19,12 @@ import { answerPlan, ghostFor } from "./intent";
 //   users            [{ username, name, about, profile_image }]  (was: bare names)
 //   communities      [{ ...bridge row, profile_image }]          (community account's avatar)
 //   communityTitles  { "portal-<id>": title }  every community the node lists
-//   artworks         [...]  from the pixagram-search Worker, `artworksLoading` while in flight
+//   artworks         [...]  from the pixagram-search Worker, `artworksLoading` while in flight;
+//                    controls.loadMore() adds their next page (the grid's end in sight):
+//   artworksMore     the artworks' continuation (searchApi), null when there is no next page
+//   moreLoading      the next page is on its way; moreFailed: it could not come (asked
+//                    again only by loadMore — the "Try again" under the grid)
+//   artworksCapped   LIMITS.artworksMax are shown and the Worker had more
 //   posts            [...]  blog posts incl. community (portal) posts, same request as artworks
 //   filters          the active filters (see filters.js)
 //   filtersOpen      whether the filter panel is expanded
@@ -35,7 +42,8 @@ import { answerPlan, ghostFor } from "./intent";
 //                    verified to add) or "unavailable" (it could not answer:
 //                    controls.elaborateAgain() asks again)
 //   overview         v4.8: { text, lines } — the Worker's one-line summary of the
-//                    artworks found for the term; null when none
+//                    artworks found for the term; null when none. It sums up the
+//                    first page ("showing 48"): gone once a next page is added
 //   didYouMean       { text, term }: the search for `term` (trimmed, lower case)
 //                    corrected a word into `text`; null when not
 //   examples         examples for the placeholder, in the UI language (kept
@@ -44,7 +52,7 @@ import { answerPlan, ghostFor } from "./intent";
 //   controls = { setFilters, toggleFilters, suggestAuthors, suggestCommunities,
 //                applyText(text), pickSuggestion(s), acceptCompletion(),
 //                submit(), feedback(item, action),
-//                elaborateAgain(), rateAnswer(queryId, 1 | -1) }
+//                elaborateAgain(), rateAnswer(queryId, 1 | -1), loadMore() }
 //
 // useSearch(apiRef, { lang }) — `lang` is the UI language (two letters): the
 // examples and the suggestions' questions come in it. Without it (settings
@@ -73,6 +81,13 @@ import { answerPlan, ghostFor } from "./intent";
 // the first answer when it lands. A new text stops both. After an answer, the
 // suggestions are asked with after=<query_id>, so its follow-ups come first
 // while the next question is typed (for CONVERSATION_TTL_MS).
+//
+// Loading more: the artworks come a page at a time (LIMITS.artworks). loadMore
+// asks for the next one (searchApi.searchMore), one at a time, never while a new
+// search is on its way, and adds it under the grid: each artwork once, at most
+// LIMITS.artworksMax. A new search (text, filters, reset) stops the page on its
+// way, and a page only ever lands on the artworks it follows. The cached search
+// grows with its pages, so coming back to a term brings them back.
 
 const EMPTY = Object.freeze([]);
 const EMPTY_OBJ = Object.freeze({});
@@ -80,10 +95,37 @@ const EMPTY_OBJ = Object.freeze({});
 export const SEARCH_IDLE = Object.freeze({
     users: EMPTY, tags: EMPTY, communities: EMPTY, communityTitles: EMPTY_OBJ,
     artworks: EMPTY, posts: EMPTY, overview: null,
+    artworksMore: null, moreLoading: false, moreFailed: false, artworksCapped: false,
     filters: EMPTY_FILTERS, filtersOpen: false,
     loading: false, artworksLoading: false,
     suggest: null, answer: null, didYouMean: null, examples: EMPTY,
 });
+
+/**
+ * The artworks with a next page added under them — each artwork once, never more than
+ * LIMITS.artworksMax — and what comes after it (`more`, null at the cap). The overview summed
+ * up the first page ("showing 48"): it goes as soon as the grid grows.
+ */
+function withPage(artworks, overview, page, more) {
+    const seen = new Set(artworks.map((it) => it.id));
+    const added = [];
+    for (const it of page) {
+        if (it && !seen.has(it.id)) {
+            seen.add(it.id);
+            added.push(it);
+        }
+    }
+    if (!added.length) return { artworks, overview, more: more || null, capped: false };
+    const all = artworks.concat(added);
+    const max = LIMITS.artworksMax;
+    return {
+        artworks: all.length > max ? all.slice(0, max) : all,
+        overview: null,
+        more: all.length >= max ? null : more || null,
+        // stopped at the cap while the Worker had more
+        capped: all.length > max || (all.length === max && !!more),
+    };
+}
 
 function reducer(state, action) {
     switch (action.type) {
@@ -97,10 +139,26 @@ function reducer(state, action) {
         case "index":
             return {
                 ...state, artworks: action.artworks, posts: action.posts, overview: action.overview || null, artworksLoading: false,
+                artworksMore: action.more || null, artworksCapped: !!action.capped, moreLoading: false, moreFailed: false,
                 didYouMean: action.didYouMean ? Object.freeze({ text: action.didYouMean, term: action.term }) : null,
             };
         case "cached":
-            return { ...state, ...action.results, loading: false, artworksLoading: false };
+            return { ...state, ...action.results, loading: false, artworksLoading: false, moreLoading: false, moreFailed: false };
+        // the artworks' next page: only ever onto the artworks it follows (`from`, their continuation)
+        case "moreLoading":
+            return state.artworksMore === action.from ? { ...state, moreLoading: true, moreFailed: false } : state;
+        case "more": {
+            if (state.artworksMore !== action.from) return state;
+            const next = withPage(state.artworks, state.overview, action.artworks, action.more);
+            return {
+                ...state, artworks: next.artworks, overview: next.overview, artworksMore: next.more, artworksCapped: next.capped,
+                moreLoading: false, moreFailed: false,
+            };
+        }
+        case "moreFailed":
+            return state.artworksMore === action.from ? { ...state, moreLoading: false, moreFailed: true } : state;
+        case "moreStopped":
+            return state.moreLoading ? { ...state, moreLoading: false } : state;
         case "filters":
             return { ...state, filters: action.filters };
         case "filtersOpen":
@@ -185,7 +243,12 @@ export function useSearch(apiRef, { lang = null } = {}) {
     const chainAbortRef = useRef(null);
     const indexAbortRef = useRef(null);
     const chainCacheRef = useRef(new Map());    // term → { users, tags, communities }
-    const indexCacheRef = useRef(new Map());    // term \0 filters → { artworks, posts, didYouMean }
+    const indexCacheRef = useRef(new Map());    // term \0 filters → { artworks, posts, overview, didYouMean, more, capped }
+    // loading more: the artworks' next page on its way, and the cache key of the artworks shown
+    const moreAbortRef = useRef(null);
+    const indexKeyRef = useRef(null);
+    const artworksStateRef = useRef(results);    // mirrors results (artworks, artworksMore, artworksLoading)
+    artworksStateRef.current = results;
     // v3: what the Worker proposes while typing, and answers to questions
     const suggestTimerRef = useRef(null);
     const suggestAbortRef = useRef(null);
@@ -322,6 +385,15 @@ export function useSearch(apiRef, { lang = null } = {}) {
         return { users, tags, communities };
     }, [addTitles, communityList, profilesFor]);
 
+    /** Stop the artworks' next page on its way (a new search, a reset): its spinner goes with it. */
+    const abortMore = useCallback(() => {
+        const ctl = moreAbortRef.current;
+        if (!ctl) return;
+        moreAbortRef.current = null;
+        ctl.abort();
+        dispatch({ type: "moreStopped" });
+    }, []);
+
     /**
      * Run the search for `trimmed` + `filters`. `chain` also refreshes the
      * users/tags/communities sections (a filter change leaves them alone).
@@ -334,7 +406,9 @@ export function useSearch(apiRef, { lang = null } = {}) {
         }
 
         // Artwork + post search (one request) starts first and runs in parallel with the chain calls.
+        // (A next page of the artworks shown is of no use anymore.)
         if (indexAbortRef.current) indexAbortRef.current.abort();
+        abortMore();
         const indexCtl = new AbortController();
         indexAbortRef.current = indexCtl;
         const indexKey = trimmed + "\0" + filtersKey(filters);
@@ -372,9 +446,17 @@ export function useSearch(apiRef, { lang = null } = {}) {
 
         const index = await indexPromise;
         if (indexCtl.signal.aborted || index === null) return;
-        dispatch({ type: "index", artworks: index.artworks, posts: index.posts, overview: index.overview || null, didYouMean: index.didYouMean, term: trimmed });
-        if (!indexCached) remember(indexCacheRef.current, indexKey, { artworks: index.artworks, posts: index.posts, overview: index.overview || null, didYouMean: index.didYouMean || null });
-    }, [apiRef, chainSearch, communityList, titlesObj]);
+        indexKeyRef.current = indexKey;
+        dispatch({
+            type: "index", artworks: index.artworks, posts: index.posts, overview: index.overview || null, didYouMean: index.didYouMean, term: trimmed,
+            more: index.more || null, capped: !!index.capped,
+        });
+        if (!indexCached) {
+            remember(indexCacheRef.current, indexKey, {
+                artworks: index.artworks, posts: index.posts, overview: index.overview || null, didYouMean: index.didYouMean || null, more: index.more || null, capped: false,
+            });
+        }
+    }, [apiRef, abortMore, chainSearch, communityList, titlesObj]);
 
     /** The search's own debounce and requests (suggestions and answers have theirs). */
     const abortSearch = useCallback(() => {
@@ -384,6 +466,45 @@ export function useSearch(apiRef, { lang = null } = {}) {
         }
         if (chainAbortRef.current) chainAbortRef.current.abort();
         if (indexAbortRef.current) indexAbortRef.current.abort();
+        abortMore();
+    }, [abortMore]);
+
+    /**
+     * The artworks' next page (the grid's end came into sight): asked for once at a time, not while
+     * a new search is on its way, and added under the artworks it follows — the dispatch carries
+     * their continuation (`from`), so a page that comes back after a newer search lands nowhere. The
+     * cached search grows with it, when the cache still holds the artworks this page follows.
+     */
+    const loadMore = useCallback(() => {
+        const shown = artworksStateRef.current;
+        const more = shown.artworksMore;
+        if (!more || shown.artworksLoading || moreAbortRef.current) return;
+        const ctl = new AbortController();
+        moreAbortRef.current = ctl;
+        const key = indexKeyRef.current;
+        dispatch({ type: "moreLoading", from: more });
+        searchMore(more, { signal: ctl.signal }).then(
+            (page) => {
+                if (ctl.signal.aborted) return;
+                moreAbortRef.current = null;
+                if (!page) {
+                    dispatch({ type: "moreFailed", from: more });
+                    return;
+                }
+                dispatch({ type: "more", from: more, artworks: page.artworks, more: page.more });
+                const cache = indexCacheRef.current;
+                const entry = key ? cache.get(key) : null;
+                if (entry && entry.more === more) {
+                    const next = withPage(entry.artworks, entry.overview, page.artworks, page.more);
+                    // (same entry, same age: it expires with the search it started from)
+                    cache.set(key, { ...entry, artworks: next.artworks, overview: next.overview, more: next.more, capped: next.capped });
+                }
+            },
+            () => {
+                if (moreAbortRef.current === ctl) moreAbortRef.current = null;
+                if (!ctl.signal.aborted) dispatch({ type: "moreFailed", from: more });
+            },
+        );
     }, []);
 
     /** Stop asking for suggestions; `clear` also takes the ones shown away. */
@@ -635,14 +756,17 @@ export function useSearch(apiRef, { lang = null } = {}) {
             return;
         }
         const chainCached = fresh(chainCacheRef.current.get(trimmed));
-        const indexCached = fresh(indexCacheRef.current.get(trimmed + "\0" + filtersKey(filters)));
+        const indexKey = trimmed + "\0" + filtersKey(filters);
+        const indexCached = fresh(indexCacheRef.current.get(indexKey));
         if (chainCached && indexCached) {
             abortSearch();
+            indexKeyRef.current = indexKey;
             dispatch({
                 type: "cached",
                 results: {
                     users: chainCached.users, tags: chainCached.tags, communities: chainCached.communities, communityTitles: titlesObj(),
                     artworks: indexCached.artworks, posts: indexCached.posts, overview: indexCached.overview || null,
+                    artworksMore: indexCached.more || null, artworksCapped: !!indexCached.capped,
                     didYouMean: indexCached.didYouMean ? Object.freeze({ text: indexCached.didYouMean, term: trimmed }) : null,
                 },
             });
@@ -798,10 +922,10 @@ export function useSearch(apiRef, { lang = null } = {}) {
         () => Object.freeze({
             setFilters, toggleFilters, suggestAuthors, suggestCommunities,
             applyText, pickSuggestion, acceptCompletion, submit, feedback,
-            elaborateAgain, rateAnswer,
+            elaborateAgain, rateAnswer, loadMore,
             explainAgain: elaborateAgain, // v4's name, for a caller that still uses it
         }),
-        [setFilters, toggleFilters, suggestAuthors, suggestCommunities, applyText, pickSuggestion, acceptCompletion, submit, feedback, elaborateAgain, rateAnswer],
+        [setFilters, toggleFilters, suggestAuthors, suggestCommunities, applyText, pickSuggestion, acceptCompletion, submit, feedback, elaborateAgain, rateAnswer, loadMore],
     );
 
     const reset = useCallback(() => {

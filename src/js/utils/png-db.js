@@ -346,16 +346,17 @@ export const pngdb = () => {
 
     /**
      * Returns decoded pixel data (ImageData) for a previously-fetched
-     * img_obj. Usually just joins the background decode that
-     * get_new_img_obj already started; pays for a decode itself only if
-     * the entry was evicted or the warm-up hasn't reached it yet.
+     * img_obj — a get_new_img_obj snapshot, or an ImageMeasurer size.
+     * Usually just joins the background decode that get_new_img_obj
+     * already started; pays for a decode itself only if the entry was
+     * evicted or the warm-up hasn't reached it yet.
      * Returns null if decode fails or img_obj is invalid.
      */
     const get_new_img_data = async (img_obj) => {
         if (!img_obj || !img_obj.id) return null;
         // Entries are keyed by CONTENT HASH. A snapshot from get_new_img_obj
-        // carries it as `id`; ImageMeasurer's cached copy carries the post id
-        // as `id` and the content hash as `hash`. Looking the post id up used
+        // carries it as `id`; ImageMeasurer's size carries the post id as
+        // `id` and the content hash as `hash`. Looking the post id up used
         // to miss every time, so each drawn card was decoded a second time
         // into a second cache slot.
         const key = img_obj.hash || img_obj.id;
@@ -374,17 +375,30 @@ export const pngdb = () => {
         // the snapshot (it carries type + payload bytes) and decode once,
         // shared. Re-inserting means a post-eviction re-decode is paid at
         // most once instead of on every call.
-        if (!img_obj.data) return null;
-        const entry = {
-            id: key,
-            type: img_obj.type,
-            data: img_obj.data,
-            width: img_obj.width | 0,
-            height: img_obj.height | 0,
-            decoded: null,
-        };
-        imgCache.set(entry.id, entry);
-        return decodeEntry(entry);
+        if (img_obj.data) {
+            const entry = {
+                id: key,
+                type: img_obj.type,
+                data: img_obj.data,
+                width: img_obj.width | 0,
+                height: img_obj.height | 0,
+                decoded: null,
+            };
+            imgCache.set(entry.id, entry);
+            return decodeEntry(entry);
+        }
+
+        // An ImageMeasurer size carries no bytes — holding them for every
+        // card it ever measured pinned them all outside this cache's budget —
+        // but a reference to the post's own image string. Probe it again (the
+        // base64 decode + hash + header read of measure time, no pixels),
+        // which re-files the entry, then decode it as above: the snapshot
+        // carries the bytes, so this never recurses a second time.
+        if (typeof img_obj.src === "string" && img_obj.src) {
+            const fresh = await get_new_img_obj(img_obj.src);
+            return fresh ? get_new_img_data(fresh) : null;
+        }
+        return null;
     };
 
     return { get_new_img_obj, get_new_img_data };

@@ -10,22 +10,27 @@ import ListItemText from "@material-ui/core/ListItemText";
 import ListItemIcon from "@material-ui/core/ListItemIcon";
 import Menu from "@material-ui/core/Menu";
 import MenuItem from "@material-ui/core/MenuItem";
+import Divider from "@material-ui/core/Divider";
 import Typography from "@material-ui/core/Typography";
 import ReplyRounded from "@material-ui/icons/ReplyRounded";
 import MoreVertRounded from "@material-ui/icons/MoreVertRounded";
 import EditRounded from "@material-ui/icons/EditRounded";
 import DeleteOutlineRounded from "@material-ui/icons/DeleteOutlineRounded";
+import CodeIcon from "@material-ui/icons/Code";
+import LinkIcon from "@material-ui/icons/Link";
 import CircularProgress from '@material-ui/core/CircularProgress';
+import * as clipboard from "clipboard-polyfill";
 import ArrowUpDropCircle from '../icons/ArrowUpDropCircle';
 import ArrowUpDropCircleOutline from '../icons/ArrowUpDropCircleOutline';
 import ArrowDownDropCircle from '../icons/ArrowDownDropCircle';
 import ArrowDownDropCircleOutline from '../icons/ArrowDownDropCircleOutline';
 import useLiveTimeAgo from "../hooks/useLiveTimeAgo";
-import { HISTORY } from "../utils/constants";
+import { HISTORY, buildCommentFocusHash, parsePostUrl } from "../utils/constants";
 import * as actions from "../actions/utils";
 import { voteSign } from "../utils/voteValue";
 import { votesWithLocalVote } from "../utils/voteSync";
 import { safeHTML } from "../utils/api/sanitizer";
+import ProfileHoverAnchor from "./ProfileHoverCard";
 
 import { t, tnode } from "../utils/text";
 
@@ -103,6 +108,29 @@ const LiveTimeAgoSpan = React.forwardRef(function LiveTimeAgoSpan({ date, option
 // 3 -> the comment itself (level 1), its direct replies (level 2) and their
 // replies (level 3). Deeper levels are reached via "Show Replies".
 const MAX_VISIBLE_DEPTH = 3;
+
+/**
+ * Shareable link to one comment. A comment has no page of its own: its link
+ * is the post it sits under, opened on the thread with this comment pinned —
+ * "#replies&focus=<b64url(author/permlink)>", the deep-link PostDialog and
+ * BlogPostDialog both read (PaperCardReply and Profile build the same one).
+ *
+ * CommentInList only renders inside those two dialogs, and they keep the
+ * address bar on the open post's URL — their own "copy link" copies it — so
+ * the post part comes from there, through parsePostUrl: canonical, with any
+ * "+meta" overlay suffix and the current drawer hash left behind. Off a post
+ * URL there is no thread to point at, so no link (null) rather than a wrong one.
+ */
+function commentLinkOf(c) {
+    const d = c || {};
+    const author = d.username || (d.author || {}).username || "";
+    const permlink = d.permlink || "";
+    const post = parsePostUrl(HISTORY.location && HISTORY.location.pathname);
+    if (!post || !author || !permlink) return null;
+    const origin = (typeof window !== "undefined" && window.location && window.location.origin) || "";
+    return origin + "/" + post.tag + "/@" + post.author + "/" + post.permlink
+        + buildCommentFocusHash(author, permlink);
+}
 
 /* ── Live comment edits ────────────────────────────────────────────────
  * A host dialog patches its own top level after api.broadcast.updateComment,
@@ -416,7 +444,10 @@ const styles = theme => ({
             color: '#999',
         },
     },
-    ownerMenu: {
+    // The ⋮ menu every comment carries: Copy link and Inspect for everyone,
+    // Edit / Delete for the author. The divider between the two groups
+    // matches the post card's menu (PaperCardMenuOption).
+    commentMenu: {
         '& .MuiPaper-root': {
             backgroundColor: '#1a1a1a',
             borderRadius: '12px',
@@ -427,6 +458,10 @@ const styles = theme => ({
         '& .MuiListItemIcon-root': {
             color: '#999',
             minWidth: 36,
+        },
+        '& .MuiDivider-root': {
+            backgroundColor: '#2a2a2a',
+            margin: '4px 0',
         },
     }
 });
@@ -666,6 +701,8 @@ class CommentInList extends React.PureComponent {
             upvoteLoading: false,
             downvoteLoading: false,
             _menu_anchor: null,
+            // The ⋮ Menu mounts on its first open and then stays (see _open_menu).
+            _menu_mounted: false,
             depth: props.depth || 0,
             _loadedReplies: undefined,
             _repliesLoading: false,
@@ -918,10 +955,14 @@ class CommentInList extends React.PureComponent {
         this.props.onReply && this.props.onReply(this.st4te.data, this._ancestor_path());
     };
 
-    // ── Owner 3-dot menu (edit / delete own comment) ───────────────────
+    // ── 3-dot menu: copy link + inspect (everyone), edit / delete (own) ──
+    // Every comment shows the button now, so the Menu is not rendered until
+    // the first open: a long thread would otherwise carry one closed
+    // Menu → Popover → Modal per comment, re-run on each of its re-renders.
+    // Once mounted it stays, so the close transition still plays.
     _open_menu = (e) => {
         if (e && e.stopPropagation) e.stopPropagation();
-        this.setSt4te({ _menu_anchor: e.currentTarget }, () => { this.forceUpdate(); });
+        this.setSt4te({ _menu_anchor: e.currentTarget, _menu_mounted: true }, () => { this.forceUpdate(); });
     };
 
     _close_menu = () => {
@@ -940,9 +981,35 @@ class CommentInList extends React.PureComponent {
         this.props.onDelete && this.props.onDelete(data);
     };
 
-    // The menu only exists for the comment's own author — and only when the
-    // parent dialog actually wired the edit/delete handlers (modifications
-    // are dialog-only by design).
+    // Inspect: the comment's raw chain payload in the Data Inspector — the
+    // same dialog a post card's "Inspect Data" opens (PaperCardMenuOption).
+    // A comment is chain content like a post, so DataViewerDialog reads
+    // author.username / permlink off `data` and fetches it fresh
+    // (get_content, raw). It is a global dialog, so no host has to wire a
+    // handler, and inspecting needs no login.
+    _handle_inspect = () => {
+        const data = this.st4te.data;
+        this.setSt4te({ _menu_anchor: null }, () => { this.forceUpdate(); });
+        if (data) actions.trigger_data_viewer(data);
+    };
+
+    // Copy link: the comment's deep-link (commentLinkOf), built at click time
+    // and written inside the click itself — browsers only let the clipboard be
+    // written during the user gesture. Copied through clipboard-polyfill like
+    // the host dialogs' own link, with the post card menu's snackbars.
+    _handle_copy_link = () => {
+        const link = commentLinkOf(this.st4te.data);
+        this.setSt4te({ _menu_anchor: null }, () => { this.forceUpdate(); });
+        if (!link) return;
+        clipboard.writeText(link).then(
+            () => { actions.trigger_snackbar(t("words.link_copied_to_clipboard")); },
+            () => { actions.trigger_snackbar(t("components.paper_card_menu_option.failed_to_copy_link")); }
+        );
+    };
+
+    // Edit / Delete are for the comment's own author only — and only when
+    // the parent dialog actually wired the handlers (modifications are
+    // dialog-only by design). Copy link and Inspect are for everyone.
     _is_own_comment = () => {
         const { data, account } = this.st4te;
         if (!account || !data) return false;
@@ -1083,8 +1150,15 @@ class CommentInList extends React.PureComponent {
         const data = this.st4te.data || {};
         const author = data.author || {};
         const numberReplies = data.children || 0;
-        const showOwnerMenu = this._is_own_comment()
-            && (typeof this.props.onEdit === "function" || typeof this.props.onDelete === "function");
+        // The ⋮ menu is always shown: Copy link and Inspect are for everyone.
+        // Edit / Delete join it on the viewer's own comment, when the host
+        // wired them. The link is only worked out once the menu has mounted
+        // (first open), and stays through the close animation; the click
+        // builds it afresh.
+        const isOwnComment = this._is_own_comment();
+        const canEdit = isOwnComment && typeof this.props.onEdit === "function";
+        const canDelete = isOwnComment && typeof this.props.onDelete === "function";
+        const commentLink = this.st4te._menu_mounted ? commentLinkOf(data) : null;
 
         const depth = this.st4te.depth || 0;
         const replies = this._get_replies();
@@ -1135,15 +1209,23 @@ class CommentInList extends React.PureComponent {
                                 style={ST_MB_4__D_BLOCK__FLEX_1}
                             >
                                 {mutedWords(tnode("components.comment_in_list.author_said_time", {
+                                    // Rich author hover card instead of the old
+                                    // raw-@username Tooltip, as on the post and
+                                    // reply cards. The anchor adds no element: it
+                                    // attaches its pointer listeners to this very
+                                    // span. The card is the host page's single
+                                    // <ProfileHoverCardLayer/> (Feed, FeedPersonal,
+                                    // Profile and Community mount it around both
+                                    // dialogs). Click behavior is unchanged.
                                     author: (
-                                        <Tooltip title={"@"+(author.username || "")}>
+                                        <ProfileHoverAnchor api={this.st4te.api} author={author} onOpenProfile={this._open_author}>
                                             <span
                                                 className={classes.subheaderName}
                                                 onClick={this._open_comment_author}
                                             >
                                                 {author.name && author.name !== author.username ? author.name : ("@" + (author.username || ""))}
                                             </span>
-                                        </Tooltip>
+                                        </ProfileHoverAnchor>
                                     ),
                                     time: (
                                         <Tooltip arrow title={this._date_tooltip(data.date, locales)}>
@@ -1152,28 +1234,44 @@ class CommentInList extends React.PureComponent {
                                     ),
                                 }), ST_C_999)}
                             </Typography>
-                            {showOwnerMenu && (
-                                <Tooltip arrow title={t("components.comment_in_list.comment_options")}>
-                                    <IconButton
-                                        size="small"
-                                        className={classes.menuButton}
-                                        aria-label={t("components.comment_in_list.comment_options")}
-                                        onClick={this._open_menu}
-                                    >
-                                        <MoreVertRounded fontSize="small" />
-                                    </IconButton>
-                                </Tooltip>
-                            )}
-                            {showOwnerMenu && (
+                            <Tooltip arrow title={t("components.comment_in_list.comment_options")}>
+                                <IconButton
+                                    size="small"
+                                    className={classes.menuButton}
+                                    aria-label={t("components.comment_in_list.comment_options")}
+                                    onClick={this._open_menu}
+                                >
+                                    <MoreVertRounded fontSize="small" />
+                                </IconButton>
+                            </Tooltip>
+                            {this.st4te._menu_mounted && (
                                 <Menu
-                                    className={classes.ownerMenu}
+                                    className={classes.commentMenu}
                                     anchorEl={this.st4te._menu_anchor}
                                     open={Boolean(this.st4te._menu_anchor)}
                                     onClose={this._close_menu}
                                     keepMounted={false}
                                     MenuListProps={{ dense: true }}
                                 >
-                                    {typeof this.props.onEdit === "function" && (
+                                    {/* Copy link and Inspect: the post card menu's
+                                        entries, icons and labels, in its order,
+                                        so they read the same everywhere. */}
+                                    {commentLink && (
+                                        <MenuItem onClick={this._handle_copy_link}>
+                                            <ListItemIcon>
+                                                <LinkIcon fontSize="small" />
+                                            </ListItemIcon>
+                                            <ListItemText primary={<span style={ST_C_DDD__FS_14}>{t("components.paper_card_menu_option.copy_link")}</span>} />
+                                        </MenuItem>
+                                    )}
+                                    <MenuItem onClick={this._handle_inspect}>
+                                        <ListItemIcon>
+                                            <CodeIcon fontSize="small" />
+                                        </ListItemIcon>
+                                        <ListItemText primary={<span style={ST_C_DDD__FS_14}>{t("components.paper_card_menu_option.inspect_data")}</span>} />
+                                    </MenuItem>
+                                    {(canEdit || canDelete) && <Divider />}
+                                    {canEdit && (
                                         <MenuItem onClick={this._handle_edit}>
                                             <ListItemIcon>
                                                 <EditRounded fontSize="small" />
@@ -1181,7 +1279,7 @@ class CommentInList extends React.PureComponent {
                                             <ListItemText primary={<span style={ST_C_DDD__FS_14}>{t("components.comment_in_list.edit_comment")}</span>} />
                                         </MenuItem>
                                     )}
-                                    {typeof this.props.onDelete === "function" && (
+                                    {canDelete && (
                                         <MenuItem onClick={this._handle_delete}>
                                             <ListItemIcon>
                                                 <DeleteOutlineRounded fontSize="small" />

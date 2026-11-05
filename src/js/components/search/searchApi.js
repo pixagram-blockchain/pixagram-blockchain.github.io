@@ -36,6 +36,13 @@ import { wikiUrl } from "./wiki";
 //   facets — only when asked for ({ facets: true }): { author, community, primary_color,
 //            has_color, type, month, … } as [{ key, n }] counts
 // Without a query the Worker browses (newest first) — that is how filters work on their own.
+//
+// Loading more (artworks only): the flat Worker pages a search with cursor=<next_cursor> (an
+// offset in its ranking for a search, a keyset token when browsing; null on the last page).
+// searchIndex returns `more`, the artworks' continuation — the cursor of each scope that has a
+// next page, and what a merge of several scopes found beyond one page — and searchMore(more)
+// brings the next page with the next `more`. The sets Worker answers without one (no loading
+// more there).
 
 /**
  * Absolute URL of the best thumbnail: the native WebP (small, exact pixels) first. Only the
@@ -142,7 +149,7 @@ function normalizeFacets(raw) {
     return out;
 }
 
-const EMPTY = Object.freeze({ artworks: [], posts: [], facets: null, didYouMean: null, overview: null });
+const EMPTY = Object.freeze({ artworks: [], posts: [], facets: null, didYouMean: null, overview: null, more: null });
 
 /** GET /search with `params`: the parsed body, or null on any failure. Rethrows only on abort. */
 async function fetchSearch(params, signal) {
@@ -171,7 +178,7 @@ let apiShape = null;
 function fromSets(json, limit, postsLimit) {
     const artworks = (Array.isArray(json?.artworks?.items) ? json.artworks.items : []).map(normalize).filter((it) => it.src && it.path).slice(0, limit);
     const posts = (Array.isArray(json?.posts?.items) ? json.posts.items : []).map(normalizePost).filter((it) => it.path).slice(0, postsLimit);
-    return { artworks, posts, facets: normalizeFacets(json?.facets), didYouMean: null, overview: null };
+    return { artworks, posts, facets: normalizeFacets(json?.facets), didYouMean: null, overview: null, more: null };
 }
 
 /** v4.8: the overview of a search answer ({ text, lines }), checked; null when there is none. */
@@ -194,27 +201,108 @@ function didYouMeanOf(answers) {
 
 /**
  * Items of several flat answers as one list: first seen wins, re-ordered when several scopes were
- * merged. Each keeps the query_id of its answer and its rank there (for /feedback).
+ * merged. Each keeps the query_id of its answer and its rank there (for /feedback) — counted from
+ * `offsets[k]` for answer k, a next page's place in its ranking.
  */
-function mergeItems(answers, newest) {
+function mergeItems(answers, newest, offsets = null) {
     const seen = new Set();
     const items = [];
-    for (const json of answers) {
+    answers.forEach((json, k) => {
         const qid = json && typeof json.query_id === "string" ? json.query_id : null;
+        const from = offsets && offsets[k] > 0 ? offsets[k] : 0;
         const list = Array.isArray(json?.items) ? json.items : [];
         list.forEach((it, i) => {
             if (it && it.id != null && !seen.has(it.id)) {
                 seen.add(it.id);
-                items.push(qid ? { ...it, _qid: qid, _rank: i + 1 } : it);
+                items.push(qid ? { ...it, _qid: qid, _rank: from + i + 1 } : it);
             }
         });
-    }
+    });
     if (answers.length > 1) {
         items.sort(newest
             ? (a, b) => (b.created || 0) - (a.created || 0)
             : (a, b) => (b.score?.fused || 0) - (a.score?.fused || 0));
     }
     return items;
+}
+
+// ── Loading more ──
+// The continuation of a search's artworks (opaque to the UI, frozen):
+//   { params, pages: [{ scope, cursor }], rest: [artwork], newest, limit }
+//   params  the artworks request (type=artwork, limit, the query and the filters; no overview)
+//   pages   one per scope with a next page: the search itself, or one community each (a tag scope)
+//   rest    artworks a merge of several scopes found beyond one page, not shown yet
+// Nothing to continue (no page and nothing left over): no continuation (null).
+
+/** The Worker's next_cursor of an answer (a non-empty string), else null. */
+const cursorOf = (json) => (json && typeof json.next_cursor === "string" && json.next_cursor && json.next_cursor.length <= 512 ? json.next_cursor : null);
+
+/** The rank a page starts after: a search's cursor is that offset; a keyset token (browsing) is not. */
+const offsetOf = (cursor) => (/^\d{1,7}$/.test(cursor) ? Number(cursor) : 0);
+
+function continuation(params, pages, rest, newest, limit) {
+    if (!pages.length && !rest.length) return null;
+    return Object.freeze({ params: Object.freeze({ ...params }), pages: Object.freeze(pages), rest: Object.freeze(rest), newest, limit });
+}
+
+/** The next page of each scope that has one (`answers` in the order of `scopes`). */
+function nextPages(scopes, answers) {
+    const pages = [];
+    scopes.forEach((scope, i) => {
+        const cursor = cursorOf(answers[i]);
+        if (cursor) pages.push(Object.freeze({ scope, cursor }));
+    });
+    return pages;
+}
+
+/** Artworks of `a` then `b`, each id once; ordered as a merged page is (newest, else score) when `sort`. */
+function pool(a, b, newest, sort) {
+    const seen = new Set();
+    const out = [];
+    for (const it of a.concat(b)) {
+        if (!seen.has(it.id)) {
+            seen.add(it.id);
+            out.push(it);
+        }
+    }
+    if (sort) out.sort(newest ? (x, y) => (y.created || 0) - (x.created || 0) : (x, y) => (y.score || 0) - (x.score || 0));
+    return out;
+}
+
+/**
+ * The next page of artworks after `more` (searchIndex's, or the last searchMore's). Resolves to
+ * { artworks, more } — `more` null when nothing comes after — or to null when the Worker could not
+ * answer at all: nothing moved on, the same `more` can be asked again. Rethrows only on abort.
+ *
+ * Each scope with a next page is asked for it (the same request, cursor=next_cursor); what they
+ * answer joins what was left over and is cut at one page, ordered as the first one was (several
+ * scopes: by score, or newest first). A scope that did not answer keeps its cursor for the next
+ * call. Every artwork keeps the query_id of its page and its rank in the whole ranking.
+ */
+export async function searchMore(more, { signal } = {}) {
+    if (!more) return { artworks: [], more: null };
+    const { params, pages, rest, newest, limit } = more;
+    // a whole page left over from the last merge: no request this time
+    const asked = rest.length >= limit ? [] : pages;
+    const answers = await Promise.all(asked.map((p) => fetchSearch({ ...params, ...p.scope, cursor: p.cursor }, signal)));
+    if (asked.length && answers.every((json) => !json)) return null;
+    const left = asked.length ? [] : pages.slice();
+    const got = [];
+    const offsets = [];
+    asked.forEach((p, i) => {
+        const json = answers[i];
+        if (!json) {
+            left.push(p);
+            return;
+        }
+        got.push(json);
+        offsets.push(offsetOf(p.cursor));
+        const cursor = cursorOf(json);
+        if (cursor) left.push(Object.freeze({ scope: p.scope, cursor }));
+    });
+    const fetched = mergeItems(got, newest, offsets).map(normalize).filter((it) => it.src && it.path);
+    const all = pool(rest, fetched, newest, got.length > 1 || (rest.length > 0 && fetched.length > 0));
+    return { artworks: all.slice(0, limit), more: continuation(params, left, all.slice(limit), newest, limit) };
 }
 
 /**
@@ -245,18 +333,21 @@ async function searchFlat(params, filters, { signal, limit, postsLimit, facets, 
     ]);
     if (artAnswers.concat(postAnswers).length && artAnswers.concat(postAnswers).every((j) => !j)) return EMPTY;
 
-    const artworks = mergeItems(artAnswers, newest).map(normalize).filter((it) => it.src && it.path).slice(0, limit);
+    const found = mergeItems(artAnswers, newest).map(normalize).filter((it) => it.src && it.path);
     const posts = mergeItems(postAnswers, newest).map(normalizePost).filter((it) => it.path).slice(0, postsLimit);
     return {
-        artworks, posts, facets: normalizeFacets(facetAnswers[0]?.facets), didYouMean: didYouMeanOf(artAnswers.concat(postAnswers)),
+        artworks: found.slice(0, limit), posts, facets: normalizeFacets(facetAnswers[0]?.facets), didYouMean: didYouMeanOf(artAnswers.concat(postAnswers)),
         overview: overviewOf(wantArtworks ? artAnswers[0] : postAnswers[0]),
+        // the artworks' next page: each scope's cursor, and what several scopes found beyond this page
+        more: wantArtworks ? continuation({ ...base, type: "artwork", limit: String(limit) }, nextPages(scopes, artAnswers), found.slice(limit), newest, limit) : null,
     };
 }
 
 /**
  * Search artworks and posts. Resolves to empty sets on any failure (the dropdown must
  * never break because the search Worker is unreachable) and rethrows only on abort.
- * An empty term with filters browses (newest first).
+ * An empty term with filters browses (newest first). `more` is the artworks' continuation
+ * (searchMore brings their next page), null when there is none.
  */
 export async function searchIndex(term, { signal, filters = null, limit = LIMITS.artworks, postsLimit = LIMITS.posts, nsfw = "exclude", facets = false, lang = null } = {}) {
     const q = String(term || "").trim();

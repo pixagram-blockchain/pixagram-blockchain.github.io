@@ -49,6 +49,7 @@ import VisibilityRounded from "@material-ui/icons/VisibilityRounded";
 import VisibilityOffRounded from "@material-ui/icons/VisibilityOffRounded";
 import CircularProgress from "@material-ui/core/CircularProgress";
 import CommentInList, { applyCommentEdit, withCommentEdits } from "./CommentInList";
+import ProfileHoverAnchor from "./ProfileHoverCard";
 import { ToxicityWatcher } from "./ToxicityHint";
 import * as toxicity from "../utils/toxicity";
 import Tabs from "@material-ui/core/Tabs";
@@ -356,12 +357,15 @@ const ParentComment = React.memo(({ comment, index, classes, locales, onOpenAuth
                 style={{ marginBottom: 4, display: "block" }}
             >
                 {mutedWords(tnode("components.post_dialog.author_said_time", {
+                    // Author hover card, as on every comment (CommentInList):
+                    // the anchor only adds listeners to this span; the card is
+                    // the host page's <ProfileHoverCardLayer/>.
                     author: (
-                        <Tooltip title={"@" + (comment.author || {}).username}>
+                        <ProfileHoverAnchor api={api} author={comment.author} onOpenProfile={onOpenAuthor}>
                         <span className={classes.subheaderName} onClick={(event) => { onOpenAuthor((comment.author || {}).username) }}>
                             {(comment.author || {}).name}
                         </span>
-                        </Tooltip>
+                        </ProfileHoverAnchor>
                     ),
                     time: (
                         <Tooltip arrow title={new Date(comment.date || Date.now()).toLocaleDateString(locales, {
@@ -390,6 +394,7 @@ const ParentComment = React.memo(({ comment, index, classes, locales, onOpenAuth
         && a.locales === b.locales
         && a.classes === b.classes
         && a.onOpenAuthor === b.onOpenAuthor
+        && a.api === b.api // the body render and the hover card both use it
         && a.comment === b.comment // identity is enough; new comment object ⇒ new render
 );
 
@@ -737,7 +742,8 @@ const DetailsView = React.memo(({
                                     nsfw,
                                     locales,
                                     onOpenArtwork,
-                                    onOpenAuthor
+                                    onOpenAuthor,
+                                    onInspirationShown
                                 }) => (
     <React.Fragment>
         <PostDescription html={data._description_html} summary={data._summary} />
@@ -751,7 +757,9 @@ const DetailsView = React.memo(({
             <ShareSection postId={id} copied={copied} onCopy={onCopy} className={classes.urlLink} />
             <ActionsSection isFavorite={isFavorite} onToggleFavorite={onToggleFavorite} />
             {/* Originality (copies on-chain) + Inspiration (similar themes), from the search
-                Worker. Keyed by post so every artwork opens with both collapsed. */}
+                Worker. Keyed by post so every artwork opens with both collapsed.
+                onInspirationShown(bool): the Inspiration results are loaded and on
+                screen — the desktop panel widens while they are (PostDialog). */}
             <PostOriginality
                 key={((data.author || {}).username || "") + "/" + (data.permlink || "")}
                 author={(data.author || {}).username}
@@ -759,7 +767,8 @@ const DetailsView = React.memo(({
                 nsfw={nsfw}
                 locales={locales}
                 onOpenArtwork={onOpenArtwork}
-                onOpenAuthor={onOpenAuthor} />
+                onOpenAuthor={onOpenAuthor}
+                onInspirationShown={onInspirationShown} />
         </List>
     </React.Fragment>
 ), function (a, b){
@@ -768,6 +777,7 @@ const DetailsView = React.memo(({
     if (a.isFavorite !== b.isFavorite) return false;
     if (a.nsfw !== b.nsfw || a.locales !== b.locales) return false;
     if (a.onOpenArtwork !== b.onOpenArtwork || a.onOpenAuthor !== b.onOpenAuthor) return false;
+    if (a.onInspirationShown !== b.onInspirationShown) return false;
     if (a.metadata !== b.metadata) return false;
     /* Belt-and-suspenders: deep-check metadata fields in case Preact's
      * batching reuses an object reference across two reducer patches. */
@@ -1520,7 +1530,7 @@ const DrawerViews = React.memo(function DrawerViews({
                                                         classes, hidden, index, onChangeIndex,
                                                         /* details */ data, metadata, type, kb, tags, copied, isOwner, isFavorite, nsfw, locales,
                                                         onTagClick, onDownloadArtwork, onOpenLicenseDialog, onCopy, onEditPost, onToggleFavorite,
-                                                        onOpenArtwork, onOpenAuthor,
+                                                        onOpenArtwork, onOpenAuthor, onInspirationShown,
                                                         /* comments */ currentComments, showParent, sorting, comments, commentsLoading, api, account,
                                                         focusKey, focusPathKeys,
                                                         onToggleShowParent, onSliceReplies, onSortingChange, onShowReplies, onLoadReplies,
@@ -1541,7 +1551,8 @@ const DrawerViews = React.memo(function DrawerViews({
                                  isOwner={isOwner} onEditPost={onEditPost}
                                  isFavorite={isFavorite} onToggleFavorite={onToggleFavorite}
                                  nsfw={nsfw} locales={locales}
-                                 onOpenArtwork={onOpenArtwork} onOpenAuthor={onOpenAuthor} />
+                                 onOpenArtwork={onOpenArtwork} onOpenAuthor={onOpenAuthor}
+                                 onInspirationShown={onInspirationShown} />
                 </CardContent>
                 <CardContent key="view-1" style={STYLE_CARDCONTENT_1}>
                     <CommentsView id={data.id} currentComments={currentComments} showParent={showParent}
@@ -1571,7 +1582,7 @@ const DrawerCardInner = React.memo(function DrawerCardInner({
                                                                 /* details */ metadata, type, kb, _copied, handleTagClick, handleDownloadArtwork, handleOpenLicenseDialog, handleCopy,
                                                                 isOwner, openEditPost,
                                                                 isFavorite, onToggleFavorite,
-                                                                nsfw, openRelatedArtwork,
+                                                                nsfw, openRelatedArtwork, onInspirationShown,
                                                                 /* comments */ _current_comments, _show_parent, _sorting, sortedComments, _comments_loading, api, account,
                                                                 toggleShowParent, sliceReplies, handleSortingChange, showReplies, onLoadReplies, openAuthor, replyToComment,
                                                                 startEditComment, requestDeleteComment,
@@ -1604,6 +1615,7 @@ const DrawerCardInner = React.memo(function DrawerCardInner({
                          onOpenLicenseDialog={handleOpenLicenseDialog} onCopy={handleCopy}
                          onEditPost={openEditPost} onToggleFavorite={onToggleFavorite}
                          onOpenArtwork={openRelatedArtwork} onOpenAuthor={openAuthor}
+                         onInspirationShown={onInspirationShown}
                          currentComments={_current_comments} showParent={_show_parent} sorting={_sorting}
                          comments={sortedComments} commentsLoading={_comments_loading} api={api} account={account}
                          focusKey={focusKey} focusPathKeys={focusPathKeys}
@@ -1641,6 +1653,7 @@ const DrawerCardInner = React.memo(function DrawerCardInner({
     if (a._edit_target !== b._edit_target || a.isOwner !== b.isOwner || a.account !== b.account) return false;
     if (a.isFavorite !== b.isFavorite) return false;
     if (a.nsfw !== b.nsfw || a.openRelatedArtwork !== b.openRelatedArtwork || a.openAuthor !== b.openAuthor) return false;
+    if (a.onInspirationShown !== b.onInspirationShown) return false;
     if (a._sorting !== b._sorting || a._comments_loading !== b._comments_loading) return false;
     if (a._show_parent !== b._show_parent || a._current_comments !== b._current_comments) return false;
     if (a.sortedComments !== b.sortedComments || a.authorsEntries !== b.authorsEntries) return false;
@@ -1676,6 +1689,24 @@ const TOOLTIP_DATE_OPTIONS = Object.freeze({ weekday: 'long', year: 'numeric', m
 // theme's sm value ever changes, change this with it.
 const DRAWER_WIDTH = 480;
 const MOBILE_BREAKPOINT = 960;
+// Desktop only: while the Inspiration grid (Details tab) is loaded and on
+// screen, the panel widens to DRAWER_WIDTH_WIDE for a little more room on the
+// recommendations — but only where the artwork column keeps at least
+// WIDE_DRAWER_MIN_ART px beside it (a 1240 px viewport and up); narrower
+// desktops keep DRAWER_WIDTH. See syncDrawerWidth / computeSize.
+const DRAWER_WIDTH_WIDE = 600;
+const WIDE_DRAWER_MIN_ART = 640;
+// The panel's width transition, and the artwork glide that rides along with it.
+const DRAWER_GLIDE_MS = 420;
+const DRAWER_EASING = "cubic-bezier(0.4, 0, 0.2, 1)";
+// How long the grid must stay off screen before the panel narrows again — a
+// grid brushing the scroller's edge must not make the panel flutter.
+const DRAWER_NARROW_DELAY = 300;
+// computeSize's reason for a panel toggle (animated), as opposed to a resize
+// or a layout pass (which snap, as they always did).
+const DRAWER_TOGGLE = "drawer-toggle";
+
+const wideDrawerFits = (vw) => vw > MOBILE_BREAKPOINT && vw - DRAWER_WIDTH_WIDE >= WIDE_DRAWER_MIN_ART;
 
 const STYLE_ROOT_CONTAINER = Object.freeze({ userSelect: "none", width: "100%", height: "100%", display: "flex", overflow: "hidden", contain: "size style layout" });
 const STYLE_CLOSE_OVERLAY = Object.freeze({ position: "absolute", left: 0, top: 0, width: "100%", height: "100%" });
@@ -1740,7 +1771,7 @@ const STYLE_NFT_COMING_SOON_WRAP = Object.freeze({ position: "relative" });
 const STYLE_NFT_BLURRED = Object.freeze({ filter: "blur(9px)", opacity: 0.55, pointerEvents: "none", userSelect: "none" });
 const STYLE_NFT_BAR_DISABLED = Object.freeze({ filter: "blur(5px)", opacity: 0.5, pointerEvents: "none", userSelect: "none" });
 const STYLE_NFT_OVERLAY = Object.freeze({ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 2, display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "0px 16px", backgroundColor: "rgba(0, 0, 0, 0.25)" });
-const STYLE_NFT_OVERLAY_CARD = Object.freeze({ position: "sticky", top: 120, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", maxWidth: 340, padding: "28px 24px", borderRadius: 16, backgroundColor: "rgba(15, 15, 15, 0.9)", backdropFilter: "blur(8px)" });
+const STYLE_NFT_OVERLAY_CARD = Object.freeze({ position: "sticky", top: 120, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", maxWidth: 340, padding: "28px 24px", borderRadius: 16, backgroundColor: "rgba(15, 15, 15, 0.9)", backdropFilter: "blur(9px)" });
 const STYLE_NFT_OVERLAY_ICON_WRAP = Object.freeze({ width: 72, height: 72, borderRadius: "50%", backgroundColor: "#1a1a1a", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 });
 const STYLE_NFT_OVERLAY_ICON = Object.freeze({ fontSize: 36, color: "#fff" });
 const STYLE_NFT_OVERLAY_TITLE = Object.freeze({ color: "#fff", fontWeight: "bold", marginBottom: 8 });
@@ -1824,7 +1855,7 @@ const DeleteCommentModalMemo = React.memo(DeleteCommentModal);
 const styles = (theme) => ({
     backdrop: {
         zIndex: theme.zIndex.drawer + 1,
-        /* A solid scrim instead of backdropFilter: blur(9px) grayscale(1).
+        /* A solid scrim instead of backdropFilter: blur(6px) grayscale(1).
          * The viewport-wide filter kept extra full-screen GPU textures
          * alive while the dialog was open and re-blurred the feed behind
          * it. The compound selector outranks the global .MuiBackdrop-root
@@ -2110,6 +2141,38 @@ const styles = (theme) => ({
             transform: "translateY(calc(100% - 84px))",
             transition: "transform 180ms cubic-bezier(0.4, 0, 0.2, 1) 5ms",
         }
+    },
+    /* ── Wide desktop panel (Details → Inspiration on screen) ─────────────
+     * Modifiers on the root container. drawerWide moves the panel and the
+     * artwork column to DRAWER_WIDTH_WIDE; drawerAnim carries the width
+     * transition only for the length of a toggle (computeSize sets and clears
+     * it), so window resizes — across the mobile breakpoint included — keep
+     * snapping as they always did. Both sit behind up("md"): the mobile sheet
+     * stays full width whatever they say, even for the frame between a resize
+     * and the computeSize that drops them. The artwork rides along on
+     * drawerGlide below (glideArtwork). */
+    drawerWide: {
+        [theme.breakpoints.up("md")]: {
+            "& $viewLeft": {
+                width: `calc(100% - ${DRAWER_WIDTH_WIDE}px)`,
+            },
+            "& $viewRight, & $viewRightNoAnim, & $viewRightPrerender, & $viewRightHidden, & $viewRightHiddenNoDelay": {
+                width: `${DRAWER_WIDTH_WIDE}px`,
+            },
+        },
+    },
+    drawerAnim: {
+        [theme.breakpoints.up("md")]: {
+            "& $viewLeft, & $viewRight, & $viewRightNoAnim, & $viewRightPrerender, & $viewRightHidden, & $viewRightHiddenNoDelay": {
+                transition: `width ${DRAWER_GLIDE_MS}ms ${DRAWER_EASING}`,
+            },
+        },
+    },
+    /* The artwork's outer transform wrapper while it glides to the new view
+     * box with the panel. Deliberately not !important: a hero or reverse-hero
+     * flight (heroTransition) outranks it if one starts mid-glide. */
+    drawerGlide: {
+        transition: `transform ${DRAWER_GLIDE_MS}ms ${DRAWER_EASING}`,
     },
     infoButton: {
         position: "absolute",
@@ -2524,7 +2587,7 @@ const styles = (theme) => ({
         cursor: "pointer",
         userSelect: "none",
         backgroundColor: "rgba(0,0,0,0.72)",
-        backdropFilter: "blur(12px)",
+        backdropFilter: "blur(9px)",
     },
     downloadOverlayInner: {
         display: "flex",
@@ -2614,6 +2677,10 @@ const INITIAL_STATE = {
     _delete_target: null,     // comment pending the delete confirmation dialog
     _edit_post_open: false,   // EditPostDialog (post metadata) visibility
     _is_favorite: false,      // artwork bookmarked in the LacertaDB favorites store
+    // Desktop: the panel at DRAWER_WIDTH_WIDE (Inspiration on screen), and the
+    // width transition running for a toggle — both laid out by computeSize.
+    _drawer_wide: false,
+    _drawer_anim: false,
     zoom: 1.33,
     metadata: { imgd: null, colors: [], width: 0, height: 0 },
     _size: {},
@@ -2721,6 +2788,17 @@ function createInst() {
         // View measurement
         viewMeasurement: {},
 
+        // Wide desktop panel. drawerWideWanted: the Inspiration grid's last
+        // report (loaded + on screen); drawerWideFor: the post that reported
+        // it; drawerWide: what computeSize lays out (wanted + Details tab —
+        // the viewport check is computeSize's own).
+        drawerWideWanted: false,
+        drawerWideFor: null,
+        drawerWide: false,
+        drawerWideTimer: null,       // narrow delay, or retry while the artwork is in flight
+        drawerAnimTimer: null,       // drops _drawer_anim once the width transition is over
+        drawerGlideTimer: null,      // artwork glide end: class off + the deferred re-render
+
         // Drawer settings
         drawerSettings: { hysteresisClosed: 14, hysteresisOpened: 18, friction: 0.0333 },
 
@@ -2785,6 +2863,17 @@ function createInst() {
         previewForId: null,
         pendingFullRender: null,
     };
+}
+
+/* Where the current artwork stands for a panel toggle (syncDrawerWidth /
+ * computeSize): null — not placed yet, so there is nothing to carry (its
+ * placement reads the new view box anyway); "busy" — a flight (open hero,
+ * reverse hero, arrow nav), a drag/pinch or a running glide owns its
+ * transform; "rest" — placed and still, free to glide. */
+function artworkState(inst, st) {
+    if (inst.positionSetForId == null || inst.positionSetForId !== "" + st.data.id || st._hidden) return null;
+    return (inst.heroAnimating || inst.closingHero || inst.navTransitioning
+        || inst.dragging || inst.twoPointer || inst.drawerGlideTimer) ? "busy" : "rest";
 }
 
 /* openRelatedArtwork's swap, waiting for the drawer entry's pop, abandoned. */
@@ -3604,6 +3693,9 @@ function PostDialog(props) {
             inst.posTop = startTop;
             inst.currentZoom = startZoom;
             el.classList.remove(classes.heroTransition);
+            // A panel glide still running for the outgoing artwork (a related
+            // artwork opened mid-glide) would animate the move to this start.
+            el.classList.remove(classes.drawerGlide);
             el.style.transform = `translate3d(calc(${startLeft}px - 50%), calc(${startTop}px - 50%), 0) scale(${(startZoom / 3).toFixed(4)})`;
         }
 
@@ -3891,7 +3983,55 @@ function PostDialog(props) {
         runFullRender();
     }, [setImgd]);
 
-    const computeSize = useCallback(() => {
+    /* ── Panel toggle: carry the artwork along (desktop) ──────────────────
+     * The panel's width transition (classes.drawerAnim) moves the edge of the
+     * artwork's view box; this moves the artwork with it — to the new box's
+     * center, at the same zoom relative to its fit, any pan offset scaled
+     * along. A FLIP on the outer transform wrapper: the canvas takes its new
+     * CSS box now (React writes the same value from `_size` on its commit), a
+     * counter-scale holds the picture exactly where it is for this frame,
+     * then classes.drawerGlide transitions it to the final transform —
+     * compositor-only, in step with the panel. `_size`, the view box and the
+     * zoom keep their usual meaning, so wheel, drag, pinch, resize and the
+     * reverse hero all carry on from the result untouched. The sharper
+     * re-render for the new size waits for `onLanded` rather than landing
+     * under the animation. Returns false when there is nothing to carry. */
+    const glideArtwork = useCallback((m0, m1, s0, s1, onLanded) => {
+        const el = imageRef.current;
+        if (!el || !m0 || !m0.width || !s0 || !s0.width || !s1 || !s1.width) return false;
+        const k = s1.width / s0.width;
+        const z = inst.currentZoom;
+        const left = m1.width / 2 + (inst.posLeft - m0.width / 2) * k | 0;
+        const top = m1.height / 2 + (inst.posTop - m0.height / 2) * k | 0;
+
+        const can = canvasRef.current;
+        if (can) {
+            can.style.width = `${s1.width * 2}px`;
+            can.style.height = `${s1.height * 2}px`;
+        }
+        el.classList.remove(classes.drawerGlide);
+        el.style.transform = `translate3d(calc(${inst.posLeft}px - 50%), calc(${inst.posTop}px - 50%), 0) scale(${(z / 3 / k).toFixed(4)})`;
+        void el.offsetHeight; // ONE flush: commits the counter-scaled start
+
+        // Final values on inst BEFORE the dispatch that follows: the re-render
+        // rewrites the outer div's transform from them, and writing the same
+        // string the transition is heading to leaves it undisturbed (the same
+        // contract as the reverse hero).
+        inst.posLeft = left; inst.posTop = top;
+        el.classList.add(classes.drawerGlide);
+        el.style.transform = `translate3d(calc(${left}px - 50%), calc(${top}px - 50%), 0) scale(${(z / 3).toFixed(4)})`;
+
+        if (inst.drawerGlideTimer) clearTimeout(inst.drawerGlideTimer);
+        inst.drawerGlideTimer = setTimeout(() => {
+            inst.drawerGlideTimer = null;
+            const elNow = imageRef.current;
+            if (elNow) elNow.classList.remove(classes.drawerGlide);
+            onLanded();
+        }, DRAWER_GLIDE_MS + 40);
+        return true;
+    }, [classes]);
+
+    const computeSize = useCallback((reason) => {
         const st = stateRef.current;
 
         // ── Arithmetic view box — no layout read. ───────────────────────
@@ -3903,7 +4043,8 @@ function PostDialog(props) {
         // determined by our own chrome: the Backdrop is fixed fullscreen,
         // STYLE_ROOT_CONTAINER fills it, and viewLeft is its first flex
         // child — anchored at the viewport origin, full height, full width
-        // minus the DRAWER_WIDTH drawer on desktop (the mobile drawer is a
+        // minus the drawer on desktop (DRAWER_WIDTH, or DRAWER_WIDTH_WIDE
+        // while the Inspiration grid widens it; the mobile drawer is a
         // fixed bottom sheet, out of flow). window.innerWidth/innerHeight
         // are viewport metrics, not layout metrics — reading them never
         // triggers reflow. (The app frame never shows a body scrollbar —
@@ -3912,33 +4053,112 @@ function PostDialog(props) {
         const vw = window.innerWidth || document.documentElement.clientWidth || 960;
         const vh = window.innerHeight || document.documentElement.clientHeight || 640;
         const mobile = vw <= MOBILE_BREAKPOINT;
+        // The effective panel: wide only when asked for (syncDrawerWidth) and
+        // where it fits — wideDrawerFits is false on mobile.
+        const wide = inst.drawerWide && wideDrawerFits(vw);
         const m = {
             left: 0, top: 0,
-            width: mobile ? vw : vw - DRAWER_WIDTH,
+            width: mobile ? vw : vw - (wide ? DRAWER_WIDTH_WIDE : DRAWER_WIDTH),
             height: vh,
         };
+        const m0 = inst.viewMeasurement;
+        const s0 = st._size;
         inst.viewMeasurement = m;
 
+        const patch = {};
+        let changed = false;
+        if (st._view_right_mobile_enabled !== mobile) { patch._view_right_mobile_enabled = mobile; changed = true; }
+        // The panel follows the box. Only a toggle animates it; a resize
+        // across the threshold snaps, like every other resize.
+        const toggled = wide !== st._drawer_wide;
+        const animate = toggled && reason === DRAWER_TOGGLE;
+        if (toggled) { patch._drawer_wide = wide; changed = true; }
+        if (animate) {
+            patch._drawer_anim = true;
+            if (inst.drawerAnimTimer) clearTimeout(inst.drawerAnimTimer);
+            inst.drawerAnimTimer = setTimeout(() => {
+                inst.drawerAnimTimer = null;
+                if (stateRef.current._drawer_anim) dispatch({ _drawer_anim: false });
+            }, DRAWER_GLIDE_MS + 80);
+        }
+
         if (!st.metadata?.width) {
-            if (st._view_right_mobile_enabled !== mobile) dispatch({ _view_right_mobile_enabled: mobile });
+            if (changed) dispatch(patch);
             return;
         }
 
         const md = st.metadata;
         const zMax = Math.min((m.width - 16) / md.width, (m.height - 16) / md.height);
         const size = { width: md.width * zMax | 0, height: md.height * zMax | 0 };
-        const patch = { _size: size };
-        if (st._view_right_mobile_enabled !== mobile) patch._view_right_mobile_enabled = mobile;
+        patch._size = size;
+
+        // A toggle under an artwork at rest glides it along with the panel;
+        // its re-render at the new size runs once it has landed — unless a
+        // resize has rendered a newer box meanwhile, the artwork changed, or
+        // the dialog is closing (the canvas keeps its pixels for the fade or
+        // the flight home).
+        const renderId = inst.currentRenderId;
+        const glided = animate && artworkState(inst, st) === "rest"
+            && glideArtwork(m0, m, s0, size, () => {
+                const s = stateRef.current;
+                if (renderId !== inst.currentRenderId || s._size !== size) return;
+                if (!s.open || s._closing || inst.closingHero || !s.metadata?.imgd) return;
+                renderPipeline(s.renderer, s.metadata.imgd, size, s.mode);
+            });
         dispatch(patch);
 
-        renderPipeline(st.renderer, md.imgd, size, st.mode);
-    }, [renderPipeline]);
+        if (!glided) renderPipeline(st.renderer, md.imgd, size, st.mode);
+    }, [renderPipeline, glideArtwork]);
 
     const debouncedComputeSize = useCallback(() => {
         if (!inst.resizeRaf) {
             inst.resizeRaf = requestAnimationFrame(() => { inst.resizeRaf = null; computeSize(); });
         }
     }, [computeSize]);
+
+    /* ── Wide desktop panel ───────────────────────────────────────────────
+     * Wide while the Inspiration grid reports its results loaded and on
+     * screen AND the Details tab — where the grid lives — is showing;
+     * computeSize turns that into the effective width (desktop only, and
+     * only where the artwork keeps WIDE_DRAWER_MIN_ART beside it). A closed
+     * or closing dialog keeps the panel it has: the close reset narrows it
+     * once it's out of sight. An artwork mid-flight or under a gesture
+     * defers the toggle until it is still, so the glide never fights a
+     * hero, a nav bounce or a drag. */
+    const syncDrawerWidth = useCallback(() => {
+        if (inst.drawerWideTimer) { clearTimeout(inst.drawerWideTimer); inst.drawerWideTimer = null; }
+        const st = stateRef.current;
+        if (!st.open || st._closing || inst.closingHero) return;
+        const want = inst.drawerWideWanted && st._tab_value === 0;
+        if (want === inst.drawerWide) return;
+        const vw = window.innerWidth || document.documentElement.clientWidth || 960;
+        // Nothing visible changes (mobile, or a desktop too narrow for the
+        // wide panel): record the wish — a later resize applies it — and stop.
+        if ((want && wideDrawerFits(vw)) === st._drawer_wide) { inst.drawerWide = want; return; }
+        if (artworkState(inst, st) === "busy") {
+            inst.drawerWideTimer = setTimeout(syncDrawerWidth, 120);
+            return;
+        }
+        inst.drawerWide = want;
+        computeSize(DRAWER_TOGGLE);
+    }, [computeSize]);
+
+    /* The Inspiration grid (PostOriginality) reports whether its results are
+     * loaded and on screen in the drawer. Widen at once; narrow only once the
+     * grid has stayed away DRAWER_NARROW_DELAY — unless the report comes from
+     * the post being swapped out from under it (the old grid unmounting: the
+     * key is per post), where the new artwork must be laid out against the
+     * narrow box straight away. */
+    const handleInspirationShown = useCallback((shown) => {
+        shown = !!shown;
+        const post = stateRef.current.data.id;
+        if (shown) inst.drawerWideFor = post;
+        if (shown === inst.drawerWideWanted) return;
+        inst.drawerWideWanted = shown;
+        if (shown || inst.drawerWideFor !== post) { syncDrawerWidth(); return; }
+        if (inst.drawerWideTimer) clearTimeout(inst.drawerWideTimer);
+        inst.drawerWideTimer = setTimeout(syncDrawerWidth, DRAWER_NARROW_DELAY);
+    }, [syncDrawerWidth]);
 
     /* ================================================================
      * COMMENTS API
@@ -4846,10 +5066,17 @@ function PostDialog(props) {
             if (inst.navBounceTimer) clearTimeout(inst.navBounceTimer);
             if (inst.closeResetTimer) clearTimeout(inst.closeResetTimer);
             if (inst.scrollMomentumRaf) cancelAnimationFrame(inst.scrollMomentumRaf);
+            if (inst.drawerWideTimer) clearTimeout(inst.drawerWideTimer);
+            if (inst.drawerAnimTimer) clearTimeout(inst.drawerAnimTimer);
+            if (inst.drawerGlideTimer) clearTimeout(inst.drawerGlideTimer);
             cancelRelatedSwap(inst);
             discardPreview();
         };
     }, []);
+
+    // The wide panel belongs to the Details tab: leaving it narrows the panel,
+    // coming back re-applies the Inspiration grid's last report.
+    useEffect(() => { syncDrawerWidth(); }, [state._tab_value, syncDrawerWidth]);
 
     // ── URL hash → state (browser back/forward + same-pathname hash edits) ─
     // The drawer state is mirrored in the URL hash; when the URL changes
@@ -5136,6 +5363,14 @@ function PostDialog(props) {
                 // the blur DOM would never reattach the src after a remount).
                 inst.committedImage = null;
                 inst.renderedImageData = null; inst.renderedKey = null;
+                // The panel kept its width through the fade-out; now that it is
+                // out of sight it goes back to DRAWER_WIDTH without a transition.
+                // (The grid that asked for it remounts with the reset post below.)
+                inst.drawerWideWanted = false; inst.drawerWideFor = null; inst.drawerWide = false;
+                if (inst.drawerWideTimer) { clearTimeout(inst.drawerWideTimer); inst.drawerWideTimer = null; }
+                if (inst.drawerAnimTimer) { clearTimeout(inst.drawerAnimTimer); inst.drawerAnimTimer = null; }
+                if (inst.drawerGlideTimer) { clearTimeout(inst.drawerGlideTimer); inst.drawerGlideTimer = null; }
+                if (imageRef.current) imageRef.current.classList.remove(classes.drawerGlide);
                 // The dialog-size render (16-36 MiB) is rarely shown again;
                 // the card-size renders of this post stay cached for the feed.
                 const closedId = stateRef.current.data && stateRef.current.data.id;
@@ -5160,6 +5395,7 @@ function PostDialog(props) {
                     _reply_target: null, _comment_sending: false,
                     _edit_target: null, _delete_target: null,
                     _edit_post_open: false,
+                    _drawer_wide: false, _drawer_anim: false,
                     metadata: { imgd: null, colors: [], width: 0, height: 0 }
                 });
             }, 600);
@@ -5375,7 +5611,8 @@ function PostDialog(props) {
         _upvoteLoading, _downvoteLoading, _comment_sending, _reply_target,
         _edit_target, _delete_target, _edit_post_open, _is_favorite,
         _size, zoom, kb, type, _copied, _sorting, _comments, _current_comments,
-        _show_parent, _comments_loading, _focusComment, _focusPathKeys
+        _show_parent, _comments_loading, _focusComment, _focusPathKeys,
+        _drawer_wide, _drawer_anim
     } = state;
 
     /* Post ownership — gates the Manage section + EditPostDialog */
@@ -5509,6 +5746,11 @@ function PostDialog(props) {
                 ? (inst.drawerHasAppeared ? classes.viewRightNoAnim : classes.viewRight)
                 : (inst.drawerHasAppeared ? classes.viewRightHiddenNoDelay : classes.viewRightHidden);
 
+    /* Wide desktop panel modifiers (see classes.drawerWide / drawerAnim). */
+    const rootClass = _drawer_wide
+        ? (_drawer_anim ? `${classes.drawerWide} ${classes.drawerAnim}` : classes.drawerWide)
+        : (_drawer_anim ? classes.drawerAnim : undefined);
+
     const imageAnimClass =
         inst.navDismissing ? classes.dismiss
             : (inst.navBouncing && !_hidden) ? classes.bounceAppear
@@ -5607,7 +5849,7 @@ function PostDialog(props) {
         <Portal>
             <Backdrop keepMounted={true} open={open}
                       className={_closing ? `${classes.backdrop} ${classes.closingChrome}` : classes.backdrop}>
-                <div style={STYLE_ROOT_CONTAINER}>
+                <div style={STYLE_ROOT_CONTAINER} className={rootClass}>
                     <div className={classes.viewLeft} ref={setViewRefCb}>
                         <div style={STYLE_CLOSE_OVERLAY} onClick={onRequestClose} />
                         <DownloadControl className={classes.downloadWrap} progressClassName={classes.downloadButtonProgress}
@@ -5663,6 +5905,7 @@ function PostDialog(props) {
                             isOwner={isOwner} openEditPost={openEditPost}
                             isFavorite={_is_favorite} onToggleFavorite={toggleFavorite}
                             nsfw={!!props.nsfw} openRelatedArtwork={openRelatedArtwork}
+                            onInspirationShown={handleInspirationShown}
                             _current_comments={_current_comments} _show_parent={_show_parent}
                             _sorting={_sorting} sortedComments={sortedComments} _comments_loading={_comments_loading}
                             api={props.api} account={props.account}

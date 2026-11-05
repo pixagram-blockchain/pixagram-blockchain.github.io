@@ -851,7 +851,7 @@ const NOOP = () => {};
 const styles = (theme) => ({
     backdrop: {
         zIndex: theme.zIndex.drawer + 1,
-        backdropFilter: "blur(9px) grayscale(1)",
+        backdropFilter: "blur(6px) grayscale(1)",
         overflow: "hidden",
         userSelect: "none",
     },

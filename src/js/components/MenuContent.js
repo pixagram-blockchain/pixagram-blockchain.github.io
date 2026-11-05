@@ -12,8 +12,9 @@
 //   3. The UI is split into independent leaves:
 //        MainView, CommunityItem, TagChip, TagChipIcon, ProfileImage,
 //        ActionButtons, ProfileHeader, CTASection, ProposalsTile, PortalIconTile,
-//        FriendTile, FeedTile, LoginView, LoggedOutHeader, LoadingView, NotificationsLayer,
-//        AppsMenu, AppsMenuEntry, AccountsMenu, AccountsMenuEntry.
+//        SeeAllPortalsTile, FriendTile, FeedTile, LoginView, LoggedOutHeader,
+//        LoadingView, NotificationsLayer, AppsMenu, AppsMenuEntry, AccountsMenu,
+//        AccountsMenuEntry.
 //      Each one re-renders only when its own slice of state changes - chips,
 //      communities, notif badge, profile header, etc. are skipped entirely.
 //   4. Per-item leaves (TagChip, CommunityItem) bind their click handler with
@@ -77,6 +78,7 @@ import WarningRounded from "@material-ui/icons/WarningRounded";
 import SecurityRounded from "@material-ui/icons/SecurityRounded";
 import BugReportRounded from "@material-ui/icons/BugReportRounded";
 import CodeRounded from "@material-ui/icons/CodeRounded";
+import ExploreRounded from "@material-ui/icons/ExploreRounded";
 import Community from "../icons/Community";
 import Avatar from "@material-ui/core/Avatar";
 import List from "@material-ui/core/List";
@@ -234,6 +236,9 @@ const styles = theme => ({
         }
     },
     discoverWideText: { display: "flex", flexDirection: "column", flex: 1, minWidth: 0 },
+    // The "See all portals" row closing the Trending Portals list: a wide
+    // tile (discoverWideTile) in a list item of its own, inset like the grids.
+    seeAllPortals: { listStyle: "none", padding: "8px 16px 4px 16px" },
     discoverWideTitle: { fontWeight: 600, fontSize: "14px", lineHeight: "18px", color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
     discoverWideSub: { fontSize: "12px", lineHeight: "16px", color: "#888", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
     // The feed button leading the "Friends" row: a 56px rounded square like
@@ -743,6 +748,29 @@ const ProposalsTile = React.memo(({ classes, portal, onGoToCommunity }) => {
 }, (prev, next) => prev.portal === next.portal && prev.onGoToCommunity === next.onGoToCommunity);
 ProposalsTile.displayName = "ProposalsTile";
 
+// ----- "See all portals": the last row of the Trending Portals list, opening
+// the portal directory (PortalsDialog — every portal, searchable, with the
+// button to create one). The proposals tile's anatomy (icon square, label,
+// one-line hint), since it too asks for an action rather than naming a
+// portal. A list item of its own: the list is a <ul>.
+const SeeAllPortalsTile = React.memo(({ classes, onClick }) => {
+    useLanguage();
+    return (
+        <li className={classes.seeAllPortals}>
+            <ButtonBase className={classes.discoverTile + " " + classes.discoverWideTile} onClick={onClick}>
+                <Avatar className={classes.discoverTileAvatar}>
+                    <ExploreRounded />
+                </Avatar>
+                <span className={classes.discoverWideText}>
+                    <span className={classes.discoverWideTitle}>{t("components.menu_content.see_all_portals")}</span>
+                    <span className={classes.discoverWideSub}>{t("components.menu_content.browse_search_or_create_one")}</span>
+                </span>
+            </ButtonBase>
+        </li>
+    );
+}, cmpKeys(["onClick"]));
+SeeAllPortalsTile.displayName = "SeeAllPortalsTile";
+
 // ----- Friend tile: a recent feed author as a rounded square with an
 // unseen-posts badge ("4+"). Clicking it opens the personal feed — the same
 // page as the feed tile leading the row, NOT the author's profile — scrolled
@@ -817,7 +845,8 @@ const FeedTile = React.memo(({ classes, onGoToFeed, span }) => {
 FeedTile.displayName = "FeedTile";
 
 // ----- The main view: Friends row (led by the feed tile), random trending
-// tags (led by the home chip), random trending portals, then the Governance
+// tags (led by the home chip), random trending portals (closed by the "See
+// all portals" row, `onSeeAllPortals`), then the Governance
 // grid (full-width proposals row, then the 2 × 4 portal icons). Every
 // section carries its own <Fade> — one shared duration, index-staggered
 // transitionDelay — so they appear TOP → BOTTOM once at startup. Sections
@@ -833,7 +862,7 @@ FeedTile.displayName = "FeedTile";
 const MainView = React.memo(({
                                  classes, proposalsPortal, governancePortals, friends, feedEnabled,
                                  trendingTags, trendingPortals,
-                                 onGoToCommunity, onGoToFeed, onGoToFeedPost, onTagClick
+                                 onGoToCommunity, onGoToFeed, onGoToFeedPost, onTagClick, onSeeAllPortals
                              }) => {
         useLanguage();
         const feedSpan = Math.max(1, FRIENDS_ROW_COLUMNS - friends.length);
@@ -871,6 +900,7 @@ const MainView = React.memo(({
                             {trendingPortals.map((c, i) => (
                                 <CommunityItem key={"disc-" + (c.name || i)} classes={classes} community={c} onGoToCommunity={onGoToCommunity} />
                             ))}
+                            <SeeAllPortalsTile classes={classes} onClick={onSeeAllPortals} />
                         </List>
                     </Fade>
                 )}
@@ -896,6 +926,7 @@ const MainView = React.memo(({
         prev.onGoToFeed === next.onGoToFeed &&
         prev.onGoToFeedPost === next.onGoToFeedPost &&
         prev.onTagClick === next.onTagClick &&
+        prev.onSeeAllPortals === next.onSeeAllPortals &&
         prev.feedEnabled === next.feedEnabled &&
         prev.proposalsPortal === next.proposalsPortal &&
         shallowArrayEqual(prev.governancePortals, next.governancePortals) &&
@@ -1775,6 +1806,12 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
         });
     }, []);
     const handleGoToCommunity = useCallback((communityName) => { HISTORY.push("/" + communityName); }, []);
+    // "See all portals": the portal directory, by its overlay ("+portals").
+    // The META event is Index's way to open any overlay by its meta, so this
+    // drawer row and the toolbar's Portals button land on the same address.
+    const handleSeeAllPortals = useCallback(() => {
+        dispatcher.dispatch({ type: "META", data: { kind: "portals" } });
+    }, []);
 
     // ---- Derived ----
     const theme = useTheme();
@@ -1917,6 +1954,7 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
                         onGoToFeed={handleFeedOpen}
                         onGoToFeedPost={handleFeedFocus}
                         onTagClick={handleTagNavigation}
+                        onSeeAllPortals={handleSeeAllPortals}
                     />
                 </div>
             </div>

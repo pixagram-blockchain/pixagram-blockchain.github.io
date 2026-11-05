@@ -4,6 +4,7 @@ import React, {
     memo,
     useCallback,
     useEffect,
+    useLayoutEffect,
     useMemo,
     useReducer,
     useRef,
@@ -44,6 +45,8 @@ import ToolbarMenuOption from "../components/ToolbarMenuOption";
 // user/community profiles and the artwork leg (pixagram-search Worker).
 import { useSearch, SearchBar, artworkPath, compactFilters } from "../components/search";
 import VoteIcon from "../icons/Vote";
+// The portals' own icon (the drawer's portal rows): the toolbar's Portals button.
+import CommunityIcon from "../icons/Community";
 // The wallet's Trade button wears the same chart icon.
 import TradeIcon from "@material-ui/icons/ShowChartRounded";
 import SettingsIcon from "@material-ui/icons/Settings";
@@ -75,7 +78,7 @@ import getIT from "../data/pixaLogoWhite";
 // stays lazy via PAGE_IMPORTERS below.
 import HomeEager from "./Home";
 
-import { t, tk, setLanguage, subscribe as subscribe_language, useLanguage } from "../utils/text";
+import { t, tk, setLanguage, subscribe as subscribe_language, useLanguage, getRevision } from "../utils/text";
 
 const pixaLogoWhite = getIT();
 
@@ -179,16 +182,22 @@ const SETTINGS_DEFAULTS = {
 };
 
 // Which already-mounted page is allowed to host a post URL as an overlay
-// without being unmounted. Feed/FeedPersonal/Profile render <PostDialog>;
-// Community renders <BlogPostDialog>. FeedPersonal renders BOTH — the
-// personal feed mixes portal blog posts in between artworks — so it hosts
-// community-post URLs too and a blog card opened there stays on the feed.
-// A community-post URL pushed from inside feed/profile must still unmount
-// that page and mount Community so the correct dialog can take over (and a
+// without being unmounted. Feed renders <PostDialog>; Community renders
+// <BlogPostDialog>. FeedPersonal and Profile render BOTH — the personal feed
+// and a profile's posts tab mix portal blog posts in between artworks, and
+// Profile's comments, replies and history tabs open blog posts too — so they
+// host community-post URLs as well, and a blog post opened there stays on
+// that page. Only a page already on screen is kept: a cold entry on a post
+// URL (shared link, reload) mounts the default host instead (setPageComponent
+// below), so a blog post's default page stays Community. The page on screen
+// decides, not where the history entry was made: Back or Forward onto a blog
+// post while a profile is showing opens it over that profile, as on the
+// personal feed. A community-post URL pushed from inside Feed must still
+// unmount it and mount Community so the correct dialog can take over (and a
 // regular post URL pushed from Community swaps back to Feed).
 const OVERLAY_HOSTS_BY_POST_KIND = {
     feed: ["feed", "feedpersonal", "profile"],
-    community: ["community", "feedpersonal"],
+    community: ["community", "feedpersonal", "profile"],
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -218,6 +227,12 @@ const LazyPublishLogoLoader = React.lazy(() => import("../components/PublishLogo
 // succeeds, while the animation plays.
 const loadShareArtworkDialog = () => import("../components/ShareArtworkDialog");
 const LazyShareArtworkDialog = React.lazy(loadShareArtworkDialog);
+
+// The portal directory ("+portals", §8e): every portal, searchable, with the
+// Create button. Mounted at the shell rather than in the dialog slot; its
+// chunk is warmed on idle with the exchange picker's (§12).
+const loadPortalsDialog = () => import("../components/PortalsDialog");
+const LazyPortalsDialog = React.lazy(loadPortalsDialog);
 const loadShareArtworkRender = () => JSLoader(() => import("../utils/shareArtworkRender"));
 
 const TOUR_STORAGE_KEY = "pixagram_tour_v1";
@@ -1387,6 +1402,10 @@ function useMetaRoute(history) {
 // `extrasRef.current[dialogName]` is merged into an overlay's open options:
 // what the event that asked for it carried (LOGIN's onLogin, defaultUsername…),
 // which the address alone can't hold.
+//
+// "+portals" is deliberately absent from these maps: the portal directory is
+// not a dialog of the slot (usePortalsOverlay, §8e). To the slot it reads as
+// no overlay at all, so an overlay dialog still up when it arrives is closed.
 
 const META_DIALOG_BY_KIND = Object.freeze({
     settings: "settings", info: "appinfo", governance: "witnesses", login: "login", signup: "account",
@@ -1598,6 +1617,68 @@ function useSearchMeta(search, meta, route, ready) {
         visitRef, addressKey, cancel, writePending]);
 
     return useMemo(() => ({ flush }), [flush]);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// §8e — usePortalsOverlay: "+portals", the portal directory
+// ═════════════════════════════════════════════════════════════════════════════
+// The one overlay that is not a dialog of the slot. The directory's Create
+// button opens CreateCommunityDialog over it, and creating a portal
+// broadcasts with the creator's active key: the PIN / add-key prompt asking
+// for it opens IN the slot (§9, pin_required / key_required), which would
+// swap a slot-hosted directory out — Create dialog, progress and all — at the
+// first broadcast. So the directory is mounted at the shell, and the prompt
+// stacks above it.
+//
+// Otherwise the contract of the slot's overlays (§8c): "+portals" in the
+// address opens it, once the shell and the API are up; its close goes through
+// the address (closeMetaOf); the back arrow closes it — unless it holds on
+// through `registerCloseGuard`, useMetaDialogs' mechanism: the directory
+// closes an open Create form first, and stays up while a portal is being
+// created; the suffix then goes back into the address. A hold is asked for
+// only when the address is back on the page the directory was opened on with
+// no overlay at all (the back arrow, its own close): a navigation (a portal
+// picked, a new portal opened) or another overlay (the log-in a logged-out
+// Create asks for) always takes it down.
+//
+// Mounted on the first open (Suspense on the lazy chunk) and unmounted once
+// its closing transition is over, so every visit starts afresh.
+
+function usePortalsOverlay(meta, route, history, ready) {
+    const { openMeta, closeMetaOf } = route;
+    const wanted = !!meta && meta.kind === "portals";
+    const [open, setOpen] = useState(false);
+    const [mounted, setMounted] = useState(false);
+    const holdRef = useRef(null);
+    const pageRef = useRef(null); // page part of the address it was opened on
+
+    useEffect(() => {
+        if (wanted && ready) {
+            pageRef.current = splitMetaPath(history.location.pathname).path;
+            setMounted(true);
+            setOpen(true);
+            return;
+        }
+        if (!open) return;
+        if (!meta && splitMetaPath(history.location.pathname).path === pageRef.current) {
+            const hold = holdRef.current;
+            let held = false;
+            try { held = typeof hold === "function" && hold() === true; } catch (e) { held = false; }
+            if (held) {
+                openMeta({ kind: "portals" });
+                return;
+            }
+        }
+        setOpen(false);
+    }, [wanted, ready, meta, open, history, openMeta]);
+
+    const onClose = useCallback(() => closeMetaOf("portals"), [closeMetaOf]);
+    const onExited = useCallback(() => setMounted(false), []);
+    const registerCloseGuard = useCallback((hold) => {
+        holdRef.current = typeof hold === "function" ? hold : null;
+    }, []);
+
+    return { mounted, open, onClose, onExited, registerCloseGuard };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -2525,6 +2606,81 @@ const ToolbarMenuButton = React.memo(
         prev.classes === next.classes,
 );
 
+// ── useToolbarLabelsFit ──────────────────────────────────────────────────────
+// The secondary buttons (Ask Help, Portals, Governance, Info) carry their
+// labels from 1280 px (styles.toolbarMenuButtons drops them below) — but only
+// while the labelled group, right-aligned, keeps clear of the Trade button,
+// and how wide it is depends on the language. Measured with the real fonts,
+// the five labelled buttons need a 1400 px window in English, 1531 px in
+// French, 1565 px in Russian; the four of before already ran into Trade from
+// 1280 px in most languages (French until 1408 px, Russian until 1445 px).
+// So the width is measured rather than assumed: whenever the group shows its
+// labels, its width is kept for the language; while it shows icons only, that
+// width tells whether the labels would fit again (a language not measured yet
+// is shown labelled once, to be measured — before paint, from the layout
+// effect). Re-checked on resize, on a language or catalogue change, and once
+// the web fonts are in. Offsets, not client rects: the Trade button scales on
+// hover. Returns true while the labels must go.
+
+const TOOLBAR_LABEL_GAP = 8; // px the labelled group keeps from the Trade button
+
+function useToolbarLabelsFit(groupRef, tradeRef, langKey) {
+    const [iconOnly, setIconOnly] = useState(false);
+    const iconOnlyRef = useRef(false);
+    iconOnlyRef.current = iconOnly;
+    const langRef = useRef(langKey);
+    langRef.current = langKey;
+    const widthsRef = useRef(null); // langKey → the labelled group's width
+    if (widthsRef.current === null) widthsRef.current = new Map();
+
+    const evaluate = useCallback(() => {
+        const group = groupRef.current;
+        const trade = tradeRef.current;
+        if (!group || !trade || !group.offsetWidth) return; // the compact layout hides the group
+        const tradeRight = trade.offsetLeft + trade.offsetWidth;
+        if (!iconOnlyRef.current) {
+            const label = group.querySelector(".text");
+            if (!label || !label.offsetWidth) return; // below 1280 px: CSS has no labels to fit
+            widthsRef.current.set(langRef.current, group.offsetWidth);
+            if (group.offsetLeft < tradeRight + TOOLBAR_LABEL_GAP) setIconOnly(true);
+            return;
+        }
+        const width = widthsRef.current.get(langRef.current);
+        if (width === undefined) { setIconOnly(false); return; }
+        if (group.offsetLeft + group.offsetWidth - width >= tradeRight + TOOLBAR_LABEL_GAP) setIconOnly(false);
+    }, [groupRef, tradeRef]);
+
+    useLayoutEffect(() => { evaluate(); }, [iconOnly, langKey, evaluate]);
+
+    useEffect(() => {
+        let live = true;
+        let frame = 0;
+        const onResize = () => {
+            if (frame) return;
+            frame = requestAnimationFrame(() => { frame = 0; evaluate(); });
+        };
+        // New glyphs, new widths: measure every language again.
+        const onFonts = () => {
+            if (!live) return;
+            widthsRef.current.clear();
+            if (iconOnlyRef.current) setIconOnly(false);
+            else evaluate();
+        };
+        const fonts = typeof document !== "undefined" ? document.fonts : null;
+        window.addEventListener("resize", onResize);
+        if (fonts && fonts.addEventListener) fonts.addEventListener("loadingdone", onFonts);
+        if (fonts && fonts.ready) fonts.ready.then(onFonts, () => {});
+        return () => {
+            live = false;
+            window.removeEventListener("resize", onResize);
+            if (frame) cancelAnimationFrame(frame);
+            if (fonts && fonts.removeEventListener) fonts.removeEventListener("loadingdone", onFonts);
+        };
+    }, [evaluate]);
+
+    return iconOnly;
+}
+
 // ── ToolbarComponent ─────────────────────────────────────────────────────────
 
 const ToolbarComponent = React.memo(
@@ -2536,9 +2692,12 @@ const ToolbarComponent = React.memo(
          onOpenMenuDrawer, onResetSearch, onSearchChange,
          onGoHome, onGoToUsername, onGoToTag, onGoToCommunity, onGoToArtwork,
          onSetTagNavigation,
-         onTrade, onWitnesses, onAppinfo, onSettings, onToolbarMenu,
+         onTrade, onPortals, onWitnesses, onAppinfo, onSettings, onToolbarMenu,
      }) => {
-        useLanguage();
+        const lang = useLanguage();
+        const groupRef = useRef(null);
+        const tradeRef = useRef(null);
+        const labelsOff = useToolbarLabelsFit(groupRef, tradeRef, lang + ":" + getRevision());
         return (
             <div className={classes.toolbar}>
                 <ToolbarMenuButton classes={classes} avatar={menuAvatar} onClick={onOpenMenuDrawer} />
@@ -2565,11 +2724,14 @@ const ToolbarComponent = React.memo(
                     never "Buy", and no price on it: it stands out as the
                     toolbar's one filled pill, with a white shine crossing it
                     every few seconds. */}
-                <Button className={classes.toolbarTradeButton} onClick={onTrade}>
+                <Button ref={tradeRef} className={classes.toolbarTradeButton} onClick={onTrade}>
                     <TradeIcon className={classes.toolbarTradeIcon} />
                     <span>{t("components.pixa_wallet_dialog.trade", {TUC: true})}</span>
                 </Button>
-                <div className={classes.toolbarMenuButtons}>
+                <div
+                    ref={groupRef}
+                    className={labelsOff ? classes.toolbarMenuButtons + " " + classes.toolbarMenuButtonsIconOnly : classes.toolbarMenuButtons}
+                >
                     {/* Ask Help: the community's Telegram group. A real link
                         (href → MUI renders an <a>) rather than a window.open
                         handler, so it keeps link behaviour — middle-click,
@@ -2586,7 +2748,16 @@ const ToolbarComponent = React.memo(
                             </Button>
                         </Tooltip>
                     </Fade>
+                    {/* Portals: the portal directory (+portals, §8e) — every
+                        portal, searchable, with the button to create one. */}
                     <Fade in timeout={600}>
+                        <Tooltip title={t("components.index.browse_search_and_create_portals")}>
+                            <Button className={classes.toolbarSecondaryButton} onClick={onPortals}>
+                                <CommunityIcon /> <span className="text">{t("words.portals")}</span>
+                            </Button>
+                        </Tooltip>
+                    </Fade>
+                    <Fade in timeout={700}>
                         <Tooltip title={t("components.index.elect_the_blockchain_guardians")}>
                             <Button className={classes.toolbarSecondaryButton} onClick={onWitnesses} data-tour="nav-governance">
                                 <VoteIcon /> <span className="text">{t("words.governance")}</span>
@@ -2963,6 +3134,19 @@ const SnackbarComponent = React.memo(
 const styles = (theme) => {
     // Search-bar styles moved to components/search/styles.js (SearchBar owns them).
     const buttonTransition = `225ms ${EASE}`;
+    // The toolbar's secondary buttons without their labels: icon-sized (36 px,
+    // MUI's 64 px minimum dropped) and 4 px apart, so all five clear the Trade
+    // button down to the 960 px where the compact layout takes over (at 64 px
+    // each, even the four of before ran into it below ~1000 px).
+    const iconOnlyToolbarButtons = {
+        "& .text": { display: "none" },
+        "& $toolbarSecondaryButton": {
+            minWidth: 36,
+            padding: 6,
+            marginLeft: 4,
+            "& svg": { marginRight: 0 },
+        },
+    };
 
     return {
         // The app shell is pinned to the viewport itself. Its layout
@@ -3108,9 +3292,12 @@ const styles = (theme) => {
             display: "relative",
             right: 24,
             top: 24,
-            [theme.breakpoints.down("md")]: { "& .text": { display: "none" } },
+            // Labelled from 1280 px — while the labels fit (useToolbarLabelsFit).
+            [theme.breakpoints.down("md")]: iconOnlyToolbarButtons,
             [theme.breakpoints.down("sm")]: { display: "none" },
         },
+        // From 1280 px, in a language whose labels would reach the Trade button.
+        toolbarMenuButtonsIconOnly: iconOnlyToolbarButtons,
         // Trade: a light grey pill, dark bold label, soft halo, white on hover
         // — the one filled button on the dark toolbar. Placed like the Shop
         // button it replaces (absolute, right after the search bar, never
@@ -3425,6 +3612,8 @@ function Index({ classes, history, settings: rawSettings }) {
     useEffect(() => {
         if (!meta || meta.kind !== "login") metaExtrasRef.current.login = null;
     }, [meta]);
+    // "+portals": the portal directory, at the shell (§8e).
+    const portals = usePortalsOverlay(meta, metaRoute, history, apiReady && !!page.name && page.name !== "home");
 
     // Re-route when locale changes or on initial settings load.
     // Other settings changes (renderer, nsfw, payout…) propagate to pages
@@ -3818,6 +4007,9 @@ function Index({ classes, history, settings: rawSettings }) {
     }), [openMeta]);
     const openAppinfo = useCallback((data) => openMeta({ kind: "info", tab: data?.tab }), [openMeta]);
     const openSettings = useCallback(() => openMeta({ kind: "settings" }), [openMeta]);
+    // The portal directory: the toolbar's Portals button and the ⋮ menu's
+    // entry. The drawer's "See all portals" row sends the META event instead.
+    const openPortals = useCallback(() => openMeta({ kind: "portals" }), [openMeta]);
     const openTextDialog = useCallback((options = {}) => {
         const gradient = options?.gradient || (typeof options !== 'object' ? options : undefined);
         openDialog("text", {
@@ -3980,6 +4172,8 @@ function Index({ classes, history, settings: rawSettings }) {
             // The exchange picker behind the toolbar's Trade button, so a
             // click opens it without the dim cold-load backdrop first.
             DIALOG_REGISTRY.exchanges.load,
+            // Same for the portal directory behind the Portals button.
+            loadPortalsDialog,
             // Not a page, but same reasoning: warm the (now code-split)
             // post-publish overlay so a successful broadcast never waits
             // on its chunk download.
@@ -4105,6 +4299,7 @@ function Index({ classes, history, settings: rawSettings }) {
                             onGoToArtwork={goToArtwork}
                             onSetTagNavigation={setTagNavigation}
                             onTrade={openTrade}
+                            onPortals={openPortals}
                             onWitnesses={openWitnesses}
                             onAppinfo={openAppinfo}
                             onSettings={openSettings}
@@ -4135,6 +4330,7 @@ function Index({ classes, history, settings: rawSettings }) {
                         onInfoClick={openAppinfo}
                         onSettingsClick={openSettings}
                         onWitnessesClick={openWitnesses}
+                        onPortalsClick={openPortals}
                         onTradeClick={openTrade}
                     />
 
@@ -4149,6 +4345,20 @@ function Index({ classes, history, settings: rawSettings }) {
                         closedMenuAds={processedSettings._closed_menu_ads}
                         pixaAPI={apiRef.current}
                     />
+
+                    {/* The portal directory, outside the slot (§8e). */}
+                    {portals.mounted && (
+                        <Suspense fallback={portals.open ? DIALOG_FALLBACK : null}>
+                            <LazyPortalsDialog
+                                open={portals.open}
+                                api={apiRef.current}
+                                locales={processedSettings._selected_locales_code}
+                                onClose={portals.onClose}
+                                onExited={portals.onExited}
+                                registerCloseGuard={portals.registerCloseGuard}
+                            />
+                        </Suspense>
+                    )}
 
                     <DialogSlot dialog={dialog} />
 

@@ -37,11 +37,14 @@ import ButtonBase from "@material-ui/core/ButtonBase";
 //                 first with this artwork outlined in it, and the thumbnails only start loading
 //                 once the expand has finished, each fading in as it arrives.
 //   Inspiration   "Reveal artworks with similar themes": up to eight of the Worker's SigLIP
-//                 neighbours (copies left out), fetched on the first reveal, laid out in three
-//                 masonry columns and faded in the same way.
+//                 neighbours (copies left out), fetched on the first reveal, laid out in masonry
+//                 columns — two in the desktop side panel, three on phones — and faded in the
+//                 same way. On desktop, reaching the bottom of the drawer reveals it by itself.
 //
 // The parent keys this component by post, so every post starts collapsed. Opening a thumbnail
-// goes through `onOpenArtwork(item)` (the dialog swaps the post in place).
+// goes through `onOpenArtwork(item)` (the dialog swaps the post in place). While the Inspiration
+// results are on screen, `onInspirationShown(true)` tells the dialog, which widens its desktop
+// panel for them; `false` when they leave (or this post's section goes).
 
 const NS = "components.post_originality.";
 
@@ -49,11 +52,23 @@ const COLLAPSE_TIMEOUT = Object.freeze({ enter: 360, exit: 260 });
 const TILE_H = 96;            // matches row: every thumbnail this tall...
 const TILE_MIN_W = 72;        // ...and this wide at least (room for the verdict badge),
 const TILE_MAX_W = 168;       // ...at most (very wide or very tall works are letterboxed)
-const COLUMNS = 3;            // inspiration masonry
+const COLUMNS = 3;            // inspiration masonry on phones...
+const COLUMNS_DESKTOP = 2;    // ...and at most two in the desktop side panel
+const GRID_GAP = 8;           // masonry gutter, between the columns and within them
+const CELL_SETTLE_MS = 160;   // a new column width must hold this long before the tiles re-check their scale
 const STAGGER_MS = 55;        // fade-in delay between consecutive thumbnails
 const STAGGER_MAX = 8;
 const DATE_OPTIONS = Object.freeze({ year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "numeric" });
 const SKELETON = [[1, 0.8], [1.25, 0.75], [0.85, 1.1]]; // height / width of the placeholder cells, per column
+// The drawer is the desktop side panel from here up — the same edge as PostDialog's
+// theme.breakpoints.up("md") (its mobile sheet is everything below).
+const DESKTOP_QUERY = "(min-width: 960px)";
+// "Reached the bottom" (desktop auto-reveal): the end of this section — the last thing in the
+// Details tab — is in view.
+const BOTTOM_MARGIN = "0px";
+// "On screen" (onInspirationShown): a real strip of the grid above the drawer's bottom bar, not a
+// sliver at the edge — the viewport's bottom 160 px don't count.
+const SHOWN_MARGIN = "0px 0px -160px 0px";
 
 const stagger = (index) => Math.min(index, STAGGER_MAX) * STAGGER_MS + "ms";
 const stopPropagation = (e) => e.stopPropagation();
@@ -100,6 +115,79 @@ function distribute(items, columns) {
 function cellRatio(item) {
     if (!(item.width > 0 && item.height > 0)) return 1;
     return Math.min(2, Math.max(0.5, item.height / item.width));
+}
+
+/**
+ * Whether an inspiration cell `cellWidth` px wide shows the artwork at or above its own size
+ * (object-fit: contain in a cell of cellRatio): nearest-neighbour then, a reduced one reads better
+ * smooth — the row's rule. Until the grid has been measured, the narrowest column a phone gives.
+ */
+function enlarges(item, cellWidth) {
+    if (!(item.width > 0 && item.height > 0)) return false;
+    const w = cellWidth || 128;
+    return Math.min(w / item.width, (w * cellRatio(item)) / item.height) >= 1;
+}
+
+/** The drawer is the desktop side panel (DESKTOP_QUERY). Read synchronously on mount, so the
+ *  first paint already lays out the right number of columns. */
+function useDesktop() {
+    const [desktop, setDesktop] = useState(() => typeof window !== "undefined"
+        && typeof window.matchMedia === "function" && window.matchMedia(DESKTOP_QUERY).matches);
+    useEffect(() => {
+        if (typeof window === "undefined" || typeof window.matchMedia !== "function") return undefined;
+        const mq = window.matchMedia(DESKTOP_QUERY);
+        const update = () => setDesktop(mq.matches);
+        update();
+        if (mq.addEventListener) {
+            mq.addEventListener("change", update);
+            return () => mq.removeEventListener("change", update);
+        }
+        mq.addListener(update); // Safari < 14
+        return () => mq.removeListener(update);
+    }, []);
+    return desktop;
+}
+
+/**
+ * One masonry column's width in CSS px. Measured, because it moves with the drawer — the desktop
+ * panel widens while the grid is on screen — and settled before it is handed on, so a width
+ * transition makes the tiles re-check their scale once, after it, not on every frame of it.
+ * The first reading goes through at once.
+ */
+function useColumnWidth(ref, columns) {
+    const [width, setWidth] = useState(0);
+    useEffect(() => {
+        const el = ref.current;
+        if (!el || typeof ResizeObserver === "undefined") return undefined;
+        let timer = null;
+        let first = true;
+        const ro = new ResizeObserver((entries) => {
+            const inner = entries[entries.length - 1].contentRect.width;
+            const w = Math.max(0, Math.round((inner - (columns - 1) * GRID_GAP) / columns));
+            clearTimeout(timer);
+            if (first) { first = false; setWidth(w); }
+            else timer = setTimeout(() => setWidth(w), CELL_SETTLE_MS);
+        });
+        ro.observe(el);
+        return () => { clearTimeout(timer); ro.disconnect(); };
+    }, [ref, columns]);
+    return width;
+}
+
+/**
+ * Tells `onVisible` whether the element is on screen in the drawer (SHOWN_MARGIN). The drawer's
+ * scroller and the tab slider clip it like they clip everything — a swiped-away Details tab is
+ * not on screen. False again when the element goes.
+ */
+function useOnScreen(ref, onVisible) {
+    useEffect(() => {
+        const el = ref.current;
+        if (!el || !onVisible || typeof IntersectionObserver === "undefined") return undefined;
+        const io = new IntersectionObserver((entries) => onVisible(entries[entries.length - 1].isIntersecting),
+            { rootMargin: SHOWN_MARGIN });
+        io.observe(el);
+        return () => { io.disconnect(); onVisible(false); };
+    }, [ref, onVisible]);
 }
 
 // ── thumbnails ────────────────────────────────────────────────────────────────
@@ -194,14 +282,14 @@ const MatchRow = React.memo(function MatchRow({ items, classes, reveal, nsfw, lo
     );
 });
 
-const IdeaTile = React.memo(function IdeaTile({ item, index, classes, reveal, nsfw, onOpen }) {
+/** `pixelated`: the cell enlarges the artwork (enlarges(), from the grid's measured column). */
+const IdeaTile = React.memo(function IdeaTile({ item, index, classes, reveal, nsfw, pixelated, onOpen }) {
     const [loaded, setLoaded] = useState(false);
     const done = useCallback(() => setLoaded(true), []);
     const blurred = item.nsfw && !nsfw;
     const open = useCallback(() => { if (!blurred && onOpen) onOpen(item); }, [blurred, item, onOpen]);
-    // the columns are ~110–135 px wide: at or under that the artwork is enlarged
     const imgClass = classes.tileImg + (loaded ? " loaded" : "")
-        + (item.width > 0 && item.width <= 128 ? " pixelated" : "")
+        + (pixelated ? " pixelated" : "")
         + (blurred ? " nsfw" : "");
     const tip = (
         <React.Fragment>
@@ -223,14 +311,23 @@ const IdeaTile = React.memo(function IdeaTile({ item, index, classes, reveal, ns
     );
 });
 
-const IdeaGrid = React.memo(function IdeaGrid({ items, classes, reveal, nsfw, onOpen }) {
-    const cols = useMemo(() => distribute(items, COLUMNS), [items]);
+/**
+ * The masonry. It only exists once results are in, so it is also what reports them on screen
+ * (`onVisible`, desktop only — see PostOriginality). The column width it measures decides, tile
+ * by tile, whether the artwork is enlarged.
+ */
+const IdeaGrid = React.memo(function IdeaGrid({ items, columns, classes, reveal, nsfw, onOpen, onVisible }) {
+    const ref = useRef(null);
+    const cols = useMemo(() => distribute(items, columns), [items, columns]);
+    const cellWidth = useColumnWidth(ref, columns);
+    useOnScreen(ref, onVisible);
     return (
-        <div className={classes.grid}>
+        <div ref={ref} className={classes.grid}>
             {cols.map((col, c) => (
                 <div key={c} className={classes.column}>
                     {col.map(({ item, index }) => (
-                        <IdeaTile key={item.id} item={item} index={index} classes={classes} reveal={reveal} nsfw={nsfw} onOpen={onOpen} />
+                        <IdeaTile key={item.id} item={item} index={index} classes={classes} reveal={reveal} nsfw={nsfw}
+                                  pixelated={enlarges(item, cellWidth)} onOpen={onOpen} />
                     ))}
                 </div>
             ))}
@@ -238,10 +335,10 @@ const IdeaGrid = React.memo(function IdeaGrid({ items, classes, reveal, nsfw, on
     );
 });
 
-const IdeaSkeleton = React.memo(function IdeaSkeleton({ classes }) {
+const IdeaSkeleton = React.memo(function IdeaSkeleton({ classes, columns }) {
     return (
         <div className={classes.grid} aria-hidden="true">
-            {SKELETON.map((col, c) => (
+            {SKELETON.slice(0, columns).map((col, c) => (
                 <div key={c} className={classes.column}>
                     {col.map((r, i) => <div key={i} className={classes.cell + " " + classes.skeleton} style={{ aspectRatio: "1 / " + r }} />)}
                 </div>
@@ -336,7 +433,7 @@ const RevealToggle = React.memo(function RevealToggle({ classes, Icon, label, op
 
 /** Inspiration's body: the right note, the skeleton, or the masonry. */
 const InspirationPanel = React.memo(function InspirationPanel({
-                                                                  classes, settled, unavailable, selfId, similar, reveal, nsfw, onOpen, onRetry, onRetrySimilar,
+                                                                  classes, settled, unavailable, selfId, similar, reveal, nsfw, columns, onOpen, onRetry, onRetrySimilar, onVisible,
                                                               }) {
     useLanguage();
     const retryOnKey = useMemo(() => activateOnKey(onRetry), [onRetry]);
@@ -353,7 +450,7 @@ const InspirationPanel = React.memo(function InspirationPanel({
         );
     }
     if (settled && !selfId) return <div className={classes.note}>{t(NS + "inspiration_unindexed")}</div>;
-    if (!similar || similar.status === "loading") return <IdeaSkeleton classes={classes} />;
+    if (!similar || similar.status === "loading") return <IdeaSkeleton classes={classes} columns={columns} />;
     if (similar.status === "error") {
         return (
             <div className={classes.note}>
@@ -365,16 +462,22 @@ const InspirationPanel = React.memo(function InspirationPanel({
         );
     }
     if (!similar.items.length) return <div className={classes.note}>{t(NS + "no_inspiration")}</div>;
-    return <IdeaGrid items={similar.items} classes={classes} reveal={reveal} nsfw={nsfw} onOpen={onOpen} />;
+    return <IdeaGrid items={similar.items} columns={columns} classes={classes} reveal={reveal} nsfw={nsfw}
+                     onOpen={onOpen} onVisible={onVisible} />;
 });
 
 // ── the section ───────────────────────────────────────────────────────────────
 
-function PostOriginality({ classes, author, permlink, nsfw, locales, onOpenArtwork, onOpenAuthor }) {
+function PostOriginality({ classes, author, permlink, nsfw, locales, onOpenArtwork, onOpenAuthor, onInspirationShown }) {
     const lang = useLanguage();
     const rootRef = useRef(null);
+    const bottomRef = useRef(null);
     const mounted = useRef(true);
     useEffect(() => () => { mounted.current = false; }, []);
+
+    // Desktop side panel: two masonry columns, the bottom-of-drawer reveal, the shown report.
+    const desktop = useDesktop();
+    const columns = desktop ? COLUMNS_DESKTOP : COLUMNS;
 
     const [visible, setVisible] = useState(false);
     const [attempt, setAttempt] = useState(0);
@@ -387,6 +490,8 @@ function PostOriginality({ classes, author, permlink, nsfw, locales, onOpenArtwo
     const [ideasOpen, setIdeasOpen] = useState(false);
     const [ideasEntered, setIdeasEntered] = useState(false);
     const [similar, setSimilar] = useState(null); // null | { status: "loading" | "ready" | "error", items }
+    const [gridOnScreen, setGridOnScreen] = useState(false); // the masonry, on screen in the drawer (desktop)
+    const ideasTouched = useRef(false); // Inspiration was revealed once, by hand or by reaching the bottom
 
     // Ask the Worker only once the section is (nearly) on screen: most views never scroll here.
     useEffect(() => {
@@ -435,8 +540,43 @@ function PostOriginality({ classes, author, permlink, nsfw, locales, onOpenArtwo
     useEffect(() => {
         if (ideasOpen && selfId && !similar) loadSimilar();
     }, [ideasOpen, selfId, similar, loadSimilar]);
-    const toggleIdeas = useCallback(() => setIdeasOpen((o) => !o), []);
+    // A reader's own toggle ends the automatic reveal for this post: hidden by hand stays hidden.
+    const toggleIdeas = useCallback(() => { ideasTouched.current = true; setIdeasOpen((o) => !o); }, []);
     const onIdeasEntered = useCallback(() => setIdeasEntered(true), []);
+
+    // Desktop: reaching the bottom of the drawer — the end of this section, the last thing in the
+    // Details tab — reveals Inspiration by itself, once per post (the parent keys us by post).
+    // Before that the Worker is not asked: most views never scroll this far.
+    useEffect(() => {
+        if (!desktop || ideasOpen || ideasTouched.current) return undefined;
+        const el = bottomRef.current;
+        if (!el || typeof IntersectionObserver === "undefined") return undefined;
+        const io = new IntersectionObserver((entries) => {
+            if (!entries[entries.length - 1].isIntersecting || ideasTouched.current) return;
+            io.disconnect();
+            ideasTouched.current = true;
+            setIdeasOpen(true);
+        }, { rootMargin: BOTTOM_MARGIN });
+        io.observe(el);
+        return () => io.disconnect();
+    }, [desktop, ideasOpen]);
+
+    // The dialog widens its desktop panel while the Inspiration results are on screen: revealed,
+    // the expand finished, and the masonry — which only exists once results are in — in view.
+    // Reported on change; withdrawn when this post's section goes (a thumbnail opened, the dialog
+    // moved on), so the panel never stays wide for a section that isn't there.
+    const shown = ideasOpen && ideasEntered && gridOnScreen;
+    const reportShown = useRef(onInspirationShown);
+    reportShown.current = onInspirationShown;
+    const reported = useRef(false);
+    useEffect(() => {
+        if (reported.current === shown) return;
+        reported.current = shown;
+        if (reportShown.current) reportShown.current(shown);
+    }, [shown]);
+    useEffect(() => () => {
+        if (reported.current && reportShown.current) reportShown.current(false);
+    }, []);
 
     const status = data ? data.status : null;
 
@@ -463,10 +603,13 @@ function PostOriginality({ classes, author, permlink, nsfw, locales, onOpenArtwo
             <Collapse in={ideasOpen} timeout={COLLAPSE_TIMEOUT} onEntered={onIdeasEntered}>
                 {ideasOpen || ideasEntered ? (
                     <InspirationPanel classes={classes} settled={!!data} unavailable={status === ORIGINALITY.UNAVAILABLE}
-                                      selfId={selfId} similar={similar} reveal={ideasEntered} nsfw={!!nsfw}
-                                      onOpen={onOpenArtwork} onRetry={retry} onRetrySimilar={loadSimilar} />
+                                      selfId={selfId} similar={similar} reveal={ideasEntered} nsfw={!!nsfw} columns={columns}
+                                      onOpen={onOpenArtwork} onRetry={retry} onRetrySimilar={loadSimilar}
+                                      onVisible={desktop ? setGridOnScreen : null} />
                 ) : null}
             </Collapse>
+            {/* The bottom of the drawer (see the desktop auto-reveal above). */}
+            <div ref={bottomRef} className={classes.bottom} aria-hidden="true" />
         </div>
     );
 }
@@ -647,10 +790,10 @@ const styles = {
         overflow: "hidden",
         textOverflow: "ellipsis",
     },
-    // inspiration masonry
+    // inspiration masonry (useColumnWidth reads the gutter back from GRID_GAP)
     grid: {
         display: "flex",
-        gap: 8,
+        gap: GRID_GAP,
         alignItems: "flex-start",
         padding: "8px 16px 16px 16px",
     },
@@ -659,7 +802,12 @@ const styles = {
         minWidth: 0,
         display: "flex",
         flexDirection: "column",
-        gap: 8,
+        gap: GRID_GAP,
+    },
+    // the section's last pixel: the desktop auto-reveal watches it come into view
+    bottom: {
+        height: 1,
+        pointerEvents: "none",
     },
     cell: {
         position: "relative",

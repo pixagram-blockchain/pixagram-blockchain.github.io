@@ -85,9 +85,9 @@ module.exports = {
         chunkIds: 'natural',
         splitChunks: {
             chunks: 'async',
-            minSize: 20000,
+            minSize: 50000,
             maxSize: 480 * 1024,
-            minChunks: 2,
+            minChunks: 4,
             maxAsyncRequests: 30,
             maxInitialRequests: 30,
             automaticNameDelimiter: '_',
@@ -95,15 +95,15 @@ module.exports = {
             cacheGroups: {
                 mui: {
                     test: isMui,
-                    minChunks: 2,
-                    minSize: 5000,
+                    minChunks: 1,
+                    minSize: 50000,
                     priority: 0,
                     reuseExistingChunk: true,
                 },
                 nodeShims: {
                     test: isNodeShim,
-                    minChunks: 2,
-                    minSize: 5000,
+                    minChunks: 1,
+                    minSize: 50000,
                     priority: 0,
                     reuseExistingChunk: true,
                 },
@@ -112,7 +112,7 @@ module.exports = {
                     priority: -10
                 },
                 default: {
-                    minChunks: 2,
+                    minChunks: 4,
                     maxAsyncRequests: 30,
                     maxInitialRequests: 30,
                     priority: -20,

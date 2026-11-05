@@ -11,6 +11,7 @@ import RefreshIcon from "@material-ui/icons/Refresh";
 import OpenInNewIcon from "@material-ui/icons/OpenInNew";
 
 import { inspectImageDataUri } from "../utils/api/sanitizer";
+import { buildCommentFocusHash, parsePostUrl } from "../utils/constants";
 
 import { T } from "../utils/T";
 import { t, tk, tx, getLocaleCode, useLanguage } from "../utils/text";
@@ -112,6 +113,12 @@ function buildTree(key, value, parentPath = "") {
 //
 // `author` may be either a string (raw chain payload) or an object
 // with `.username` (sanitized entity shape).
+//
+// A comment (non-empty parent_author) has no page of its own: its URL is
+// its thread — the ROOT post's URL plus "#replies&focus=<b64url(author/
+// permlink)>" (buildCommentFocusHash), the deep-link PostDialog and
+// BlogPostDialog open with this comment pinned. CommentInList's "Copy link"
+// builds the same one.
 function buildPostUrl(rawData) {
     if (!rawData || typeof rawData !== "object") return null;
     const authorField = rawData.author;
@@ -124,8 +131,36 @@ function buildPostUrl(rawData) {
     const origin = (typeof window !== "undefined" && window.location && window.location.origin)
         ? window.location.origin
         : "";
+    if (rawData.parent_author) {
+        const rootPath = commentRootPath(rawData);
+        return rootPath ? origin + rootPath + buildCommentFocusHash(author, permlink) : null;
+    }
     const cat = category && String(category).length ? String(category) : "feed";
     return `${origin}/${cat}/@${author}/${permlink}`;
+}
+
+// "/{category}/@{root author}/{root permlink}" for a comment, from its own
+// chain record, in the order PaperCardReply trusts: root_author /
+// root_permlink with the comment's category (a comment keeps its ROOT's
+// category on-chain), then the url field's leading triplet
+// ("/cat/@root/perm#@author/perm"), then — at depth 1 only, where the parent
+// IS the root — parent_author / parent_permlink. The result must parse back
+// to exactly those three parts as a post route (parsePostUrl), since it
+// lands in an href. A root that can't be proven gets no URL rather than a
+// link that opens the wrong thread.
+const ROOT_URL_RE = /^\/([^\/@#?\s]+)\/@([\w.-]+)\/([^\/#?\s]+)/;
+
+function commentRootPath(raw) {
+    const fromUrl = typeof raw.url === "string" ? ROOT_URL_RE.exec(raw.url) : null;
+    const category = String(raw.category || (fromUrl ? fromUrl[1] : ""));
+    let author = raw.root_author;
+    let permlink = raw.root_permlink;
+    if ((!author || !permlink) && fromUrl) { author = fromUrl[2]; permlink = fromUrl[3]; }
+    if ((!author || !permlink) && Number(raw.depth) === 1) { author = raw.parent_author; permlink = raw.parent_permlink; }
+    if (!category || !author || !permlink) return null;
+    const path = "/" + category + "/@" + author + "/" + permlink;
+    const p = parsePostUrl(path);
+    return p && p.tag === category && p.author === author && p.permlink === permlink ? path : null;
 }
 
 // ─── Type Icons (greyscale SVG) ────────────────────────────────
@@ -1084,8 +1119,9 @@ function resolveIdentifiers({ author, permlink, data }) {
 // In all api-mode forms the dialog calls
 //   api.content.getContent(author, permlink, { raw: true })
 // on open and on every refresh, displaying the un-sanitized chain
-// payload. The canonical post URL is built from `category` + `author`
-// + `permlink` once data lands.
+// payload. The canonical URL is built from the payload once data lands:
+// `category` + `author` + `permlink` for a post, the root post's URL plus
+// the "#replies&focus=…" deep-link for a comment.
 const DataViewerDialog = React.memo(({ classes, open, onClose, data, api, author, permlink }) => {
     useLanguage();
     const [selectedId, setSelectedId] = useState(null);
@@ -1228,7 +1264,7 @@ const DataViewerDialog = React.memo(({ classes, open, onClose, data, api, author
         return c;
     }, [tree]);
 
-    // Canonical post URL — built from category + author + permlink in the payload.
+    // Canonical URL from the payload: a post's own, a comment's thread deep-link.
     const postUrl = useMemo(() => buildPostUrl(activeData), [activeData]);
 
     // Don't render if there's nothing to show and no api to fetch with.

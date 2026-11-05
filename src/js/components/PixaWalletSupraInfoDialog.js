@@ -45,7 +45,7 @@ const TITLE_FONT = '"Industry Book", "Normative Pro", sans-serif';
 const styles = theme => ({
     backdrop: {
         zIndex: theme.zIndex.drawer + 2,
-        backdropFilter: "blur(5px)",
+        backdropFilter: "blur(6px)",
     },
     dialogCard: {
         userSelect: "none",

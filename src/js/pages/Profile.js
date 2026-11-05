@@ -24,6 +24,8 @@ import {
     TRANSITION_ENTRY as TE, RAINBOW_RIPPLE as RIPPLE, slideKF,
 } from "../theme/motion";
 import PaperCard, { isArtworkBlurred, paperCardLayoutKey } from "../components/PaperCard";
+import PaperCardBlog, { paperCardBlogLayoutKey } from "../components/PaperCardBlog";
+import { enrichPostForBlogCard, isPortalBlogPost, isBlogCard, buildPortalPostUrl } from "../utils/blogCard";
 import PaperCardMenuOption from "../components/PaperCardMenuOption";
 import { ProfileHoverCardLayer } from "../components/ProfileHoverCard";
 import Button from "@material-ui/core/Button";
@@ -75,6 +77,19 @@ const LazyPostDialog = React.lazy(loadPostDialog);
 const loadOwnPostDialogs = () => import("../components/EditPostDialog");
 const LazyEditPostDialog = React.lazy(loadOwnPostDialogs);
 const LazyDeletePostDialog = React.lazy(() => loadOwnPostDialogs().then(m => ({ default: m.DeletePostDialog })));
+
+// BlogPostDialog is the portal-post viewer — the one Community and
+// FeedPersonal host. The posts tab mixes the profile's portal blog posts in
+// between its artworks, and Index lets this page host their
+// /portal-N/@author/permlink URLs (OVERLAY_HOSTS_BY_POST_KIND), so a blog
+// card opens over the profile instead of switching to the portal page.
+// Warmed on idle only once a blog card is actually loaded.
+const loadBlogPostDialog = () => import("../components/BlogPostDialog");
+const LazyBlogPostDialog = React.lazy(loadBlogPostDialog);
+
+// What the viewer that is NOT holding the current post receives, so
+// PostDialog never sees a blog card and BlogPostDialog never sees an artwork.
+const NO_POST = Object.freeze({});
 
 // ── Deferred profile-picture viewer ────────────────────────────────────
 // PictureDialog is PostDialog's image half (render pool, hero animation) —
@@ -372,10 +387,72 @@ const isSamePost = (p, cur) => !!p && !!cur
 const findNavigableIndex = (list, from, dir, nsfwEnabled, getPost) => {
     for (let i = from + dir; i >= 0 && i < list.length; i += dir) {
         const p = getPost ? getPost(list[i]) : list[i];
-        if (p && !isArtworkBlurred(p, p.id, nsfwEnabled)) return i;
+        // Blog cards open in BlogPostDialog, never in PostDialog — step over.
+        if (p && !isBlogCard(p) && !isArtworkBlurred(p, p.id, nsfwEnabled)) return i;
     }
     return -1;
 };
+
+// ── Portal blog posts in the posts tab ─────────────────────────────────
+// The account's blog (get_discussions_by_blog) returns its portal blog posts
+// alongside its artworks. They used to go through the artwork path: no body
+// image → ImageMeasurer never sized them → the cell rendered nothing, so they
+// were missing from the grid (and one with an image in its body would have
+// shown up as a bogus artwork card). They now render as PaperCardBlog, as in
+// FeedPersonal. Their height is the card's own layout, not an image, so they
+// bypass ImageMeasurer: each gets a fixed placeholder entry (stable per card
+// object, so identity holds across renders) and CellMeasurer measures the
+// real card.
+const BLOG_ENTRY_CACHE = new WeakMap();
+const blogEntryOf = (card) => {
+    let entry = BLOG_ENTRY_CACHE.get(card);
+    if (!entry) {
+        entry = { item: card, size: { id: card.id, width: 1, height: 1 } };
+        BLOG_ENTRY_CACHE.set(card, entry);
+    }
+    return entry;
+};
+// An artwork the measurer hasn't listed yet: same "not sized" shape the
+// cell renderer already skips (`!size.height`), so it keeps its place in the
+// grid. MasonryExtended holds it as a zero-height hole — the blog cards
+// behind it are placed meanwhile — and opens the space once it is sized.
+const PENDING_ENTRY_CACHE = new WeakMap();
+const pendingEntryOf = (post) => {
+    let entry = PENDING_ENTRY_CACHE.get(post);
+    if (!entry) {
+        entry = { item: post, size: { id: post.id, width: 0, height: 0 } };
+        PENDING_ENTRY_CACHE.set(post, entry);
+    }
+    return entry;
+};
+
+// A blog card can't blur its cover the way PaperCard blurs an artwork, so
+// while "show NSFW" is off an nsfw-flagged blog card is shown without it.
+// Cached per card object for the same identity reason.
+const COVERLESS_CACHE = new WeakMap();
+const withoutCover = (card) => {
+    let copy = COVERLESS_CACHE.get(card);
+    if (!copy) { copy = { ...card, image: null }; COVERLESS_CACHE.set(card, copy); }
+    return copy;
+};
+
+const sameEntries = (a, b) => {
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+};
+
+// Which viewer a post URL opens in. The URL decides, exactly as it decides
+// the host page in Index (hostPageForPostUrl): a community-post URL
+// (/portal-N/@author/permlink) is a blog post → BlogPostDialog; any other
+// post URL is an artwork → PostDialog.
+const POST_KIND_ARTWORK = "artwork";
+const POST_KIND_BLOG = "blog";
+const postKindOfUrl = (pathname) => (isCommunityPostUrl(pathname) ? POST_KIND_BLOG : POST_KIND_ARTWORK);
+
+// The URL a card pushes when opened. Blog cards build theirs from the portal
+// slug they were classified with, so it always parses as a community post.
+const postUrlOf = (data) => (isBlogCard(data) ? buildPortalPostUrl(data) : buildPostUrl(data));
 
 // ── Parsed-metadata cache ───────────────────────────────────────────────
 // json_metadata is consulted several times per post (NSFW here, the deleted
@@ -506,7 +583,16 @@ const resolveContentType = (raw) => {
     return isCommunityCategory(cat) ? 'blog' : 'pixel_art';
 };
 
+// Portal blog post → the portal's own card shape (shared with Community and
+// FeedPersonal), with this page's NSFW / soft-delete predicates so filtering
+// stays uniform across both card kinds.
+const enrichProfileBlogCard = (post, account, voterProfiles) => ({
+    ...enrichPostForBlogCard(post, account, voterProfiles),
+    nsfw: isNsfwPost(post), deleted: isDeletedPost(post), children: post.children ?? 0,
+});
+
 const enrichPostForCard = (post, account, voterProfiles) => {
+    if (isPortalBlogPost(post)) return enrichProfileBlogCard(post, account, voterProfiles);
     const pp = parsePayout(post.pending_payout_value), tp = parsePayout(post.total_payout_value), cp = parsePayout(post.curator_payout_value);
     const payout = pp > 0 ? pp : tp + cp;
     const tags = post._tags || [], images = post._images || [], activeVotes = post.active_votes || [];
@@ -734,7 +820,9 @@ const hydrateContent = (content) => {
         let m; const re1 = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
         while ((m = re1.exec(body)) !== null) imgs.push({ src: m[1], alt: '', is_base64: m[1].startsWith('data:'), index: imgs.length });
         if (!imgs.length) { const re2 = /!\[([^\]]*)\]\(([^)]+)\)/g; while ((m = re2.exec(body)) !== null) imgs.push({ src: m[2], alt: m[1]||'', is_base64: m[2].startsWith('data:'), index: imgs.length }); }
-        if (!imgs.length) (meta.image||[]).forEach((src, i) => { if (src) imgs.push({ src, alt: '', is_base64: src.startsWith('data:'), index: i }); });
+        // Array only: a blog post's meta.image is a string (its cover), and
+        // `.forEach` on it threw — orphan blog posts resolve through here too.
+        if (!imgs.length && Array.isArray(meta.image)) meta.image.forEach((src, i) => { if (typeof src === 'string' && src) imgs.push({ src, alt: '', is_base64: src.startsWith('data:'), index: i }); });
         content._images = imgs;
     }
     if (!content._tags) content._tags = meta.tags || [];
@@ -758,7 +846,11 @@ const CONTENT_READ_FAILED = Symbol('content_read_failed');
 //   • a `_deleted` marker — the post is gone from the chain but its author
 //     exists, so the link was plausibly valid and the post was deleted
 //   • null — nothing we can resolve; the caller flips the stub to _notFound
-const fetchOrphanPost = async (api, author, permlink) => {
+// `kind` is the URL's post kind: a community-post URL is always handed the
+// blog-card shape (what BlogPostDialog reads — Community and FeedPersonal do
+// the same for every post they resolve by URL), anything else goes through
+// the card classifier as usual.
+const fetchOrphanPost = async (api, author, permlink, kind = POST_KIND_ARTWORK) => {
     if (!api?.content?.getContent || !author || !permlink) return null;
     try {
         // Both inputs (author, permlink) are known up front, so the content
@@ -805,12 +897,17 @@ const fetchOrphanPost = async (api, author, permlink) => {
                     name: resolveDisplayName(authorAccount, author),
                     image: authorAccount.image || '',
                 },
-                _content_type: 'pixel_art',
+                _content_type: kind === POST_KIND_BLOG ? 'blog' : 'pixel_art',
             };
         }
 
+        // hydrateContent derives a missing type from the category; a post
+        // reached through a community-post URL is a blog post regardless.
+        if (kind === POST_KIND_BLOG && !content._content_type) content._content_type = 'blog';
         hydrateContent(content);
-        return overlayPendingVote(enrichPostForCard(content, authorAccount, {}));
+        return overlayPendingVote(kind === POST_KIND_BLOG
+            ? enrichProfileBlogCard(content, authorAccount, {})
+            : enrichPostForCard(content, authorAccount, {}));
     } catch (e) {
         console.warn('[Profile] fetchOrphanPost failed:', e && e.message);
         return null;
@@ -2183,6 +2280,10 @@ const usePostNavigation = ({ api, posts, masonryRefs, scrollToIndex, setSelected
     const [currentPost, setCurrentPost] = useState({});
     const [originRect, setOriginRect] = useState(null);
     const [isOrphan, setIsOrphan] = useState(false);
+    // Which viewer holds the post: POST_KIND_ARTWORK (PostDialog) or
+    // POST_KIND_BLOG (BlogPostDialog). Deliberately NOT reset on close, so
+    // the dialog that is closing keeps its `open` transition.
+    const [postKind, setPostKind] = useState(POST_KIND_ARTWORK);
     const historyDepthRef = useRef(0);
     // One-shot guard for the cold-entry history seed (see the URL effect).
     const seededRef = useRef(false);
@@ -2237,11 +2338,11 @@ const usePostNavigation = ({ api, posts, masonryRefs, scrollToIndex, setSelected
             }
         }
         const syncFromUrl = (pathname) => {
-            // `/portal-N/@a/p` is a community post — <Community> +
-            // <BlogPostDialog> own it (see hostPageForPostUrl). Treating it as
-            // "not our post URL" closes any open overlay and stays out of the
-            // router's way while it swaps the host page in.
-            const parsed = isCommunityPostUrl(pathname) ? null : parsePostUrl(pathname);
+            // `/portal-N/@a/p` is a community post. Index keeps this page
+            // mounted for it (OVERLAY_HOSTS_BY_POST_KIND) and it opens in
+            // <BlogPostDialog> over the profile; any other post URL opens in
+            // <PostDialog>.
+            const parsed = parsePostUrl(pathname);
             if (!parsed) {
                 orphanFetchTokenRef.current += 1;
                 setArtworkOpen(prev => {
@@ -2254,6 +2355,10 @@ const usePostNavigation = ({ api, posts, masonryRefs, scrollToIndex, setSelected
                 });
                 return;
             }
+            // Portal post URL → BlogPostDialog, any other → PostDialog. Set
+            // before the bail-out below (a same-value set is a no-op).
+            const kind = postKindOfUrl(pathname);
+            setPostKind(kind);
             const cur = currentPostRef.current;
             const sameUrl =
                 cur && cur.permlink === parsed.permlink
@@ -2340,7 +2445,7 @@ const usePostNavigation = ({ api, posts, masonryRefs, scrollToIndex, setSelected
                     setTimeout(attemptFetch, 250);
                     return;
                 }
-                const enriched = await fetchOrphanPost(apiNow, parsed.author, parsed.permlink);
+                const enriched = await fetchOrphanPost(apiNow, parsed.author, parsed.permlink, kind);
                 if (token !== orphanFetchTokenRef.current) return;
                 if (!enriched) {
                     setCurrentPost(prev => ({ ...prev, _loading: false, _notFound: true }));
@@ -2359,21 +2464,29 @@ const usePostNavigation = ({ api, posts, masonryRefs, scrollToIndex, setSelected
     }, [posts]);
 
     // Push the post URL (optionally with a "#…" drawer-tab hash on the SAME
-    // history entry — PostDialog adopts HISTORY.location.hash when it opens,
-    // exactly as openCommentArtwork below relies on) and seat the dialog.
+    // history entry — PostDialog and BlogPostDialog both adopt
+    // HISTORY.location.hash when they open, exactly as openCommentArtwork
+    // below relies on) and seat the dialog. Blog cards push their portal URL;
+    // Index keeps this page mounted for it, so the blog post opens over the
+    // profile exactly like an artwork.
     const pushAndOpen = useCallback((data, rect, hash) => {
-        const u = buildPostUrl(data); if (u) HISTORY.push(hash ? u + hash : u);
+        const u = postUrlOf(data); if (u) HISTORY.push(hash ? u + hash : u);
         orphanFetchTokenRef.current += 1;
         setIsOrphan(false);
-        setArtworkOpen(true); setCurrentPost(data); setOriginRect(rect||null); historyDepthRef.current = 1;
+        const blog = isBlogCard(data);
+        setPostKind(blog ? POST_KIND_BLOG : POST_KIND_ARTWORK);
+        // originRect drives PostDialog's hero transition only.
+        setArtworkOpen(true); setCurrentPost(data); setOriginRect(blog ? null : (rect||null)); historyDepthRef.current = 1;
     }, []);
 
     // Plain open — card title / image click on the posts tab.
     const openPost = useCallback((data, rect) => pushAndOpen(data, rect), [pushAndOpen]);
 
     // Comment-button open — pushes "…/permlink#replies" so PostDialog lands
-    // on the comments tab. The bare hash just selects the tab; the comment
-    // and reply cards add "&focus=<b64>" on top of it (openCommentArtwork).
+    // on the comments tab and BlogPostDialog scrolls its comments column into
+    // view (the same intent Community's and FeedPersonal's cards push). The
+    // bare hash just selects the tab; the comment and reply cards add
+    // "&focus=<b64>" on top of it (openCommentArtwork).
     const openPostComments = useCallback(
         (data, rect) => pushAndOpen(data, rect, POST_DRAWER_TAB_HASHES[1]),
         [pushAndOpen],
@@ -2426,24 +2539,25 @@ const usePostNavigation = ({ api, posts, masonryRefs, scrollToIndex, setSelected
 
     // ── Arrow availability + reverse-hero target — see Feed.js ─────────
     // Same blur-skipping walk as navigatePost, run over `posts` (identical
-    // order to the measured posts-grid items) so it can run during render;
-    // an exhausted direction surfaces its callback as `undefined` (the
-    // orphan convention) and the dialog unmounts that arrow.
+    // order to the posts-grid entries) so it can run during render; an
+    // exhausted direction surfaces its callback as `undefined` (the orphan
+    // convention) and the dialog unmounts that arrow.
+    // Artworks only: BlogPostDialog has no prev/next (as on the portal page).
     const canGoNext = useMemo(() => {
-        if (!artworkOpen || isOrphan) return false;
+        if (!artworkOpen || isOrphan || postKind !== POST_KIND_ARTWORK) return false;
         const list = posts || [];
         if (!list.length) return false;
         const ci = list.findIndex((p) => isSamePost(p, currentPost));
         return findNavigableIndex(list, ci, 1, nsfwEnabled) !== -1;
-    }, [artworkOpen, isOrphan, posts, currentPost, nsfwEnabled]);
+    }, [artworkOpen, isOrphan, postKind, posts, currentPost, nsfwEnabled]);
 
     const canGoPrev = useMemo(() => {
-        if (!artworkOpen || isOrphan) return false;
+        if (!artworkOpen || isOrphan || postKind !== POST_KIND_ARTWORK) return false;
         const list = posts || [];
         if (!list.length) return false;
         const ci = list.findIndex((p) => isSamePost(p, currentPost));
         return findNavigableIndex(list, ci, -1, nsfwEnabled) !== -1;
-    }, [artworkOpen, isOrphan, posts, currentPost, nsfwEnabled]);
+    }, [artworkOpen, isOrphan, postKind, posts, currentPost, nsfwEnabled]);
 
     // Live rect of the open post's card canvas (data-artwork-id stamp in
     // PaperCard) for PostDialog's reverse-hero close; null (no card
@@ -2519,7 +2633,7 @@ const usePostNavigation = ({ api, posts, masonryRefs, scrollToIndex, setSelected
                     enriched.category = commentData.category;
                     enriched._content_type = isCommunityCategory(enriched.category) ? 'blog' : 'pixel_art';
                 }
-                const u = buildPostUrl(enriched);
+                const u = postUrlOf(enriched);
                 // A focus ref pins one comment of the thread: the URL gains
                 // "#replies&focus=<b64>", so the dialog opens straight on the
                 // comments with that comment highlighted and its tree path
@@ -2527,19 +2641,24 @@ const usePostNavigation = ({ api, posts, masonryRefs, scrollToIndex, setSelected
                 // the same param when it learns the drawer-hash scheme).
                 const hash = focus ? buildCommentFocusHash(focus.author, focus.permlink) : "";
                 if (u) HISTORY.push(u + hash);
-                // A blog post lives in a community, and `hostPageForPostUrl`
-                // sends `/portal-N/@a/p` to <Community> + <BlogPostDialog>.
-                // Profile has no BlogPostDialog and its PostDialog is the
-                // artwork viewer, so the pushed URL is the whole handoff — the
-                // router mounts the right host. Opening the local dialog too
-                // would stack the artwork viewer on top of a blog post.
-                if (u && isCommunityCategory(enriched.category)) return;
+                historyDepthRef.current = 1;
+                // A blog post lives in a portal (`/portal-N/@a/p`), and Index
+                // keeps this page mounted for it: it opens in BlogPostDialog
+                // over the profile. The push above has already switched the
+                // viewer (syncFromUrl). A root that came back without its
+                // category is the one exception: its card is artwork-shaped
+                // even though the comment's inherited portal routes it to
+                // BlogPostDialog — leave it to syncFromUrl's URL-driven
+                // fetch, which resolves it in the blog-card shape that
+                // dialog reads.
+                if (u && isCommunityPostUrl(u) && !isBlogCard(enriched)) return;
                 orphanFetchTokenRef.current += 1;
+                setPostKind(isBlogCard(enriched) ? POST_KIND_BLOG : POST_KIND_ARTWORK);
                 // A root post loaded from a comment isn't in the profile's
                 // post grid either — it behaves like an orphan for navigation
                 // purposes (no grid neighbours to arrow through).
                 setIsOrphan(true);
-                setArtworkOpen(true); setCurrentPost(enriched); setOriginRect(null); historyDepthRef.current = 1; return;
+                setArtworkOpen(true); setCurrentPost(enriched); setOriginRect(null); return;
             } catch {}
         }
         actions.trigger_snackbar(t("components.profile.could_not_load_the_original_post"));
@@ -2550,12 +2669,12 @@ const usePostNavigation = ({ api, posts, masonryRefs, scrollToIndex, setSelected
     // downstream hook keyed on `postNav` (all four cell renderers, dialog
     // props) recomputed on every Profile render — scroll ticks included.
     return useMemo(() => ({
-        artworkOpen, currentPost, originRect, isOrphan,
+        artworkOpen, currentPost, originRect, isOrphan, postKind,
         openPost, openPostComments, closePost, onDrawerPush, onDrawerPop, getReturnRect,
         nextPost: (isOrphan || !canGoNext) ? undefined : nextPost,
         previousPost: (isOrphan || !canGoPrev) ? undefined : previousPost,
         openCommentArtwork,
-    }), [artworkOpen, currentPost, originRect, isOrphan,
+    }), [artworkOpen, currentPost, originRect, isOrphan, postKind,
         openPost, openPostComments, closePost, onDrawerPush, onDrawerPop, getReturnRect,
         nextPost, previousPost, canGoNext, canGoPrev, openCommentArtwork]);
 };
@@ -2708,16 +2827,28 @@ const Profile = ({ classes, settings, pathname, api }) => {
 
     // NSFW filtering for the posts tab: when the filter is ON (_nsfw_filter
     // truthy) drop posts flagged nsfw before the masonry sees them. Blur of
-    // shown posts is handled by PaperCard via _nsfw_enabled. Only the posts grid
-    // carries nsfw cards; the other tabs are unchanged.
+    // shown posts is handled by PaperCard via _nsfw_enabled; blog cards can't
+    // blur, so they lose their cover instead (withoutCover). Only the posts
+    // grid carries nsfw cards; the other tabs are unchanged.
     // Delete animation (useCellExit): `exitingKeys` makes the posts grid
     // scale the leaving card down and fade it out; `exitedKeys` keeps it out
     // of the list afterwards, whatever a lagging refetch still returns.
+    // measurablePosts is what ImageMeasurer sizes — artworks only. It IS
+    // visiblePosts (same array) whenever the batch holds no blog card.
     const { exitingKeys, exitedKeys, exitCell } = useCellExit();
-    const visiblePosts = useMemo(
-        () => (tabData.posts || []).filter((p) => !p.deleted && !exitedKeys.has(p.id) && (!settings._nsfw_filter || !p.nsfw)),
-        [tabData.posts, settings._nsfw_filter, exitedKeys]
-    );
+    const { visiblePosts, measurablePosts } = useMemo(() => {
+        const visible = [], measurable = [];
+        for (const p of (tabData.posts || [])) {
+            if (p.deleted || exitedKeys.has(p.id) || (settings._nsfw_filter && p.nsfw)) continue;
+            if (isBlogCard(p)) {
+                visible.push(!settings._nsfw_enabled && p.nsfw && p.image ? withoutCover(p) : p);
+            } else {
+                visible.push(p);
+                measurable.push(p);
+            }
+        }
+        return { visiblePosts: visible, measurablePosts: measurable.length === visible.length ? visible : measurable };
+    }, [tabData.posts, settings._nsfw_filter, settings._nsfw_enabled, exitedKeys]);
 
     const postNav = usePostNavigation({ api, posts: visiblePosts, masonryRefs: grid.masonryRefs, scrollToIndex: grid.scrollToIndex, setSelectedPostIndex: grid.setSelectedPostIndex, profileUsername: parsed.username, nsfwEnabled: settings._nsfw_enabled });
 
@@ -2981,14 +3112,35 @@ const Profile = ({ classes, settings, pathname, api }) => {
         return () => cancelIdle(id);
     }, [createArtworkOpen, profile.isOwnProfile]);
 
+    // The open post goes to exactly one viewer, picked by postNav.postKind.
+    const isBlogPostOpen = postNav.postKind === POST_KIND_BLOG;
+    const artworkDialogOpen = postNav.artworkOpen && !isBlogPostOpen;
+    const blogDialogOpen = postNav.artworkOpen && isBlogPostOpen;
+
     // Mount the (now-lazy) post viewer on first open and keep it mounted so
     // close/reopen and in-dialog next/prev stay instant. On a deep-link entry
     // (cold-entry post URL) artworkOpen is already true, so this mounts on the
     // first commit while the orphan fetch runs in parallel.
     const [postDialogMounted, setPostDialogMounted] = useState(false);
     useEffect(() => {
-        if (postNav.artworkOpen) setPostDialogMounted(true);
-    }, [postNav.artworkOpen]);
+        if (artworkDialogOpen) setPostDialogMounted(true);
+    }, [artworkDialogOpen]);
+
+    // Same for the blog-post viewer (a portal post opened over the profile).
+    const [blogDialogMounted, setBlogDialogMounted] = useState(false);
+    useEffect(() => {
+        if (blogDialogOpen) setBlogDialogMounted(true);
+    }, [blogDialogOpen]);
+
+    // Warm its chunk on idle — but only once the posts tab actually holds a
+    // blog card (measurablePosts diverges from visiblePosts exactly then), so
+    // a profile of artworks never downloads it.
+    const hasBlogCards = measurablePosts !== visiblePosts;
+    useEffect(() => {
+        if (blogDialogMounted || !hasBlogCards) return;
+        const id = idle(() => { loadBlogPostDialog().catch(() => {}); });
+        return () => cancelIdle(id);
+    }, [blogDialogMounted, hasBlogCards]);
 
     // Warm the post-viewer chunk on idle for EVERYONE (anyone can open a post),
     // so the open-from-card transition isn't gated on a cold chunk fetch.
@@ -3142,7 +3294,7 @@ const Profile = ({ classes, settings, pathname, api }) => {
         if (!parent?.props?.itemsWithSizes?.[index|0]) return null;
         const {item, size} = parent.props.itemsWithSizes[index|0]; if (!size.height) return null;
         const colIdx = index%columnCount, rowIdx = (index-colIdx)/columnCount;
-        const ih = Math.ceil(columnWidth*(size.height/size.width))||0; style.width = columnWidth;
+        style.width = columnWidth;
         // Where the cell sits: the Masonry's `top` param (under useTransform the
         // style's `top` is 0 and the position is a transform). NaN on the
         // measurement pass — ignored by the tracker, "not visible" below.
@@ -3158,6 +3310,27 @@ const Profile = ({ classes, settings, pathname, api }) => {
         const viewH = container?container.clientHeight:postListHeight;
         const visible = artworkAheadPx+bottom>st && top<st+viewH+artworkAheadPx;
         cellMeasurerCache.visible_ids[size.id] = visible||(cellMeasurerCache.visible_ids[size.id]||false);
+        if (isBlogCard(item)) {
+            // `stacked`: the posts grid's columns are narrow (two or three
+            // per row on wide screens, beside the sidebar), and the portal
+            // page's viewport breakpoint (side cover ≥ 1200px) would squeeze
+            // the text beside a 180–360px side cover — and change the card's
+            // height with no column-width change to trigger a re-measure.
+            // Stacked, the height tracks the column. `noMargin`:
+            // the masonry spacer is the only gap between cells, as for the
+            // artwork cards. (A class, not style.marginTop: the masonry's
+            // style object belongs to the cell slot, not the card.)
+            const stats = item.stats || {};
+            return (<CellMeasurer cache={cellMeasurerCache} index={index} key={key} parent={parent}>
+                <PaperCardBlog stacked noMargin onOpen={openPost} onCommentsClick={openPostComments}
+                               locales={locales} data={item} onMenuClick={openCardMenu} api={api}
+                               voter={profile.loggedInUser} onVoteChange={onVoteChange} is_scrolling={isScrolling}
+                               selected={selectedPostIndex===index} visible={cellMeasurerCache.visible_ids[size.id]}
+                               column_width={columnWidth} id={size.id} key={size.id} rowIndex={rowIdx} columnIndex={colIdx}
+                               style={style} muted={Boolean(stats.hide || stats.gray)} />
+            </CellMeasurer>);
+        }
+        const ih = Math.ceil(columnWidth*(size.height/size.width))||0;
         return (<CellMeasurer cache={cellMeasurerCache} index={index} key={key} parent={parent}>
             <PaperCard onOpen={openPost} onCommentsClick={openPostComments} locales={locales} nsfw={settings._nsfw_enabled} data={item} renderer={settings._renderer} mode={settings._mode} onMenuClick={openCardMenu} api={api} voter={profile.loggedInUser} onVoteChange={onVoteChange} is_scrolling={isScrolling} selected={selectedPostIndex===index} size={size} visible={cellMeasurerCache.visible_ids[size.id]} column_width={columnWidth} image_height={ih} image_width={columnWidth} id={size.id} key={size.id} rowIndex={rowIdx} columnIndex={colIdx} style={style} />
         </CellMeasurer>);
@@ -3297,21 +3470,62 @@ const Profile = ({ classes, settings, pathname, api }) => {
     const commentsKeyMapper = useCallback((i) => { const c = commentsRef.current?.[i]; return c ? c.date : `missing_${i}`; }, []);
     const repliesKeyMapper = useCallback((i) => { const r = repliesRef.current?.[i]; return r ? r.date : `missing_${i}`; }, []);
     const timelineKeyMapper = useCallback((i) => { const ev = timelineRef.current?.[i]; return ev ? ev.id : `tl_${i}`; }, []);
-    // What each cell's height depends on, per tab (PaperCard's own key for
+    // What each cell's height depends on, per tab (the cards' own keys for
     // the posts grid, ROW_SHAPES for the lists): a row whose key changes —
     // an edit — is re-measured in place and the rows past it re-flow.
-    const postsLayoutKey = useCallback((i) => paperCardLayoutKey(postsItemsRef.current[i]), []);
+    // Artworks: paperCardLayoutKey (an unsized placeholder reads 0x0, so
+    // getting sized counts too). Blog cards: paperCardBlogLayoutKey (cover,
+    // title, excerpt — dropping the cover with "show NSFW" off counts).
+    const postsLayoutKey = useCallback((i) => {
+        const entry = postsItemsRef.current[i];
+        if (!entry) return undefined;
+        return isBlogCard(entry.item) ? paperCardBlogLayoutKey(entry.item) : paperCardLayoutKey(entry);
+    }, []);
     const commentsLayoutKey = useCallback((i) => rowLayoutKey(1, commentsRef.current?.[i], textEpochRef.current), []);
     const repliesLayoutKey = useCallback((i) => rowLayoutKey(2, repliesRef.current?.[i], textEpochRef.current), []);
     const timelineLayoutKey = useCallback((i) => rowLayoutKey(3, timelineRef.current?.[i], textEpochRef.current), []);
 
+    // ── Posts grid entries: measured artworks + blog placeholders ──────
+    // ImageMeasurer only sees artworks; this re-threads the blog entries in
+    // at their place in the list. Every visible post keeps its place: an
+    // artwork missing from the measurer's list (not sized yet) gets an
+    // unsized entry rather than being dropped, so the cards behind it don't
+    // shift back and forth as the measurer catches up (each shift would
+    // re-flow the grid from there). The result keeps its identity while
+    // nothing changed, so MasonryExtended isn't handed a fresh
+    // itemsWithSizes on every render. With no blog card loaded the
+    // measurer's own list passes through untouched. (Same merge as
+    // FeedPersonal's.)
+    const mergeCacheRef = useRef({ sized: null, visible: null, out: null });
+    const withBlogEntries = useCallback((sized) => {
+        if (measurablePosts === visiblePosts) return sized;
+        const cache = mergeCacheRef.current;
+        if (cache.sized === sized && cache.visible === visiblePosts) return cache.out;
+        const byId = new Map();
+        for (const entry of (sized || [])) {
+            const id = entry && (entry.size?.id ?? entry.item?.id);
+            if (id != null) byId.set(id, entry);
+        }
+        const next = [];
+        for (const p of visiblePosts) {
+            if (isBlogCard(p)) next.push(blogEntryOf(p));
+            else next.push(byId.get(p.id) || pendingEntryOf(p));
+        }
+        const out = sameEntries(cache.out, next) ? cache.out : next;
+        mergeCacheRef.current = { sized, visible: visiblePosts, out };
+        return out;
+    }, [visiblePosts, measurablePosts]);
+
     // The posts tab's ImageMeasurer render-prop, memoized on what it forwards
     // (it was an inline arrow, failing ImageMeasurer's PureComponent compare
-    // on every render). Everything it forwards only changes on a layout
-    // change, so it is stable across scroll ticks: a page render (data, a
-    // dialog) re-renders neither the measurer nor the Masonry.
+    // on every render). Apart from the blog merge above — which follows the
+    // posts list, like the measurer's own `items` — everything it forwards
+    // only changes on a layout change, so it is stable across scroll ticks:
+    // a page render for anything else (a dialog, the chrome) re-renders
+    // neither the measurer nor the Masonry.
     const { cellMeasurerCache: gridCache, cellPositioner: gridPositioner, setMasonryRef } = grid;
-    const renderPostsMasonry = useCallback((itemsWithSizes) => {
+    const renderPostsMasonry = useCallback((measured) => {
+        const itemsWithSizes = withBlogEntries(measured);
         postsItemsRef.current = itemsWithSizes || EMPTY_ITEMS;
         return (
             <MasonryExtended key="masonry-profile-posts" {...masonryProps}
@@ -3320,12 +3534,17 @@ const Profile = ({ classes, settings, pathname, api }) => {
                              cellMeasurerCache={gridCache} cellPositioner={gridPositioner}
                              cellRenderer={cellRendererPosts} ref={setMasonryRef(0)} />
         );
-    }, [masonryProps, postsKeyMapper, postsLayoutKey, exitingKeys, gridCache, gridPositioner, cellRendererPosts, setMasonryRef]);
+    }, [withBlogEntries, masonryProps, postsKeyMapper, postsLayoutKey, exitingKeys, gridCache, gridPositioner, cellRendererPosts, setMasonryRef]);
 
     let body = null;
     if (!isEmpty) {
+        // `renderWhenEmpty` once a blog card is loaded: the measurer only
+        // calls its render-prop when it has sized at least one artwork, so a
+        // profile whose posts are all blog posts (or whose artworks are still
+        // loading) would otherwise show nothing at all.
         if (category === 0) body = (
-            <ImageMeasurer key="posts" className={classes.masonry} items={visiblePosts} image={GET_ITEM_IMAGE} keyMapper={GET_ITEM_ID}>
+            <ImageMeasurer key="posts" className={classes.masonry} items={measurablePosts} image={GET_ITEM_IMAGE} keyMapper={GET_ITEM_ID}
+                           renderWhenEmpty={hasBlogCards}>
                 {renderPostsMasonry}
             </ImageMeasurer>
         );
@@ -3428,7 +3647,20 @@ const Profile = ({ classes, settings, pathname, api }) => {
 
             {postDialogMounted && (
                 <React.Suspense fallback={DIALOG_FALLBACK}>
-                    <LazyPostDialog renderer={settings._renderer} mode={settings._mode} nsfw={settings._nsfw_enabled} format={settings._format} data={postNav.currentPost} open={postNav.artworkOpen} locales={locales} api={api} account={profile.loggedInUser} originRect={postNav.originRect} onVoteChange={onVoteChange} onClose={postNav.closePost} getReturnRect={postNav.getReturnRect} onDrawerPush={postNav.onDrawerPush} onDrawerPop={postNav.onDrawerPop} onPrevious={postNav.previousPost} onNext={postNav.nextPost} />
+                    <LazyPostDialog renderer={settings._renderer} mode={settings._mode} nsfw={settings._nsfw_enabled} format={settings._format} data={isBlogPostOpen ? NO_POST : postNav.currentPost} open={artworkDialogOpen} locales={locales} api={api} account={profile.loggedInUser} originRect={postNav.originRect} onVoteChange={onVoteChange} onClose={postNav.closePost} getReturnRect={postNav.getReturnRect} onDrawerPush={postNav.onDrawerPush} onDrawerPop={postNav.onDrawerPop} onPrevious={postNav.previousPost} onNext={postNav.nextPost} />
+                </React.Suspense>
+            )}
+            {/* Portal blog post opened over the profile — same props as on
+                the portal page and the personal feed; no prev/next there
+                either. */}
+            {blogDialogMounted && (
+                <React.Suspense fallback={DIALOG_FALLBACK}>
+                    <LazyBlogPostDialog
+                        data={isBlogPostOpen ? postNav.currentPost : NO_POST} open={blogDialogOpen}
+                        locales={locales} api={api} account={profile.loggedInUser}
+                        onVoteChange={onVoteChange} onClose={postNav.closePost}
+                        onPrevious={undefined} onNext={undefined}
+                    />
                 </React.Suspense>
             )}
 

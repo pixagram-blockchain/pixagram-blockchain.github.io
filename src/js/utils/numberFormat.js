@@ -161,6 +161,21 @@ export const formatNumber = (value, decimals = { min: 0, max: 3 }, locale) => {
 export const formatInteger = (value, locale) => formatNumber(value, 0, locale);
 
 /**
+ * Count for a tight spot (an avatar tile, a badge), in the locale's short
+ * form from a thousand up:
+ *   formatCompact(980)    -> "980"
+ *   formatCompact(12345)  -> "12K"     (en)   "12 k"   (fr-CH)
+ * An engine without compact notation gets formatInteger's full figure.
+ */
+export const formatCompact = (value, locale) => {
+    const n = Math.round(toNumber(value));
+    if (Math.abs(n) < 1000) return formatInteger(n, locale);
+    const f = numberFormatter(locale, { notation: "compact", compactDisplay: "short" });
+    const resolved = f && typeof f.resolvedOptions === "function" ? f.resolvedOptions() : null;
+    return resolved && resolved.notation === "compact" ? f.format(n) : formatInteger(n, locale);
+};
+
+/**
  * Token amount: localised number + non-breaking space + symbol.
  *   formatAmount(1234.5, "PXA")     -> "1 234,500 PXA"   (fr-CH)
  *   formatAmount(1234.5, "PXP", 2)  -> "1 234,50 PXP"

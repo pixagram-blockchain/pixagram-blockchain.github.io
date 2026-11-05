@@ -208,7 +208,7 @@ const styles = (theme) => ({
         width: "100%",
         height: "100%",
         pointerEvents: "none",
-        filter: "greyscale(1)"
+        filter: "grayscale(1)"
     },
     content: {
         position: "relative",

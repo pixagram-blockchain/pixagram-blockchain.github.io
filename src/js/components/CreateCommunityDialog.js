@@ -373,6 +373,16 @@ class CreateCommunityDialog extends React.PureComponent {
         window.removeEventListener("resize", this._computeSize);
     }
 
+    // Optional `onPhaseChange(phase)`: every move of _creation_phase — null
+    // (idle), "creating" … "indexing", "done" or "error" — is reported, so a
+    // host can follow the creation. PortalsDialog uses it to stay up, with
+    // this dialog over it, while a back arrow lands mid-broadcast.
+    componentDidUpdate(prevProps, prevState) {
+        if (prevState._creation_phase !== this.state._creation_phase && typeof this.props.onPhaseChange === "function") {
+            this.props.onPhaseChange(this.state._creation_phase);
+        }
+    }
+
     componentWillReceiveProps(new_props) {
         // Capture transition flags BEFORE setState so we compare against the previous value
         const isNewlyOpened = new_props.open === true && !this.state.open;

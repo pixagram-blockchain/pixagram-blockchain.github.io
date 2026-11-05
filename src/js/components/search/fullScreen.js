@@ -3,7 +3,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preac
 
 import {
     DESKTOP_MIN_WIDTH, MASONRY_COLUMNS, MASONRY_GAP,
-    FULL_COLLAPSE_MS, FULL_COLUMN_PX, FULL_ENTER_PX, FULL_EXPAND_MS, FULL_HEIGHT, FULL_MAX_COLUMNS, FULL_WIDTH,
+    FULL_COLLAPSE_MS, FULL_COLUMN_PX, FULL_COLUMN_PX_DESKTOP, FULL_ENTER_PX, FULL_EXPAND_MS, FULL_HEIGHT,
+    FULL_MAX_COLUMNS, FULL_MAX_COLUMNS_DESKTOP, FULL_WIDTH,
 } from "./config";
 import { BAR_H, BAR_H_SM, SCROLL_MARGIN, SCROLL_MARGIN_SM } from "./styles";
 
@@ -42,9 +43,10 @@ import { BAR_H, BAR_H_SM, SCROLL_MARGIN, SCROLL_MARGIN_SM } from "./styles";
 // keeping the content in place) is nobody's gesture. Closing the search ends
 // it at once; with prefers-reduced-motion the panel switches without moving.
 //
-// Full, the masonry takes as many columns as the panel holds (fullColumns),
-// from the moment the panel starts growing until it starts shrinking: the
-// moments the artworks are only just in sight, or out of it.
+// Full, the masonry takes as many columns as the panel holds (fullColumns:
+// fewer, larger ones in the desktop sheet), from the moment the panel starts
+// growing until it starts shrinking: the moments the artworks are only just in
+// sight, or out of it.
 
 // Material's emphasized easing: a quick start that settles softly.
 const EASE = "cubic-bezier(0.2, 0, 0, 1)";
@@ -67,10 +69,15 @@ function indexShowing(list, margin) {
     return false;
 }
 
-/** The masonry's columns in a list `width` px wide, full screen: about FULL_COLUMN_PX each. */
-export function fullColumns(width) {
-    const n = Math.round((width + MASONRY_GAP) / (FULL_COLUMN_PX + MASONRY_GAP));
-    return Math.max(MASONRY_COLUMNS, Math.min(FULL_MAX_COLUMNS, n || 0));
+/**
+ * The masonry's columns in a list `width` px wide, full screen: about FULL_COLUMN_PX each — in the
+ * desktop sheet (`desktop`) fewer and larger, about FULL_COLUMN_PX_DESKTOP each.
+ */
+export function fullColumns(width, desktop = false) {
+    const column = desktop ? FULL_COLUMN_PX_DESKTOP : FULL_COLUMN_PX;
+    const max = desktop ? FULL_MAX_COLUMNS_DESKTOP : FULL_MAX_COLUMNS;
+    const n = Math.round((width + MASONRY_GAP) / (column + MASONRY_GAP));
+    return Math.max(MASONRY_COLUMNS, Math.min(max, n || 0));
 }
 
 /** Where the panel's containing block starts (the viewport's corner, unless an ancestor holds it). */
@@ -412,7 +419,7 @@ export function useFullScreen({ open, panel, resultsRef, maxHeightRef, reduceMot
     const panelWidth = desktop ? viewport.w * FULL_WIDTH : viewport.w;
     const panelHeight = desktop ? viewport.h * FULL_HEIGHT : viewport.h;
     const columns = full && !shrinking
-        ? fullColumns(panelWidth - 2 * (desktop ? SCROLL_MARGIN : SCROLL_MARGIN_SM))
+        ? fullColumns(panelWidth - 2 * (desktop ? SCROLL_MARGIN : SCROLL_MARGIN_SM), desktop)
         : MASONRY_COLUMNS;
     const height = Math.max(0, Math.floor(panelHeight - (desktop ? BAR_H : BAR_H_SM)));
     return { full, columns, height, tick, vw: viewport.w, spacer, setSpacer, setScroller };

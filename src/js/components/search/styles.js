@@ -832,6 +832,31 @@ export const searchStyles = (theme) => {
             overflowWrap: "anywhere",
             "&:hover, &:focus-visible": { color: "#fff", textDecoration: "underline", outline: "none" },
         },
+        // The end of the artwork grid (LoadMore): a line the next page is watched
+        // for from; with something in it (the spinner while a page comes, "Try
+        // again", the note past the last page allowed), room under the grid.
+        loadMore: {
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            minHeight: 1,
+        },
+        loadMoreFilled: { minHeight: 32, padding: "0 0 16px 0" },
+        loadMoreButton: {
+            padding: "6px 14px",
+            border: "none",
+            borderRadius: 14,
+            backgroundColor: FIELD_BG,
+            color: "#c8c8c8",
+            fontSize: 12,
+            lineHeight: "18px",
+            fontFamily: "inherit",
+            cursor: "pointer",
+            outline: "none",
+            transition: `color ${buttonTransition}, background-color ${buttonTransition}`,
+            "&:hover, &:focus-visible": { backgroundColor: FIELD_BG_HOVER, color: "#fff" },
+        },
+        loadMoreEnd: { margin: "0 8px", color: "#777", fontSize: 12, lineHeight: 1.4, textAlign: "center" },
         // The Worker's one-line overview of the artworks found, above their grid.
         overview: {
             margin: "0 8px 6px 8px",

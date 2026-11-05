@@ -13,22 +13,47 @@ const _EMPTY = [];
  *
  * Key properties vs. the previous implementation:
  *
- *   • ID-keyed cache (`Map<id, size>`) — survives reorder, filter,
- *     and append without invalidation. Each size remembers the image it
- *     was measured from: an item whose image changes (an edit) is measured
- *     again, and keeps its previous size until the new one lands — it never
- *     drops out of the output in between.
+ *   • ID-keyed sizes — survive reorder, filter, and append without
+ *     invalidation. Each size remembers the image it was measured from: an
+ *     item whose image changes (an edit) is measured again, and keeps its
+ *     previous size until the new one lands — it never drops out of the
+ *     output in between.
  *   • Progressive rendering — children receive items as soon as *any*
  *     measurement resolves; a single slow or broken image never blocks
  *     the entire feed.
  *   • RAF-batched updates — multiple promises settling in the same
  *     frame produce a single `forceUpdate`, not one per image.
- *   • Pending-set deduplication — rapid props changes cannot fire
- *     duplicate measurement requests for the same ID.
+ *   • Pending deduplication — rapid props changes cannot fire
+ *     duplicate measurement requests for the same image.
  *   • Referentially stable output — `itemsWithSizes` is rebuilt only
  *     when `items` changes or a new measurement lands, so a parent
  *     re-render (scroll tick, dialog state) hands the Masonry the SAME
  *     array and its PureComponent bail-out actually holds.
+ *
+ * Memory — the measurer holds nothing an item doesn't already hold, and
+ * nothing for longer than the page holds the item:
+ *
+ *   • A size is { id, hash, type, width, height, src }. `src` is the item's
+ *     own image string — a reference, never a copy — from which png-db
+ *     rebuilds its cache entry once it has evicted it. A size used to be
+ *     png-db's whole snapshot, `data` included: the decoded file bytes of
+ *     every artwork measured since mount, held here outside png-db's byte
+ *     budget — which bounds what png-db keeps, not what it hands out.
+ *   • Per-id state (sizes, the image each id shows, failures) covers the
+ *     ids of the CURRENT `items` and is pruned on every items change. It
+ *     used to keep every id ever seen, and with them the data URIs of posts
+ *     the page had let go — another profile's, a feed's before a refresh
+ *     (after which every artwork's string was held twice: the old copy
+ *     here, the new one in the list).
+ *   • An item that leaves the list and comes back as the same object (a
+ *     filter switched off and on) is sized again at once, with no request:
+ *     its size is also kept in a WeakMap keyed by the item object, so a
+ *     post the page drops takes its size with it.
+ *   • Failures and in-flight requests are per id, holding a reference to
+ *     the image they were for. They used to be `${id}\n${src}` strings — a
+ *     fresh copy of the whole data URI each, kept forever for every failed
+ *     image, and rebuilt on every items change for every failed or pending
+ *     one.
  *
  * Props:
  *   items      — array of data objects (posts, etc.)
@@ -36,25 +61,37 @@ const _EMPTY = [];
  *   keyMapper  — accessor `(item) => uniqueId`  (falls back to item.id)
  *   children   — render-prop `(itemsWithSizes) => ReactNode`
  *   className  — forwarded to wrapper div
+ *   renderWhenEmpty — call `children` even while nothing is sized (with an
+ *                empty array). Off by default: the render-prop only runs
+ *                once at least one item is measured. A host that threads
+ *                cells of its own between the measured ones (Profile's blog
+ *                cards) turns it on, so those cells show before — or
+ *                without — any measured image, and its masonry stays
+ *                mounted across that change instead of being swapped in.
  */
 class ImageMeasurer extends React.PureComponent {
 
     constructor(props) {
         super(props);
 
-        // ── Persistent caches (survive across prop changes) ──────────
-        this._cache   = new Map();   // id → { width, height, type, data, hash, id }
-        this._srcOf   = new Map();   // id → the image its cached size was measured from
-        this._wantSrc = new Map();   // id → the item's current image
-        // Failures and in-flight requests are per image, keyed `${id}\n${src}`:
-        // a new image for an id is a new request, and an image that failed
-        // isn't retried until the item points at another one.
-        this._failed  = new Set();
-        this._pending = new Set();
+        // ── Per-id state, for the ids of the current `items` only ────
+        // Pruned on every items change (see _measure). Invariant: every id
+        // in _sizes or _failed is also in _want, so pruning _want's stale
+        // ids prunes all three.
+        this._sizes  = new Map();   // id → size { id, hash, type, width, height, src }
+        this._want   = new Map();   // id → the image the item shows now
+        this._failed = new Map();   // id → the image that failed for it; not
+                                    // retried until the item shows another one
+        // In-flight requests: id → the image being measured. Not pruned —
+        // a request clears its own entry when it settles.
+        this._pending = new Map();
+        // Item object → its size, for an item that leaves the list and comes
+        // back as the same object. Weak: never keeps an item alive.
+        this._byItem = new WeakMap();
 
         // ── Output memo ──────────────────────────────────────────────
-        // `_version` counts successful measurements. The last built
-        // output is reused verbatim while (items, keyMapper, _version)
+        // `_version` counts changes to the sizes the output reads. The last
+        // built output is reused verbatim while (items, keyMapper, _version)
         // are unchanged — failures and in-flight ids never appear in the
         // output, so they don't bump the version.
         this._version    = 0;
@@ -82,6 +119,15 @@ class ImageMeasurer extends React.PureComponent {
             cancelAnimationFrame(this._rafId);
             this._rafId = 0;
         }
+        // Requests still in flight keep this instance alive until they
+        // settle; let go of everything it holds now rather than then.
+        this._sizes.clear();
+        this._want.clear();
+        this._failed.clear();
+        this._pending.clear();
+        this._byItem = new WeakMap();
+        this._outItems = null;
+        this._out = _EMPTY;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
@@ -109,64 +155,71 @@ class ImageMeasurer extends React.PureComponent {
 
     _measure = () => {
         const { items, image } = this.props;
-        if (!items || items.length === 0) return;
+        const list = items || _EMPTY;
+        const ids = new Set();
+        let changed = false;
 
-        for (let i = 0; i < items.length; i++) {
-            const item = items[i];
+        for (let i = 0; i < list.length; i++) {
+            const item = list[i];
             const id   = this._keyOf(item);
             const src  = image(item) || '';
-            this._wantSrc.set(id, src);
+            ids.add(id);
+            this._want.set(id, src);
 
-            // Measured from this very image → nothing to do
-            if (this._cache.has(id) && this._srcOf.get(id) === src) continue;
-
-            // This image permanently failed, or is in flight → skip
-            const req = id + '\n' + src;
-            if (this._failed.has(req) || this._pending.has(req)) continue;
-
-            if (!src) {
-                // No image URL — treat as permanent failure (nothing to load)
-                this._failed.add(req);
+            // Measured from this very image → nothing to do. (`===` compares
+            // contents, so a refetched post's new copy of the same string
+            // matches.) Re-point the size at the current item's string, so
+            // the copy a previous object of this post held can be collected,
+            // and file it under this object too — a vote patch or a refetch
+            // hands over new objects, and this is the one that may leave the
+            // list and come back.
+            const size = this._sizes.get(id);
+            if (size && size.src === src) {
+                size.src = src;
+                this._byItem.set(item, size);
                 continue;
             }
 
-            this._pending.add(req);
+            // This very object was measured before it left the list (a
+            // filter switched off and on): file its size under its id again.
+            // _buildOutput already showed it, unless the id held another
+            // size (an edit) — then the output changes.
+            const known = this._byItem.get(item);
+            if (known && known.src === src) {
+                if (size) changed = true;
+                this._sizes.set(id, known);
+                continue;
+            }
 
-            pngdby.get_new_img_obj(src)
-                .then((size) => {
-                    this._pending.delete(req);
-                    if (this._unmounted) return;
+            // In flight for this image, or failed for it → skip
+            if (this._pending.get(id) === src) continue;
+            if (this._failed.get(id) === src) continue;
 
-                    if (size && size.width > 0 && size.height > 0) {
-                        // The item moved on to another image meanwhile: this
-                        // size describes neither what it shows nor what it
-                        // will show.
-                        if (this._wantSrc.get(id) !== src) return;
-                        this._cache.set(id, {
-                            ...size,
-                            // `id` becomes the post id (the masonry's key);
-                            // png-db keys its entries by the content hash, so
-                            // keep it, or every card's pixels are decoded a
-                            // second time under the post id.
-                            hash: size.id,
-                            id,
-                        });
-                        this._srcOf.set(id, src);
-                        this._version++;
-                        this._scheduleUpdate();
-                    } else {
-                        // A failed image changes nothing the children see — a
-                        // new item stays omitted exactly as a pending one was,
-                        // a changed one keeps its previous size — so no render
-                        // pass is needed.
-                        this._failed.add(req);
-                    }
-                })
-                .catch(() => {
-                    this._pending.delete(req);
-                    if (this._unmounted) return;
-                    this._failed.add(req);
-                });
+            if (!src) {
+                // No image URL — treat as permanent failure (nothing to load)
+                this._failed.set(id, src);
+                continue;
+            }
+
+            this._pending.set(id, src);
+            this._request(item, id, src);
+        }
+
+        // Prune the per-id state of ids no longer listed. Only _want needs
+        // checking (see the invariant in the constructor); a pass that only
+        // appended or replaced rows of the same posts finds nothing to do.
+        if (this._want.size > ids.size) {
+            for (const id of this._want.keys()) {
+                if (ids.has(id)) continue;
+                this._want.delete(id);
+                this._sizes.delete(id);
+                this._failed.delete(id);
+            }
+        }
+
+        if (changed) {
+            this._version++;
+            this._scheduleUpdate();
         }
 
         // No "nothing dispatched → schedule a render" fallback here: this
@@ -175,13 +228,56 @@ class ImageMeasurer extends React.PureComponent {
         // Scheduling another pass only re-rendered the same array.
     };
 
+    _request = (item, id, src) => {
+        const settle = (snap) => {
+            if (this._pending.get(id) === src) this._pending.delete(id);
+            if (this._unmounted) return;
+
+            if (!(snap && snap.width > 0 && snap.height > 0)) {
+                // A failed image changes nothing the children see — a
+                // new item stays omitted exactly as a pending one was,
+                // a changed one keeps its previous size — so no render
+                // pass is needed.
+                if (this._want.get(id) === src) this._failed.set(id, src);
+                return;
+            }
+
+            // What the layout and the card's pixel lookup read, and no more —
+            // png-db's snapshot also carries the file's decoded bytes. `id`
+            // is the post id (the masonry's key); png-db keys its entries by
+            // the content hash, so keep it as `hash`, or every card's pixels
+            // are decoded a second time under the post id. `src` lets png-db
+            // rebuild an evicted entry.
+            const size = {
+                id,
+                hash: snap.id,
+                type: snap.type,
+                width: snap.width,
+                height: snap.height,
+                src,
+            };
+            this._byItem.set(item, size);
+
+            // The item moved on to another image meanwhile, or left the list:
+            // this size describes neither what it shows nor what it will show.
+            if (this._want.get(id) !== src) return;
+            this._sizes.set(id, size);
+            this._version++;
+            this._scheduleUpdate();
+        };
+
+        pngdby.get_new_img_obj(src)
+            .then(settle)
+            .catch(() => settle(null));
+    };
+
     // ── Output builder ───────────────────────────────────────────────
 
     /**
      * Assemble the `{item, size}[]` array from the current items list
-     * and the persistent size cache.  Only items whose measurement
-     * succeeded are included — failed/pending items are silently
-     * omitted so downstream Masonry never receives incomplete entries.
+     * and the sizes.  Only items whose measurement succeeded are
+     * included — failed/pending items are silently omitted so
+     * downstream Masonry never receives incomplete entries.
      * (An item whose image changed keeps its previous size until the new
      * image is measured.)
      *
@@ -202,7 +298,9 @@ class ImageMeasurer extends React.PureComponent {
         const out = [];
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
-            const size = this._cache.get(this._keyOf(item));
+            // The id's size — or, for an object back in the list, the size it
+            // had (this render runs before _measure files it under its id).
+            const size = this._sizes.get(this._keyOf(item)) || this._byItem.get(item);
             if (size) out.push({ item, size });
         }
 
@@ -216,11 +314,11 @@ class ImageMeasurer extends React.PureComponent {
     // ── Render ───────────────────────────────────────────────────────
 
     render() {
-        const { children, className } = this.props;
+        const { children, className, renderWhenEmpty } = this.props;
         const itemsWithSizes = this._buildOutput();
         return (
             <div className={className}>
-                {itemsWithSizes.length > 0 ? children(itemsWithSizes) : null}
+                {(itemsWithSizes.length > 0 || renderWhenEmpty) ? children(itemsWithSizes) : null}
             </div>
         );
     }

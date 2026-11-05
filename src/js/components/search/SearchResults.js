@@ -1,5 +1,5 @@
 "use strict";
-import React, { useCallback, useMemo } from "preact/compat";
+import React, { useCallback, useMemo, useState } from "preact/compat";
 import Collapse from "@material-ui/core/Collapse";
 import List from "@material-ui/core/List";
 import ListSubheader from "@material-ui/core/ListSubheader";
@@ -19,6 +19,7 @@ import { TagResult } from "./TagResult";
 import { CommunityResult } from "./CommunityResult";
 import { PostResult } from "./PostResult";
 import { ArtworkMasonry } from "./ArtworkMasonry";
+import { LoadMore } from "./LoadMore";
 import { SuggestionList } from "./SuggestionList";
 import { AnswerCard } from "./AnswerCard";
 
@@ -49,6 +50,10 @@ import { AnswerCard } from "./AnswerCard";
 // vote through controls). v4.8 also puts the Worker's one-line overview of the
 // artworks found above their grid. Opening an artwork or a post from the
 // results tells the Worker which one (controls.feedback), so its ranking learns.
+//
+// The artworks are the last section, so the end of their grid is the end of the
+// list: LoadMore sits there and, as it comes near, adds the next page under the
+// grid (controls.loadMore), watching from the scrolling list itself.
 
 const EMPTY = Object.freeze([]);
 
@@ -61,7 +66,16 @@ export const SearchResults = React.memo(
      }) => {
         useLanguage();
         const { users, tags, communities, artworks, posts, loading, artworksLoading, filters, filtersOpen, answer, didYouMean, overview } = results;
+        const { artworksMore, moreLoading, moreFailed, artworksCapped } = results;
         const filtering = hasFilters(filters);
+
+        // The scrolling list: what the grid's end is watched from (LoadMore), and SearchBar's scrollRef.
+        const [scrollEl, setScrollEl] = useState(null);
+        const setScroll = useCallback((el) => {
+            setScrollEl(el);
+            if (typeof scrollRef === "function") scrollRef(el);
+            else if (scrollRef && typeof scrollRef === "object") scrollRef.current = el;
+        }, [scrollRef]);
 
         // Opening a result reports it (the Worker's ranker learns which ones people open).
         const openArtwork = useCallback((item) => {
@@ -124,17 +138,32 @@ export const SearchResults = React.memo(
             <p className={classes.overview} title={overview.text}>{overview.text}</p>
         ) : null;
 
+        // The artworks' next page, under the grid: not while a new search is on its way (these
+        // artworks are about to go).
+        const nextPage = artworksLoading ? null : artworksMore;
+
         const artworkSection = (artworks.length > 0 || artworksLoading) ? (
             <div className={indexClass} data-search-index="artworks">
                 <ListSubheader className={classes.subheaderSticky}>{tr(t, "words.artworks", "Artworks")}</ListSubheader>
                 {overviewLine}
-                {artworks.length > 0
-                    ? <ArtworkMasonry items={artworks} onOpen={openArtwork} columns={columns} />
-                    : (
-                        <div className={classes.loading} style={{ padding: "8px 0 12px 0" }}>
-                            <CircularProgress size={18} style={{ color: "#666" }} />
-                        </div>
-                    )}
+                {artworks.length > 0 ? (
+                    <React.Fragment>
+                        <ArtworkMasonry items={artworks} onOpen={openArtwork} columns={columns} />
+                        <LoadMore
+                            classes={classes}
+                            root={scrollEl}
+                            more={nextPage}
+                            loading={!!moreLoading}
+                            failed={!!moreFailed}
+                            capped={!!artworksCapped}
+                            onMore={controls ? controls.loadMore : undefined}
+                        />
+                    </React.Fragment>
+                ) : (
+                    <div className={classes.loading} style={{ padding: "8px 0 12px 0" }}>
+                        <CircularProgress size={18} style={{ color: "#666" }} />
+                    </div>
+                )}
             </div>
         ) : null;
 
@@ -172,7 +201,7 @@ export const SearchResults = React.memo(
                             />
                         </Collapse>
                     ) : null}
-                    <div className={classes.searchScroll} ref={scrollRef}>
+                    <div className={classes.searchScroll} ref={setScroll}>
                         {suggestions.length > 0 && onPick ? (
                             <SuggestionList
                                 classes={classes}

@@ -6,6 +6,8 @@ import ListItemIcon from "@material-ui/core/ListItemIcon";
 import ListItemText from "@material-ui/core/ListItemText";
 import Menu from "@material-ui/core/Menu";
 import VoteIcon from "../icons/Vote";
+// The portals' icon, as on the desktop toolbar's Portals button.
+import CommunityIcon from "../icons/Community";
 // The toolbar's and the wallet's Trade buttons wear the same chart icon.
 import TradeIcon from "@material-ui/icons/ShowChartRounded";
 import SettingsIcon from "@material-ui/icons/Settings";
@@ -81,9 +83,11 @@ const MenuItems = React.memo(({
                                   classes,
                                   shine,
                                   onTradeClick,
+                                  onPortalsClick,
                                   onWitnessesClick,
                                   onInfoClick,
-                                  onSettingsClick
+                                  onSettingsClick,
+                                  onLinkClick
                               }) => {
     useLanguage();
     return (
@@ -99,12 +103,20 @@ const MenuItems = React.memo(({
             <Divider />
             {/* Ask Help: the community's Telegram group, as a real link
                 (component="a") — the entry the desktop toolbar shows left of
-                Governance. */}
-            <MenuItem component="a" href={HELP_TELEGRAM_URL} target="_blank" rel="noopener noreferrer">
+                Portals and Governance. */}
+            <MenuItem component="a" href={HELP_TELEGRAM_URL} target="_blank" rel="noopener noreferrer" onClick={onLinkClick}>
                 <ListItemIcon>
                     <TelegramIcon fontSize="small" />
                 </ListItemIcon>
                 <ListItemText primary={t("words.ask_help")} />
+            </MenuItem>
+            {/* Portals: the portal directory (+portals) — the same order as
+                the desktop toolbar, between Ask Help and Governance. */}
+            <MenuItem onClick={onPortalsClick}>
+                <ListItemIcon>
+                    <CommunityIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText primary={t("words.portals")} />
             </MenuItem>
             <MenuItem onClick={onWitnessesClick}>
                 <ListItemIcon>
@@ -142,6 +154,7 @@ const PaperCardMenuOption = ({
                                  xy = [],
                                  onClose,
                                  onTradeClick,
+                                 onPortalsClick,
                                  onWitnessesClick,
                                  onInfoClick,
                                  onSettingsClick
@@ -185,6 +198,26 @@ const PaperCardMenuOption = ({
         dense: true
     }), []);
 
+    // Picking an entry closes the menu first. What an entry opens (a dialog,
+    // the portal directory) comes down over the menu, which used to be still
+    // open once that closed again — and over a whole new page when a portal
+    // was picked in the directory. Wrapped once per handler identity, so the
+    // memoized MenuItems keep stable props.
+    const picked = useMemo(() => {
+        const pick = (handler) => (event) => {
+            if (typeof onClose === "function") onClose();
+            if (typeof handler === "function") handler(event);
+        };
+        return {
+            trade: pick(onTradeClick),
+            portals: pick(onPortalsClick),
+            witnesses: pick(onWitnessesClick),
+            info: pick(onInfoClick),
+            settings: pick(onSettingsClick),
+            link: pick(null),   // Ask Help: the link itself opens the tab
+        };
+    }, [onClose, onTradeClick, onPortalsClick, onWitnessesClick, onInfoClick, onSettingsClick]);
+
     return (
         <Menu
             className={classes.menu}
@@ -202,10 +235,12 @@ const PaperCardMenuOption = ({
             <MenuItems
                 classes={classes}
                 shine={isOpen}
-                onTradeClick={onTradeClick}
-                onWitnessesClick={onWitnessesClick}
-                onInfoClick={onInfoClick}
-                onSettingsClick={onSettingsClick}
+                onTradeClick={picked.trade}
+                onPortalsClick={picked.portals}
+                onWitnessesClick={picked.witnesses}
+                onInfoClick={picked.info}
+                onSettingsClick={picked.settings}
+                onLinkClick={picked.link}
             />
         </Menu>
     );
@@ -222,6 +257,7 @@ const arePropsEqual = (prevProps, nextProps) => {
     // Compare event handlers (reference equality)
     if (prevProps.onClose !== nextProps.onClose ||
         prevProps.onTradeClick !== nextProps.onTradeClick ||
+        prevProps.onPortalsClick !== nextProps.onPortalsClick ||
         prevProps.onWitnessesClick !== nextProps.onWitnessesClick ||
         prevProps.onInfoClick !== nextProps.onInfoClick ||
         prevProps.onSettingsClick !== nextProps.onSettingsClick) {

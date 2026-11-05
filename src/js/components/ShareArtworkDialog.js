@@ -68,7 +68,7 @@ const URL_INPUT_PROPS = Object.freeze({ spellCheck: false, autoComplete: "off" }
 const styles = (theme) => ({
     backdrop: {
         backgroundColor: "rgba(0, 0, 0, 0.6)",
-        backdropFilter: "blur(9px)",
+        backdropFilter: "blur(6px) grayscale(1)",
         WebkitBackdropFilter: "blur(9px)",
     },
     paper: {
