@@ -7,7 +7,7 @@ import Card from '@material-ui/core/Card';
 import CardHeader from '@material-ui/core/CardHeader';
 import IconButton from '@material-ui/core/IconButton';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
-import { xbrzF, hexF, crtF, triF, releaseId, getCachedRender, acquireCachedBitmap } from '../utils/render-pool';
+import { xbrzF, hexF, crtF, triF, releaseId, getCachedRender, acquireCachedBitmap, playAnimation } from '../utils/render-pool';
 import DateLabel from './DateLabel';
 import { HISTORY } from '../utils/constants';
 import ButtonBase from '@material-ui/core/ButtonBase';
@@ -24,7 +24,7 @@ import { t, tnode, useLanguage } from '../utils/text';
 // Version stamp — check in console: window.__PIXA_VERSIONS__
 if (typeof window !== 'undefined') {
     if (!window.__PIXA_VERSIONS__) window.__PIXA_VERSIONS__ = {};
-    window.__PIXA_VERSIONS__.PaperCard = '4.13.0-layoutkey';
+    window.__PIXA_VERSIONS__.PaperCard = '4.14.0-animated';
 }
 
 // ── Async, non-critical NSFW detector loading ───────────────────────
@@ -242,6 +242,36 @@ const IDLE_TIMEOUT_MISS_MS = 400;
 // through the pool.
 const POOL_ALGO = { hexagon: 'hex', xbrz: 'xbrz', crt: 'crt', tri: 'tri' };
 
+function closeBitmap(bmp) {
+    if (bmp) { try { bmp.close && bmp.close(); } catch (e) {} }
+}
+
+// ── Viewport tracking for animated artworks ─────────────────────────
+// One IntersectionObserver for every playing card. A card whose canvas is
+// out of the viewport (beyond a small margin) - in the masonry's overscan
+// band, say - stops requesting frames until it comes back; render-pool's
+// player also pauses on its own while the page is hidden.
+const inViewCallbacks = new WeakMap();
+let inViewObserver = null;
+
+function observeInView(el, onChange) {
+    if (typeof IntersectionObserver === 'undefined') return () => {};
+    if (!inViewObserver) {
+        inViewObserver = new IntersectionObserver((entries) => {
+            for (let i = 0; i < entries.length; i++) {
+                const cb = inViewCallbacks.get(entries[i].target);
+                if (cb) cb(entries[i].isIntersecting);
+            }
+        }, { rootMargin: '96px 0px' });
+    }
+    inViewCallbacks.set(el, onChange);
+    inViewObserver.observe(el);
+    return () => {
+        inViewCallbacks.delete(el);
+        try { inViewObserver.unobserve(el); } catch (e) {}
+    };
+}
+
 // === Canvas leaf: memoized + race-proof + bitmaprenderer fast path, no resize on draw ===
 const CanvasImage = memo(function CanvasImage({
                                                   renderer,
@@ -272,7 +302,16 @@ const CanvasImage = memo(function CanvasImage({
     const pendingRevealRef = useRef(0);       // pending opacity-reveal RAF id
     const pendingBitmapRef = useRef(null);    // bitmap parked until its reveal frame close()s it
     const unmountedRef = useRef(false);       // hard-stop after unmount
+    const playerRef = useRef(null);           // render-pool animation player (animated GIF / WebP)
+    const unobserveRef = useRef(null);        // its viewport observer
     const [revealed, setRevealed] = useState(false); // controls opacity-reveal class
+
+    // Ends playback of an animated artwork (frames in flight are freed by
+    // the pool) and its viewport tracking. Safe to call when nothing plays.
+    const stopAnimation = useCallback(() => {
+        if (unobserveRef.current) { unobserveRef.current(); unobserveRef.current = null; }
+        if (playerRef.current) { playerRef.current.stop(); playerRef.current = null; }
+    }, []);
 
     const renderKey = useMemo(
         () => `${renderer}:${mode}:${id}:${image_width}x${image_height}:${size?.width}x${size?.height}:${column_width || 0}`,
@@ -304,6 +343,7 @@ const CanvasImage = memo(function CanvasImage({
         return () => {
             unmountedRef.current = true;
             drawTokenRef.current++;
+            stopAnimation();
             cancelScheduled(pendingScheduleRef.current);
             pendingScheduleRef.current = null;
             if (pendingRevealRef.current) {
@@ -405,6 +445,19 @@ const CanvasImage = memo(function CanvasImage({
         }
     }, []);
 
+    // Paints one frame of a playing animation: a straight transfer into the
+    // canvas (the reveal already happened on frame 0 through applyImage).
+    const paintFrame = useCallback((bmp) => {
+        const ctx = ctxRef.current;
+        const can = canRef.current;
+        if (unmountedRef.current || !ctx || !can || !can.isConnected) { closeBitmap(bmp); return; }
+        try {
+            if (ctx.transferFromImageBitmap) ctx.transferFromImageBitmap(bmp);
+            else ctx.drawImage(bmp, 0, 0, can.width, can.height);
+        } catch (e) {}
+        closeBitmap(bmp); // detached by the transfer: a no-op there
+    }, []);
+
     const draw = useCallback(async () => {
         if (unmountedRef.current) return;
         if (!ctxRef?.current?.canvas || !size) return;
@@ -412,6 +465,7 @@ const CanvasImage = memo(function CanvasImage({
         // setAttribute, so blur and other style props are preserved.
         setRevealed(false);
         const myToken = ++drawTokenRef.current;
+        stopAnimation();
 
         // Scales depend only on the probe-measured `size` prop — compute
         // them BEFORE touching pixel data so the cache-first path below
@@ -431,65 +485,121 @@ const CanvasImage = memo(function CanvasImage({
             }
             applyImage(imgOrImgd, bm);
         };
-
-        // ── Cache-first fast path ────────────────────────────────────
-        // If the pool already holds THIS content at THIS scale for THIS
-        // algorithm (the 40-most-recent render cache), paint straight
-        // from it: no base64 decode, no PNG/WEBP decode, no upscale.
-        // This is the scroll-back path.
+        const stale = () => myToken !== drawTokenRef.current || unmountedRef.current;
         const poolAlgo = POOL_ALGO[renderer];
-        if (poolAlgo) {
-            const poolScale =
-                renderer === 'hexagon' ? scaleHex :
-                    renderer === 'xbrz'    ? scaleXbrz :
-                        renderer === 'crt'     ? scaleCrt : scaleTri;
-            const cachedRender = getCachedRender(id, poolAlgo, poolScale);
-            if (cachedRender) {
-                cancelScheduled(pendingScheduleRef.current);
-                pendingScheduleRef.current = scheduleIdle(() => {
-                    pendingScheduleRef.current = null;
-                    // Serve through the pool's master-bitmap layer: the
-                    // first scroll-back hit pays the ImageData raster once
-                    // (and pins it pool-side), every later repaint of this
-                    // artwork is a ~1 ms bitmap clone. The clone is ours to
-                    // consume; the pool entry is never detached. On a null
-                    // or a failure, fall back to the ImageData path
-                    // (applyImage mints its own bitmap, exactly as before).
-                    const acq = acquireCachedBitmap(id, poolAlgo, poolScale);
-                    if (acq) {
-                        acq.then(({ bitmap }) => guardedApply(cachedRender, bitmap))
-                            .catch(() => guardedApply(cachedRender));
-                    } else {
-                        guardedApply(cachedRender);
-                    }
-                }, IDLE_TIMEOUT_CACHE_HIT_MS);
-                return;
+        const poolScale =
+            renderer === 'hexagon' ? scaleHex :
+                renderer === 'xbrz'    ? scaleXbrz :
+                    renderer === 'crt'     ? scaleCrt : scaleTri;
+
+        // The still pipeline: cache-first, then decode + upscale.
+        const drawStill = async () => {
+            // ── Cache-first fast path ────────────────────────────────────
+            // If the pool already holds THIS content at THIS scale for THIS
+            // algorithm (the 40-most-recent render cache), paint straight
+            // from it: no base64 decode, no PNG/WEBP decode, no upscale.
+            // This is the scroll-back path.
+            if (poolAlgo) {
+                const cachedRender = getCachedRender(id, poolAlgo, poolScale);
+                if (cachedRender) {
+                    cancelScheduled(pendingScheduleRef.current);
+                    pendingScheduleRef.current = scheduleIdle(() => {
+                        pendingScheduleRef.current = null;
+                        // Serve through the pool's master-bitmap layer: the
+                        // first scroll-back hit pays the ImageData raster once
+                        // (and pins it pool-side), every later repaint of this
+                        // artwork is a ~1 ms bitmap clone. The clone is ours to
+                        // consume; the pool entry is never detached. On a null
+                        // or a failure, fall back to the ImageData path
+                        // (applyImage mints its own bitmap, exactly as before).
+                        const acq = acquireCachedBitmap(id, poolAlgo, poolScale);
+                        if (acq) {
+                            acq.then(({ bitmap }) => guardedApply(cachedRender, bitmap))
+                                .catch(() => guardedApply(cachedRender));
+                        } else {
+                            guardedApply(cachedRender);
+                        }
+                    }, IDLE_TIMEOUT_CACHE_HIT_MS);
+                    return;
+                }
             }
-        }
 
-        // ── Miss: full pipeline ──────────────────────────────────────
-        // get_new_img_data usually just joins the background decode that
-        // png-db kicked off at measure time, so this await rarely pays
-        // for the decode itself.
-        const imgd = await getImgData();
-        if (unmountedRef.current) return;
-        if (!imgd || myToken !== drawTokenRef.current) return; // null or canceled
+            // ── Miss: full pipeline ──────────────────────────────────────
+            // get_new_img_data usually just joins the background decode that
+            // png-db kicked off at measure time, so this await rarely pays
+            // for the decode itself.
+            const imgd = await getImgData();
+            if (unmountedRef.current) return;
+            if (!imgd || myToken !== drawTokenRef.current) return; // null or canceled
 
-        const run = () => {
-            pendingScheduleRef.current = null;
-            if (myToken !== drawTokenRef.current || unmountedRef.current) return;
-            if (renderer === 'hexagon')       renderHex(imgd,  scaleHex,  guardedApply, false, id, mode);
-            else if (renderer === 'xbrz')     renderXbrz(imgd, scaleXbrz, guardedApply, false, id, mode);
-            else if (renderer === 'crt')      renderCrt(imgd,  scaleCrt,  guardedApply, false, id, mode);
-            else if (renderer === 'tri')      renderTri(imgd,  scaleTri,  guardedApply, false, id, mode);
-            else if (renderer === 'square')   guardedApply(imgd); // explicit square handling
-            else                              guardedApply(imgd); // fallback
+            const run = () => {
+                pendingScheduleRef.current = null;
+                if (myToken !== drawTokenRef.current || unmountedRef.current) return;
+                if (renderer === 'hexagon')       renderHex(imgd,  scaleHex,  guardedApply, false, id, mode);
+                else if (renderer === 'xbrz')     renderXbrz(imgd, scaleXbrz, guardedApply, false, id, mode);
+                else if (renderer === 'crt')      renderCrt(imgd,  scaleCrt,  guardedApply, false, id, mode);
+                else if (renderer === 'tri')      renderTri(imgd,  scaleTri,  guardedApply, false, id, mode);
+                else if (renderer === 'square')   guardedApply(imgd); // explicit square handling
+                else                              guardedApply(imgd); // fallback
+            };
+
+            // Cancel any previous scheduled draw before queueing a new one.
+            cancelScheduled(pendingScheduleRef.current);
+            pendingScheduleRef.current = scheduleIdle(run, IDLE_TIMEOUT_MISS_MS);
         };
 
-        // Cancel any previous scheduled draw before queueing a new one.
-        cancelScheduled(pendingScheduleRef.current);
-        pendingScheduleRef.current = scheduleIdle(run, IDLE_TIMEOUT_MISS_MS);
-    }, [renderer, mode, id, column_width, image_width, size, getImgData, renderHex, renderXbrz, renderCrt, renderTri, applyImage]);
+        // ── Animated GIF / WebP ──────────────────────────────────────
+        // Decided before the cache-first path: a still render cached for
+        // this id (the dialog's first paint, say) must not freeze an
+        // animated card. png-db usually answers synchronously (the masonry
+        // measured this image moments ago). When it no longer holds the
+        // entry, a card-scale render in the pool's cache settles it - the
+        // card painted a still here before - and only a total miss pays
+        // the header re-probe (still no pixel decode) before deciding.
+        let anim = pngdby.peek_animation(size);
+        if (anim === undefined) {
+            if (poolAlgo && getCachedRender(id, poolAlgo, poolScale)) {
+                anim = null;
+            } else {
+                anim = await pngdby.get_animation(size).catch(() => null);
+                if (stale()) return;
+            }
+        }
+        if (!anim) {
+            drawStill();
+            return;
+        }
+
+        // Same scale the still path would use; render-pool caps xBRZ at 8x
+        // and every frame at 4 MP. 'square' plays the source frames and lets
+        // CSS `pixelated` scale them, as it does for stills.
+        let shown = 0;
+        const player = playAnimation({
+            data: anim.data,
+            width: anim.width,
+            height: anim.height,
+            algorithm: poolAlgo || 'sqr',
+            scale: poolAlgo ? poolScale : 1,
+            // One frame at a time: frame 0 reveals the canvas like a still;
+            // later frames are a plain transfer.
+            onFrame: (bmp) => {
+                if (stale()) { closeBitmap(bmp); return; }
+                if (shown++ === 0) applyImage(null, bmp);
+                else paintFrame(bmp);
+            },
+            // No playback (workers unavailable, file too large or
+            // undecodable): show the first frame as a still instead. If
+            // frames were shown already, the last one simply stays.
+            onError: (err, framesShown) => {
+                if (stale() || framesShown > 0) return;
+                if (playerRef.current === player) stopAnimation();
+                drawStill();
+            },
+        });
+        playerRef.current = player;
+        const can = canRef.current;
+        if (can) unobserveRef.current = observeInView(can, (inView) => player.setInView(inView));
+    }, [renderer, mode, id, column_width, image_width, size, getImgData, renderHex, renderXbrz, renderCrt, renderTri, applyImage, paintFrame, stopAnimation]);
 
     // ── When to draw ────────────────────────────────────────────────
     // Every cell the Masonry renders — the whole overscan band included —

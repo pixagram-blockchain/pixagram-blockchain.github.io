@@ -22,7 +22,7 @@ import ChevronRightCircleOutlined from "../icons/ChevronRightCircleOutlined";
 import PixaSupra from "../icons/PixaSupra";
 import AutoSizer from '@pixagram/virtualized/dist/es/AutoSizer';
 import VirtualizedList from '@pixagram/virtualized/dist/es/List';
-import {crtF, hexF, sqrF, triF, xbrzF, acquireBestCachedBitmap, dropRendersAbove, cappedScale} from "../utils/render-pool";
+import {crtF, hexF, sqrF, triF, xbrzF, acquireBestCachedBitmap, dropRendersAbove, cappedScale, playAnimation} from "../utils/render-pool";
 
 import ArrowForwardIosIcon from "@material-ui/icons/ArrowForwardIos";
 import InfoOutlined from "@material-ui/icons/InfoOutlined";
@@ -121,7 +121,7 @@ function renderPostBody(api, body) {
     return safeHTML(body);
 }
 
-async function getMetadata(source){
+async function getMetadata(source, image){
     if(!source) return null;
 
     // Fast path: the feed card already decoded the PNG and handed us its
@@ -137,14 +137,20 @@ async function getMetadata(source){
         // it in off the critical path (see the deferred analyze_colors
         // pass there) — the WASM palette scan over the full source must
         // never sit between the click and the hero's first frame.
-        return { imgd, colors: source.colors || null, width, height };
+        // `anim`: an animated GIF / WebP plays from its encoded bytes
+        // (png-db keeps them; a header probe, no pixel decode).
+        const anim = typeof image === "string" && image ? await pngdby.get_animation(image).catch(() => null) : null;
+        return { imgd, colors: source.colors || null, width, height, anim };
     }
 
-    // Slow path: decode from the base64 string source.
+    // Slow path: decode from the base64 string source. For an animated GIF /
+    // WebP `imgd` is its first frame (every still consumer — palette, NSFW,
+    // download — keeps working on it); `anim` is what playback streams.
     const imgOBJ = await pngdby.get_new_img_obj(source);
     const imgd   = await pngdby.get_new_img_data(imgOBJ);
     if (!imgd) return null; // undecodable — caller treats it as a failed open
-    return { imgd, colors: null, width: imgd.width, height: imgd.height };
+    const anim = imgOBJ && imgOBJ.animated ? await pngdby.get_animation(imgOBJ).catch(() => null) : null;
+    return { imgd, colors: null, width: imgd.width, height: imgd.height, anim };
 }
 
 function createCanvas(width, height) {
@@ -2698,6 +2704,8 @@ function createInst() {
     return {
         // Render tracking
         currentRenderId: 0,
+        // Animated GIF / WebP playback (render-pool player), or null.
+        animPlayer: null,
 
         // Drag state
         dragging: false,
@@ -3615,7 +3623,7 @@ function PostDialog(props) {
         if (inst.innerEl) inst.innerEl.style.opacity = "0";
     }, [classes]);
 
-    const setImgd = useCallback((imgd, b, id, renderId, isPreview) => {
+    const setImgd = useCallback((imgd, b, id, renderId, isPreview, noCapture) => {
         const st = stateRef.current;
         if (id !== st.data.id || renderId !== inst.currentRenderId) return;
 
@@ -3722,7 +3730,10 @@ function PostDialog(props) {
         // (aspect only). Capturing it here would poison the download cache
         // (and stall the hero start on a sync GPU readback), so skip: the
         // download path's cold-cache fallback re-runs the pool if needed.
-        if (!isPreview) {
+        // Animation frames skip it too (`noCapture`): the watermark download
+        // of an animated artwork is its first frame, styled - which that same
+        // cold-cache fallback renders from metadata.imgd.
+        if (!isPreview && !noCapture) {
             const renderedKey = id + "|" + st.renderer + "|" + (st.mode || "") + "|" + b.width + "x" + b.height;
             if (inst.renderedKey !== renderedKey) {
                 try {
@@ -3874,16 +3885,25 @@ function PostDialog(props) {
         }
     }, [classes]);
 
+    const stopAnimation = useCallback(() => {
+        const p = inst.animPlayer;
+        inst.animPlayer = null;
+        if (p) p.stop();
+    }, []);
+
     const renderPipeline = useCallback((renderer, imgd, size, mode) => {
         if (!imgd) return;
         const id = "" + stateRef.current.data.id;
         const renderId = inst.currentRenderId;
         const cb = (d, b) => setImgd(d, b, id, renderId);
+        // Animated GIF / WebP of THIS artwork (metadata belongs to the post
+        // being rendered: the pipeline only runs once it has arrived).
+        const anim = stateRef.current.metadata?.anim || null;
 
         // Full-quality pool render at this renderer's dialog scale — the
         // pre-existing dispatch verbatim, hoisted so the hero fast path can
         // also queue it as the deferred pass that runs once the hero lands.
-        const runFullRender = () => {
+        const runStill = () => {
             if (renderId !== inst.currentRenderId) return; // artwork changed since queued
             if (renderer === "hexagon") {
                 const scale = Math.max(Math.min(32, Math.ceil(size.width / imgd.width)), 3);
@@ -3902,6 +3922,56 @@ function PostDialog(props) {
                 sqrF(imgd, scale, cb, true, id, mode);
             }
         };
+
+        // Animated artwork: the same scales, but the frames stream through
+        // render-pool's animation workers one at a time (xBRZ at most 8x,
+        // every frame at most 4 MP — the canvas CSS box stretches the rest;
+        // square plays the source frames under CSS `pixelated`). Frame 0
+        // goes through setImgd, so the hero / same-artwork / reveal logic is
+        // the still path's; later frames only swap the canvas pixels. A
+        // close keeps whatever frame is up for the fade-out or the flight
+        // home. If playback cannot start, the still render takes over.
+        const runAnimation = () => {
+            if (renderId !== inst.currentRenderId) return;
+            const algo = renderer === "hexagon" ? "hex" : renderer === "xbrz" ? "xbrz" : renderer === "crt" ? "crt" : renderer === "tri" ? "tri" : "sqr";
+            const fit = Math.ceil(size.width / imgd.width);
+            const scale = algo === "hex" ? Math.max(Math.min(32, fit), 3) : algo === "sqr" ? 1 : Math.max(Math.min(32, fit * 2), 6);
+            stopAnimation();
+            let shown = 0;
+            const player = playAnimation({
+                data: anim.data,
+                width: anim.width,
+                height: anim.height,
+                algorithm: algo,
+                scale,
+                onFrame: (bmp) => {
+                    const st = stateRef.current;
+                    const live = inst.animPlayer === player && renderId === inst.currentRenderId && id === "" + st.data.id;
+                    if (!live) { try { bmp.close(); } catch (e) {} return; }
+                    if (shown++ === 0) {
+                        // Aspect only: setImgd reads w/h, and noCapture keeps
+                        // this frame out of the download cache.
+                        setImgd({ width: imgd.width, height: imgd.height }, bmp, id, renderId, false, true);
+                        return;
+                    }
+                    const can = canvasRef.current;
+                    if (!st.open || st._closing || inst.closingHero || !can || !can.context) {
+                        try { bmp.close(); } catch (e) {}
+                        if (!st.open || st._closing || inst.closingHero) stopAnimation();
+                        return;
+                    }
+                    can.context.transferFromImageBitmap(bmp);
+                    try { bmp.close(); } catch (e) {}
+                },
+                onError: (err, framesShown) => {
+                    if (inst.animPlayer === player) inst.animPlayer = null;
+                    if (framesShown === 0) runStill();
+                },
+            });
+            inst.animPlayer = player;
+        };
+
+        const runFullRender = anim ? runAnimation : runStill;
 
         const heroInFlight = inst.heroAnimating && inst.originRect;
 
@@ -3927,7 +3997,8 @@ function PostDialog(props) {
                 }
                 const pw = bmp.width;
                 setImgd(imgd, bmp, id, renderId, true); // paints + kicks the hero
-                inst.pendingFullRender = (size.width * 2 > pw) ? runFullRender : null;
+                // An animation always needs its pass: the snapshot is one frame.
+                inst.pendingFullRender = (anim || size.width * 2 > pw) ? runFullRender : null;
             }).catch(() => { if (renderId === inst.currentRenderId) runFullRender(); });
             return;
         }
@@ -3938,7 +4009,7 @@ function PostDialog(props) {
         // size and let the hero-end flush run it (or drop it, if the new
         // size no longer needs more than the card had).
         if (heroInFlight && canvasRef.current && canvasRef.current._previewFor === id) {
-            inst.pendingFullRender = (size.width * 2 > (canvasRef.current._previewW || 0)) ? runFullRender : null;
+            inst.pendingFullRender = (anim || size.width * 2 > (canvasRef.current._previewW || 0)) ? runFullRender : null;
             return;
         }
 
@@ -3971,7 +4042,7 @@ function PostDialog(props) {
                     }
                     const pw = bitmap.width;
                     setImgd(imgd, bitmap, id, renderId, true); // paints + kicks the hero
-                    inst.pendingFullRender = (size.width * 2 > pw) ? runFullRender : null;
+                    inst.pendingFullRender = (anim || size.width * 2 > pw) ? runFullRender : null;
                 }).catch(() => { if (renderId === inst.currentRenderId) runFullRender(); });
                 return;
             }
@@ -3981,7 +4052,7 @@ function PostDialog(props) {
         // never let both run for the same artwork.
         inst.pendingFullRender = null;
         runFullRender();
-    }, [setImgd]);
+    }, [setImgd, stopAnimation]);
 
     /* ── Panel toggle: carry the artwork along (desktop) ──────────────────
      * The panel's width transition (classes.drawerAnim) moves the edge of the
@@ -5071,6 +5142,7 @@ function PostDialog(props) {
             if (inst.drawerGlideTimer) clearTimeout(inst.drawerGlideTimer);
             cancelRelatedSwap(inst);
             discardPreview();
+            stopAnimation();
         };
     }, []);
 
@@ -5306,7 +5378,8 @@ function PostDialog(props) {
         const isNewPost = isNewlyOpened || (props.data?.id !== prev.data?.id) || (props.data?.image !== prev.data?.image);
         const kb = ((props.data?.image || "").length || 0) / 1000 * 3 / 4;
         const type = (props.data?.image || "").startsWith("data:image/png;base64,") ? "png"
-            : (props.data?.image || "").startsWith("data:image/webp;base64,") ? "webp" : "unknown";
+            : (props.data?.image || "").startsWith("data:image/webp;base64,") ? "webp"
+                : (props.data?.image || "").startsWith("data:image/gif;base64,") ? "gif" : "unknown";
 
         // ── Close path ───────────────────────────────────────────────────
         // The Backdrop's fade-out animation is driven by `state.open`, so it
@@ -5338,6 +5411,7 @@ function PostDialog(props) {
             if (inst.navBounceTimer) { clearTimeout(inst.navBounceTimer); inst.navBounceTimer = null; }
             if (inst.navSafetyTimer) { clearTimeout(inst.navSafetyTimer); inst.navSafetyTimer = null; }
             if (inst.commentRefreshTimer) { clearInterval(inst.commentRefreshTimer); inst.commentRefreshTimer = null; }
+            stopAnimation(); // the canvas keeps its last frame for the fade-out
             dispatch({ open: false, _download_ready: null });
             prevPropsRef.current = { data: prev.data, open: props.open, account: props.account };
 
@@ -5349,6 +5423,7 @@ function PostDialog(props) {
                 // their work otherwise.
                 if (stateRef.current.open) return;
                 inst.currentRenderId++;
+                stopAnimation();
                 clearCanvas();
                 clearBlurImages();
                 discardPreview();
@@ -5412,6 +5487,7 @@ function PostDialog(props) {
 
         if (isNewImage) {
             inst.currentRenderId++;
+            stopAnimation(); // the outgoing artwork's playback
             clearCanvas();
             discardPreview(); // outgoing artwork's card snapshot (if any) dies with it
             inst.renderedImageData = null; inst.renderedKey = null;
@@ -5521,7 +5597,7 @@ function PostDialog(props) {
             const metaSource = props.data?.size?.imgd ? props.data.size : props.data.image;
             requestAnimationFrame(() => {
                 if (renderId !== inst.currentRenderId) return;
-                getMetadata(metaSource).then((result) => {
+                getMetadata(metaSource, props.data?.image).then((result) => {
                     if (renderId !== inst.currentRenderId) return;
                     if (!result) {
                         // No metadata (e.g. missing/invalid image) — unlock nav + drawer

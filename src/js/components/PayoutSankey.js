@@ -55,14 +55,33 @@ function bandPathH(sx, sy, sh, tx, ty, th) {
     ].join(' ');
 }
 
+/**
+ * A bar's grey: its share of the total reward IS its luminance — the amount
+ * of white's light it gives off — so 0 % is black, 100 % white, and every
+ * larger share reads brighter; black is left to 0–1 % (1 % → #191919).
+ * The share used to set the sRGB value directly, which screens show far
+ * darker than that: anything under ~10 % looked black (9 % → #171717, now
+ * #555555).
+ */
+function shareLuminance(pct) {
+    return Math.min(100, Math.max(0, Number(pct) || 0)) / 100;
+}
+
 function pctToGrey(pct) {
-    const v = Math.round((pct / 100) * 255);
-    const hex = v.toString(16).padStart(2, '0');
+    const y = shareLuminance(pct);
+    const srgb = y <= 0.0031308 ? 12.92 * y : 1.055 * Math.pow(y, 1 / 2.4) - 0.055;
+    const hex = Math.round(srgb * 255).toString(16).padStart(2, '0');
     return '#' + hex + hex + hex;
 }
 
+// Label colour with the better contrast on pctToGrey(pct) (WCAG contrast
+// ratio): light text up to a ~18 % share, dark text above.
+const LIGHT_TEXT_Y = 0.723; // luminance of #ddd
+const DARK_TEXT_Y = 0.016;  // luminance of #222
+
 function textColor(pct) {
-    return pct > 45 ? '#222' : '#ddd';
+    const y = shareLuminance(pct);
+    return (LIGHT_TEXT_Y + 0.05) / (y + 0.05) >= (y + 0.05) / (DARK_TEXT_Y + 0.05) ? '#ddd' : '#222';
 }
 
 function truncate(str, maxW, fontSize) {
@@ -85,15 +104,21 @@ const DESIGN_PXA_USD = 0.12;
  *
  * Hive semantics: `beneficiaries` take their `weight` (basis points,
  * 1000 = 10 %) off the top and the author keeps the remainder — the author
- * is not listed. Rows that were pre-computed upstream may carry `percent`
- * instead; both are accepted. Whatever the rows leave goes to the author,
- * merged into an existing author row if the list already names them. The
- * author row's `account` is null when the data names no author (the chart
- * then labels it with the translated "Author").
+ * is not listed. Posts and comments published from the app carry one,
+ * REWARD_BENEFICIARY (utils/constants.js) — older ones do not — and other
+ * front ends add their own. Rows that were pre-computed upstream
+ * may carry `percent` instead; both are accepted. Whatever the rows leave
+ * goes to the author, merged into an existing author row if the list
+ * already names them. The author row's `account` is null when the data
+ * names no author (the chart then labels it with the translated "Author").
+ *
+ * `data` is a card (`author: { username }`) or a sanitized post or comment
+ * entity (`author` is the account name).
  */
 export function creatorShares(data) {
-    const author = (data && data.author) || {};
-    const authorName = author.username || (data && data.username) || null;
+    const author = data && data.author;
+    const authorName = (typeof author === 'string' ? author : author && author.username)
+        || (data && data.username) || null;
     const rows = data && Array.isArray(data.beneficiaries) ? data.beneficiaries : [];
     const bens = rows.map(b => ({
         account: b && b.account,
@@ -110,6 +135,36 @@ export function creatorShares(data) {
     if (bens.length === 0) bens.push({ account: authorName, pct: 100 });
     return bens;
 }
+
+/**
+ * Heights for bars stacked in `space`, in proportion to `pcts`, none below
+ * `floor`: floored bars take `floor` and the others share what is left in
+ * proportion, so the stack always fills exactly `space`. When even the
+ * floors do not fit, every bar gets an equal cut. All `pcts` are > 0
+ * (creatorShares drops empty rows).
+ */
+export function stackHeights(pcts, space, floor) {
+    const n = pcts.length;
+    if (n === 0) return [];
+    if (floor * n >= space) return pcts.map(() => space / n);
+    const floored = pcts.map(() => false);
+    for (;;) {
+        let freePct = 0, freeSpace = space;
+        pcts.forEach((p, i) => { if (floored[i]) freeSpace -= floor; else freePct += p; });
+        let more = false;
+        pcts.forEach((p, i) => {
+            if (!floored[i] && freeSpace * p / freePct < floor) { floored[i] = true; more = true; }
+        });
+        if (!more) return pcts.map((p, i) => (floored[i] ? floor : freeSpace * p / freePct));
+    }
+}
+
+// Author / beneficiary bars: a bar taller than AUTHOR_LABEL_H shows its
+// name, and none is shorter than AUTHOR_MIN_H, so a 5–15 % beneficiary
+// share still reads "@account" without a hover.
+const AUTHOR_GAP = 2;
+const AUTHOR_LABEL_H = 12;
+const AUTHOR_MIN_H = AUTHOR_LABEL_H + 1;
 
 function PayoutSankey({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPrice, currency, fiatRate }) {
     useLanguage();
@@ -206,17 +261,17 @@ function PayoutSankey({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPr
     const rwCuratorsSliceY = barAreaTop + rwCreatorsSliceH;
     const rwCuratorsSliceH = showCurators ? barAreaH * info.curatorsP / totalParts : 0;
 
-    // Author bars in col2 — stacked vertically within creators zone
+    // Author bars in col2 — stacked vertically within creators zone. The
+    // stack fills the zone exactly: a floored beneficiary bar used to push
+    // the ones below it down into the curators band.
     const authorBars = useMemo(() => {
         if (!showCreators || info.authors.length === 0) return [];
-        const gap = 2;
-        const totalGap = (info.authors.length - 1) * gap;
-        const usable = creatorsH - totalGap;
+        const usable = Math.max(0, creatorsH - (info.authors.length - 1) * AUTHOR_GAP);
+        const heights = stackHeights(info.authors.map(a => a.pct), usable, AUTHOR_MIN_H);
         let cy = creatorsY;
-        return info.authors.map(a => {
-            const h = Math.max(10, usable * a.pct / 100);
-            const bar = { ...a, y: cy, h, fill: pctToGrey(a.absPct) };
-            cy += h + gap;
+        return info.authors.map((a, i) => {
+            const bar = { ...a, y: cy, h: heights[i], fill: pctToGrey(a.absPct) };
+            cy += heights[i] + AUTHOR_GAP;
             return bar;
         });
     }, [info.authors, creatorsH, creatorsY, showCreators]);
@@ -255,6 +310,9 @@ function PayoutSankey({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPr
     const fixed2 = v => v.toLocaleString(localeCode, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const fmt = usd => `${approx}${fixed2(usd * fiatMul)} ${fiatCur}`;
     const fmtP = v => `${approx}${fixed2(v)}`;
+    // A share of the creators' part: beneficiary weights are basis points,
+    // so 12.5 % must not read "13 %" (nor the author's 87.5 % "88 %").
+    const pctText = v => v.toLocaleString(localeCode, { maximumFractionDigits: 1 });
     // Tooltip titles are stored as tk() descriptors (or plain "@account"
     // strings) and resolved with tx() when the tooltip renders.
     const authorLabel = a => (a.account ? '@' + a.account : t("components.payout_sankey.author"));
@@ -376,11 +434,11 @@ function PayoutSankey({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPr
                     return (
                         <g key={'hab'+i}
                            onMouseEnter={e => show(e, { title: a.account
-                               ? `@${a.account} (${a.pct.toFixed(0)}%)`
-                               : tk("components.payout_sankey.author_percent", { percent: a.pct.toFixed(0) }), usd: a.usd, pxs: a.pxs, pxa: a.pxa })}
+                                   ? `@${a.account} (${pctText(a.pct)}%)`
+                                   : tk("components.payout_sankey.author_percent", { percent: pctText(a.pct) }), usd: a.usd, pxs: a.pxs, pxa: a.pxa })}
                            onMouseMove={move} onMouseLeave={hide} style={{ cursor: 'pointer' }}>
                             <rect x={col2X} y={a.y} width={barW} height={a.h} rx={2} fill={a.fill} />
-                            {a.h > 12 && label && (
+                            {a.h > AUTHOR_LABEL_H && label && (
                                 <text x={col2X + barW / 2} y={a.y + a.h / 2} textAnchor="middle"
                                       dominantBaseline="central" fill={textColor(a.absPct)} fontSize="7.5" fontWeight="500"
                                       fontFamily='"Industry Book", "Normative Pro", sans-serif'>
@@ -395,8 +453,8 @@ function PayoutSankey({ classes, payout, isEstimate, data, pxsUsdPrice, pxaUsdPr
                 <text x={W / 2} y={H - 4} textAnchor="middle" dominantBaseline="central"
                       fill="#666" fontSize="9" fontWeight="400"
                       fontFamily='"Normative Pro", "Industry Book", sans-serif'>{t("components.payout_sankey.payout", {
-                        timeAgo: timeAgo.format(info.payoutDate)
-                    })}</text>
+                    timeAgo: timeAgo.format(info.payoutDate)
+                })}</text>
             </svg>
             {/* Portal tooltip */}
             {tip && (

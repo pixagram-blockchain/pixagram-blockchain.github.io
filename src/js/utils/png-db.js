@@ -2,6 +2,8 @@ import { ready, hashBase58Async } from '@pixagram/pixahash';
 
 import { default as decodeWEBP } from '@jsquash/webp/decode';
 import { default as decodePNG } from '@jsquash/png/decode';
+// Header-only GIF / WebP probe (no WASM: it is plain JS in the package).
+import { probeAnimation } from '@pixagram/upscaler';
 import { base64ToBytes } from './b64';
 import { probeImageSync } from './image-probe';
 import { ByteLRU, budgetBytes } from './memory-kit';
@@ -14,6 +16,8 @@ const hashReady = ready();
 const DATA_IMG_PREFIX = "data:image/";
 const WEBP_PREFIX = "data:image/webp;base64,";
 const PNG_PREFIX = "data:image/png;base64,";
+const GIF_PREFIX = "data:image/gif;base64,";
+const MIME = { PNG: "image/png", WEBP: "image/webp", GIF: "image/gif" };
 // Entry cache budget, in BYTES. Each entry holds the raw payload bytes, the
 // probed size, and — once the background decode lands — the SOURCE-resolution
 // ImageData, all keyed together under one content hash. Upscaled output is
@@ -67,6 +71,7 @@ function dataUriToBytes(dataUri, start) {
 function identifyType(input) {
     if (input.startsWith(WEBP_PREFIX)) return ["WEBP", 22];
     if (input.startsWith(PNG_PREFIX)) return ["PNG", 21];
+    if (input.startsWith(GIF_PREFIX)) return ["GIF", 21];
     if (input.startsWith(DATA_IMG_PREFIX)) return ["UNKNOWN", 0];
     return ["STRING", 0];
 }
@@ -90,13 +95,53 @@ async function hashThat(input) {
 }
 
 /**
- * Decodes image data and returns dimensions + decoded pixel data.
- * Returns null on any decode failure.
+ * First frame of a GIF / animated WebP as ImageData, decoded by the browser
+ * (createImageBitmap decodes off the main thread, and every engine shows the
+ * first frame of an animation for a still request). This is what the still
+ * consumers - layout, NSFW check, palette, share images, the dialog's first
+ * paint - get; playback decodes every frame itself in render-pool's
+ * animation workers. libwebp's WebPDecode, behind @jsquash/webp, refuses
+ * any WebP that carries the animation flag. Returns null on failure.
  */
-async function decodeImage(type, data) {
+async function decodeFirstFrame(type, data) {
+    if (typeof createImageBitmap !== "function" || typeof Blob === "undefined") return null;
+    let bmp = null;
+    let canvas = null;
     try {
+        bmp = await createImageBitmap(new Blob([data], { type: MIME[type] }), { colorSpaceConversion: "none" });
+        const { width, height } = bmp;
+        if (!(width > 0) || !(height > 0)) return null;
+        if (typeof OffscreenCanvas !== "undefined") {
+            canvas = new OffscreenCanvas(width, height);
+        } else if (typeof document !== "undefined") {
+            canvas = document.createElement("canvas");
+            canvas.width = width;
+            canvas.height = height;
+        } else {
+            return null;
+        }
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(bmp, 0, 0);
+        return ctx.getImageData(0, 0, width, height);
+    } catch {
+        return null;
+    } finally {
+        if (bmp) { try { bmp.close(); } catch {} }
+        if (canvas) { canvas.width = 1; canvas.height = 1; } // release the scratch now
+    }
+}
+
+/**
+ * Decodes an entry's image data and returns dimensions + decoded pixel data
+ * (the first frame for GIF / animated WebP). Returns null on any decode
+ * failure.
+ */
+async function decodeImage(type, data, anim) {
+    try {
+        if (anim) return await decodeFirstFrame(type, data);
         if (type === "PNG") return await decodePNG(data);
         if (type === "WEBP") return await decodeWEBP(data);
+        if (type === "GIF") return await decodeFirstFrame(type, data);
     } catch {
         return null;
     }
@@ -187,8 +232,11 @@ export const pngdb = () => {
         failedSet.add(hash);
     };
 
+    // `anim` is set for every GIF and every WebP with the animation flag
+    // (frame decoder needed); `animated` when it has more than one frame.
     const snapshot = (entry) =>
-        ({ id: entry.id, type: entry.type, data: entry.data, width: entry.width, height: entry.height });
+        ({ id: entry.id, type: entry.type, data: entry.data, width: entry.width, height: entry.height,
+            anim: entry.anim || null, animated: !!(entry.anim && entry.anim.animated) });
 
     /**
      * Full pixel decode for an entry, shared across concurrent callers AND
@@ -201,7 +249,7 @@ export const pngdb = () => {
         let pending = pendingDecodes.get(entry.id);
         if (pending) return pending;
         pending = (async () => {
-            const decoded = await decodeImage(entry.type, entry.data);
+            const decoded = await decodeImage(entry.type, entry.data, entry.anim);
             if (!decoded || !(decoded.width > 0) || !(decoded.height > 0)) {
                 // Valid-looking header but undecodable body — blacklist.
                 addFailed(entry.id);
@@ -306,6 +354,33 @@ export const pngdb = () => {
             return snapshot(imgCache.get(hash));
         }
 
+        // ── GIF / animated WebP: header-only probe ────────────────────
+        // The canvas size, frame count and loop count come from the
+        // container walk; the first frame is decoded off-path like any
+        // still. The bytes stay in the entry: they are what playback
+        // streams from (see get_animation).
+        const anim = probeAnimation(data);
+        if (anim && anim.needsFrameDecoder && anim.width > 0 && anim.height > 0) {
+            const entry = {
+                id: hash,
+                type: anim.format === "gif" ? "GIF" : "WEBP",
+                data,
+                width: anim.width,
+                height: anim.height,
+                decoded: null,
+                anim: {
+                    format: anim.format,
+                    animated: anim.animated,
+                    frameCount: anim.frameCount,
+                    loopCount: anim.loopCount,
+                    durationMs: anim.durationMs,
+                },
+            };
+            imgCache.set(hash, entry);
+            warmEntry(entry);
+            return snapshot(entry);
+        }
+
         // ── Fast path: header-only probe ─────────────────────────────
         // Decoding base64 is cheap (already done for hashing); decoding
         // pixels is not. Read width/height straight from the container
@@ -383,6 +458,7 @@ export const pngdb = () => {
                 width: img_obj.width | 0,
                 height: img_obj.height | 0,
                 decoded: null,
+                anim: img_obj.anim || null,
             };
             imgCache.set(entry.id, entry);
             return decodeEntry(entry);
@@ -401,7 +477,56 @@ export const pngdb = () => {
         return null;
     };
 
-    return { get_new_img_obj, get_new_img_data };
+    const animationOf = (entry) => {
+        const a = entry && entry.anim;
+        if (!a || !a.animated) return null;
+        return {
+            id: entry.id,
+            format: a.format,
+            width: entry.width,
+            height: entry.height,
+            frameCount: a.frameCount,
+            loopCount: a.loopCount,
+            durationMs: a.durationMs,
+            data: entry.data,
+        };
+    };
+
+    /**
+     * Synchronous: the animation behind an img_obj / ImageMeasurer size, if
+     * its entry is cached. Returns the animation (see get_animation), null
+     * for a still image, or undefined when the entry is not cached (ask
+     * get_animation then). Lets a card decide between playback and the
+     * still path without a microtask in the common case.
+     */
+    const peek_animation = (img_obj) => {
+        if (!img_obj) return null;
+        // A get_new_img_obj snapshot carries its own answer (id = content hash).
+        if (img_obj.anim !== undefined && img_obj.data) return animationOf(img_obj);
+        const key = img_obj.hash || img_obj.id;
+        if (!key) return null;
+        if (failedSet.has(key)) return null;
+        const entry = imgCache.peek(key);
+        return entry === undefined ? undefined : animationOf(entry);
+    };
+
+    /**
+     * The animation behind an img_obj, an ImageMeasurer size or a data URI:
+     * { id, format: 'gif' | 'webp', width, height, frameCount, loopCount
+     * (total plays, 0 = forever), durationMs, data (the encoded bytes) }.
+     * null for still images (single-frame GIFs included) and failures.
+     */
+    const get_animation = async (src) => {
+        if (!src) return null;
+        if (typeof src === "string") return animationOf(await get_new_img_obj(src));
+        const known = peek_animation(src);
+        if (known !== undefined) return known;
+        // Evicted: re-probe from the image string (no pixel decode).
+        if (typeof src.src === "string" && src.src) return animationOf(await get_new_img_obj(src.src));
+        return null;
+    };
+
+    return { get_new_img_obj, get_new_img_data, get_animation, peek_animation };
 };
 
 export const pngdby = pngdb();

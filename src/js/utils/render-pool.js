@@ -31,6 +31,9 @@
  *   clearRenderCache()
  *   dropRendersAbove(id, bytes)         // evicts one id's renders larger than `bytes`
  *   cappedScale(algo, width, height, scale)  // the scale a render will really use
+ *   playAnimation({data, width, height, algorithm, scale, onFrame, onEnd, onError})
+ *                                       // animated GIF / WebP, one frame at a time
+ *   animationSpec(algo, width, height, scale)  // effect + scale an animation frame gets
  *   configureRenderCache({maxEntries, maxBytes, maxBitmaps, maxBitmapBytes})
  *   configureGpuGuard({maxOutputPixels})
  *   window.__PIXA_RENDER_POOL_STATS__()
@@ -71,6 +74,13 @@
  * from a ~1 ms clone instead of a decode + upscale (or a multi-MB
  * raster).
  *
+ * Animations (animated GIF / WebP): never upscaled as a whole and never
+ * cached. playAnimation() streams the frames through a WasmAnimationPool
+ * worker one at a time (decode, composite, upscale, transfer as a bitmap);
+ * the consumer paints each bitmap into its canvas and the next one is only
+ * requested when it is about to be due. See the "Animated GIF / WebP"
+ * section below.
+ *
  * GPU size guard: what crashes the GPU is never the scale factor itself
  * but the output surface it implies (imgd.width*scale × imgd.height*scale
  * RGBA). Before any GPU render the pool checks those output dimensions
@@ -88,6 +98,7 @@ import {
     XbrzGpuRenderer,
     XBRZ_PRESETS,
     WasmXbrzPool,
+    WasmAnimationPool,
     trimMemory,
 } from '@pixagram/upscaler';
 import { idle } from "./idle";
@@ -235,6 +246,257 @@ async function xbrzCpu(imgd, scale) {
         XBRZ_CPU.equalColorTolerance, XBRZ_CPU.centerDirectionBias,
         XBRZ_CPU.dominantDirectionThreshold, XBRZ_CPU.steepDirectionThreshold);
     return wasmResultToImageData(r);
+}
+
+// ── Animated GIF / WebP ──────────────────────────────────────────────
+// An animation is never upscaled as a whole. Its frames go through a
+// WasmAnimationPool worker one at a time: the worker keeps the compressed
+// file and one canvas per animation and renders one frame per request into
+// its single output buffer; the page keeps the frame on screen (inside the
+// consumer's canvas) and, for the moment it takes to paint it, the next one.
+// The next frame is requested just before it is due, so nothing waits in a
+// queue. Frames never enter the render cache: a cached frame would be one of
+// many, and holding many is exactly what this avoids.
+//
+// Players pause while their canvas is off screen (the consumer reports it via
+// setInView) and while the page is hidden - after their first frame, which
+// is always fetched, so a card mounted in the masonry's overscan band is
+// painted like a still one before it scrolls in. The decoders live in the
+// animation build of the WASM module, which only the workers ever load; the
+// pool is ended ANIM_POOL_IDLE_MS after the last player stops.
+const ANIM_POOL_IDLE_MS = 30000;
+// One rendered frame is at most 4 MP (16 MiB): the scale is lowered to fit.
+const ANIM_MAX_OUTPUT_PIXELS = 4 * 1024 * 1024;
+// Canvases above 4 MP are not animated: they show their first frame (png-db
+// decodes it like any still image).
+export const ANIM_MAX_SOURCE_PIXELS = 4 * 1024 * 1024;
+
+let animPoolPromise = null;
+let animPoolInstance = null; // for the stats panel
+let animPoolIdleTimer = 0;
+let animPoolFailed = false;
+const animPlayers = new Set();
+let pageHidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+
+const nowMs = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+
+function closeBitmap(bmp) {
+    if (bmp) { try { bmp.close(); } catch (e) {} }
+}
+
+function getAnimPool() {
+    if (animPoolFailed) return Promise.resolve(null);
+    if (!animPoolPromise) {
+        const cores = (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 2;
+        animPoolPromise = WasmAnimationPool.create({ workers: cores >= 6 ? 2 : 1 }).then(
+            (pool) => (animPoolInstance = pool),
+            (err) => {
+                // CSP, no module workers...: animated artworks stay on their
+                // first frame for the rest of the session.
+                animPoolFailed = true;
+                animPoolPromise = null;
+                logOnce("warn", "animation workers unavailable; animated artworks show their first frame:", err);
+                return null;
+            },
+        );
+    }
+    return animPoolPromise;
+}
+
+function disposeAnimPoolWhenIdle() {
+    clearTimeout(animPoolIdleTimer);
+    animPoolIdleTimer = setTimeout(async () => {
+        if (animPlayers.size > 0) return;
+        const pending = animPoolPromise;
+        animPoolPromise = null;
+        animPoolInstance = null;
+        const pool = pending && (await pending);
+        if (pool) { try { pool.dispose(); } catch (e) {} }
+    }, ANIM_POOL_IDLE_MS);
+}
+
+if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    document.addEventListener("visibilitychange", () => {
+        pageHidden = document.visibilityState === "hidden";
+        if (!pageHidden) for (const p of animPlayers) p.poke();
+    });
+}
+
+/**
+ * The effect and scale an animation frame is rendered with: the still
+ * path's algorithm (same presets), xBRZ at most 8x (above 8x the still path
+ * refines through a vtracer composite, far too slow per frame; the canvas
+ * stretches the rest), at most ANIM_MAX_OUTPUT_PIXELS per frame. 'sqr', 'tri'
+ * (not in @pixagram/upscaler 0.5) and anything that cannot be doubled play
+ * the composited source frames as they are: the consumer's canvas scales
+ * them (`pixelated` for square).
+ */
+export function animationSpec(algorithm, width, height, scale) {
+    const fit = Math.floor(Math.sqrt(ANIM_MAX_OUTPUT_PIXELS / Math.max(1, width * height)));
+    let s = Math.min(Math.floor(scale) || 1, fit);
+    if (algorithm === "xbrz") s = Math.min(s, 8);
+    if (s < 2) return { effect: "none" };
+    if (algorithm === "xbrz") return { effect: "xbrz", options: { ...XBRZ_CPU, scale: s } };
+    // Same parameters as crtUpscale / hexUpscale (the defaults of the WASM calls).
+    if (algorithm === "crt") return { effect: "crt", options: { scale: s } };
+    if (algorithm === "hex") {
+        return { effect: "hex", options: { scale: s, orientation: "flat-top", drawBorders: false, borderColor: 0, borderThickness: 0, backgroundColor: 0 } };
+    }
+    return { effect: "none" };
+}
+
+class AnimationPlayer {
+    constructor(opts) {
+        this.opts = opts;
+        this.spec = animationSpec(opts.algorithm, opts.width, opts.height, opts.scale);
+        this.stopped = false;
+        this.inView = true;
+        this.stream = null;
+        this.wake = null; // ends the current sleep / pause wait
+        this.frames = 0;
+        animPlayers.add(this);
+        clearTimeout(animPoolIdleTimer);
+        this.done = this.run()
+            .catch((err) => {
+                if (this.stopped) return;
+                logOnce("warn", "animation playback failed; the last frame stays on screen:", err);
+                if (this.opts.onError) { try { this.opts.onError(err, this.frames); } catch (e) {} }
+            })
+            .finally(() => this.cleanup());
+    }
+
+    get paused() {
+        return !this.inView || pageHidden;
+    }
+
+    /** Off-screen players stop requesting frames until they come back. */
+    setInView(inView) {
+        inView = !!inView;
+        if (this.inView === inView) return;
+        this.inView = inView;
+        this.poke();
+    }
+
+    poke() {
+        const w = this.wake;
+        this.wake = null;
+        if (w) w();
+    }
+
+    stop() {
+        if (this.stopped) return;
+        this.stopped = true;
+        // A frame still in flight resolves to null and is freed by the pool.
+        if (this.stream) this.stream.close();
+        this.poke();
+    }
+
+    sleep(ms) {
+        return new Promise((resolve) => {
+            const t = setTimeout(() => { this.wake = null; resolve(); }, ms);
+            this.wake = () => { clearTimeout(t); resolve(); };
+        });
+    }
+
+    async waitWhilePaused() {
+        while (!this.stopped && this.paused) {
+            await new Promise((resolve) => { this.wake = resolve; });
+        }
+    }
+
+    async run() {
+        const pool = await getAnimPool();
+        if (this.stopped) return;
+        if (!pool) throw new Error("animation workers unavailable");
+        const stream = await pool.open(this.opts.data, this.spec, { maxPixels: ANIM_MAX_SOURCE_PIXELS });
+        if (this.stopped) { stream.close(); return; }
+        this.stream = stream;
+        const plays = stream.loopCount; // 0 = forever
+        const avgDelay = Math.max(20, stream.durationMs / Math.max(1, stream.frameCount));
+        let play = 1;
+        let cost = 0; // request -> arrival, smoothed
+        let due = 0;  // when the next frame should show (0: as soon as it arrives)
+        let skip = 0;
+        for (;;) {
+            // Frame 0 is fetched even off screen: the canvas shows it like a still.
+            if (this.frames > 0) await this.waitWhilePaused();
+            if (this.stopped) return;
+            if (due) {
+                // Ask for the frame so that it arrives just as it is due: the
+                // page never holds a decoded frame it is not showing.
+                const lead = due - cost - nowMs();
+                if (lead > 4) {
+                    await this.sleep(lead);
+                    if (this.stopped) return;
+                    if (this.paused) { due = 0; continue; }
+                }
+            }
+            const t0 = nowMs();
+            const frame = await stream.next({ wrap: plays === 0 || play < plays, skip });
+            skip = 0;
+            if (this.stopped) { closeBitmap(frame && frame.bitmap); return; }
+            if (!frame) {
+                // Finite loop count done: the last frame stays on screen.
+                if (this.opts.onEnd) this.opts.onEnd();
+                return;
+            }
+            if (frame.looped) play++;
+            const arrived = nowMs();
+            cost = cost ? cost * 0.75 + (arrived - t0) * 0.25 : arrived - t0;
+            let bitmap = frame.bitmap;
+            if (!bitmap && frame.data) {
+                // A worker without createImageBitmap sent pixels instead.
+                bitmap = await createImageBitmap(new ImageData(frame.data, frame.width, frame.height));
+                if (this.stopped) { closeBitmap(bitmap); return; }
+            }
+            if (due > arrived + 1) {
+                await this.sleep(due - arrived);
+                if (this.stopped) { closeBitmap(bitmap); return; }
+            }
+            this.frames++;
+            // The bitmap is the consumer's: it transfers or closes it.
+            this.opts.onFrame(bitmap, frame);
+            if (!stream.animated) return; // a single frame: nothing to play
+            const shown = nowMs();
+            const late = due ? shown - due : 0;
+            if (late > 2 * Math.max(frame.delay, avgDelay)) {
+                // Far behind (slow device, busy worker): drop frames - the
+                // worker still composites them, it only skips rendering and
+                // the transfer - and re-anchor the clock to now.
+                skip = Math.min(30, Math.floor(late / avgDelay));
+                due = shown + frame.delay;
+            } else {
+                due = (due || shown) + frame.delay;
+            }
+        }
+    }
+
+    cleanup() {
+        animPlayers.delete(this);
+        if (this.stream) this.stream.close();
+        this.stream = null;
+        if (animPlayers.size === 0) disposeAnimPoolWhenIdle();
+    }
+}
+
+/**
+ * Plays an animated GIF / WebP, one frame at a time, off the main thread.
+ *
+ *   opts.data       the encoded file (png-db's get_animation().data)
+ *   opts.width/height  its canvas size
+ *   opts.algorithm  'xbrz' | 'hex' | 'crt' | 'sqr' | 'tri'
+ *   opts.scale      the scale the still path would use (see animationSpec)
+ *   opts.onFrame(bitmap, frame)  every frame; the ImageBitmap is the
+ *                   consumer's to transfer or close. `frame` has index,
+ *                   delay, width, height.
+ *   opts.onEnd()    a finite loop count has played out (last frame stays)
+ *   opts.onError(err, framesShown)  playback could not start or broke off
+ *
+ * Returns { stop(), setInView(bool), done }. Call stop() on unmount; report
+ * the canvas leaving / entering the viewport with setInView.
+ */
+export function playAnimation(opts) {
+    return new AnimationPlayer(opts);
 }
 
 // ── GPU renderer lifecycle (one lazy singleton per algorithm) ────────
@@ -1323,6 +1585,12 @@ if (typeof window !== 'undefined') {
             // could not start and CPU xBRZ runs on the main thread), and
             // again after the pool is ended for being idle.
             cpuXbrzWorkers: xbrzPoolInstance ? xbrzPoolInstance.size : 0,
+            // Animated GIF / WebP: workers, decoders open in them, players.
+            animations: {
+                workers: animPoolInstance ? animPoolInstance.size : 0,
+                streams: animPoolInstance ? animPoolInstance.streamCount : 0,
+                players: animPlayers.size,
+            },
             coldBytes: coldRenders.bytesInMemory,
             algorithms: {},
         };

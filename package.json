@@ -27,7 +27,7 @@
     "@pixagram/dpixa": "~1.5.4",
     "@pixagram/toxicity": "~1.0.1",
     "@pixagram/lacerta-db": "~0.16.0",
-    "@pixagram/upscaler": "~0.4.1",
+    "@pixagram/upscaler": "~0.5.0",
     "@pixagram/pixahash": "~0.1.0",
     "@pixagram/turboserial": "~0.5.2",
     "@wasm-codecs/mozjpeg": "~1.0.1",
