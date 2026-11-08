@@ -36,6 +36,7 @@ import JSLoader from "../utils/JSLoader";
 import Fade from "@material-ui/core/Fade";
 import LicenseCustomizationDialog from "./LicenseCustomizationDialog";
 import ImageEditor from "./ImageEditor";
+import PixelEditorDialog, { preloadPixelEditor } from "./pixel-editor";
 import { PIXA_LICENSE_BASE } from "../utils/pixa_license";
 import { resolveDefaultLicense } from "../utils/default_license";
 import { get_cached_settings as getCachedSettings, subscribe as subscribeSettings, same_setting_value as sameSettingValue } from "../utils/settings";
@@ -1154,6 +1155,13 @@ const initialState = {
     preview: null,
     previewCache: {},
     quantizedData: null,
+    // The picture as finished in the pixel editor ("Open editor") and its
+    // layered project, so the editor reopens where the user left it. While
+    // set, it is what the post shows, encodes, downloads and publishes —
+    // over the quantized picture and the chosen size. "Reset" drops it.
+    editedData: null,
+    editedProject: null,
+    pixelEditorOpen: false,
     base64: "",
     processorData: null,
     availableSizes: [],
@@ -1275,6 +1283,9 @@ const reducer = (state, action) => {
                 preview: null,
                 previewCache: {},
                 quantizedData: null,
+                editedData: null,
+                editedProject: null,
+                pixelEditorOpen: false,
                 base64: "",
                 processorData: null,
                 availableSizes: [],
@@ -1302,6 +1313,8 @@ const reducer = (state, action) => {
                 ...state,
                 preview: action.preview,
                 previewCache: { [action.sizeName]: action.preview },
+                editedData: null,
+                editedProject: null,
                 processorData: action.processorData,
                 availableSizes: action.availableSizes,
                 title: action.title || state.title,
@@ -1906,6 +1919,7 @@ const CanvasPreview = memo(({
                                 classes,
                                 preview,
                                 quantizedData,
+                                editedData,
                                 preferredSize,
                                 availableSizes,
                                 preloading,
@@ -1919,6 +1933,7 @@ const CanvasPreview = memo(({
                                 onCancelQuantize,
                                 onDownload,
                                 onOpenEditor,
+                                onResetEdits,
                                 base64Kb,
                                 onCanvasReady,
                                 canvasKey
@@ -1926,7 +1941,7 @@ const CanvasPreview = memo(({
     useLanguage();
     const canvasRef = useRef(null);
     const originalCanvasRef = useRef(null);
-    const dataToRender = quantizedData || preview;
+    const dataToRender = editedData || quantizedData || preview;
 
     // Render preview canvas when data changes or component mounts
     useLayoutEffect(() => {
@@ -1969,7 +1984,14 @@ const CanvasPreview = memo(({
                 display: "flow",
                 zIndex: 0
             }}>
-                {quantizedData ? (
+                {editedData ? (
+                    <Fade in timeout={600}>
+                        <div className={classes.quantizedMessage}>
+                            <span style={{ lineHeight: "32px" }}>{t("components.pixel_editor.edits_applied")}</span>
+                            <Button variant="text" onClick={onResetEdits}>{t("words.reset", {TUC: true})}</Button>
+                        </div>
+                    </Fade>
+                ) : quantizedData ? (
                     <Fade in timeout={600}>
                         <div className={classes.quantizedMessage}>
                             <span style={{ lineHeight: "32px" }}>{t("words.quantization_applied")}</span>
@@ -2069,20 +2091,31 @@ const CanvasPreview = memo(({
                 bottom: "0px",
                 zIndex: 10
             }}>
-                <Fade in timeout={600}>
-                    <Button variant="text" style={{ color: "#ffffff88" }} onClick={onApplyQuantize}>
-                        {quantizedData
-                            ? t("components.new_post.adjust", { TUC: true })
-                            : t("components.new_post.quantize", { TUC: true })}
-                    </Button>
-                </Fade>
+                {/* Quantizing works from the converted picture: it would not
+                    keep the editor's changes, so it waits for a Reset. */}
+                {!editedData && (
+                    <Fade in timeout={600}>
+                        <Button variant="text" style={{ color: "#ffffff88" }} onClick={onApplyQuantize}>
+                            {quantizedData
+                                ? t("components.new_post.adjust", { TUC: true })
+                                : t("components.new_post.quantize", { TUC: true })}
+                        </Button>
+                    </Fade>
+                )}
                 <Fade in timeout={800}>
                     <Button variant="text" style={{ color: "#ffffff88" }} onClick={onDownload}>{t("components.new_post.download_kb", {
                         base64Kb: formatKb(base64Kb)
                     })}</Button>
                 </Fade>
                 <Fade in timeout={1000}>
-                    <Button variant="text" style={{ color: "#ffffff88" }} onClick={onOpenEditor}>
+                    <Button
+                        variant="text"
+                        style={{ color: "#ffffff88" }}
+                        onClick={onOpenEditor}
+                        onMouseEnter={preloadPixelEditor}
+                        onFocus={preloadPixelEditor}
+                        onTouchStart={preloadPixelEditor}
+                    >
                         {t("components.new_post.open_editor")}
                     </Button>
                 </Fade>
@@ -2092,6 +2125,7 @@ const CanvasPreview = memo(({
 }, (prev, next) => (
     prev.preview === next.preview &&
     prev.quantizedData === next.quantizedData &&
+    prev.editedData === next.editedData &&
     prev.preferredSize === next.preferredSize &&
     prev.preloading === next.preloading &&
     prev.preloadProgress === next.preloadProgress &&
@@ -2569,6 +2603,7 @@ function NewPost(props) {
     const {
         tabValue, currentStep, title, description, tags, nsfw, preferredSize, aspectRatio,
         transformationPercent, fidelityPercent, preview, previewCache, quantizedData,
+        editedData, editedProject, pixelEditorOpen,
         base64, processorData, availableSizes, dropzoneActive, message, inputFileUrl,
         inputFile, uploadOriginal, editParams, editorOpen, isProbing,
         showingOriginal, preloading, preloadProgress, isGenerating,
@@ -2766,10 +2801,12 @@ function NewPost(props) {
             const cached = mod.getCached(key);
             if (cached !== undefined) { applyVerdict(cached); return; }
 
-            // Source pixels: prefer the live preview ImageData (already in
-            // memory); fall back to decoding the encoded post body.
+            // Source pixels: prefer the picture in memory (the editor's
+            // result when there is one, else the live preview); fall back to
+            // decoding the encoded post body.
             const getImgData = async () => {
-                if (preview && preview.data && preview.width && preview.height) return preview;
+                const pixels = editedData || preview;
+                if (pixels && pixels.data && pixels.width && pixels.height) return pixels;
                 return decodeBase64ToImageData(base64);
             };
 
@@ -2785,7 +2822,7 @@ function NewPost(props) {
         })();
 
         return () => { cancelled = true; };
-    }, [currentStep, base64, preview]);
+    }, [currentStep, base64, preview, editedData]);
 
     // Document-level drag detection: detects when a file is being dragged into the
     // window, activates the Portal overlay to catch the drop, and toggles the dashed
@@ -3518,7 +3555,7 @@ function NewPost(props) {
 
     // Download artwork
     const downloadArtwork = useCallback(() => {
-        const dataToDownload = quantizedData || preview;
+        const dataToDownload = editedData || quantizedData || preview;
         if (!dataToDownload) return;
 
         JSLoader(() => import("../utils/encodeImage")).then(({ encodeIMG }) => {
@@ -3530,11 +3567,40 @@ function NewPost(props) {
                 a.remove();
             });
         });
-    }, [quantizedData, preview]);
+    }, [editedData, quantizedData, preview]);
 
-    // Open external link
-    const openLink = useCallback((url) => {
-        window.open(url, "_blank", "noopener,noreferrer");
+    // ── Pixel editor ("Open editor" under the preview) ──────────────────
+    // It opens on the picture as shown — the editor's last result, the
+    // quantized picture or the chosen size — and with the layers of the last
+    // edit when there is one. Done brings the picture back here; the canvas
+    // re-renders and re-encodes the post body from it.
+    const handleOpenPixelEditor = useCallback(() => {
+        dispatch({ type: actionTypes.SET_FIELD, field: 'pixelEditorOpen', value: true });
+    }, []);
+
+    const handleClosePixelEditor = useCallback(() => {
+        dispatch({ type: actionTypes.SET_FIELD, field: 'pixelEditorOpen', value: false });
+    }, []);
+
+    const handleSavePixelEditor = useCallback(({ imageData, project }) => {
+        dispatch({
+            type: actionTypes.SET_MULTIPLE,
+            payload: {
+                editedData: imageData,
+                editedProject: project,
+                pixelEditorOpen: false,
+                showingOriginal: false
+            }
+        });
+        dispatch({ type: actionTypes.INCREMENT_CANVAS_KEY });
+    }, []);
+
+    const handleResetEdits = useCallback(() => {
+        dispatch({
+            type: actionTypes.SET_MULTIPLE,
+            payload: { editedData: null, editedProject: null }
+        });
+        dispatch({ type: actionTypes.INCREMENT_CANVAS_KEY });
     }, []);
 
     // Close the dialog: the "Close" button, a click on the backdrop and
@@ -3648,7 +3714,7 @@ function NewPost(props) {
             // then the full-screen logo loader takes over and this dialog
             // closes underneath it. The loader ends on its own — no reload.
             try {
-                const pixels = quantizedData || preview;
+                const pixels = editedData || quantizedData || preview;
                 dispatcher.dispatch({
                     type: "ARTWORK_PUBLISHED",
                     data: {
@@ -3678,7 +3744,7 @@ function NewPost(props) {
             dispatch({ type: actionTypes.SET_FIELD, field: 'isPublishing', value: false });
             actions.trigger_snackbar(error.message || t("components.new_post.failed_to_publish_post_please_try_again"));
         }
-    }, [api, title, description, tags, nsfw, base64, preview, quantizedData, licenseCustomization, resetProps, onClose]);
+    }, [api, title, description, tags, nsfw, base64, preview, quantizedData, editedData, licenseCustomization, resetProps, onClose]);
 
     // Handle next/finish
     const handleNextOrFinish = useCallback(() => {
@@ -3945,6 +4011,7 @@ function NewPost(props) {
                     classes={classes}
                     preview={preview}
                     quantizedData={quantizedData}
+                    editedData={editedData}
                     preferredSize={preferredSize}
                     availableSizes={availableSizes}
                     preloading={preloading}
@@ -3957,7 +4024,8 @@ function NewPost(props) {
                     onApplyQuantize={handleApplyQuantize}
                     onCancelQuantize={handleCancelQuantize}
                     onDownload={downloadArtwork}
-                    onOpenEditor={() => openLink("https://pixa.pics/")}
+                    onOpenEditor={handleOpenPixelEditor}
+                    onResetEdits={handleResetEdits}
                     base64Kb={base64Kb}
                     onCanvasReady={handleCanvasReady}
                     canvasKey={canvasKey}
@@ -4248,6 +4316,13 @@ function NewPost(props) {
                 maxOutputSize={2560}
                 onClose={handleCloseImageEditor}
                 onComplete={handleImageEditorComplete}
+            />
+            <PixelEditorDialog
+                open={pixelEditorOpen}
+                image={editedData || quantizedData || preview}
+                project={editedData ? editedProject : null}
+                onClose={handleClosePixelEditor}
+                onSave={handleSavePixelEditor}
             />
             {/* Invisible full-screen drag overlay — rendered at step 0 before a file is
                 loaded. pointer-events stays "none" (so clicks pass through to the upload

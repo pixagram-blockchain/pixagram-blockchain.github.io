@@ -47,12 +47,16 @@
     }
   ],
   "ledger": [
-    { "date": "2026-09-10", "from": "pixa.team", "to": "matias",  "amount": 8000000.030, "asset": "PXP", "category": "contributor_reward" },
-    { "date": "2026-09-10", "from": "pixa.team", "to": "mathiew", "amount": 4000000.015, "asset": "PXP", "category": "contributor_reward" },
-    { "date": "2026-09-10", "from": "pixa.team", "to": "matus",   "amount": 2360000.009, "asset": "PXP", "category": "contributor_reward" },
-    { "date": "2026-09-10", "from": "pixa.team", "to": "tetiana", "amount": 1000000.004, "asset": "PXP", "category": "contributor_reward" },
-    { "date": "2026-09-10", "from": "pixa.team", "to": "karen",   "amount": 1000000.004, "asset": "PXP", "category": "contributor_reward" },
-    { "date": "2026-09-10", "from": "pixa.team", "to": "melanie", "amount": 150000.001,  "asset": "PXP", "category": "contributor_reward" },
+    { "date": "2026-09-4", "from": "pixa.team", "to": "matias",  "amount": 8000000.030, "asset": "PXP", "category": "contributor_reward" },
+    { "date": "2026-11-4", "from": "pixa.team", "to": "wisdom",  "amount": 5000000.004, "asset": "PXP", "category": "contributor_reward" },
+    { "date": "2026-09-4", "from": "pixa.team", "to": "mathiew", "amount": 4000000.015, "asset": "PXP", "category": "contributor_reward" },
+    { "date": "2026-09-4", "from": "pixa.team", "to": "matus",   "amount": 2360000.009, "asset": "PXP", "category": "contributor_reward" },
+    { "date": "2026-09-4", "from": "pixa.team", "to": "tetiana", "amount": 1000000.004, "asset": "PXP", "category": "contributor_reward" },
+    { "date": "2026-09-4", "from": "pixa.team", "to": "karen",   "amount": 1000000.004, "asset": "PXP", "category": "contributor_reward" },
+    { "date": "2026-10-12", "from": "pixa.team", "to": "lorenzo", "amount": 445000.004,  "asset": "PXP", "category": "contributor_reward" },
+    { "date": "2026-09-4", "from": "pixa.team", "to": "melanie", "amount": 150000.001,  "asset": "PXP", "category": "contributor_reward" },
+    { "date": "2026-10-12", "from": "pixa.team", "to": "noblemman", "amount": 75000.001,  "asset": "PXP", "category": "contributor_reward" },
+    { "date": "2026-10-12", "from": "pixa.team", "to": "zitouna", "amount": 66667.001,  "asset": "PXP", "category": "contributor_reward" },
 
     {
       "date": "2026-09-10",
@@ -64,7 +68,8 @@
       "note": "Powered down by the operating account and sold on exchanges.",
       "unvest": true,
       "earmarks": [
-        { "to": "Coinstore", "amount": 3000000, "asset": "PIXA", "status": "planned", "note": "Listing liquidity." }
+        { "to": "Pixtopia", "amount": 100000, "asset": "PIXA", "status": "sent", "note": "Donation." },
+        { "to": "Coinstore", "amount": 3000000, "asset": "PIXA", "status": "sent", "note": "Listing liquidity." }
       ]
     },
     { "date": "2026-09-10", "from": "pixa.rex", "to": "gonor", "amount": 250000.001, "asset": "PXP", "category": "sale" },

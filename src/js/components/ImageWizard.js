@@ -50,6 +50,7 @@ import Slider from "@material-ui/core/Slider";
 import Fade from "@material-ui/core/Fade";
 import { isArtworkPixelart, normalizeUpload, processImageFile, quantizeImageData } from "../utils/pix2art/file2imgd";
 import JSLoader from "../utils/JSLoader";
+import PixelEditorDialog, { preloadPixelEditor } from "./pixel-editor";
 
 import { t, tk, tx, useLanguage, getLocaleCode } from "../utils/text";
 import { T } from "../utils/T";
@@ -176,7 +177,21 @@ const styles = theme => ({
         backgroundColor: "#101010",
         width: "100%",
         maxHeight: "calc(var(--app-h, 100vh) * 0.48)",
-        objectFit: "contain"
+        objectFit: "contain",
+        verticalAlign: "top"
+    },
+    // "Open editor" over the foot of the preview, as in NewPost.
+    canvasActions: {
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        padding: "48px 8px 8px 8px",
+        textAlign: "right",
+        borderRadius: "0px 0px 21px 21px",
+        background: "linear-gradient(0deg, #101010cf 20%, #10101075 60%, #10101000 90%)",
+        pointerEvents: "none",
+        "& > *": { pointerEvents: "auto" }
     },
     sliderContainer: {
         marginTop: theme.spacing(2),
@@ -530,6 +545,14 @@ function ImageWizard(props) {
     const [quantizeDownscale, setQuantizeDownscale] = useState(4);
     const [quantizeColors, setQuantizeColors] = useState(64);
 
+    // The picture as finished in the pixel editor ("Open editor") and its
+    // layered project, so the editor reopens where it was left. While set it
+    // is the picture used — over the quantized one and the chosen size —
+    // and the quantization sliders rest until "Reset".
+    const [editedData, setEditedData] = useState(null);
+    const [editedProject, setEditedProject] = useState(null);
+    const [pixelEditorOpen, setPixelEditorOpen] = useState(false);
+
     // Live weight estimate of the encoded WEBP
     const [outKb, setOutKb] = useState(null);
     const [encoding, setEncoding] = useState(false);
@@ -543,7 +566,7 @@ function ImageWizard(props) {
     const inputUrlRef = useRef("");
 
     const maxBytes = maxKb * 1000;
-    const dataToUse = quantizedData || preview;
+    const dataToUse = editedData || quantizedData || preview;
 
     // ── Reset everything (close / new file) ─────────────────────────────
     const resetState = useCallback(() => {
@@ -568,6 +591,9 @@ function ImageWizard(props) {
         setQuantizedData(null);
         setQuantizeDownscale(4);
         setQuantizeColors(64);
+        setEditedData(null);
+        setEditedProject(null);
+        setPixelEditorOpen(false);
         setOutKb(null);
         setEncoding(false);
     }, []);
@@ -783,6 +809,23 @@ function ImageWizard(props) {
         if (previewCache[preferredSize]) setPreview(previewCache[preferredSize]);
     }, [previewCache, preferredSize]);
 
+    // ── Pixel editor ─────────────────────────────────────────────────────
+    // Opens on the picture as shown; Done brings it back, and the weight
+    // estimate re-encodes it like any other change.
+    const handleOpenPixelEditor = useCallback(() => setPixelEditorOpen(true), []);
+    const handleClosePixelEditor = useCallback(() => setPixelEditorOpen(false), []);
+    const handleSavePixelEditor = useCallback(({ imageData, project }) => {
+        if (quantizeTimerRef.current) clearTimeout(quantizeTimerRef.current);
+        setEditedData(imageData);
+        setEditedProject(project);
+        setPixelEditorOpen(false);
+        setErrorMsg("");
+    }, []);
+    const handleResetEdits = useCallback(() => {
+        setEditedData(null);
+        setEditedProject(null);
+    }, []);
+
     // ── Render the working image into the preview canvas ────────────────
     useLayoutEffect(() => {
         if (phase !== "adjust" || !canvasRef.current || !dataToUse?.width) return;
@@ -867,7 +910,14 @@ function ImageWizard(props) {
         view = (
             <div style={{ position: "relative" }}>
                 <FormControl component="fieldset" className={classes.sizeHeader}>
-                    {quantizedData ? (
+                    {editedData ? (
+                        <Fade in timeout={600}>
+                            <div className={classes.quantizedMessage}>
+                                <span style={{ lineHeight: "32px" }}>{t("components.pixel_editor.edits_applied")}</span>
+                                <Button variant="text" onClick={handleResetEdits}>{t("words.reset", {TUC: true})}</Button>
+                            </div>
+                        </Fade>
+                    ) : quantizedData ? (
                         <Fade in timeout={600}>
                             <div className={classes.quantizedMessage}>
                                 <span style={{ lineHeight: "32px" }}>{t("words.quantization_applied")}</span>
@@ -896,8 +946,20 @@ function ImageWizard(props) {
                     )}
                 </FormControl>
 
-                <div className="pixelated" style={{ width: "100%", textAlign: "center" }}>
+                <div className="pixelated" style={{ width: "100%", textAlign: "center", position: "relative" }}>
                     <canvas ref={canvasRef} className={classes.previewCanvas} />
+                    <div className={classes.canvasActions}>
+                        <Button
+                            variant="text"
+                            style={{ color: "#ffffff88" }}
+                            onClick={handleOpenPixelEditor}
+                            onMouseEnter={preloadPixelEditor}
+                            onFocus={preloadPixelEditor}
+                            onTouchStart={preloadPixelEditor}
+                        >
+                            {t("components.new_post.open_editor")}
+                        </Button>
+                    </div>
                 </div>
 
                 <div className={classes.sliderContainer}>
@@ -905,6 +967,7 @@ function ImageWizard(props) {
                         <Typography className={classes.sliderLabel} gutterBottom>{t("words.downscale_ratio")}</Typography>
                         <Slider
                             value={quantizeDownscale}
+                            disabled={!!editedData}
                             onChange={handleQuantizeDownscaleChange}
                             min={1}
                             max={32}
@@ -926,6 +989,7 @@ function ImageWizard(props) {
                         <Typography className={classes.sliderLabel} gutterBottom>{t("words.number_of_colors")}</Typography>
                         <Slider
                             value={quantizeColors}
+                            disabled={!!editedData}
                             onChange={handleQuantizeColorsChange}
                             min={2}
                             max={128}
@@ -1041,6 +1105,13 @@ function ImageWizard(props) {
                     </Box>
                 </DialogActions>
             </Dialog>
+            <PixelEditorDialog
+                open={open && pixelEditorOpen}
+                image={dataToUse}
+                project={editedData ? editedProject : null}
+                onClose={handleClosePixelEditor}
+                onSave={handleSavePixelEditor}
+            />
             {/* AI Dialog — same question, same look as NewPost */}
             <Dialog
                 PaperProps={{ classes: { root: classes.whiteDialog } }}
