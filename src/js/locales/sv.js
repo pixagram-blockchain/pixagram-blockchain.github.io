@@ -1,7 +1,7 @@
 /**
  * locales/sv.js — Svenska
  *
- * Coverage: 2374 of 2542 keys (93.4 %).
+ * Coverage: 2382 of 2550 keys (93.4 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -881,6 +881,13 @@ export default {
             "retry": "Försök igen"
         },
         "post_dialog": {
+            "origin": "Ursprung",
+            "original_content": "Originalinnehåll",
+            "not_original_content": "Inte originalinnehåll",
+            "original_content_tooltip": "Angivet av upphovspersonen: ett eget foto eller en egen teckning, före någon stiltransformering",
+            "ai_used": "Använd AI",
+            "no_ai_declared": "Ingen AI angiven",
+            "ai_used_tooltip": "Angivet av upphovspersonen: den AI som skapade eller transformerade bilden",
             "for_sale": "Till salu",
             "last": "Senast: {{soldPrice}}{{currency}}",
             "not_for_sale": "Inte till salu",
@@ -1086,7 +1093,16 @@ export default {
             "adjust_step": "Justera ({{step}}/{{total}})",
             "post_step": "Publicera ({{step}}/{{total}})",
             "publish": "Publicera",
-            "ai_style": "AI-stil"
+            "ai_style": "AI-stil",
+            "original_content": "Originalinnehåll",
+            "oc_hint": "Slå på om det var din egen riktiga bild — ett foto eller en teckning — före någon stiltransformering.",
+            "oc_file_declares_ai": "Avstängt: bildfilen anger att den skapats eller redigerats med AI — slå på det om det är fel.",
+            "oc_generated": "Genererad utifrån din beskrivning och därför inte originalinnehåll.",
+            "ai_used": "Använd AI",
+            "ai_used_prefilled": "Förifyllt med den AI som appen använde. Lägg till all annan AI som skapat eller ändrat bilden.",
+            "ai_used_hint": "Lämna tomt om ingen AI var inblandad. Ange annars den AI som skapat eller ändrat bilden.",
+            "ai_used_is_required": "Ange den AI som skapade eller transformerade den här bilden",
+            "ai_used_must_be_characters_or_less_currently": "Använd AI får vara högst {{AI_MAX_LENGTH}} tecken (just nu {{ai_count}})"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Power-massöverföring",
@@ -1670,6 +1686,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "Konstverk",
+            "artwork_hint": "Redigera bilden i pixelredigeraren. När du sparar ersätts den på kedjan; endast blockhistoriken behåller den gamla versionen.",
+            "edit_in_pixel_editor": "Redigera i pixelredigeraren",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "Konstverkets innehåll har raderats: det finns ingen bild kvar att redigera.",
+            "artwork_encoding": "Kodar den redigerade bilden…",
+            "artwork_encode_failed": "Den redigerade bilden kunde inte kodas. Tryck på Klar i redigeraren igen, eller på Återställ.",
+            "artwork_too_large": "Den redigerade bilden väger {{size}} kB, mer än de {{max}} kB som en redigering kan skicka. Förenkla den i redigeraren, eller tryck på Återställ.",
+            "artwork_updated": "Inlägget uppdaterades — det nya konstverket visas om en stund",
+            "original_content_not_declared": "Inte angivet ännu. Slå på om det var din egen riktiga bild — ett foto eller en teckning — före någon stiltransformering.",
+            "ai_used_as_published": "Som publicerat: du kan formulera om det eller lägga till en annan AI, men inte ta bort det.",
             "loading_the_on_chain_version": "Läser in versionen på kedjan …",
             "only_can_edit_this_post": "Endast @{{authorUsername}} kan redigera det här inlägget.",
             "title": "Titel",
@@ -1691,7 +1719,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "Taggar: gemener, inga punkter, minst 3 tecken, måste börja med en bokstav",
             "enable_this_if_your_content_contains_mature": "Aktivera detta om ditt innehåll innehåller vuxet eller känsligt material",
             "if_this_post_is_a_dao_proposal": "Om det här inlägget är ett DAO-förslag tas det länkade förslaget också bort på kedjan.",
-            "replacing_the_artwork_with_a_new_image": "Att ersätta konstverket med en ny bild kommer hit i en framtida uppdatering.",
             "title_description_and_tags_for_this_post": "Titel, beskrivning och taggar för det här inlägget redigeras från ”Redigera innehåll”. Här kan du växla dess synlighetsflaggor.",
             "marks_the_post_as_deleted_in_its": "Markerar inlägget som raderat i dess metadata: det försvinner från varje flöde, profil och gemenskapssida. Reversibelt — endast metadataflaggan berörs. Ingen tagg läggs till, så raderade inlägg kan inte bläddras fram.",
             "erase_the_artwork_content_itself_the_post": "Radera själva konstverkets innehåll (inläggskroppen). Bilden ersätts på kedjan och kan inte återställas härifrån — endast blockhistoriken behåller den gamla versionen. Markerar inlägget som raderat.",
@@ -5052,7 +5079,15 @@ export default {
             "view_zoom_out": "Zooma ut",
             "view_grid_on": "Visa rutnätet",
             "view_grid_off": "Dölj rutnätet",
-            "edits_applied": "Redigerad i pixelredigeraren"
+            "edits_applied": "Redigerad i pixelredigeraren",
+            "panels": "Paneler",
+            "import": "Importera",
+            "import_image": "Importera bild",
+            "import_hint": "Pixelkonst behåller sina pixlar, förstorad pixelkonst skalas tillbaka och ett foto blir pixelkonst. Bilden svävar över det aktiva lagret tills du verkställer den. Du kan också släppa eller klistra in en bild på arbetsytan.",
+            "import_done_native": "Pixelkonst importerad, {{width}} × {{height}}",
+            "import_done_upscaled": "{{scale}}× pixelkonst importerad i sin verkliga storlek, {{width}} × {{height}}",
+            "import_done_photo": "Foto omvandlat till pixelkonst, {{width}} × {{height}}",
+            "import_failed": "Den här filen kan inte läsas som en bild."
         }
     }
 };

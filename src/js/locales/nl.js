@@ -1,7 +1,7 @@
 /**
  * locales/nl.js — Nederlands
  *
- * Coverage: 2374 of 2542 keys (93.4 %).
+ * Coverage: 2382 of 2550 keys (93.4 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -881,6 +881,13 @@ export default {
             "retry": "Opnieuw proberen"
         },
         "post_dialog": {
+            "origin": "Herkomst",
+            "original_content": "Originele inhoud",
+            "not_original_content": "Geen originele inhoud",
+            "original_content_tooltip": "Opgegeven door de maker: een eigen foto of tekening, vóór elke stijltransformatie",
+            "ai_used": "Gebruikte AI",
+            "no_ai_declared": "Geen AI opgegeven",
+            "ai_used_tooltip": "Opgegeven door de maker: de AI die de afbeelding maakte of omzette",
             "for_sale": "Te koop",
             "last": "Laatste: {{soldPrice}}{{currency}}",
             "not_for_sale": "Niet te koop",
@@ -1086,7 +1093,16 @@ export default {
             "adjust_step": "Aanpassen ({{step}}/{{total}})",
             "post_step": "Posten ({{step}}/{{total}})",
             "publish": "Publiceren",
-            "ai_style": "AI-stijl"
+            "ai_style": "AI-stijl",
+            "original_content": "Originele inhoud",
+            "oc_hint": "Zet dit aan als het vóór elke stijltransformatie je eigen echte afbeelding was — een foto of een tekening.",
+            "oc_file_declares_ai": "Uitgezet: volgens het bestand is de afbeelding met AI gemaakt of bewerkt — zet het aan als dit niet klopt.",
+            "oc_generated": "Gegenereerd op basis van je beschrijving, dus geen originele inhoud.",
+            "ai_used": "Gebruikte AI",
+            "ai_used_prefilled": "Vooraf ingevuld met de AI die de app gebruikte. Vul elke andere AI aan die de afbeelding maakte of veranderde.",
+            "ai_used_hint": "Laat leeg als er geen AI aan te pas kwam. Noem anders de AI die de afbeelding maakte of veranderde.",
+            "ai_used_is_required": "Noem de AI die deze afbeelding maakte of omzette",
+            "ai_used_must_be_characters_or_less_currently": "Gebruikte AI mag maximaal {{AI_MAX_LENGTH}} tekens lang zijn (nu {{ai_count}})"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Bulkoverboeking van Power",
@@ -1670,6 +1686,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "Kunstwerk",
+            "artwork_hint": "Bewerk de afbeelding in de pixeleditor. Bij opslaan wordt ze on-chain vervangen; alleen de blokgeschiedenis bewaart de oude versie.",
+            "edit_in_pixel_editor": "Bewerken in de pixeleditor",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "De inhoud van het kunstwerk is gewist: er is geen afbeelding meer om te bewerken.",
+            "artwork_encoding": "De bewerkte afbeelding wordt gecodeerd…",
+            "artwork_encode_failed": "De bewerkte afbeelding kon niet worden gecodeerd. Kies in de editor opnieuw Klaar, of Resetten.",
+            "artwork_too_large": "De bewerkte afbeelding is {{size}} kB, meer dan de {{max}} kB die een bewerking kan versturen. Vereenvoudig haar in de editor, of kies Resetten.",
+            "artwork_updated": "Post bijgewerkt — het nieuwe kunstwerk verschijnt zo",
+            "original_content_not_declared": "Nog niet opgegeven. Zet dit aan als het vóór elke stijltransformatie je eigen echte afbeelding was — een foto of een tekening.",
+            "ai_used_as_published": "Zoals gepubliceerd: je kunt het herformuleren of een andere AI toevoegen, maar niet verwijderen.",
             "loading_the_on_chain_version": "De on-chain versie laden…",
             "only_can_edit_this_post": "Alleen @{{authorUsername}} kan deze post bewerken.",
             "title": "Titel",
@@ -1691,7 +1719,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "Tags: kleine letters, geen punten, min. 3 tekens, moet met een letter beginnen",
             "enable_this_if_your_content_contains_mature": "Schakel dit in als je content volwassen of gevoelig materiaal bevat",
             "if_this_post_is_a_dao_proposal": "Als deze post een DAO-voorstel is, wordt het gekoppelde voorstel ook on-chain verwijderd.",
-            "replacing_the_artwork_with_a_new_image": "Het kunstwerk vervangen door een nieuwe afbeelding komt hier in een toekomstige update.",
             "title_description_and_tags_for_this_post": "Titel, beschrijving en tags van deze post bewerk je via ‘Inhoud bewerken’. Hier kun je de zichtbaarheidsvlaggen omschakelen.",
             "marks_the_post_as_deleted_in_its": "Markeert de post als verwijderd in zijn metadata: hij verdwijnt uit elke feed, elk profiel en elke communitypagina. Omkeerbaar — alleen de metadatavlag wordt aangeraakt. Er wordt geen tag toegevoegd, dus verwijderde posts kunnen niet worden doorgebladerd.",
             "erase_the_artwork_content_itself_the_post": "Wis de inhoud van het kunstwerk zelf (de body van de post). De afbeelding wordt on-chain vervangen en kan hier niet worden hersteld — alleen de blokgeschiedenis bewaart de oude versie. Markeert de post als verwijderd.",
@@ -5052,7 +5079,15 @@ export default {
             "view_zoom_out": "Uitzoomen",
             "view_grid_on": "Raster tonen",
             "view_grid_off": "Raster verbergen",
-            "edits_applied": "Bewerkt in de pixeleditor"
+            "edits_applied": "Bewerkt in de pixeleditor",
+            "panels": "Panelen",
+            "import": "Importeren",
+            "import_image": "Afbeelding importeren",
+            "import_hint": "Pixelart houdt zijn pixels, vergrote pixelart wordt teruggeschaald en een foto wordt pixelart. De afbeelding zweeft boven de actieve laag tot je haar toepast. Je kunt ook een afbeelding op het canvas slepen of plakken.",
+            "import_done_native": "Pixelart geïmporteerd, {{width}} × {{height}}",
+            "import_done_upscaled": "{{scale}}× pixelart op ware grootte geïmporteerd, {{width}} × {{height}}",
+            "import_done_photo": "Foto omgezet in pixelart, {{width}} × {{height}}",
+            "import_failed": "Dit bestand kan niet als afbeelding worden gelezen."
         }
     }
 };

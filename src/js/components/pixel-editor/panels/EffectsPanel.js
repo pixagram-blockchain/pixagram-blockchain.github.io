@@ -61,7 +61,7 @@ export const EFFECTS = [
     { key: "rotr", run: "effect.rotate", args: { dir: 1 }, label: "fx_rotate_right", Icon: RotateRightIcon },
 ];
 
-export default function EffectsPanel({ ed }) {
+export default function EffectsPanel({ ed, titled }) {
     useEditorEvents(ed, ["selection", "change", "floating", "layers", "colors", "preview"]);
     const { preview, open, update, apply, cancel } = usePreview(ed);
     const lastArgs = useRef(new Map());
@@ -95,7 +95,7 @@ export default function EffectsPanel({ ed }) {
                     onCancel={cancel}
                 />
             )}
-            <Section title={tp("tab_effects")}>
+            <Section title={titled ? undefined : tp("tab_effects")}>
                 <Tiles>
                     {EFFECTS.map((fx) => {
                         const id = fx.run || fx.id;

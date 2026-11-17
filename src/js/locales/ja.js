@@ -1,7 +1,7 @@
 /**
  * locales/ja.js — 日本語
  *
- * Coverage: 2387 of 2542 keys (93.9 %).
+ * Coverage: 2395 of 2550 keys (93.9 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -882,6 +882,13 @@ export default {
             "retry": "再試行"
         },
         "post_dialog": {
+            "origin": "出所",
+            "original_content": "オリジナルコンテンツ",
+            "not_original_content": "オリジナルコンテンツではありません",
+            "original_content_tooltip": "作者の申告：スタイル変換前の自分の写真または絵",
+            "ai_used": "使用したAI",
+            "no_ai_declared": "AIの申告なし",
+            "ai_used_tooltip": "作者の申告：画像を生成または変換したAI",
             "for_sale": "販売中",
             "last": "直近：{{soldPrice}}{{currency}}",
             "not_for_sale": "販売していません",
@@ -1087,7 +1094,16 @@ export default {
             "adjust_step": "調整（{{step}}/{{total}}）",
             "post_step": "投稿（{{step}}/{{total}}）",
             "publish": "公開",
-            "ai_style": "AI スタイル"
+            "ai_style": "AI スタイル",
+            "original_content": "オリジナルコンテンツ",
+            "oc_hint": "スタイル変換の前に、あなた自身の実際の画像（写真または絵）だった場合はオンにしてください。",
+            "oc_file_declares_ai": "オフにしました：画像ファイルにAIで生成または編集されたと記録されています — 誤りであればオンにしてください。",
+            "oc_generated": "あなたの説明から生成されたため、オリジナルコンテンツではありません。",
+            "ai_used": "使用したAI",
+            "ai_used_prefilled": "アプリが使用したAIが入力されています。画像を生成・変更した他のAIがあれば追記してください。",
+            "ai_used_hint": "AIを使用していない場合は空欄のままにしてください。使用した場合は、画像を生成・変更したAIを入力してください。",
+            "ai_used_is_required": "この画像を生成または変換したAIを入力してください",
+            "ai_used_must_be_characters_or_less_currently": "使用したAIは {{AI_MAX_LENGTH}} 文字以内にしてください（現在 {{ai_count}} 文字）"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Power の一括送付",
@@ -1672,6 +1688,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "作品",
+            "artwork_hint": "ピクセルエディターで画像を編集します。保存するとオンチェーンで置き換えられ、旧版はブロック履歴にのみ残ります。",
+            "edit_in_pixel_editor": "ピクセルエディターで編集",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "作品の内容は消去されています。編集できる画像は残っていません。",
+            "artwork_encoding": "編集した画像をエンコードしています…",
+            "artwork_encode_failed": "編集した画像をエンコードできませんでした。エディターでもう一度「完了」を押すか、「リセット」してください。",
+            "artwork_too_large": "編集した画像は {{size}} kB で、1回の編集で送信できる {{max}} kB を超えています。エディターで簡素にするか、「リセット」してください。",
+            "artwork_updated": "投稿を更新しました。新しい作品はまもなく表示されます",
+            "original_content_not_declared": "まだ申告されていません。スタイル変換の前に、あなた自身の実際の画像（写真または絵）だった場合はオンにしてください。",
+            "ai_used_as_published": "公開時のとおり：言い換えたり別のAIを追加したりできますが、削除はできません。",
             "loading_the_on_chain_version": "オンチェーン版を読み込んでいます…",
             "only_can_edit_this_post": "この投稿を編集できるのは @{{authorUsername}} のみです。",
             "title": "タイトル",
@@ -1693,7 +1721,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "タグ：小文字、ピリオドなし、3文字以上、英字で始めてください",
             "enable_this_if_your_content_contains_mature": "成人向けまたはセンシティブな内容を含む場合は有効にしてください",
             "if_this_post_is_a_dao_proposal": "この投稿が DAO 提案の場合、リンクされた提案もオンチェーンで削除されます。",
-            "replacing_the_artwork_with_a_new_image": "作品を新しい画像に差し替える機能は今後のアップデートで提供します。",
             "title_description_and_tags_for_this_post": "この投稿のタイトル・説明・タグは「本文を編集」から変更します。ここでは表示フラグを切り替えられます。",
             "marks_the_post_as_deleted_in_its": "投稿をメタデータ上で削除済みとして記録します。すべてのフィード・プロフィール・コミュニティページから消えます。取り消し可能で、変更されるのはメタデータのフラグのみです。タグは付与されないため、削除済みの投稿を一覧で見ることはできません。",
             "erase_the_artwork_content_itself_the_post": "作品の内容そのもの（投稿本文）を消去します。画像はオンチェーンで置き換えられ、ここから復元することはできません — 旧版はブロック履歴にのみ残ります。投稿は削除済みとして記録されます。",
@@ -5056,7 +5083,15 @@ export default {
             "view_zoom_out": "縮小",
             "view_grid_on": "グリッドを表示",
             "view_grid_off": "グリッドを隠す",
-            "edits_applied": "ピクセルエディターで編集済み"
+            "edits_applied": "ピクセルエディターで編集済み",
+            "panels": "パネル",
+            "import": "読み込み",
+            "import_image": "画像を読み込む",
+            "import_hint": "ピクセルアートはそのままのピクセルで、拡大されたピクセルアートは元のサイズに戻り、写真はピクセルアートに変換されます。画像は適用するまでアクティブなレイヤーの上に浮かびます。キャンバスに画像をドロップまたは貼り付けることもできます。",
+            "import_done_native": "ピクセルアートを読み込みました（{{width}} × {{height}}）",
+            "import_done_upscaled": "{{scale}}倍のピクセルアートを元のサイズで読み込みました（{{width}} × {{height}}）",
+            "import_done_photo": "写真をピクセルアートに変換しました（{{width}} × {{height}}）",
+            "import_failed": "このファイルは画像として読み込めません。"
         }
     }
 };

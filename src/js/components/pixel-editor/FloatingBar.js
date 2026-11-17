@@ -23,7 +23,7 @@ import CloseIcon from "@material-ui/icons/Close";
 
 import { tp } from "./labels";
 import { useEditorEvents } from "./editorUtils";
-import { EASE } from "./ui";
+import { EASE, SURFACE } from "./ui";
 
 const useStyles = makeStyles({
     wrap: {
@@ -45,7 +45,7 @@ const useStyles = makeStyles({
         overflowX: "auto",
         padding: "4px 6px 4px 14px",
         borderRadius: 28,
-        backgroundColor: "rgba(23, 23, 23, 0.94)",
+        backgroundColor: SURFACE.panel,
         boxShadow: "0 10px 30px rgba(0,0,0,0.55)",
         scrollbarWidth: "none",
         "&::-webkit-scrollbar": { display: "none" },
@@ -68,12 +68,12 @@ const useStyles = makeStyles({
         flex: "0 0 auto",
         color: "#dddddd",
         transition: `background-color 160ms ${EASE}`,
-        "&:hover": { backgroundColor: "#2a2a2a", color: "#ffffff" },
+        "&:hover": { backgroundColor: SURFACE.hover, color: "#ffffff" },
         "& .MuiSvgIcon-root": { fontSize: 20 },
     },
     apply: {
-        backgroundColor: "#e9e9e9",
-        color: "#1d1d1d",
+        backgroundColor: SURFACE.on,
+        color: SURFACE.onInk,
         "&:hover": { backgroundColor: "#ffffff", color: "#000000" },
     },
 });

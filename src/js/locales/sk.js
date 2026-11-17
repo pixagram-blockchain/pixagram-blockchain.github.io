@@ -1,7 +1,7 @@
 /**
  * locales/sk.js — Slovenčina
  *
- * Coverage: 2407 of 2542 keys (94.7 %).
+ * Coverage: 2415 of 2550 keys (94.7 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -885,6 +885,13 @@ export default {
             "retry": "Skúsiť znova"
         },
         "post_dialog": {
+            "origin": "Pôvod",
+            "original_content": "Pôvodný obsah",
+            "not_original_content": "Nejde o pôvodný obsah",
+            "original_content_tooltip": "Uvedené autorom: vlastná fotka alebo kresba pred akoukoľvek štýlovou premenou",
+            "ai_used": "Použitá AI",
+            "no_ai_declared": "Žiadna AI nebola uvedená",
+            "ai_used_tooltip": "Uvedené autorom: AI, ktorá obrázok vytvorila alebo premenila",
             "for_sale": "Na predaj",
             "last": "Posledná: {{soldPrice}}{{currency}}",
             "not_for_sale": "Nie je na predaj",
@@ -1090,7 +1097,16 @@ export default {
             "adjust_step": "Upraviť ({{step}}/{{total}})",
             "post_step": "Zverejniť ({{step}}/{{total}})",
             "publish": "Publikovať",
-            "ai_style": "Štýl AI"
+            "ai_style": "Štýl AI",
+            "original_content": "Pôvodný obsah",
+            "oc_hint": "Zapnite, ak išlo pred akoukoľvek štýlovou premenou o váš vlastný skutočný obrázok — fotku alebo kresbu.",
+            "oc_file_declares_ai": "Vypnuté: súbor obrázka uvádza, že bol vytvorený alebo upravený pomocou AI — ak je to chybné, zapnite to.",
+            "oc_generated": "Vytvorené z vášho popisu, takže nejde o pôvodný obsah.",
+            "ai_used": "Použitá AI",
+            "ai_used_prefilled": "Predvyplnené AI, ktorú použila aplikácia. Doplňte akúkoľvek ďalšiu AI, ktorá obrázok vytvorila alebo zmenila.",
+            "ai_used_hint": "Ak sa nepoužila žiadna AI, nechajte prázdne. Inak uveďte AI, ktorá obrázok vytvorila alebo zmenila.",
+            "ai_used_is_required": "Uveďte AI, ktorá tento obrázok vytvorila alebo premenila",
+            "ai_used_must_be_characters_or_less_currently": "Použitá AI musí mať najviac {{AI_MAX_LENGTH}} znakov (momentálne {{ai_count}})"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Hromadný prevod Power",
@@ -1674,6 +1690,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "Dielo",
+            "artwork_hint": "Upravte obrázok v pixelovom editore. Uložením sa on-chain nahradí; starú verziu uchováva iba história blokov.",
+            "edit_in_pixel_editor": "Upraviť v pixelovom editore",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "Obsah diela bol vymazaný: nezostal žiadny obrázok na úpravu.",
+            "artwork_encoding": "Kódovanie upraveného obrázka…",
+            "artwork_encode_failed": "Upravený obrázok sa nepodarilo zakódovať. V editore znova stlačte Hotovo, alebo Resetovať.",
+            "artwork_too_large": "Upravený obrázok má {{size}} kB, viac než {{max}} kB, ktoré môže úprava odoslať. Zjednodušte ho v editore, alebo stlačte Resetovať.",
+            "artwork_updated": "Príspevok aktualizovaný — nové dielo sa zobrazí o chvíľu",
+            "original_content_not_declared": "Zatiaľ neuvedené. Zapnite, ak išlo pred akoukoľvek štýlovou premenou o váš vlastný skutočný obrázok — fotku alebo kresbu.",
+            "ai_used_as_published": "Ako bolo zverejnené: môžete to preformulovať alebo pridať ďalšiu AI, ale nie odstrániť.",
             "loading_the_on_chain_version": "Načítava sa on-chain verzia…",
             "only_can_edit_this_post": "Tento príspevok môže upraviť iba @{{authorUsername}}.",
             "title": "Názov",
@@ -1695,7 +1723,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "Značky: malé písmená, bez bodiek, min. 3 znaky, musia začínať písmenom",
             "enable_this_if_your_content_contains_mature": "Zapnite, ak váš obsah obsahuje materiál pre dospelých alebo citlivý materiál",
             "if_this_post_is_a_dao_proposal": "Ak je tento príspevok návrhom DAO, prepojený návrh sa odstráni aj on-chain.",
-            "replacing_the_artwork_with_a_new_image": "Nahradenie diela novým obrázkom pribudne v budúcej aktualizácii.",
             "title_description_and_tags_for_this_post": "Názov, popis a značky tohto príspevku sa upravujú cez „Upraviť obsah“. Tu môžete prepínať jeho príznaky viditeľnosti.",
             "marks_the_post_as_deleted_in_its": "Označí príspevok ako vymazaný v jeho metadátach: zmizne z každého feedu, profilu a stránky komunity. Vratné — mení sa iba príznak metadát. Nepridáva sa žiadna značka, takže vymazané príspevky sa nedajú prehliadať.",
             "erase_the_artwork_content_itself_the_post": "Vymazať samotný obsah diela (telo príspevku). Obrázok sa nahradí on-chain a odtiaľto sa nedá obnoviť — starú verziu uchováva iba história blokov. Označí príspevok ako vymazaný.",
@@ -5056,7 +5083,15 @@ export default {
             "view_zoom_out": "Oddialiť",
             "view_grid_on": "Zobraziť mriežku",
             "view_grid_off": "Skryť mriežku",
-            "edits_applied": "Upravené v pixelovom editore"
+            "edits_applied": "Upravené v pixelovom editore",
+            "panels": "Panely",
+            "import": "Import",
+            "import_image": "Importovať obrázok",
+            "import_hint": "Pixel art si ponechá svoje pixely, zväčšený pixel art sa vráti do skutočnej veľkosti a z fotografie sa stane pixel art. Obrázok sa vznáša nad aktívnou vrstvou, kým ho nepoužijete. Obrázok môžete aj pretiahnuť alebo vložiť na plátno.",
+            "import_done_native": "Pixel art importovaný, {{width}} × {{height}}",
+            "import_done_upscaled": "Pixel art {{scale}}× importovaný v skutočnej veľkosti, {{width}} × {{height}}",
+            "import_done_photo": "Fotografia premenená na pixel art, {{width}} × {{height}}",
+            "import_failed": "Tento súbor sa nedá prečítať ako obrázok."
         }
     }
 };

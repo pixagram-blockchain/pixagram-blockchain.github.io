@@ -28,6 +28,7 @@ import ArrowForwardIosIcon from "@material-ui/icons/ArrowForwardIos";
 import InfoOutlined from "@material-ui/icons/InfoOutlined";
 import JSLoader from "../utils/JSLoader";
 import {HISTORY, POST_DRAWER_TAB_HASHES, parsePostDrawerHash, parseCommentFocusHash, buildCommentFocusHash, getPostState, POST_STATE, buildPostUrl} from "../utils/constants";
+import { isStoreBuild, getStoreName } from "../utils/store";
 import { feedTagPath } from "../utils/feedSort";
 import Chip from "@material-ui/core/Chip";
 import Palette from '@material-ui/icons/Palette'
@@ -38,7 +39,10 @@ import ListSubheader from "@material-ui/core/ListSubheader";
 import Grid from "@material-ui/core/Grid";
 import Info from "@material-ui/icons/Info";
 import License from "../icons/License";
+import PhotoCameraRounded from "@material-ui/icons/PhotoCameraRounded";
+import MemoryRounded from "@material-ui/icons/MemoryRounded";
 import {PIXA_LICENSE_BASE as baseLicenseData} from "../utils/pixa_license";
+import { readAiDisclosure } from "../utils/ai_provenance";
 import { sanitizeComment as rawSanitizeComment, safeHTML } from "../utils/api/sanitizer";
 import CloudDownload from "@material-ui/icons/CloudDownload";
 import CommentRounded from "@material-ui/icons/CommentRounded";
@@ -151,6 +155,41 @@ async function getMetadata(source, image){
     if (!imgd) return null; // undecodable — caller treats it as a failed open
     const anim = imgOBJ && imgOBJ.animated ? await pngdby.get_animation(imgOBJ).catch(() => null) : null;
     return { imgd, colors: null, width: imgd.width, height: imgd.height, anim };
+}
+
+// ── Store builds: mature artworks are not shown (utils/store.js) ───────────
+// In the Google Play / App Store apps a post labelled NSFW, or classified as
+// mature on this device, opens on the "not available" card instead of its
+// artwork. The feed cards can't open one (PaperCard), but a shared link, a
+// notification or the back arrow can. The verdict is the one the cards use
+// (utils/nsfw.js), computed here when this device never classified the post,
+// and checked before the artwork is revealed. It fails open like the cards:
+// a model that can't run hides nothing.
+const STORE_HIDE = isStoreBuild();
+let _storeNsfwMod = null;
+
+async function isMatureForStore(data, imgd) {
+    if (!data) return false;
+    if (data.nsfw === true) return true;
+    try {
+        if (!_storeNsfwMod) {
+            const m = await import("../utils/nsfw");
+            _storeNsfwMod = (m && (m.default || m)) || null;
+        }
+        const mod = _storeNsfwMod;
+        if (!mod || !imgd) return false;
+        mod.configure({ filterEnabled: true });
+        // The feed card keys its verdict by the image entry's id (size.id);
+        // reuse it when the post carries one, so a card's verdict is a hit.
+        const id = (data.size && data.size.id) || data.id;
+        if (!id) {
+            const r = await mod.classifyImage(imgd);
+            return !!(r && r.ok && r.nsfw);
+        }
+        return (await mod.ensureNsfw({ id, getImgData: async () => imgd, alreadyFlagged: false })) === true;
+    } catch (e) {
+        return false;
+    }
 }
 
 function createCanvas(width, height) {
@@ -655,6 +694,45 @@ const ArtworkSection = React.memo(function ArtworkSection({ type, kb, onDownload
     );
 });
 
+/* Origin — the AI disclosure the author published with the artwork
+ * (json_metadata.oc / .ai, written by NewPost, editable in EditPostDialog):
+ * whether the picture was their own original content before any style
+ * transformation, and which AI made or transformed it. Both are the
+ * author's declaration, which the tooltips say. Posts that declare neither —
+ * published before the keys existed, or by another app — show no section.
+ * Parsed when the metadata string changes, not on every render of the tab. */
+const OriginSection = React.memo(function OriginSection({ jsonMetadata }) {
+    useLanguage();
+    const disclosure = useMemo(() => readAiDisclosure(jsonMetadata), [jsonMetadata]);
+    if (!disclosure) return null;
+    const { oc, ai } = disclosure;
+    return (
+        <React.Fragment>
+            <ListSubheader disableSticky>{t("components.post_dialog.origin")}</ListSubheader>
+            {oc !== null && (
+                <Tooltip title={t("components.post_dialog.original_content_tooltip")}>
+                    <ListItem>
+                        <ListItemIcon><PhotoCameraRounded /></ListItemIcon>
+                        <ListItemText>{oc
+                            ? t("components.post_dialog.original_content")
+                            : t("components.post_dialog.not_original_content")}</ListItemText>
+                    </ListItem>
+                </Tooltip>
+            )}
+            <Tooltip title={t("components.post_dialog.ai_used_tooltip")}>
+                <ListItem>
+                    <ListItemIcon><MemoryRounded /></ListItemIcon>
+                    {ai ? (
+                        <ListItemText primary={ai} secondary={t("components.post_dialog.ai_used")} />
+                    ) : (
+                        <ListItemText>{t("components.post_dialog.no_ai_declared")}</ListItemText>
+                    )}
+                </ListItem>
+            </Tooltip>
+        </React.Fragment>
+    );
+});
+
 /* Owner only — rendered by DetailsView behind isOwner. */
 const ManageSection = React.memo(function ManageSection({ onEditPost }) {
     useLanguage();
@@ -759,6 +837,7 @@ const DetailsView = React.memo(({
                           colors={metadata.colors || EMPTY_COLORS} classes={classes} />
             <ArtworkSection type={type} kb={kb}
                             onDownloadArtwork={onDownloadArtwork} onOpenLicenseDialog={onOpenLicenseDialog} />
+            <OriginSection jsonMetadata={data.json_metadata} />
             {isOwner ? <ManageSection onEditPost={onEditPost} /> : null}
             <ShareSection postId={id} copied={copied} onCopy={onCopy} className={classes.urlLink} />
             <ActionsSection isFavorite={isFavorite} onToggleFavorite={onToggleFavorite} />
@@ -2643,6 +2722,9 @@ const INITIAL_STATE = {
     // masonry card, so every other layer (backdrop tint, drawer, arrows,
     // download) fades out of its way — see classes.closingChrome.
     _closing: false,
+    // Store build: this post's artwork was classified mature on the device,
+    // so the dialog shows the "not available" card (see STORE_HIDE).
+    _store_restricted: false,
     data: {},
     renderer: "square",
     mode: null,
@@ -5033,8 +5115,11 @@ function PostDialog(props) {
         };
         dispatch({ data: newData });
         // A post marked deleted (or with its artwork erased) should not stay
-        // on screen — close the dialog and let the host page refetch.
-        if (payload.deleted || payload.bodyErased) {
+        // on screen — close the dialog and let the host page refetch. Nor
+        // should the previous picture once the pixel editor replaced it: the
+        // canvas is drawn from props.data.image, which only the host's
+        // refetch (on content_updated) brings up to date.
+        if (payload.deleted || payload.bodyErased || payload.artworkReplaced) {
             props.onClose?.();
         }
     }, [props.onClose]);
@@ -5530,7 +5615,7 @@ function PostDialog(props) {
         }
         if (isNewPost) {
             const iv = resolveInitialVoted(props.data, props.account);
-            Object.assign(extra, { _initialVoted: iv, _voted: iv, _comments: [], _current_comments: [], _comments_loading: false, _comment_sending: false, _reply_target: null, _edit_target: null, _delete_target: null, _edit_post_open: false, _focusComment: null, _focusPathKeys: [] });
+            Object.assign(extra, { _initialVoted: iv, _voted: iv, _comments: [], _current_comments: [], _comments_loading: false, _comment_sending: false, _reply_target: null, _edit_target: null, _delete_target: null, _edit_post_open: false, _focusComment: null, _focusPathKeys: [], _store_restricted: false });
             inst.cachedViews = null; inst.cachedViewsKey = null; inst.sortedCommentsCache = null; inst.sortedCommentsCacheKey = null; inst.sortedCommentsCacheRef = null;
         } else if (props.data?.active_votes !== prev.data?.active_votes) {
             const iv = resolveInitialVoted(props.data, props.account);
@@ -5597,7 +5682,19 @@ function PostDialog(props) {
             const metaSource = props.data?.size?.imgd ? props.data.size : props.data.image;
             requestAnimationFrame(() => {
                 if (renderId !== inst.currentRenderId) return;
-                getMetadata(metaSource, props.data?.image).then((result) => {
+                const postData = props.data;
+                getMetadata(metaSource, props.data?.image).then(async (result) => {
+                    if (renderId !== inst.currentRenderId) return;
+                    // Store build: classify before revealing (STORE_HIDE). In
+                    // the browser this never awaits, so nothing changes there.
+                    if (STORE_HIDE && result && result.imgd && await isMatureForStore(postData, result.imgd)) {
+                        if (renderId !== inst.currentRenderId) return;
+                        inst.navTransitioning = false; inst.navBouncing = false;
+                        inst.navDismissing = false; inst.navDirection = null;
+                        if (inst.navSafetyTimer) { clearTimeout(inst.navSafetyTimer); inst.navSafetyTimer = null; }
+                        dispatch({ _store_restricted: true, _hidden: false, _hidden2: false });
+                        return;
+                    }
                     if (renderId !== inst.currentRenderId) return;
                     if (!result) {
                         // No metadata (e.g. missing/invalid image) — unlock nav + drawer
@@ -5862,12 +5959,17 @@ function PostDialog(props) {
      * flashing the artwork layout on its way out.
      */
     const postState = getPostState(data);
-    if (postState !== POST_STATE.READY) {
+    // Store build: a mature artwork gets the same card, worded for the store
+    // version (STORE_HIDE) — an NSFW label is known at once, an on-device
+    // verdict when the open pipeline has classified the artwork.
+    const storeRestricted = STORE_HIDE && postState === POST_STATE.READY
+        && (data.nsfw === true || state._store_restricted === true);
+    if (postState !== POST_STATE.READY || storeRestricted) {
         const unavailableAuthor = data.author || {};
         const unavailableUsername = unavailableAuthor.username || "";
         const unavailableName = unavailableAuthor.name
             || (unavailableUsername ? "@" + unavailableUsername : "");
-        const isDeleted = postState === POST_STATE.DELETED;
+        const isDeleted = !storeRestricted && postState === POST_STATE.DELETED;
 
         return (
             <Portal>
@@ -5880,14 +5982,18 @@ function PostDialog(props) {
                             <CircularProgress thickness={3} size={48} style={{ color: "#666" }} />
                         ) : (
                             <div className={classes.unavailableCard} onClick={(e) => e.stopPropagation()}>
-                                {isDeleted
-                                    ? <DeleteOutlineRounded className={classes.unavailableIcon} />
-                                    : <InfoOutlined className={classes.unavailableIcon} />}
+                                {storeRestricted
+                                    ? <VisibilityOffRounded className={classes.unavailableIcon} />
+                                    : isDeleted
+                                        ? <DeleteOutlineRounded className={classes.unavailableIcon} />
+                                        : <InfoOutlined className={classes.unavailableIcon} />}
 
                                 <Typography className={classes.unavailableTitle}>
-                                    {isDeleted
-                                        ? t("components.post_unavailable.deleted_title")
-                                        : t("components.post_unavailable.not_found_title")}
+                                    {storeRestricted
+                                        ? t("components.store_policy.restricted_title")
+                                        : isDeleted
+                                            ? t("components.post_unavailable.deleted_title")
+                                            : t("components.post_unavailable.not_found_title")}
                                 </Typography>
 
                                 {isDeleted && unavailableUsername && (
@@ -5905,9 +6011,11 @@ function PostDialog(props) {
                                 )}
 
                                 <Typography className={classes.unavailableText}>
-                                    {isDeleted
-                                        ? t("components.post_unavailable.deleted_body")
-                                        : t("components.post_unavailable.not_found_body")}
+                                    {storeRestricted
+                                        ? t("components.store_policy.restricted_body", { store: getStoreName() })
+                                        : isDeleted
+                                            ? t("components.post_unavailable.deleted_body")
+                                            : t("components.post_unavailable.not_found_body")}
                                 </Typography>
 
                                 <Button className={classes.unavailableButton} onClick={onRequestClose}>

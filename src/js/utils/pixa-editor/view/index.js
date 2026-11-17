@@ -37,10 +37,49 @@ import { encodePNG } from '../io/png.js';
  * @property {{ checker?: [string, string], checkerSize?: number, grid?: string, accent?: string, frame?: string }} [theme]
  */
 
-/** Tools whose drags may start outside the art (elsewhere, outside pans). */
+/** Tools whose drags may start outside the art with a mouse or pen (elsewhere, and for a finger, outside pans). */
 const SELECTION_TOOLS = new Set(['select-rect', 'select-ellipse', 'select-line', 'select-path', 'select-brush']);
 const HANDLE_CURSORS = { n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize', move: 'move' };
 const TOOL_KEYS = { b: 'pencil', i: 'picker', v: 'move', m: 'select-rect', o: 'select-ellipse', l: 'select-path', w: 'select-area', u: 'select-line', s: 'select-brush' };
+
+/**
+ * Touch: a long press (held, still) or a double tap opens the menu. Only a tap (short, still)
+ * can start a double tap, so a stroke followed by a quick dot is never mistaken for one.
+ */
+const LONG_PRESS_MS = 500, LONG_PRESS_SLOP = 8;
+const TAP_MS = 350, TAP_SLOP = 10, DOUBLE_TAP_MS = 250, DOUBLE_TAP_SLOP = 28;
+
+/**
+ * How much of the art panning and zooming must leave in the zone, in CSS px (all of it when it
+ * is smaller): the art may travel almost out of view, so a zoom around a point beside it keeps
+ * that point under the pointer instead of sliding the art.
+ */
+const KEEP_IN_VIEW = 48;
+
+/**
+ * Zooming glides rather than jumps. A step (keys, buttons, the menu) zooms by ZOOM_STEP; the wheel
+ * by WHEEL_ZOOM per CSS px of travel (a mouse notch, about 100 px, is some 13 %). Both move at
+ * least one device pixel per art pixel while the zoom is crisp. A glide takes GLIDE_MS; wheel
+ * travel within WHEEL_GESTURE_MS of the last adds to the same glide.
+ */
+const ZOOM_STEP = 1.2, WHEEL_ZOOM = 0.0012, GLIDE_MS = 180, WHEEL_GESTURE_MS = 250;
+
+/**
+ * Auto-pan while a drag holds the pointer at the zone edge: after a short wait it eases in, faster
+ * the further past the edge (CSS px per second), and stops once the art's own edge is in view
+ * with a margin. Selections and floating layers start it in a band inside the edge; painting only
+ * once the pointer has left the zone.
+ */
+const AUTO_PAN = { band: 16, wait: 220, ramp: 450, min: 40, max: 480, reach: 96, margin: 24 };
+
+/**
+ * The art's entrance (intro): it fades up in `fade` ms while it springs from `from` of its size,
+ * overshooting a little and settling (a decay in s and a period in s), all over within `ms`.
+ */
+const INTRO = { fade: 240, from: 0.84, decay: 0.12, period: 0.34, ms: 680 };
+
+/** Whether the system asks for less motion: then glides jump and the entrance only fades. */
+const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /** On macOS a Ctrl-click is the secondary click: it opens the menu instead of using the tool. */
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
@@ -94,9 +133,17 @@ export class CanvasZone {
     this.needs = { under: true, art: true, ref: true, over: true };
     /** @type {Array<() => void>} */ this.cleanup = [];
     /** @type {any} */ this.menuEl = null;
-    this.lastTap = { time: 0, x: 0, y: 0, entries: 0 };
+    /** The last tap: when and where it ended, and the history state before it. */
+    this.lastTap = { time: 0, x: 0, y: 0, state: /** @type {any} */ (0) };
+    /** Where and when the finger now down touched. @type {{ x: number, y: number, time: number } | null} */
+    this.touchStart = null;
     /** @type {any} */ this.longPress = null;
+    /** A trackpad pinch in progress: its unrounded zoom and the art point it holds. @type {any} */
+    this.pinchWheel = null;
     /** @type {any} */ this.autoPan = null;
+    /** A zoom gliding to its view. @type {any} */ this.glide = null;
+    /** The wheel zoom under way: its travel and the unrounded zoom it asks for. @type {any} */ this.wheel = null;
+    /** The art's entrance, while it plays. @type {any} */ this.introAnim = null;
     /** @type {CanvasPattern | null} */ this.checker = null;
     /** Keeps the layers under the active one flattened, so strokes and previews redraw fast. */
     this.compositor = new Compositor();
@@ -159,6 +206,9 @@ export class CanvasZone {
     on(el, 'pointercancel', (e) => this.onUp(e, true));
     on(el, 'pointerleave', (e) => { if (!this.gesture && e.pointerType === 'mouse') { this.hover = null; this.ed.tool?.move?.({ ...this.toPointer(e), inside: false }); this.request('over'); } });
     on(el, 'wheel', (e) => this.onWheel(e), { passive: false });
+    // The wheel button drags as the Move tool: no autoscroll or paste of its own.
+    on(el, 'mousedown', (e) => { if (/** @type {MouseEvent} */ (e).button === 1) e.preventDefault(); });
+    on(el, 'auxclick', (e) => { if (/** @type {MouseEvent} */ (e).button === 1) e.preventDefault(); });
     on(el, 'contextmenu', (e) => {
       e.preventDefault();
       if (this.suppressMenu) { this.suppressMenu = false; return; }
@@ -176,15 +226,19 @@ export class CanvasZone {
       on(window, 'keyup', (e) => { if (e.code === 'Space') { this.space = false; this.updateCursor(); } });
       on(window, 'blur', () => { this.space = false; });
     }
+    // Resizing a canvas clears it, and a frame requested now would only draw after the next
+    // paint: while a container animates its size that paints a blank zone every frame. So a
+    // resize draws at once, before the browser paints.
+    const refit = () => { if (this.resize()) this.flush(); };
     if (typeof ResizeObserver !== 'undefined') {
-      const ro = new ResizeObserver(() => this.resize());
+      const ro = new ResizeObserver(refit);
       ro.observe(el);
       this.cleanup.push(() => ro.disconnect());
-    } else on(window, 'resize', () => this.resize());
+    } else on(window, 'resize', refit);
     // Moving to a screen with another pixel ratio changes no CSS size: watch the ratio itself.
     if (typeof matchMedia === 'function') {
       /** @type {MediaQueryList | null} */ let mq = null;
-      const onRatio = () => { this.resize(); watch(); };
+      const onRatio = () => { refit(); watch(); };
       const watch = () => {
         mq?.removeEventListener('change', onRatio);
         mq = matchMedia(`(resolution: ${globalThis.devicePixelRatio || 1}dppx)`);
@@ -199,6 +253,8 @@ export class CanvasZone {
     cancelAnimationFrame(this.frame);
     clearTimeout(this.pasteTimer);
     this.stopAutoPan();
+    this.stopGlide(false);
+    this.stopIntro();
     this.closeMenu();
     this.refPic?.image?.close?.();
     this.refPic = null;
@@ -234,12 +290,13 @@ export class CanvasZone {
     return { x: ax, y: ay };
   }
 
+  /** Follows the zone's size and pixel ratio. @returns {boolean} whether the canvases changed */
   resize() {
     const dpr = globalThis.devicePixelRatio || 1, dprChanged = dpr !== this.dpr;
     this.dpr = dpr;
     this.origin();
     const w = Math.max(1, this.el.clientWidth), h = Math.max(1, this.el.clientHeight);
-    if (w === this.width && h === this.height && !dprChanged && this.under.width === Math.round(w * dpr)) return;
+    if (w === this.width && h === this.height && !dprChanged && this.under.width === Math.round(w * dpr)) return false;
     this.width = w; this.height = h;
     for (const c of this.canvases()) {
       // CSS size from the backing size, so the browser shows it 1:1 (never stretched by a fraction).
@@ -248,10 +305,11 @@ export class CanvasZone {
       c.style.width = `${c.width / this.dpr}px`;
       c.style.height = `${c.height / this.dpr}px`;
     }
-    if (this.autoFit) this.fit();
+    if (this.autoFit || this.glide?.fit) this.fit();
     // Another pixel ratio: snap the zoom to whole device pixels per art pixel again.
     else if (dprChanged) this.zoomTo(this.scale, w / 2, h / 2, true);
     else this.applyView();
+    return true;
   }
 
   /** @param {boolean} replaced */
@@ -282,15 +340,29 @@ export class CanvasZone {
     return d >= 1 ? Math.max(1, Math.round(d)) / this.dpr : s;
   }
 
-  fit() {
+  /** The fitted view: the whole art, crisp, centred. */
+  fitView() {
     const doc = this.ed.doc;
     let s = this.fitScale;
     if (this.o.crispZoom && s * this.dpr >= 1) s = Math.max(1, Math.floor(s * this.dpr)) / this.dpr;
-    this.scale = s;
-    this.tx = (this.width - doc.width * s) / 2;
-    this.ty = (this.height - doc.height * s) / 2;
+    return { s, tx: (this.width - doc.width * s) / 2, ty: (this.height - doc.height * s) / 2 };
+  }
+
+  /** Fits the art at once; the view then follows the zone's size until it is zoomed or panned. */
+  fit() {
+    this.stopGlide(false);
+    const v = this.fitView();
+    this.scale = v.s;
+    this.tx = v.tx;
+    this.ty = v.ty;
     this.autoFit = true;
     this.applyView();
+  }
+
+  /** Glides to the fit, then fits as fit() does. */
+  fitGlide() {
+    const v = this.fitView();
+    this.glideTo(v.s, v.tx, v.ty, { fit: true });
   }
 
   /**
@@ -298,42 +370,154 @@ export class CanvasZone {
    * @param {boolean} [snap]
    */
   zoomTo(scale, sx = this.width / 2, sy = this.height / 2, snap = true) {
+    this.stopGlide();
+    this.viewAround(scale, sx, sy, (sx - this.tx) / this.scale, (sy - this.ty) / this.scale, snap);
+  }
+
+  /**
+   * Zooms so that the art point (ax, ay) sits at zone point (sx, sy).
+   * @param {number} scale @param {number} sx @param {number} sy @param {number} ax @param {number} ay
+   * @param {boolean} [snap]
+   */
+  viewAround(scale, sx, sy, ax, ay, snap = true) {
+    this.stopGlide();
     let s = Math.min(this.maxScale, Math.max(this.minScale, scale));
     if (snap) s = this.crisp(s);
-    const dx = (sx - this.tx) / this.scale, dy = (sy - this.ty) / this.scale;
     this.scale = s;
-    this.tx = sx - dx * s;
-    this.ty = sy - dy * s;
+    this.tx = sx - ax * s;
+    this.ty = sy - ay * s;
     this.autoFit = false;
     this.applyView();
   }
 
-  /** @param {number} factor @param {number} [sx] @param {number} [sy] */
-  zoomBy(factor, sx, sy) {
-    let next = this.scale * factor;
-    // When snapping, make sure a step always moves at least one device pixel per art pixel.
-    if (this.o.crispZoom && this.scale * this.dpr >= 1) {
-      const d = this.scale * this.dpr;
+  /**
+   * The zoom one step by `factor` from `s`, within the zoom limits: when snapping, a step always
+   * moves at least one device pixel per art pixel.
+   * @param {number} s @param {number} factor
+   */
+  stepScale(s, factor) {
+    let next = s * factor;
+    if (this.o.crispZoom && s * this.dpr >= 1) {
+      const d = s * this.dpr;
       next = (factor > 1 ? Math.max(Math.round(d * factor), Math.floor(d) + 1) : Math.min(Math.round(d * factor), Math.ceil(d) - 1)) / this.dpr;
-      if (next * this.dpr < 1) next = this.scale * factor;
+      if (next * this.dpr < 1) next = s * factor;
     }
-    this.zoomTo(next, sx, sy, true);
+    return Math.min(this.maxScale, Math.max(this.minScale, next));
+  }
+
+  /** Zooms by a step of `factor` at once. @param {number} factor @param {number} [sx] @param {number} [sy] */
+  zoomBy(factor, sx, sy) {
+    this.stopGlide();
+    this.zoomTo(this.stepScale(this.scale, factor), sx, sy, true);
+  }
+
+  /**
+   * One zoom step in (dir > 0) or out around zone point (sx, sy), gliding there; steps taken
+   * while it glides go on from where it is heading.
+   * @param {number} dir @param {number} [sx] @param {number} [sy]
+   */
+  zoomStep(dir, sx = this.width / 2, sy = this.height / 2) {
+    const base = this.glideBase();
+    this.zoomGlide(this.stepScale(base.s, dir > 0 ? ZOOM_STEP : 1 / ZOOM_STEP), sx, sy, base);
+  }
+
+  /** The view a glide is heading to, or the view as it is. */
+  glideBase() {
+    const g = this.glide;
+    return g ? { s: g.to.s, tx: g.to.tx, ty: g.to.ty } : { s: this.scale, tx: this.tx, ty: this.ty };
+  }
+
+  /**
+   * Glides to `scale` around zone point (sx, sy): the art point there in view `base` ends there.
+   * @param {number} scale @param {number} sx @param {number} sy @param {{ s: number, tx: number, ty: number }} [base]
+   */
+  zoomGlide(scale, sx, sy, base = this.glideBase()) {
+    const s = this.crisp(Math.min(this.maxScale, Math.max(this.minScale, scale)));
+    const ax = (sx - base.tx) / base.s, ay = (sy - base.ty) / base.s;
+    const v = this.clampFor(s, sx - ax * s, sy - ay * s);
+    this.glideTo(s, v.tx, v.ty);
+  }
+
+  /**
+   * Glides the view to (scale, tx, ty) in GLIDE_MS, easing out: a zoom about the one art point
+   * both views put in the same place, so the art there stays put all the way.
+   * @param {number} scale @param {number} tx @param {number} ty @param {{ fit?: boolean, ms?: number }} [o]
+   */
+  glideTo(scale, tx, ty, o = {}) {
+    const fit = !!o.fit, ms = o.ms ?? GLIDE_MS;
+    this.stopGlide(false);
+    const from = { s: this.scale, tx: this.tx, ty: this.ty }, to = { s: scale, tx, ty };
+    const still = from.s === to.s && Math.abs(from.tx - to.tx) < 0.5 && Math.abs(from.ty - to.ty) < 0.5;
+    if (ms <= 0 || still || reducedMotion()) { this.endGlide(to, fit); return; }
+    const g = this.glide = { from, to, fit, t0: performance.now(), ms, raf: 0 };
+    /** @param {number} now */
+    const step = (now) => {
+      if (this.glide !== g) return;
+      const t = Math.min(1, Math.max(0, (now - g.t0) / g.ms));
+      if (t >= 1) { this.glide = null; this.endGlide(to, fit); return; }
+      const k = 1 - (1 - t) ** 3, s = from.s * (to.s / from.s) ** k, ds = from.s - to.s;
+      if (Math.abs(ds) > 1e-9) {
+        const ax = (to.tx - from.tx) / ds, ay = (to.ty - from.ty) / ds;
+        this.tx = from.tx + ax * (from.s - s);
+        this.ty = from.ty + ay * (from.s - s);
+      } else {
+        this.tx = from.tx + (to.tx - from.tx) * k;
+        this.ty = from.ty + (to.ty - from.ty) * k;
+      }
+      this.scale = s;
+      this.autoFit = false;
+      this.applyView();
+      g.raf = requestAnimationFrame(step);
+    };
+    g.raf = requestAnimationFrame(step);
+  }
+
+  /** @param {{ s: number, tx: number, ty: number }} to @param {boolean} fit */
+  endGlide(to, fit) {
+    if (fit) { this.fit(); return; }
+    this.scale = to.s;
+    this.tx = to.tx;
+    this.ty = to.ty;
+    this.autoFit = false;
+    this.applyView();
+  }
+
+  /** Stops a glide: at the view it was heading to (finish), or where it is. @param {boolean} [finish] */
+  stopGlide(finish = true) {
+    const g = this.glide;
+    if (!g) return;
+    this.glide = null;
+    cancelAnimationFrame(g.raf);
+    if (finish) this.endGlide(g.to, g.fit);
+  }
+
+  /** Ends at once whatever plays (a glide, the entrance), as it would have ended. */
+  settle() {
+    this.stopGlide();
+    this.stopIntro();
   }
 
   /** @param {number} dx @param {number} dy */
   panBy(dx, dy) {
+    this.stopGlide();
     this.tx += dx;
     this.ty += dy;
     this.autoFit = false;
     this.applyView();
   }
 
-  /** Keeps at least a quarter of the art, or 48 px, inside the zone. */
+  /** Keeps a strip of the art inside the zone (see KEEP_IN_VIEW), whatever the zoom. */
   clampView() {
-    const doc = this.ed.doc, aw = doc.width * this.scale, ah = doc.height * this.scale;
-    const kx = Math.min(aw, Math.max(48, aw * 0.25)), ky = Math.min(ah, Math.max(48, ah * 0.25));
-    this.tx = Math.min(this.width - kx, Math.max(kx - aw, this.tx));
-    this.ty = Math.min(this.height - ky, Math.max(ky - ah, this.ty));
+    const v = this.clampFor(this.scale, this.tx, this.ty);
+    this.tx = v.tx;
+    this.ty = v.ty;
+  }
+
+  /** (tx, ty) moved as little as keeps the strip of the art in the zone at zoom s. @param {number} s @param {number} tx @param {number} ty */
+  clampFor(s, tx, ty) {
+    const doc = this.ed.doc, aw = doc.width * s, ah = doc.height * s;
+    const kx = Math.min(aw, KEEP_IN_VIEW, this.width), ky = Math.min(ah, KEEP_IN_VIEW, this.height);
+    return { tx: Math.min(this.width - kx, Math.max(kx - aw, tx)), ty: Math.min(this.height - ky, Math.max(ky - ah, ty)) };
   }
 
   applyView() {
@@ -377,17 +561,27 @@ export class CanvasZone {
   /** @param {PointerEvent} e */
   onDown(e) {
     this.closeMenu();
+    // A press ends a glide or the entrance where they were going: tools work on a still view.
+    this.settle();
     this.el.focus({ preventScroll: true });
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try { this.el.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
     const ed = this.ed;
 
     if (this.pointers.size === 2) {
-      // Second finger: whatever the first one started becomes a pinch.
+      // Second finger: whatever the first one started becomes a pinch (and no tap).
       this.cancelLongPress();
+      this.touchStart = null;
+      this.lastTap.time = 0;
       if (this.gesture?.kind === 'tool' || this.gesture?.kind === 'floating') ed.cancelToolGesture();
       const [a, b] = [...this.pointers.values()];
-      this.gesture = { kind: 'pinch', d: Math.hypot(a.x - b.x, a.y - b.y), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, scale: this.scale };
+      const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, o = this.origin();
+      // The art point between the fingers, held there for the whole pinch: each step is worked
+      // out from it rather than from the last (rounded) view, so the art never drifts.
+      this.gesture = {
+        kind: 'pinch', d: Math.hypot(a.x - b.x, a.y - b.y), cx, cy, scale: this.scale,
+        ax: (cx - o.x - this.tx) / this.scale, ay: (cy - o.y - this.ty) / this.scale,
+      };
       return;
     }
     if (this.pointers.size > 2) return;
@@ -400,22 +594,31 @@ export class CanvasZone {
 
     const p = this.toPointer(e);
     if (e.pointerType === 'touch') {
-      const now = performance.now();
-      if (now - this.lastTap.time < 200 && Math.hypot(e.clientX - this.lastTap.x, e.clientY - this.lastTap.y) < 20) {
-        // Double tap: open the menu, and take back what the first tap did.
-        if (ed.history.list().length > this.lastTap.entries && ed.history.canUndo()) ed.undo();
-        this.lastTap.time = 0;
+      const now = performance.now(), last = this.lastTap;
+      this.touchStart = null;
+      if (now - last.time < DOUBLE_TAP_MS && Math.hypot(e.clientX - last.x, e.clientY - last.y) < DOUBLE_TAP_SLOP) {
+        // Double tap: open the menu, and take back what the first tap did (if it did anything:
+        // compared by state, as a new step after an undo also drops the redo branch).
+        if (ed.history.stateId() !== last.state && ed.history.canUndo()) ed.undo();
+        last.time = 0;
         this.gesture = { kind: 'none' };
         this.openMenu(e.clientX, e.clientY);
         return;
       }
-      this.lastTap.entries = ed.history.list().length;
+      last.state = ed.history.stateId();
+      this.touchStart = { x: e.clientX, y: e.clientY, time: now };
       this.startLongPress(e);
     }
 
-    if (e.button === 1 || this.space) { this.startPan(e); return; }
+    if (this.space) { this.startPan(e); return; }
 
-    const doc = ed.doc, tool = ed.tool, hadFloating = !!doc.floating;
+    // The wheel button is the Move tool for the length of its drag, whatever tool is picked: it
+    // drags the floating layer (from anywhere) or the selection under it (lifted first, a copy
+    // with Alt), and pans anywhere else.
+    const wheelButton = e.button === 1;
+    const toolId = wheelButton ? 'move' : ed.activeToolId, tool = wheelButton ? ed.tools.get('move') : ed.tool;
+    if (wheelButton) p.button = 0;
+    const doc = ed.doc, hadFloating = !!doc.floating;
     let hit = null;
     if (doc.floating) {
       hit = ed.floatingController.hit(p);
@@ -425,10 +628,17 @@ export class CanvasZone {
         this.updateCursor();
         return;
       }
-      // A tap outside the floating layer applies it; the Move tool may still drag it from anywhere.
-      if (ed.activeToolId !== 'move' && e.button === 0) ed.run('floating.commit');
     }
-    const outsideOk = SELECTION_TOOLS.has(ed.activeToolId) || (ed.activeToolId === 'move' && !!doc.floating);
+    // One finger outside the art moves the view, whatever the tool; a tap there still applies a
+    // floating layer, as a click outside it does.
+    if (e.pointerType === 'touch' && !p.inside) {
+      this.gesture = { kind: 'pan', x: e.clientX, y: e.clientY, tapApplies: hadFloating && toolId !== 'move' };
+      this.updateCursor();
+      return;
+    }
+    // A click outside the floating layer applies it; the Move tool may still drag it from anywhere.
+    if (hadFloating && toolId !== 'move' && e.button === 0) ed.run('floating.commit');
+    const outsideOk = SELECTION_TOOLS.has(toolId) || (toolId === 'move' && !!doc.floating);
     if (!p.inside && !outsideOk) {
       this.startPan(e);
       return;
@@ -470,20 +680,27 @@ export class CanvasZone {
     // A second button pressed during a drag arrives as a move: right button cancels.
     if (e.button === 2 && this.cancelGesture()) { this.suppressMenu = true; return; }
     const g = this.gesture, ed = this.ed;
-    if (this.longPress && Math.hypot(e.clientX - this.longPress.x, e.clientY - this.longPress.y) > 8) this.cancelLongPress();
+    if (this.longPress && Math.hypot(e.clientX - this.longPress.x, e.clientY - this.longPress.y) > LONG_PRESS_SLOP) this.cancelLongPress();
 
     if (g?.kind === 'pinch') {
       const pts = [...this.pointers.values()];
       if (pts.length < 2) return;
       const [a, b] = pts, d = Math.hypot(a.x - b.x, a.y - b.y), cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
       const o = this.origin();
-      this.panBy(cx - g.cx, cy - g.cy);
-      this.zoomTo(g.scale * (d / Math.max(1, g.d)), cx - o.x, cy - o.y, false);
+      this.viewAround(g.scale * (d / Math.max(1, g.d)), cx - o.x, cy - o.y, g.ax, g.ay, false);
       g.cx = cx; g.cy = cy;
       return;
     }
     if (g?.kind === 'pan') {
-      this.panBy(e.clientX - g.x, e.clientY - g.y);
+      // The view moves in whole device pixels: what rounding left behind carries over to the
+      // next move, so the art keeps up with a sub-pixel pointer (pen, touch) exactly. Against the
+      // pan limit the remainder is dropped, so the way back starts at once.
+      const dx = e.clientX - g.x + (g.rx || 0), dy = e.clientY - g.y + (g.ry || 0), tx = this.tx, ty = this.ty;
+      this.panBy(dx, dy);
+      g.rx = dx - (this.tx - tx);
+      g.ry = dy - (this.ty - ty);
+      if (Math.abs(g.rx) * this.dpr >= 1) g.rx = 0;
+      if (Math.abs(g.ry) * this.dpr >= 1) g.ry = 0;
       g.x = e.clientX; g.y = e.clientY;
       return;
     }
@@ -510,7 +727,9 @@ export class CanvasZone {
     if (g?.kind === 'pinch') {
       if (this.pointers.size === 0) {
         this.gesture = null;
-        this.zoomTo(this.scale, this.width / 2, this.height / 2, true);
+        // Settle on whole device pixels around where the fingers were, so the art stays put.
+        const o = this.origin();
+        this.viewAround(this.scale, g.cx - o.x, g.cy - o.y, g.ax, g.ay, true);
       }
       return;
     }
@@ -527,7 +746,16 @@ export class CanvasZone {
     } else if (g.kind === 'tool') {
       if (cancelled) ed.cancelToolGesture();
       else ed.tool?.up?.(p);
-      if (e.pointerType === 'touch') this.lastTap = { ...this.lastTap, time: performance.now(), x: e.clientX, y: e.clientY };
+    } else if (g.kind === 'pan' && g.tapApplies && !cancelled && ed.doc.floating) {
+      const s = this.touchStart;
+      if (s && Math.hypot(e.clientX - s.x, e.clientY - s.y) < TAP_SLOP) ed.run('floating.commit', {});
+    }
+    if (e.pointerType === 'touch') {
+      // A tap with the tool, on a floating layer or beside the art may be the first of a double tap.
+      const s = this.touchStart, now = performance.now();
+      const tap = !cancelled && !!s && g.kind !== 'none' && now - s.time < TAP_MS && Math.hypot(e.clientX - s.x, e.clientY - s.y) < TAP_SLOP;
+      this.lastTap = { ...this.lastTap, time: tap ? now : 0, x: e.clientX, y: e.clientY };
+      this.touchStart = null;
     }
     this.updateCursor();
     this.request('over');
@@ -537,14 +765,54 @@ export class CanvasZone {
   onWheel(e) {
     e.preventDefault();
     this.closeMenu();
+    this.stopIntro();
     const o = this.origin(), sx = e.clientX - o.x, sy = e.clientY - o.y;
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? this.height : 1;
     if (e.shiftKey && !e.ctrlKey) { this.panBy(-(e.deltaY || e.deltaX) * unit, 0); return; }
     if (e.altKey && !e.ctrlKey) { this.panBy(0, -e.deltaY * unit); return; }
     const dy = e.deltaY * unit;
     if (Math.abs(dy) < 0.5) return;
-    if (e.ctrlKey) this.zoomTo(this.scale * Math.exp(-dy * 0.01), sx, sy, true); // trackpad pinch: smooth
-    else this.zoomBy(dy < 0 ? 1.25 : 0.8, sx, sy);
+    if (e.ctrlKey && e.deltaMode === 0 && Math.abs(dy) < 40) {
+      // Trackpad pinch (small ctrl+wheel steps; a mouse notch with Ctrl is far larger and glides
+      // below): it follows the fingers at once. Its steps add up unrounded, so a slow pinch zooms
+      // too (each small step alone would round back to the same crisp scale), around a point held
+      // for the pinch.
+      this.stopGlide();
+      const now = performance.now(), z = this.pinchWheel;
+      const going = !!z && now - z.time < 300 && z.shown === this.scale && z.sx === sx && z.sy === sy;
+      const target = Math.min(this.maxScale, Math.max(this.minScale, (going ? z.target : this.scale) * Math.exp(-dy * 0.01)));
+      const ax = going ? z.ax : (sx - this.tx) / this.scale, ay = going ? z.ay : (sy - this.ty) / this.scale;
+      this.viewAround(target, sx, sy, ax, ay, true);
+      this.pinchWheel = { target, shown: this.scale, time: now, sx, sy, ax, ay };
+      return;
+    }
+    // A wheel notch counts as about 100 px, whatever unit the browser gives it in.
+    this.wheelZoom(e.deltaY * (e.deltaMode === 1 ? 100 / 3 : e.deltaMode === 2 ? 300 : 1), sx, sy);
+  }
+
+  /**
+   * Wheel travel (CSS px; down zooms out) zooms by WHEEL_ZOOM per px around zone point (sx, sy),
+   * gliding. The travel of one turn of the wheel adds up unrounded, so a free-spinning wheel or a
+   * trackpad zooms smoothly too; and half a notch always moves at least one step, however coarse
+   * the crisp zooms are there.
+   * @param {number} travel @param {number} sx @param {number} sy
+   */
+  wheelZoom(travel, sx, sy) {
+    const now = performance.now(), dir = travel < 0 ? 1 : -1, base = this.glideBase();
+    let w = this.wheel;
+    if (!w || now - w.time > WHEEL_GESTURE_MS || w.dir !== dir) w = this.wheel = { want: base.s, travel: 0, stepped: false, dir, time: now };
+    w.time = now;
+    w.travel += Math.abs(travel);
+    w.want = Math.min(this.maxScale, Math.max(this.minScale, w.want * Math.exp(-travel * WHEEL_ZOOM)));
+    let s = this.crisp(w.want);
+    if (dir > 0 ? s < base.s : s > base.s) s = base.s;
+    if (s === base.s && !w.stepped && w.travel >= 50) {
+      s = this.stepScale(base.s, dir > 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
+      w.want = s;
+    }
+    if (s === base.s) return;
+    w.stepped = true;
+    this.zoomGlide(s, sx, sy, base);
   }
 
   /** @param {PointerEvent} e */
@@ -554,10 +822,13 @@ export class CanvasZone {
       x: e.clientX, y: e.clientY,
       timer: setTimeout(() => {
         this.longPress = null;
-        if (this.gesture?.kind === 'tool') this.ed.cancelToolGesture();
+        // What the finger started is taken back: a dot, or a floating layer it began to drag.
+        if (this.gesture?.kind === 'tool' || this.gesture?.kind === 'floating') this.ed.cancelToolGesture();
+        this.stopAutoPan();
         this.gesture = { kind: 'none' };
+        this.updateCursor();
         this.openMenu(e.clientX, e.clientY);
-      }, 500),
+      }, LONG_PRESS_MS),
     };
   }
 
@@ -566,32 +837,108 @@ export class CanvasZone {
     this.longPress = null;
   }
 
-  /** Pans while a gesture holds the pointer near the zone edge. @param {PointerEvent} e */
+  /**
+   * Pans while a drag holds the pointer at the zone edge (see AUTO_PAN): how far into the edge
+   * band, or past the zone's edge, sets the speed; the frames move it.
+   * @param {PointerEvent} e
+   */
   checkAutoPan(e) {
-    const o = this.origin(), m = 24;
-    const x = e.clientX - o.x, y = e.clientY - o.y;
-    const vx = x < m ? m - x : x > this.width - m ? this.width - m - x : 0;
-    const vy = y < m ? m - y : y > this.height - m ? this.height - m - y : 0;
-    if (!vx && !vy) { this.stopAutoPan(); return; }
-    const speed = (v) => Math.sign(v) * Math.min(14, Math.abs(v) * 0.5 + 2);
-    this.autoPan = { vx: vx ? speed(vx) : 0, vy: vy ? speed(vy) : 0, event: e };
-    if (!this.autoPan.raf) {
-      const step = () => {
-        const a = this.autoPan;
-        if (!a || !this.gesture) return;
-        this.panBy(a.vx, a.vy);
-        const p = this.toPointer(a.event);
-        if (this.gesture.kind === 'floating') this.ed.floatingController.move(p);
-        else this.ed.tool?.move?.(p);
-        a.raf = requestAnimationFrame(step);
-      };
-      this.autoPan.raf = requestAnimationFrame(step);
-    }
+    const A = AUTO_PAN, g = this.gesture, o = this.origin();
+    const band = g?.kind === 'floating' || SELECTION_TOOLS.has(this.ed.activeToolId) ? A.band : 0;
+    /** @param {number} v @param {number} size depth into the band: + brings the art's start into view */
+    const depth = (v, size) => (v < band ? band - v : v > size - band ? size - band - v : 0);
+    const dx = depth(e.clientX - o.x, this.width), dy = depth(e.clientY - o.y, this.height);
+    if (!dx && !dy) { this.stopAutoPan(); return; }
+    const a = this.autoPan || (this.autoPan = { since: performance.now(), last: 0, fx: 0, fy: 0, raf: 0 });
+    Object.assign(a, { event: e, dx, dy });
+    if (!a.raf) a.raf = requestAnimationFrame((t) => this.autoPanStep(t));
+  }
+
+  /** One frame of auto-pan: time-based, so a fast screen pans no faster. @param {number} now */
+  autoPanStep(now) {
+    const a = this.autoPan, A = AUTO_PAN, g = this.gesture;
+    if (!a || !g) return;
+    a.raf = requestAnimationFrame((t) => this.autoPanStep(t));
+    const dt = a.last ? Math.min(0.05, (now - a.last) / 1000) : 0;
+    a.last = now;
+    const held = now - a.since - A.wait;
+    if (held <= 0 || !dt) return;
+    const r = Math.min(1, held / A.ramp), ease = r * r * (3 - 2 * r);
+    /** @param {number} d */
+    const speed = (d) => {
+      const k = Math.min(1, Math.abs(d) / A.reach);
+      return Math.sign(d) * (A.min + (A.max - A.min) * k * k) * ease;
+    };
+    // Whole device pixels at a time; the remainder carries over, so a slow pan still moves.
+    a.fx += a.dx ? speed(a.dx) * dt : 0;
+    a.fy += a.dy ? speed(a.dy) * dt : 0;
+    const whole = (v) => Math.trunc(v * this.dpr) / this.dpr;
+    let vx = whole(a.fx), vy = whole(a.fy);
+    a.fx -= vx;
+    a.fy -= vy;
+    // Only as far as brings the art's edge into view: there is nothing to reach beyond it.
+    const aw = this.ed.doc.width * this.scale, ah = this.ed.doc.height * this.scale;
+    if (vx > 0) vx = Math.min(vx, Math.max(0, A.margin - this.tx));
+    else if (vx < 0) vx = Math.max(vx, Math.min(0, this.width - A.margin - this.tx - aw));
+    if (vy > 0) vy = Math.min(vy, Math.max(0, A.margin - this.ty));
+    else if (vy < 0) vy = Math.max(vy, Math.min(0, this.height - A.margin - this.ty - ah));
+    if (!vx && !vy) return;
+    this.panBy(vx, vy);
+    const p = this.toPointer(a.event);
+    if (g.kind === 'floating') this.ed.floatingController.move(p);
+    else this.ed.tool?.move?.(p);
+    this.request('over');
   }
 
   stopAutoPan() {
     if (this.autoPan?.raf) cancelAnimationFrame(this.autoPan.raf);
     this.autoPan = null;
+  }
+
+  /**
+   * The art's entrance (see INTRO): the canvases fade up while the art springs from a little
+   * smaller to its size, overshooting once and settling; only the fade where the system asks for
+   * less motion. It only shows: the view and where the pointer lands are untouched, and a press
+   * or the wheel ends it at once.
+   * @param {{ delay?: number }} [o] ms before it starts (the canvases stay hidden meanwhile)
+   */
+  intro(o = {}) {
+    this.stopIntro();
+    const canvases = this.canvases(), still = reducedMotion(), end = (still ? INTRO.fade : INTRO.ms) / 1000;
+    const it = this.introAnim = { t0: performance.now() + Math.max(0, o.delay ?? 0), raf: 0 };
+    for (const c of canvases) c.style.opacity = '0';
+    /** @param {number} now */
+    const step = (now) => {
+      if (this.introAnim !== it) return;
+      const t = (now - it.t0) / 1000;
+      if (t >= end) { this.stopIntro(); return; }
+      if (t > 0) {
+        const a = Math.min(1, (t * 1000) / INTRO.fade), fade = 1 - (1 - a) ** 2;
+        const k = still ? 1 : 1 - (1 - INTRO.from) * Math.exp(-t / INTRO.decay) * Math.cos((2 * Math.PI * t) / INTRO.period);
+        // Around the art's middle, wherever the view has it now.
+        const doc = this.ed.doc, cx = this.tx + (doc.width * this.scale) / 2, cy = this.ty + (doc.height * this.scale) / 2;
+        for (const c of canvases) {
+          c.style.opacity = String(fade);
+          c.style.transformOrigin = `${cx}px ${cy}px`;
+          c.style.transform = `scale(${k})`;
+        }
+      }
+      it.raf = requestAnimationFrame(step);
+    };
+    it.raf = requestAnimationFrame(step);
+  }
+
+  /** Ends the entrance at once, as it would end. */
+  stopIntro() {
+    const it = this.introAnim;
+    if (!it) return;
+    this.introAnim = null;
+    cancelAnimationFrame(it.raf);
+    for (const c of this.canvases()) {
+      c.style.opacity = '';
+      c.style.transform = '';
+      c.style.transformOrigin = '';
+    }
   }
 
   updateCursor() {
@@ -646,7 +993,7 @@ export class CanvasZone {
       if (k === 'a' && !e.shiftKey) return run('selection.all');
       if (k === 'd' || (k === 'a' && e.shiftKey)) return run('selection.clear');
       if (k === 'i' && e.shiftKey) return run('selection.invert');
-      if (k === '0') { this.fit(); e.preventDefault(); return; }
+      if (k === '0') { this.fitGlide(); e.preventDefault(); return; }
       return;
     }
     if (e.altKey) return;
@@ -673,9 +1020,9 @@ export class CanvasZone {
         else { this.panBy(-dx * 16, -dy * 16); e.preventDefault(); }
         return;
       }
-      case '0': this.fit(); e.preventDefault(); return;
-      case '+': case '=': this.zoomBy(1.25); e.preventDefault(); return;
-      case '-': case '_': this.zoomBy(0.8); e.preventDefault(); return;
+      case '0': this.fitGlide(); e.preventDefault(); return;
+      case '+': case '=': this.zoomStep(1); e.preventDefault(); return;
+      case '-': case '_': this.zoomStep(-1); e.preventDefault(); return;
       case '[': ed.setBrush({ size: Math.max(1, ed.brush.size - 1) }); e.preventDefault(); return;
       case ']': ed.setBrush({ size: Math.min(32, ed.brush.size + 1) }); e.preventDefault(); return;
       case 'x': ed.run('color.swap'); e.preventDefault(); return;
@@ -886,6 +1233,13 @@ export class CanvasZone {
   request(what) {
     if (what) this.needs[what] = true;
     if (!this.frame) this.frame = requestAnimationFrame((t) => this.render(t));
+  }
+
+  /** Draws what is waiting for the next frame now. */
+  flush() {
+    if (!this.frame) return;
+    cancelAnimationFrame(this.frame);
+    this.render(performance.now());
   }
 
   /** @param {number} time */

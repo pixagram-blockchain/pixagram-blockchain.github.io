@@ -872,6 +872,18 @@ export default {
             "no_changes": "No Changes"
         },
         "edit_post_dialog": {
+            "artwork": "Artwork",
+            "artwork_hint": "Edit the picture in the pixel editor. Saving replaces it on-chain; only the block history keeps the old version.",
+            "edit_in_pixel_editor": "Edit in the pixel editor",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "The artwork content was erased: there is no picture left to edit.",
+            "artwork_encoding": "Encoding the edited picture…",
+            "artwork_encode_failed": "The edited picture could not be encoded. Press Done in the editor again, or Reset.",
+            "artwork_too_large": "The edited picture weighs {{size}} kB, more than the {{max}} kB an edit can send. Simplify it in the editor, or Reset.",
+            "artwork_updated": "Post updated — the new artwork appears in a moment",
+            "original_content_not_declared": "Not declared yet. Turn it on if this was your own real picture — a photo or a drawing — before any style transformation.",
+            "ai_used_as_published": "As published: you can reword it or add another AI, but not remove it.",
 
             "loading_the_on_chain_version": "Loading the on-chain version…",
             "only_can_edit_this_post": "Only @{{authorUsername}} can edit this post.",
@@ -888,7 +900,6 @@ export default {
             "erase_artwork_content": "Erase artwork content",
             "yes_erase_it_on_save": "Yes, erase it on save",
             "the_artwork_content_will_be_erased_when": "The artwork content will be erased when you save.",
-            "replacing_the_artwork_with_a_new_image": "Replacing the artwork with a new image will land here in a future update.",
             "delete_this_post": "Delete this post?",
             "the_post_is_marked_as_deleted_in": "The post is marked as deleted in its metadata and disappears from every feed, profile and community page.",
             "the_artwork_content_post_body_is_erased": "The artwork content (post body) is erased on-chain as well — this part cannot be undone.",
@@ -2425,7 +2436,16 @@ export default {
             "adjust_step": "Adjust ({{step}}/{{total}})",
             "post_step": "Post ({{step}}/{{total}})",
             "publish": "Publish",
-            "ai_style": "AI style"
+            "ai_style": "AI style",
+            "original_content": "Original content",
+            "oc_hint": "Turn it on if this was your own real picture — a photo or a drawing — before any style transformation.",
+            "oc_file_declares_ai": "Turned off: the picture's file says it was made or edited with AI — turn it on if this is wrong.",
+            "oc_generated": "Generated from your description, so not original content.",
+            "ai_used": "AI used",
+            "ai_used_prefilled": "Pre-filled with the AI the app used. Add any other AI that made or changed the picture.",
+            "ai_used_hint": "Leave empty if no AI was involved. Otherwise, name the AI that made or changed the picture.",
+            "ai_used_is_required": "Name the AI that made or transformed this picture",
+            "ai_used_must_be_characters_or_less_currently": "AI used must be {{AI_MAX_LENGTH}} characters or less (currently {{ai_count}})"
         },
         "notifications_dialog": {
             "no_notifications_yet": "No notifications yet",
@@ -3267,6 +3287,13 @@ export default {
             "retry": "Retry"
         },
         "post_dialog": {
+            "origin": "Origin",
+            "original_content": "Original content",
+            "not_original_content": "Not original content",
+            "original_content_tooltip": "Declared by the author: their own photo or drawing, before any style transformation",
+            "ai_used": "AI used",
+            "no_ai_declared": "No AI declared",
+            "ai_used_tooltip": "Declared by the author: the AI that made or transformed the picture",
             "for_sale": "For Sale",
             "last": "Last: {{soldPrice}}{{currency}}",
             "not_for_sale": "Not for sale",
@@ -5075,7 +5102,15 @@ export default {
             "view_zoom_out": "Zoom out",
             "view_grid_on": "Show the grid",
             "view_grid_off": "Hide the grid",
-            "edits_applied": "Edited in the pixel editor"
+            "edits_applied": "Edited in the pixel editor",
+            "panels": "Panels",
+            "import": "Import",
+            "import_image": "Import image",
+            "import_hint": "Pixel art keeps its pixels, enlarged pixel art is scaled back, and a photo becomes pixel art. It floats over the active layer until you apply it. You can also drop or paste an image on the canvas.",
+            "import_done_native": "Pixel art imported, {{width}} × {{height}}",
+            "import_done_upscaled": "{{scale}}× pixel art imported at its true size, {{width}} × {{height}}",
+            "import_done_photo": "Photo turned into pixel art, {{width}} × {{height}}",
+            "import_failed": "This file could not be read as an image."
         }
     }
 };

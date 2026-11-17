@@ -1,7 +1,7 @@
 /**
  * locales/de.js — Deutsch
  *
- * Coverage: 2374 of 2542 keys (93.4 %).
+ * Coverage: 2382 of 2550 keys (93.4 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -881,6 +881,13 @@ export default {
             "retry": "Erneut versuchen"
         },
         "post_dialog": {
+            "origin": "Herkunft",
+            "original_content": "Originalinhalt",
+            "not_original_content": "Kein Originalinhalt",
+            "original_content_tooltip": "Vom Urheber angegeben: ein eigenes Foto oder eine eigene Zeichnung, vor jeder Stilumwandlung",
+            "ai_used": "Verwendete KI",
+            "no_ai_declared": "Keine KI angegeben",
+            "ai_used_tooltip": "Vom Urheber angegeben: die KI, die das Bild erstellt oder umgewandelt hat",
             "for_sale": "Zu verkaufen",
             "last": "Zuletzt: {{soldPrice}}{{currency}}",
             "not_for_sale": "Nicht zu verkaufen",
@@ -1086,7 +1093,16 @@ export default {
             "adjust_step": "Anpassen ({{step}}/{{total}})",
             "post_step": "Posten ({{step}}/{{total}})",
             "publish": "Veröffentlichen",
-            "ai_style": "KI-Stil"
+            "ai_style": "KI-Stil",
+            "original_content": "Originalinhalt",
+            "oc_hint": "Schalte es ein, wenn das vor jeder Stilumwandlung dein eigenes echtes Bild war — ein Foto oder eine Zeichnung.",
+            "oc_file_declares_ai": "Ausgeschaltet: Die Bilddatei gibt an, mit KI erstellt oder bearbeitet worden zu sein — schalte es ein, falls das nicht stimmt.",
+            "oc_generated": "Aus deiner Beschreibung generiert, daher kein Originalinhalt.",
+            "ai_used": "Verwendete KI",
+            "ai_used_prefilled": "Mit der KI vorausgefüllt, die die App verwendet hat. Ergänze jede andere KI, die das Bild erstellt oder verändert hat.",
+            "ai_used_hint": "Leer lassen, wenn keine KI beteiligt war. Sonst nenne die KI, die das Bild erstellt oder verändert hat.",
+            "ai_used_is_required": "Nenne die KI, die dieses Bild erstellt oder umgewandelt hat",
+            "ai_used_must_be_characters_or_less_currently": "Verwendete KI darf höchstens {{AI_MAX_LENGTH}} Zeichen haben (derzeit {{ai_count}})"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Sammel-Power-Transfer",
@@ -1671,6 +1687,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "Kunstwerk",
+            "artwork_hint": "Bearbeite das Bild im Pixel-Editor. Beim Speichern wird es on-chain ersetzt; nur die Blockhistorie bewahrt die alte Fassung.",
+            "edit_in_pixel_editor": "Im Pixel-Editor bearbeiten",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "Der Inhalt des Kunstwerks wurde gelöscht: Es gibt kein Bild mehr zu bearbeiten.",
+            "artwork_encoding": "Das bearbeitete Bild wird kodiert…",
+            "artwork_encode_failed": "Das bearbeitete Bild konnte nicht kodiert werden. Wähle im Editor erneut „Fertig“ oder „Zurücksetzen“.",
+            "artwork_too_large": "Das bearbeitete Bild wiegt {{size}} kB, mehr als die {{max}} kB, die eine Bearbeitung senden kann. Vereinfache es im Editor oder wähle „Zurücksetzen“.",
+            "artwork_updated": "Beitrag aktualisiert — das neue Kunstwerk erscheint gleich",
+            "original_content_not_declared": "Noch nicht angegeben. Schalte es ein, wenn das vor jeder Stilumwandlung dein eigenes echtes Bild war — ein Foto oder eine Zeichnung.",
+            "ai_used_as_published": "Wie veröffentlicht: Du kannst es umformulieren oder eine weitere KI ergänzen, aber nicht entfernen.",
             "loading_the_on_chain_version": "On-chain-Version wird geladen…",
             "only_can_edit_this_post": "Nur @{{authorUsername}} kann diesen Beitrag bearbeiten.",
             "title": "Titel",
@@ -1692,7 +1720,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "Tags: kleingeschrieben, keine Punkte, mind. 3 Zeichen, Beginn mit einem Buchstaben",
             "enable_this_if_your_content_contains_mature": "Aktiviere dies, wenn dein Inhalt nicht jugendfreies oder sensibles Material enthält",
             "if_this_post_is_a_dao_proposal": "Ist dieser Beitrag ein DAO-Antrag, wird der verknüpfte Antrag ebenfalls on-chain entfernt.",
-            "replacing_the_artwork_with_a_new_image": "Das Ersetzen des Kunstwerks durch ein neues Bild folgt in einem künftigen Update.",
             "title_description_and_tags_for_this_post": "Titel, Beschreibung und Tags dieses Beitrags werden unter „Inhalt bearbeiten“ geändert. Hier kannst du seine Sichtbarkeits-Flags umschalten.",
             "marks_the_post_as_deleted_in_its": "Markiert den Beitrag in seinen Metadaten als gelöscht: Er verschwindet aus jedem Feed, Profil und jeder Community-Seite. Umkehrbar — nur das Metadaten-Flag wird verändert. Es wird kein Tag hinzugefügt, daher lassen sich gelöschte Beiträge nicht durchstöbern.",
             "erase_the_artwork_content_itself_the_post": "Löscht den Inhalt des Kunstwerks selbst (den Beitragstext). Das Bild wird on-chain ersetzt und kann von hier aus nicht wiederhergestellt werden — nur die Blockhistorie bewahrt die alte Fassung. Markiert den Beitrag als gelöscht.",
@@ -5055,7 +5082,15 @@ export default {
             "view_zoom_out": "Verkleinern",
             "view_grid_on": "Raster einblenden",
             "view_grid_off": "Raster ausblenden",
-            "edits_applied": "Im Pixel-Editor bearbeitet"
+            "edits_applied": "Im Pixel-Editor bearbeitet",
+            "panels": "Bereiche",
+            "import": "Importieren",
+            "import_image": "Bild importieren",
+            "import_hint": "Pixel-Art behält ihre Pixel, vergrößerte Pixel-Art wird zurückskaliert, und ein Foto wird zu Pixel-Art. Das Bild schwebt über der aktiven Ebene, bis du es anwendest. Du kannst ein Bild auch auf die Leinwand ziehen oder einfügen.",
+            "import_done_native": "Pixel-Art importiert, {{width}} × {{height}}",
+            "import_done_upscaled": "{{scale}}×-Pixel-Art in Originalgröße importiert, {{width}} × {{height}}",
+            "import_done_photo": "Foto in Pixel-Art umgewandelt, {{width}} × {{height}}",
+            "import_failed": "Diese Datei kann nicht als Bild gelesen werden."
         }
     }
 };

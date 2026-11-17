@@ -1,7 +1,7 @@
 /**
  * locales/cs.js — Čeština
  *
- * Coverage: 2408 of 2542 keys (94.7 %).
+ * Coverage: 2416 of 2550 keys (94.7 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -882,6 +882,13 @@ export default {
             "retry": "Zkusit znovu"
         },
         "post_dialog": {
+            "origin": "Původ",
+            "original_content": "Původní obsah",
+            "not_original_content": "Nejde o původní obsah",
+            "original_content_tooltip": "Uvedeno autorem: vlastní fotka nebo kresba před jakoukoli stylovou proměnou",
+            "ai_used": "Použitá AI",
+            "no_ai_declared": "Žádná AI nebyla uvedena",
+            "ai_used_tooltip": "Uvedeno autorem: AI, která obrázek vytvořila nebo proměnila",
             "for_sale": "Na prodej",
             "last": "Naposledy: {{soldPrice}}{{currency}}",
             "not_for_sale": "Není na prodej",
@@ -1087,7 +1094,16 @@ export default {
             "adjust_step": "Upravit ({{step}}/{{total}})",
             "post_step": "Zveřejnit ({{step}}/{{total}})",
             "publish": "Publikovat",
-            "ai_style": "Styl AI"
+            "ai_style": "Styl AI",
+            "original_content": "Původní obsah",
+            "oc_hint": "Zapněte, pokud šlo před jakoukoli stylovou proměnou o váš vlastní skutečný obrázek — fotku nebo kresbu.",
+            "oc_file_declares_ai": "Vypnuto: soubor obrázku uvádí, že byl vytvořen nebo upraven pomocí AI — pokud je to chybně, zapněte to.",
+            "oc_generated": "Vytvořeno z vašeho popisu, takže nejde o původní obsah.",
+            "ai_used": "Použitá AI",
+            "ai_used_prefilled": "Předvyplněno AI, kterou použila aplikace. Doplňte jakoukoli další AI, která obrázek vytvořila nebo změnila.",
+            "ai_used_hint": "Pokud se žádná AI nepoužila, nechte prázdné. Jinak uveďte AI, která obrázek vytvořila nebo změnila.",
+            "ai_used_is_required": "Uveďte AI, která tento obrázek vytvořila nebo proměnila",
+            "ai_used_must_be_characters_or_less_currently": "Použitá AI smí mít nejvýše {{AI_MAX_LENGTH}} znaků (nyní {{ai_count}})"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Hromadný převod Power",
@@ -1671,6 +1687,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "Dílo",
+            "artwork_hint": "Upravte obrázek v pixelovém editoru. Uložením se on-chain nahradí; starou verzi uchovává jen historie bloků.",
+            "edit_in_pixel_editor": "Upravit v pixelovém editoru",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "Obsah díla byl vymazán: nezbývá žádný obrázek k úpravě.",
+            "artwork_encoding": "Kódování upraveného obrázku…",
+            "artwork_encode_failed": "Upravený obrázek se nepodařilo zakódovat. V editoru znovu stiskněte Hotovo, nebo Resetovat.",
+            "artwork_too_large": "Upravený obrázek má {{size}} kB, víc než {{max}} kB, které může úprava odeslat. Zjednodušte ho v editoru, nebo stiskněte Resetovat.",
+            "artwork_updated": "Příspěvek aktualizován — nové dílo se zobrazí za chvíli",
+            "original_content_not_declared": "Zatím neuvedeno. Zapněte, pokud šlo před jakoukoli stylovou proměnou o váš vlastní skutečný obrázek — fotku nebo kresbu.",
+            "ai_used_as_published": "Jak bylo zveřejněno: můžete to přeformulovat nebo přidat další AI, ale ne odstranit.",
             "loading_the_on_chain_version": "Načítání on-chain verze…",
             "only_can_edit_this_post": "Tento příspěvek může upravit jen @{{authorUsername}}.",
             "title": "Název",
@@ -1692,7 +1720,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "Tagy: malá písmena, bez teček, min. 3 znaky, musí začínat písmenem",
             "enable_this_if_your_content_contains_mature": "Zapněte, pokud váš obsah obsahuje explicitní nebo citlivý materiál",
             "if_this_post_is_a_dao_proposal": "Je-li tento příspěvek návrhem DAO, odstraní se on-chain i propojený návrh.",
-            "replacing_the_artwork_with_a_new_image": "Nahrazení díla novým obrázkem přibude v budoucí aktualizaci.",
             "title_description_and_tags_for_this_post": "Název, popis a tagy tohoto příspěvku se upravují přes „Upravit obsah“. Zde můžete přepínat jeho příznaky viditelnosti.",
             "marks_the_post_as_deleted_in_its": "Označí příspěvek v metadatech jako smazaný: zmizí ze všech feedů, profilů i stránek komunit. Vratné — mění se jen příznak v metadatech. Nepřidává se žádný tag, takže smazané příspěvky nelze procházet.",
             "erase_the_artwork_content_itself_the_post": "Vymaže samotný obsah díla (tělo příspěvku). Obrázek se on-chain nahradí a odsud ho nelze obnovit — starou verzi uchovává jen historie bloků. Označí příspěvek jako smazaný.",
@@ -5053,7 +5080,15 @@ export default {
             "view_zoom_out": "Oddálit",
             "view_grid_on": "Zobrazit mřížku",
             "view_grid_off": "Skrýt mřížku",
-            "edits_applied": "Upraveno v pixelovém editoru"
+            "edits_applied": "Upraveno v pixelovém editoru",
+            "panels": "Panely",
+            "import": "Import",
+            "import_image": "Importovat obrázek",
+            "import_hint": "Pixel art si ponechá své pixely, zvětšený pixel art se vrátí do skutečné velikosti a z fotografie se stane pixel art. Obrázek se vznáší nad aktivní vrstvou, dokud ho nepoužijete. Obrázek můžete také přetáhnout nebo vložit na plátno.",
+            "import_done_native": "Pixel art importován, {{width}} × {{height}}",
+            "import_done_upscaled": "Pixel art {{scale}}× importován ve skutečné velikosti, {{width}} × {{height}}",
+            "import_done_photo": "Fotografie převedena na pixel art, {{width}} × {{height}}",
+            "import_failed": "Tento soubor nelze přečíst jako obrázek."
         }
     }
 };

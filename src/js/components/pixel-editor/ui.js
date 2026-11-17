@@ -2,9 +2,11 @@
 // pixel-editor/ui.js — the small building blocks every panel shares
 //
 // Dark, flat and borderless, like the rest of the app: surfaces are told
-// apart by tone (#101010 sheet, #171717 controls, #212121 hover) and by
-// space, never by lines. Selected = inverted (light chip, dark ink), the
-// same convention as the app's radial menu.
+// apart by tone and by space, never by lines. Each region of the editor is a
+// rounded card (21 px, as the app's cards) on its own tone, with black
+// between the cards. Selected = inverted (light chip, dark ink), the same
+// convention as the app's radial menu; the tab bar's sliding pill is the
+// app's own tabs.
 // ============================================================================
 
 import * as React from "preact/compat";
@@ -15,6 +17,22 @@ import Switch from "@material-ui/core/Switch";
 import Tooltip from "@material-ui/core/Tooltip";
 
 export const EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
+
+/** Tones, darkest first. */
+export const SURFACE = {
+    page: "#000000",     // behind the cards
+    stage: "#0d0d0d",    // the canvas well
+    tabs: "#181818",     // the tab bar
+    panel: "#212121",    // tool rail, drawer, floating bars
+    raised: "#2b2b2b",   // controls on a panel
+    hover: "#343434",
+    focus: "#3b3b3b",
+    on: "#e9e9e9",       // selected: light chip…
+    onInk: "#1d1d1d",    // …dark ink
+    pill: "#c7c7c7",     // the tab bar's moving pill (the app's tabs)
+};
+export const RADIUS = 21;
+export const GAP = 8;
 
 const useStyles = makeStyles({
     section: {
@@ -33,7 +51,7 @@ const useStyles = makeStyles({
         fontWeight: 700,
         letterSpacing: "0.12em",
         textTransform: "uppercase",
-        color: "#939393",
+        color: "#9a9a9a",
     },
     segmented: {
         display: "inline-flex",
@@ -41,7 +59,7 @@ const useStyles = makeStyles({
         gap: 4,
         padding: 4,
         borderRadius: 20,
-        backgroundColor: "#171717",
+        backgroundColor: SURFACE.raised,
         maxWidth: "100%",
     },
     segment: {
@@ -53,12 +71,12 @@ const useStyles = makeStyles({
         fontSize: 13,
         whiteSpace: "nowrap",
         transition: `background-color 160ms ${EASE}, color 160ms ${EASE}`,
-        "&:hover": { backgroundColor: "#262626", color: "#ffffff" },
-        "&.Mui-focusVisible": { backgroundColor: "#2e2e2e" },
+        "&:hover": { backgroundColor: SURFACE.hover, color: "#ffffff" },
+        "&.Mui-focusVisible": { backgroundColor: SURFACE.focus },
     },
     segmentOn: {
-        backgroundColor: "#e9e9e9 !important",
-        color: "#1d1d1d !important",
+        backgroundColor: `${SURFACE.on} !important`,
+        color: `${SURFACE.onInk} !important`,
     },
     tiles: {
         display: "grid",
@@ -69,7 +87,7 @@ const useStyles = makeStyles({
         minHeight: 76,
         padding: "10px 6px 8px",
         borderRadius: 18,
-        backgroundColor: "#171717",
+        backgroundColor: SURFACE.raised,
         color: "#dddddd",
         display: "flex",
         flexDirection: "column",
@@ -78,14 +96,14 @@ const useStyles = makeStyles({
         gap: 6,
         textAlign: "center",
         transition: `background-color 160ms ${EASE}, color 160ms ${EASE}, opacity 160ms ${EASE}`,
-        "&:hover": { backgroundColor: "#212121", color: "#ffffff" },
-        "&.Mui-focusVisible": { backgroundColor: "#2a2a2a" },
+        "&:hover": { backgroundColor: SURFACE.hover, color: "#ffffff" },
+        "&.Mui-focusVisible": { backgroundColor: SURFACE.focus },
         "&.Mui-disabled": { opacity: 0.32 },
         "& .MuiSvgIcon-root": { fontSize: 22 },
     },
     tileOn: {
-        backgroundColor: "#e9e9e9 !important",
-        color: "#1d1d1d !important",
+        backgroundColor: `${SURFACE.on} !important`,
+        color: `${SURFACE.onInk} !important`,
     },
     tileLabel: {
         fontFamily: `"Industry Book", "Normative Pro"`,

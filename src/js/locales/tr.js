@@ -1,7 +1,7 @@
 /**
  * locales/tr.js — Türkçe
  *
- * Coverage: 2374 of 2542 keys (93.4 %).
+ * Coverage: 2382 of 2550 keys (93.4 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -885,6 +885,13 @@ export default {
             "retry": "Yeniden dene"
         },
         "post_dialog": {
+            "origin": "Köken",
+            "original_content": "Orijinal içerik",
+            "not_original_content": "Orijinal içerik değil",
+            "original_content_tooltip": "Sanatçının beyanı: herhangi bir stil dönüşümünden önce kendi fotoğrafı ya da çizimi",
+            "ai_used": "Kullanılan yapay zekâ",
+            "no_ai_declared": "Yapay zekâ beyan edilmedi",
+            "ai_used_tooltip": "Sanatçının beyanı: görseli oluşturan ya da dönüştüren yapay zekâ",
             "for_sale": "Satışta",
             "last": "Son: {{soldPrice}}{{currency}}",
             "not_for_sale": "Satılık değil",
@@ -1090,7 +1097,16 @@ export default {
             "adjust_step": "Ayarla ({{step}}/{{total}})",
             "post_step": "Paylaş ({{step}}/{{total}})",
             "publish": "Yayınla",
-            "ai_style": "AI stili"
+            "ai_style": "AI stili",
+            "original_content": "Orijinal içerik",
+            "oc_hint": "Herhangi bir stil dönüşümünden önce kendi gerçek görselinse — bir fotoğraf ya da çizim — aç.",
+            "oc_file_declares_ai": "Kapatıldı: görsel dosyası yapay zekâyla oluşturulduğunu ya da düzenlendiğini belirtiyor — yanlışsa aç.",
+            "oc_generated": "Açıklamandan oluşturuldu, bu yüzden orijinal içerik değil.",
+            "ai_used": "Kullanılan yapay zekâ",
+            "ai_used_prefilled": "Uygulamanın kullandığı yapay zekâyla önceden dolduruldu. Görseli oluşturan ya da değiştiren başka yapay zekâları da ekle.",
+            "ai_used_hint": "Yapay zekâ kullanılmadıysa boş bırak. Aksi hâlde görseli oluşturan ya da değiştiren yapay zekâyı yaz.",
+            "ai_used_is_required": "Bu görseli oluşturan ya da dönüştüren yapay zekâyı yaz",
+            "ai_used_must_be_characters_or_less_currently": "Kullanılan yapay zekâ {{AI_MAX_LENGTH}} karakter veya daha kısa olmalı (şu an {{ai_count}})"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Toplu Power transferi",
@@ -1674,6 +1690,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "Eser",
+            "artwork_hint": "Görseli piksel düzenleyicide düzenle. Kaydettiğinde zincir üstünde değiştirilir; eski sürümü yalnızca blok geçmişi saklar.",
+            "edit_in_pixel_editor": "Piksel düzenleyicide düzenle",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "Eser içeriği silindi: düzenlenecek görsel kalmadı.",
+            "artwork_encoding": "Düzenlenen görsel kodlanıyor…",
+            "artwork_encode_failed": "Düzenlenen görsel kodlanamadı. Düzenleyicide yeniden Bitti'ye ya da Sıfırla'ya bas.",
+            "artwork_too_large": "Düzenlenen görsel {{size}} kB; bir düzenlemenin gönderebileceği {{max}} kB'tan fazla. Düzenleyicide sadeleştir ya da Sıfırla'ya bas.",
+            "artwork_updated": "Gönderi güncellendi — yeni eser birazdan görünecek",
+            "original_content_not_declared": "Henüz beyan edilmedi. Herhangi bir stil dönüşümünden önce kendi gerçek görselinse — bir fotoğraf ya da çizim — aç.",
+            "ai_used_as_published": "Yayımlandığı gibi: yeniden yazabilir ya da başka bir yapay zekâ ekleyebilirsin, ama kaldıramazsın.",
             "loading_the_on_chain_version": "Zincir üstü sürüm yükleniyor…",
             "only_can_edit_this_post": "Bu gönderiyi yalnızca @{{authorUsername}} düzenleyebilir.",
             "title": "Başlık",
@@ -1695,7 +1723,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "Etiketler: küçük harf, nokta yok, en az 3 karakter, harfle başlamalı",
             "enable_this_if_your_content_contains_mature": "İçeriğin yetişkinlere yönelik veya hassas materyal içeriyorsa bunu etkinleştir",
             "if_this_post_is_a_dao_proposal": "Bu gönderi bir DAO önerisiyse, bağlı öneri zincirden de kaldırılır.",
-            "replacing_the_artwork_with_a_new_image": "Eseri yeni bir görselle değiştirme özelliği gelecekteki bir güncellemede buraya gelecek.",
             "title_description_and_tags_for_this_post": "Bu gönderinin başlığı, açıklaması ve etiketleri “İçeriği Düzenle” üzerinden düzenlenir. Burada görünürlük bayraklarını değiştirebilirsin.",
             "marks_the_post_as_deleted_in_its": "Gönderiyi meta verisinde silindi olarak işaretler: tüm akışlardan, profil ve topluluk sayfalarından kaybolur. Geri alınabilir — yalnızca meta veri bayrağına dokunulur. Etiket eklenmediği için silinen gönderilere göz atılamaz.",
             "erase_the_artwork_content_itself_the_post": "Eser içeriğinin kendisini (gönderi gövdesini) sil. Görsel zincir üstünde değiştirilir ve buradan geri getirilemez — eski sürümü yalnızca blok geçmişi saklar. Gönderiyi silindi olarak işaretler.",
@@ -5056,7 +5083,15 @@ export default {
             "view_zoom_out": "Uzaklaştır",
             "view_grid_on": "Izgarayı göster",
             "view_grid_off": "Izgarayı gizle",
-            "edits_applied": "Piksel düzenleyicide düzenlendi"
+            "edits_applied": "Piksel düzenleyicide düzenlendi",
+            "panels": "Paneller",
+            "import": "İçe aktar",
+            "import_image": "Görsel içe aktar",
+            "import_hint": "Piksel sanat piksellerini korur, büyütülmüş piksel sanat gerçek boyutuna döner ve bir fotoğraf piksel sanata dönüşür. Görsel, sen uygulayana kadar etkin katmanın üzerinde yüzer. Bir görseli tuvale bırakabilir veya yapıştırabilirsin de.",
+            "import_done_native": "Piksel sanat içe aktarıldı, {{width}} × {{height}}",
+            "import_done_upscaled": "{{scale}}× piksel sanat gerçek boyutunda içe aktarıldı, {{width}} × {{height}}",
+            "import_done_photo": "Fotoğraf piksel sanata dönüştürüldü, {{width}} × {{height}}",
+            "import_failed": "Bu dosya görsel olarak okunamıyor."
         }
     }
 };

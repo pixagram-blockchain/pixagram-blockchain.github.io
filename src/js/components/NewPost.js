@@ -39,6 +39,8 @@ import ImageEditor from "./ImageEditor";
 import PixelEditorDialog, { preloadPixelEditor } from "./pixel-editor";
 import { PIXA_LICENSE_BASE } from "../utils/pixa_license";
 import { resolveDefaultLicense } from "../utils/default_license";
+import { AI_TYPE, NO_AI, fileDeclaresAi, prefillAiUsed } from "../utils/ai_provenance";
+import { loadNsfwDetect, nsfwImageKey } from "../utils/nsfw_suggest";
 import { get_cached_settings as getCachedSettings, subscribe as subscribeSettings, same_setting_value as sameSettingValue } from "../utils/settings";
 import Chip from "@material-ui/core/Chip";
 import GavelIcon from "@material-ui/icons/Gavel";
@@ -55,6 +57,8 @@ import Portal from "@material-ui/core/Portal";
 import Autocomplete from "@material-ui/lab/Autocomplete";
 
 import { t, tk, tx, useLanguage, getLocaleCode } from "../utils/text";
+import { isMaturePrompt, isMatureTag } from "../utils/store";
+import { STORE_GATE, SCREEN, screenPicture, notifyStoreGate, warmupStoreGate } from "../utils/storeGate";
 
 // A weight shown to the user, with the app locale's decimal separator.
 const formatKb = (kb) => Number(kb).toLocaleString(getLocaleCode(), {
@@ -71,44 +75,36 @@ const formatKb = (kb) => Number(kb).toLocaleString(getLocaleCode(), {
 // content is detected as mature/sensitive.
 //
 // The detector pulls in a heavy model + onnxruntime that must NOT block the
-// NewPost dialog bundle or first paint, so — exactly as in PaperCard.js — it
-// is dynamic-import()ed lazily and cached at module scope (cost paid once per
-// session). Detection is purely advisory: it never blocks publishing and only
-// ever turns the flag ON.
-let _nsfwMod = null;
-let _nsfwModPromise = null;
+// NewPost dialog bundle or first paint, so it is dynamic-import()ed lazily and
+// cached at module scope by utils/nsfw_suggest.js (loadNsfwDetect), which
+// EditPostDialog shares for an edited picture; the verdict cache is keyed by
+// nsfwImageKey, a hash of the encoded image. Detection is purely advisory: it
+// never blocks publishing and only ever turns the flag ON.
 
-// Idempotent loader. Resolves to the module (default export) or null if the
-// import failed. Safe to call repeatedly / concurrently.
-function loadNsfwDetect() {
-    if (_nsfwMod) return Promise.resolve(_nsfwMod);
-    if (_nsfwModPromise) return _nsfwModPromise;
-    _nsfwModPromise = import("../utils/nsfw")
-        .then((m) => { _nsfwMod = (m && (m.default || m)) || null; return _nsfwMod; })
-        .catch(() => {
-            // Clear the promise so a later attempt may retry, and resolve to
-            // null so callers treat detection as unavailable (fail-open).
-            _nsfwModPromise = null;
-            return null;
-        });
-    return _nsfwModPromise;
-}
-
-// Fast, dependency-free 53-bit string hash (cyrb53). Used to derive a stable,
-// content-addressed id for the verdict cache from the encoded image: identical
-// image bytes => identical id => classified at most once per device. Matches
-// utils/nsfw.js's documented convention that the cache key is a content hash.
-function nsfwImageKey(str, seed = 0) {
-    let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
-    for (let i = 0, ch; i < str.length; i++) {
-        ch = str.charCodeAt(i);
-        h1 = Math.imul(h1 ^ ch, 2654435761);
-        h2 = Math.imul(h2 ^ ch, 1597334677);
-    }
-    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-    return "img-" + (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
-}
+// ============================================================================
+// STORE BUILDS: CREATION GATE (Google Play / App Store)
+// ============================================================================
+// The store versions of the app must not let anyone upload, generate or
+// publish mature content (Google Play: Sexual Content and AI-Generated Content
+// policies; Apple: guideline 1.1.4). In a store build (utils/store.js) every
+// picture that enters this wizard is checked with the on-device classifier the
+// feed already uses (utils/nsfw.js, classifyImage), at each point where a new
+// picture appears — before it is shown:
+//   - a pick, drop, paste, share-sheet or "open with" launch (processFileUpload)
+//   - a crop (handleImageEditorComplete)
+//   - the pixel-art probe result and every conversion / AI result
+//   - and once more on Publish, on the exact pixels being posted.
+// The pixel editor checks by itself what it opens on, what is pasted or
+// dropped on its canvas and what Done hands back (PixelEditorDialog), so its
+// result arrives here already checked.
+// A picture classified as mature is erased and a snackbar says why. A picture
+// that can't be checked (the model failed to load…) is not used either: in a
+// store build nothing unchecked is shown or published. The "Create image" tab
+// also refuses a description that plainly asks for mature content before any
+// request leaves the device (isMaturePrompt).
+// The check itself (STORE_GATE, SCREEN, screenPicture, notifyStoreGate) lives
+// in utils/storeGate.js. In the browser STORE_GATE is false and none of this
+// runs: the wizard keeps its advisory NSFW auto-flag on the final step.
 
 // Fallback source of pixels for classification: decode the (bare, WEBP) post
 // body to ImageData. Only used when the live `preview` ImageData isn't on hand.
@@ -141,6 +137,7 @@ function decodeBase64ToImageData(base64) {
 const VALIDATION = {
     TITLE_MAX_LENGTH: 24,
     DESCRIPTION_MAX_LENGTH: 1024,
+    AI_MAX_LENGTH: 128,
     TAGS_MIN_COUNT: 1,
     TAGS_MAX_COUNT: 5,
     TAG_MIN_LENGTH: 3,
@@ -151,6 +148,9 @@ const VALIDATION = {
 };
 
 const RECOMMENDED_TAGS = ["selfies", "gaming", "fantasy", "landscape", "retro", "couples", "technology", "animals", "family", "sport", "holidays", "work", "pets", "abstract", "nude", "friends", "drawing", "vehicules", "events", "hobbies", "art", "myself", "fun", "intro", "travel", "fashion", "nature", "space", "comics"];
+// What the tag field suggests: a store build never suggests a mature tag
+// (Google Play: "don't promote or recommend sexual content").
+const SUGGESTED_TAGS = STORE_GATE ? RECOMMENDED_TAGS.filter((tag) => !isMatureTag(tag)) : RECOMMENDED_TAGS;
 
 // ============================================================================
 // VALIDATION FUNCTIONS
@@ -230,7 +230,24 @@ const validateTags = (tags) => {
     return { valid: true, error: null };
 };
 
-const validateAllFields = (title, description, tags) => {
+// The "AI used" field (json_metadata.ai): free text, and required when the
+// app itself ran an AI step. It is pre-filled then, so the requirement only
+// bites when the author clears it.
+const validateAiUsed = (aiUsed, required) => {
+    const value = aiUsed || "";
+    if (required && !value.trim()) {
+        return { valid: false, error: tk("components.new_post.ai_used_is_required") };
+    }
+    if (value.length > VALIDATION.AI_MAX_LENGTH) {
+        return { valid: false, error: tk("components.new_post.ai_used_must_be_characters_or_less_currently", {
+                AI_MAX_LENGTH: VALIDATION.AI_MAX_LENGTH,
+                ai_count: value.length
+            }) };
+    }
+    return { valid: true, error: null };
+};
+
+const validateAllFields = (title, description, tags, aiUsed, aiRequired) => {
     const errors = {};
 
     const titleValidation = validateTitle(title);
@@ -246,6 +263,11 @@ const validateAllFields = (title, description, tags) => {
     const tagsValidation = validateTags(tags);
     if (!tagsValidation.valid) {
         errors.tags = tagsValidation.error;
+    }
+
+    const aiValidation = validateAiUsed(aiUsed, aiRequired);
+    if (!aiValidation.valid) {
+        errors.ai = aiValidation.error;
     }
 
     return {
@@ -1118,6 +1140,8 @@ const DEFAULT_AI_STYLE = AI_STYLES[0].value;
 // descriptor (never as English text, never as a t() result) and resolved with
 // tx() where UploadZone renders it, so it follows the active language.
 const UPLOAD_MESSAGE_DEFAULT = tk("components.new_post.we_don_t_store_uploaded_images");
+// Under the upload button while a store build checks a new picture (STORE_GATE).
+const UPLOAD_MESSAGE_CHECKING = tk("components.store_policy.checking_the_picture");
 
 const initialState = {
     // Wizard state
@@ -1135,7 +1159,8 @@ const initialState = {
     touched: {
         title: false,
         description: false,
-        tags: false
+        tags: false,
+        ai: false
     },
 
     // Image settings
@@ -1150,6 +1175,26 @@ const initialState = {
     // about 4x faster.
     aiStyle: DEFAULT_AI_STYLE,
     aiTurbo: false,
+
+    // AI disclosure, published as json_metadata.oc and json_metadata.ai
+    // (utils/ai_provenance.js).
+    //  - aiProcess: what the pipeline ran for the current result, { type,
+    //    model }, as processImageFile reports it (NO_AI for pixel art taken
+    //    as is). Replaced by every result, dropped with it.
+    //  - aiUsed: the "AI used" field. Every result pre-fills it with its
+    //    model (aiUsedPrefill keeps that value) in place of the previous
+    //    one, keeping whatever the author wrote of their own (prefillAiUsed).
+    //  - ocChoice: the author's "Original content" switch, null until they
+    //    touch it; aiDeclaredByFile: the picked file's own metadata says it
+    //    was made or edited with AI, which turns the switch off meanwhile.
+    //    Both belong to the picture: a new pick or a removal clears them.
+    // Unlike the image settings above, none survives RESET_UPLOAD without
+    // `keepInput`.
+    aiProcess: NO_AI,
+    aiUsed: "",
+    aiUsedPrefill: "",
+    ocChoice: null,
+    aiDeclaredByFile: false,
 
     // Canvas/preview data
     preview: null,
@@ -1260,25 +1305,36 @@ const reducer = (state, action) => {
 
         case actionTypes.RESET_UPLOAD: {
             // Reset only upload-related state, preserving settings. With
-            // `keepInput` the picked picture (and its edit) stays in the zone
-            // — used by "Back" from Adjust so the user can crop again or
-            // answer the AI question differently without re-uploading.
+            // `keepInput` the picked picture (its edit, and what is known of
+            // its origin) stays in the zone — used by "Back" from Adjust so
+            // the user can crop again or answer the AI question differently
+            // without re-uploading.
             const input = action.keepInput
                 ? {
                     inputFileUrl: state.inputFileUrl,
                     inputFile: state.inputFile,
                     uploadOriginal: state.uploadOriginal,
-                    editParams: state.editParams
+                    editParams: state.editParams,
+                    ocChoice: state.ocChoice,
+                    aiDeclaredByFile: state.aiDeclaredByFile
                 }
                 : {
                     inputFileUrl: "",
                     inputFile: null,
                     uploadOriginal: null,
-                    editParams: null
+                    editParams: null,
+                    ocChoice: null,
+                    aiDeclaredByFile: false,
+                    aiUsed: "",
+                    aiUsedPrefill: ""
                 };
             return {
                 ...state,
                 ...input,
+                // The conversion result is dropped, and what made it with it.
+                // With keepInput, "AI used" stays as it is: the next result
+                // swaps its own pre-fill in, keeping the author's words.
+                aiProcess: NO_AI,
                 currentStep: 0,
                 preview: null,
                 previewCache: {},
@@ -1308,7 +1364,19 @@ const reducer = (state, action) => {
             };
         }
 
-        case actionTypes.SET_PREVIEW_DATA:
+        case actionTypes.SET_PREVIEW_DATA: {
+            // What made this result (processImageFile's `ai`), and the "AI
+            // used" field pre-filled from it: the author's own words stay,
+            // the AI the app ran replaces the one it ran before.
+            const aiProcess = action.aiProcess || NO_AI;
+            const prefill = aiProcess.model || "";
+            const aiUsed = prefillAiUsed(state.aiUsed, state.aiUsedPrefill, prefill);
+            // Whether the field is now valid depends on this result (it is
+            // required once the app ran AI): re-check it rather than show a
+            // stale verdict.
+            const otherErrors = { ...state.validationErrors };
+            delete otherErrors.ai;
+            const aiCheck = validateAiUsed(aiUsed, aiProcess.type !== AI_TYPE.NONE);
             return {
                 ...state,
                 preview: action.preview,
@@ -1316,6 +1384,10 @@ const reducer = (state, action) => {
                 editedData: null,
                 editedProject: null,
                 processorData: action.processorData,
+                aiProcess,
+                aiUsed,
+                aiUsedPrefill: prefill,
+                validationErrors: aiCheck.valid ? otherErrors : { ...otherErrors, ai: aiCheck.error },
                 availableSizes: action.availableSizes,
                 title: action.title || state.title,
                 currentStep: 1,
@@ -1325,6 +1397,7 @@ const reducer = (state, action) => {
                 isGenerating: false,
                 canvasKey: state.canvasKey + 1
             };
+        }
 
         case actionTypes.CACHE_PREVIEW:
             return {
@@ -1375,7 +1448,8 @@ const reducer = (state, action) => {
                 touched: {
                     title: true,
                     description: true,
-                    tags: true
+                    tags: true,
+                    ai: true
                 }
             };
 
@@ -2109,8 +2183,8 @@ const CanvasPreview = memo(({
                 </Fade>
                 <Fade in timeout={1000}>
                     <Button
-                        variant="text"
-                        style={{ color: "#ffffff88" }}
+                        variant="contained"
+                        color="primary"
                         onClick={onOpenEditor}
                         onMouseEnter={preloadPixelEditor}
                         onFocus={preloadPixelEditor}
@@ -2251,6 +2325,13 @@ const PublishForm = memo(({
                               onNsfwChange,
                               nsfwDetecting,
                               nsfwAutoFlagged,
+                              oc,
+                              ocLocked,
+                              ocAutoOff,
+                              onOcChange,
+                              aiUsed,
+                              aiPrefilled,
+                              onAiUsedChange,
                               onOpenLicense,
                               onFieldBlur
                           }) => {
@@ -2336,6 +2417,14 @@ const PublishForm = memo(({
     const getDescriptionCharCounterClass = () => {
         if (descriptionCharCount > VALIDATION.DESCRIPTION_MAX_LENGTH) return classes.charCounterError;
         if (descriptionCharCount > VALIDATION.DESCRIPTION_MAX_LENGTH * 0.8) return classes.charCounterWarning;
+        return classes.charCounter;
+    };
+
+    const aiCharCount = aiUsed.length;
+
+    const getAiCharCounterClass = () => {
+        if (aiCharCount > VALIDATION.AI_MAX_LENGTH) return classes.charCounterError;
+        if (aiCharCount > VALIDATION.AI_MAX_LENGTH * 0.8) return classes.charCounterWarning;
         return classes.charCounter;
     };
 
@@ -2432,7 +2521,7 @@ const PublishForm = memo(({
                         filterOptions={(options, params) => {
                             const input = (params.inputValue || '').toLowerCase().trim();
                             if (!input) return [];
-                            const pool = [...new Set([...trendingTags, ...RECOMMENDED_TAGS])];
+                            const pool = [...new Set([...trendingTags, ...SUGGESTED_TAGS])];
                             const filtered = pool
                                 .filter(t => t.startsWith(input) && !tags.includes(t) && t !== input)
                                 .slice(0, 4);
@@ -2453,7 +2542,7 @@ const PublishForm = memo(({
                                 {option.disabled && <span style={{ color: '#888', marginLeft: 8, fontSize: 12 }}>{t("components.new_post.must_start_with_a_letter_min_4")}</span>}
                             </span>
                         )}
-                        options={RECOMMENDED_TAGS}
+                        options={SUGGESTED_TAGS}
                         renderTags={(value, getTagProps) =>
                             value.map((tag, index) => (
                                 <Chip key={tag} label={<span><span style={{ color: '#888', marginRight: 2 }}>#</span>{tag}</span>} {...getTagProps({ index })} />
@@ -2489,6 +2578,10 @@ const PublishForm = memo(({
                 </Box>
 
                 <Box className={classes.nsfwSwitch}>
+                    {/* No NSFW switch in a store build: mature content can't
+                        be posted there at all (see STORE_GATE), so there is
+                        nothing to mark. The "Original content" switch stays. */}
+                    {!STORE_GATE && <React.Fragment>
                     <FormControlLabel
                         control={
                             <Switch
@@ -2514,6 +2607,63 @@ const PublishForm = memo(({
                                 // same sentence as EditPostDialog's NSFW switch: its key is reused
                                 : t("components.edit_post_dialog.enable_this_if_your_content_contains_mature")}
                     </Typography>
+                    </React.Fragment>}
+
+                    {/* Original content (json_metadata.oc): the picture was
+                        the author's own real picture before any style
+                        transformation. Locked off for a generation, which
+                        starts from no picture; off while the file declares
+                        AI, until the author turns it back on. */}
+                    <FormControlLabel
+                        style={{ marginTop: 8 }}
+                        control={
+                            <Switch
+                                checked={oc}
+                                onChange={onOcChange}
+                                disabled={ocLocked}
+                                color="primary"
+                            />
+                        }
+                        label={t("components.new_post.original_content")}
+                    />
+                    <Typography variant="caption" style={{ color: ocAutoOff ? '#aaa' : '#888', display: 'block', marginLeft: 48 }}>
+                        {ocLocked
+                            ? t("components.new_post.oc_generated")
+                            : ocAutoOff
+                                ? t("components.new_post.oc_file_declares_ai")
+                                : t("components.new_post.oc_hint")}
+                    </Typography>
+                </Box>
+
+                {/* AI used (json_metadata.ai): which AI made or transformed
+                    the picture, in the author's words. Pre-filled with what
+                    the app ran, and required then. */}
+                <TextField
+                    value={aiUsed}
+                    fullWidth
+                    label={t("components.new_post.ai_used")}
+                    variant="outlined"
+                    onChange={onAiUsedChange}
+                    onBlur={() => onFieldBlur('ai')}
+                    error={touched.ai && !!validationErrors.ai}
+                    className={touched.ai && validationErrors.ai ? classes.errorField : ''}
+                    inputProps={{ maxLength: VALIDATION.AI_MAX_LENGTH + 10 }}
+                />
+                <Box display="flex" justifyContent="space-between" alignItems="flex-start" style={{ marginBottom: 16 }}>
+                    {touched.ai && validationErrors.ai ? (
+                        <Typography className={classes.errorText}>
+                            {tx(validationErrors.ai)}
+                        </Typography>
+                    ) : (
+                        <Typography className={classes.errorText} style={{ color: '#666' }}>
+                            {aiPrefilled
+                                ? t("components.new_post.ai_used_prefilled")
+                                : t("components.new_post.ai_used_hint")}
+                        </Typography>
+                    )}
+                    <Typography className={getAiCharCounterClass()}>
+                        {aiCharCount}/{VALIDATION.AI_MAX_LENGTH}
+                    </Typography>
                 </Box>
 
                 <LicenseSection
@@ -2532,6 +2682,11 @@ const PublishForm = memo(({
     prev.nsfw === next.nsfw &&
     prev.nsfwDetecting === next.nsfwDetecting &&
     prev.nsfwAutoFlagged === next.nsfwAutoFlagged &&
+    prev.oc === next.oc &&
+    prev.ocLocked === next.ocLocked &&
+    prev.ocAutoOff === next.ocAutoOff &&
+    prev.aiUsed === next.aiUsed &&
+    prev.aiPrefilled === next.aiPrefilled &&
     prev.licenseCustomization === next.licenseCustomization &&
     prev.validationErrors === next.validationErrors &&
     prev.touched === next.touched
@@ -2610,7 +2765,8 @@ function NewPost(props) {
         canvasKey, closeConfirmOpen, useAiOpen, aiStyle, aiTurbo, quantizeDialogOpen,
         licenseCustomizationOpen, quantizeDownscale, quantizeColors,
         licenseBase, licenseCustomization, processName, processStart, processFinish,
-        validationErrors, touched, isPublishing
+        validationErrors, touched, isPublishing,
+        aiProcess, aiUsed, ocChoice, aiDeclaredByFile
     } = state;
 
     // Computed values
@@ -2621,11 +2777,21 @@ function NewPost(props) {
     const loading = totalTimeMs > spentTimeMs && totalTimeMs > 0;
     const base64Kb = ((base64 || "").length || 0) / 1000 * 3 / 4;
 
+    // AI disclosure as the Post step shows it and the post records it
+    // (json_metadata.oc / .ai). Original content: never for a generation,
+    // which starts from no picture; else the author's switch; else off when
+    // the file declares AI, on otherwise. "AI used" is required once the app
+    // itself ran an AI step.
+    const ocLocked = aiProcess.type === AI_TYPE.GENERATION;
+    const oc = ocLocked ? false : (ocChoice !== null ? ocChoice : !aiDeclaredByFile);
+    const ocAutoOff = !ocLocked && ocChoice === null && aiDeclaredByFile;
+    const aiRequired = aiProcess.type !== AI_TYPE.NONE;
+
     // Check if form is valid for publishing
     const isFormValid = useMemo(() => {
-        const validation = validateAllFields(title, description, tags);
+        const validation = validateAllFields(title, description, tags, aiUsed, aiRequired);
         return validation.valid && base64;
-    }, [title, description, tags, base64]);
+    }, [title, description, tags, aiUsed, aiRequired, base64]);
 
     // Whether the dialog holds an image the user would lose by closing it:
     // a picture picked in the upload zone (it stays in the draft on the
@@ -2689,7 +2855,8 @@ function NewPost(props) {
                 if (Array.isArray(result) && result.length > 0) {
                     const names = result
                         .map(t => (typeof t === 'string' ? t : t.name))
-                        .filter(n => n && n.length > 0);
+                        // A store build never suggests a mature tag, trending or not.
+                        .filter(n => n && n.length > 0 && !(STORE_GATE && isMatureTag(n)));
                     if (names.length > 0) setTrendingTags(names);
                 }
             } catch (e) {
@@ -2749,6 +2916,12 @@ function NewPost(props) {
         return () => { cancelled = true; };
     }, [open, currentStep]);
 
+    // Store build: the very first picture picked is checked (STORE_GATE), so
+    // the model loads as soon as the dialog opens rather than at "Adjust".
+    useEffect(() => {
+        if (open && STORE_GATE) warmupStoreGate();
+    }, [open]);
+
     // Reset per-post detection memory when the dialog closes. The guard refs
     // live outside the reducer and survive open/close, so without this a second
     // post in the same session could inherit the previous post's verdict/guard.
@@ -2767,6 +2940,9 @@ function NewPost(props) {
     // always wins. Re-suggests when the underlying image changes (keyed by the
     // encoded-image hash); the detector's own cache makes repeat calls cheap.
     useEffect(() => {
+        // A store build has no NSFW switch to suggest: its gate erases mature
+        // pictures instead, and checks the published pixels on Publish.
+        if (STORE_GATE) return;
         // Only on the final step, and only once we have something to publish.
         if (currentStep !== 2) return;
         if (!base64) return;
@@ -2992,10 +3168,26 @@ function NewPost(props) {
         });
     }, []);
 
+    // ── Store builds: erase a picture the gate refused (STORE_GATE) ───────
+    // Empties the zone and every result made from the picture — the same as
+    // the remove button — drops anything still in flight for it, and says why.
+    // Stable on purpose (no state in its closure) so the async paths below can
+    // call it whenever their check lands; the zone's object URL is revoked by
+    // the inputFileUrl effect.
+    const eraseForStore = useCallback((outcome) => {
+        uploadTokenRef.current++;
+        probeTokenRef.current++;
+        if (preloadTimeoutRef.current) clearTimeout(preloadTimeoutRef.current);
+        if (debounceTimeoutRef.current) clearTimeout(debounceTimeoutRef.current);
+        dispatch({ type: actionTypes.RESET_UPLOAD, keepInput: false });
+        notifyStoreGate(outcome);
+    }, []);
+
     // Process file upload (extracted for reuse)
     //
-    // Only places the picture in the upload zone. Nothing else happens until
-    // the user clicks "Next" (see handleContinueWithUpload): that is where the
+    // Only places the picture in the upload zone, and reads what its file
+    // declares about AI (step 1b). Nothing else happens until the user
+    // clicks "Next" (see handleContinueWithUpload): that is where the
     // pixel-art probe runs and, when the picture is not pixel art already,
     // where the "Transform your picture with AI?" question is asked. In
     // between, the picture can be cropped through the edit button on the
@@ -3016,6 +3208,15 @@ function NewPost(props) {
             const local = await materializeFile(imageFile);
             if (isStale()) return;
 
+            // 1b. Whether the file declares AI (IPTC / C2PA digital source
+            //     type, Stable Diffusion settings), read from the bytes as
+            //     picked: the HEIC conversion below and a later crop both
+            //     re-encode the picture and drop its metadata. Runs alongside
+            //     the steps below, never rejects, and only turns the Post
+            //     step's "Original content" switch off until the author says
+            //     otherwise (utils/ai_provenance.js).
+            const aiDeclared = fileDeclaresAi(local);
+
             // 2. HEIC (iPhone) uploads are converted once here, so the preview
             //    <img>, the editor, the probe and the AI/pipeline paths (which
             //    get `upload` via inputFile) all see a file the browser can
@@ -3026,8 +3227,23 @@ function NewPost(props) {
             // 3. The picture must actually decode before it goes in the zone —
             //    never show a blank "loaded" zone the wizard can't continue from.
             url = URL.createObjectURL(upload);
-            await withTimeout(verifyDecodable(url), UPLOAD_DECODE_TIMEOUT_MS, "Image decode");
+            const decoded = await withTimeout(verifyDecodable(url), UPLOAD_DECODE_TIMEOUT_MS, "Image decode");
             if (isStale()) { safeRevokeURL(url); return; }
+
+            // 4. Store build: check it before it is ever shown (STORE_GATE).
+            //    Refused → it never reaches the zone, and the snackbar says why.
+            if (STORE_GATE) {
+                dispatch({ type: actionTypes.SET_FIELD, field: 'message', value: UPLOAD_MESSAGE_CHECKING });
+                const outcome = await screenPicture(upload, decoded);
+                if (isStale()) { safeRevokeURL(url); return; }
+                dispatch({ type: actionTypes.SET_FIELD, field: 'message', value: UPLOAD_MESSAGE_DEFAULT });
+                if (outcome !== SCREEN.OK) {
+                    safeRevokeURL(url);
+                    url = null;
+                    notifyStoreGate(outcome);
+                    return;
+                }
+            }
 
             dispatch({
                 type: actionTypes.SET_MULTIPLE,
@@ -3035,9 +3251,18 @@ function NewPost(props) {
                     inputFileUrl: url,
                     inputFile: upload,
                     uploadOriginal: upload,
-                    editParams: null
+                    editParams: null,
+                    // A new picture: its disclosure starts afresh.
+                    ocChoice: null,
+                    aiDeclaredByFile: false,
+                    aiUsed: "",
+                    aiUsedPrefill: ""
                 }
             });
+
+            if (await aiDeclared && !isStale()) {
+                dispatch({ type: actionTypes.SET_FIELD, field: 'aiDeclaredByFile', value: true });
+            }
         } catch (error) {
             safeRevokeURL(url);
             if (isStale()) return;
@@ -3086,12 +3311,20 @@ function NewPost(props) {
             if (isStale()) return;
 
             if (pixelartImagedata instanceof ImageData) {
+                // Store build: the probe's pixels are what Adjust would show.
+                if (STORE_GATE) {
+                    const outcome = await screenPicture(pixelartImagedata);
+                    if (isStale()) return;
+                    if (outcome !== SCREEN.OK) { eraseForStore(outcome); return; }
+                }
                 dispatch({
                     type: actionTypes.SET_PREVIEW_DATA,
                     preview: pixelartImagedata,
                     sizeName: "default",
                     processorData: null,
                     availableSizes: ["default"],
+                    // Taken as is: no AI step ran in the app.
+                    aiProcess: NO_AI,
                 });
                 dispatch({
                     type: actionTypes.SET_FIELD,
@@ -3125,7 +3358,7 @@ function NewPost(props) {
                 dispatch({ type: actionTypes.SET_FIELD, field: 'isProbing', value: false });
             }
         }
-    }, [inputFile, handleCanvasReady]);
+    }, [inputFile, handleCanvasReady, eraseForStore]);
 
     // ── Picture editor (crop / rotate / flip) ──────────────────────────
     // Opened from the edit button on the picked picture. The editor always
@@ -3145,21 +3378,36 @@ function NewPost(props) {
             dispatch({ type: actionTypes.SET_FIELD, field: 'editorOpen', value: false });
             return;
         }
-        // The previous object URL is revoked by the inputFileUrl effect.
-        const url = URL.createObjectURL(file);
-        dispatch({
-            type: actionTypes.SET_MULTIPLE,
-            payload: {
-                inputFile: file,
-                inputFileUrl: url,
-                editParams: edit || null,
-                editorOpen: false,
-                // Keep the pipeline's own framing in step with the crop; an
-                // identity edit (file = the original) leaves it untouched.
-                ...(edit ? { aspectRatio: closestPipelineAspectRatio(edit.width, edit.height) } : {})
-            }
-        });
-    }, []);
+        const apply = () => {
+            // The previous object URL is revoked by the inputFileUrl effect.
+            const url = URL.createObjectURL(file);
+            dispatch({
+                type: actionTypes.SET_MULTIPLE,
+                payload: {
+                    inputFile: file,
+                    inputFileUrl: url,
+                    editParams: edit || null,
+                    editorOpen: false,
+                    // Keep the pipeline's own framing in step with the crop; an
+                    // identity edit (file = the original) leaves it untouched.
+                    ...(edit ? { aspectRatio: closestPipelineAspectRatio(edit.width, edit.height) } : {})
+                }
+            });
+        };
+        if (!STORE_GATE) { apply(); return; }
+
+        // Store build: a crop is a new picture (it can single out what the
+        // whole one didn't show), so it is checked before it replaces the one
+        // in the zone. The zone keeps the checked picture meanwhile.
+        dispatch({ type: actionTypes.SET_FIELD, field: 'editorOpen', value: false });
+        const token = uploadTokenRef.current;
+        screenPicture(file)
+            .then((outcome) => {
+                if (!mountedRef.current || token !== uploadTokenRef.current) return;
+                if (outcome === SCREEN.OK) apply();
+                else eraseForStore(outcome);
+            });
+    }, [eraseForStore]);
 
     // Keep processFileUpload ref in sync for the overlay handler
     useEffect(() => { processFileUploadRef.current = processFileUpload; }, [processFileUpload]);
@@ -3204,6 +3452,15 @@ function NewPost(props) {
     const processImage = useCallback(async (useAi, style = DEFAULT_AI_STYLE, turbo = false) => {
         if (!mountedRef.current) return;
 
+        // Store build: the description is the model's prompt (and the whole
+        // request on "Create image"). One that plainly asks for mature content
+        // is refused here, before anything is sent (STORE_GATE).
+        if (STORE_GATE && useAi && isMaturePrompt(description)) {
+            dispatch({ type: actionTypes.SET_FIELD, field: 'isGenerating', value: false });
+            notifyStoreGate(SCREEN.PROMPT);
+            return;
+        }
+
         try {
             dispatch({ type: actionTypes.SET_FIELD, field: 'isGenerating', value: true });
 
@@ -3247,6 +3504,19 @@ function NewPost(props) {
                 }
             }
 
+            // Store build: the conversion / AI result is checked before it is
+            // shown. The other sizes are the same picture, and Publish checks
+            // the exact pixels posted.
+            if (initialPreview && STORE_GATE) {
+                const outcome = await screenPicture(initialPreview);
+                if (!mountedRef.current) return;
+                if (outcome !== SCREEN.OK) {
+                    try { if (result.disposePrepared) result.disposePrepared(); } catch (_) { /* best effort */ }
+                    eraseForStore(outcome);
+                    return;
+                }
+            }
+
             if (initialPreview) {
                 dispatch({
                     type: actionTypes.SET_PREVIEW_DATA,
@@ -3254,7 +3524,12 @@ function NewPost(props) {
                     sizeName: preferredSize,
                     processorData: result,
                     availableSizes: result.availableSizes || [],
-                    title: result.prompt || ""
+                    title: result.prompt || "",
+                    // What the pipeline actually ran — generation, a
+                    // transformation with the style's model, or no AI —
+                    // which is not always what was asked: "Create image"
+                    // with a picture in the zone transforms that picture.
+                    aiProcess: result.ai || NO_AI
                 });
 
                 // Encode base64 directly rather than relying on the
@@ -3299,7 +3574,7 @@ function NewPost(props) {
                 });
             }
         }
-    }, [description, inputFile, preferredSize, aspectRatio, transformationPercent, fidelityPercent, handleCanvasReady]);
+    }, [description, inputFile, preferredSize, aspectRatio, transformationPercent, fidelityPercent, handleCanvasReady, eraseForStore]);
 
     // Start preloading other sizes
     const startPreloading = useCallback((processor, sizes, currentSize) => {
@@ -3421,6 +3696,12 @@ function NewPost(props) {
         dispatch({ type: actionTypes.SET_FIELD, field: 'aiTurbo', value: event.target.checked });
     }, []);
 
+    // "Original content" switch (Post step). The author's choice wins over
+    // what the file declared, either way.
+    const handleOcChange = useCallback((event) => {
+        dispatch({ type: actionTypes.SET_FIELD, field: 'ocChoice', value: event.target.checked });
+    }, []);
+
     // Handle size change
     const handleSizeChange = useCallback((event) => {
         const newSize = event.target.value;
@@ -3498,6 +3779,21 @@ function NewPost(props) {
         }
     }, [touched.tags]);
 
+    const handleAiUsedChange = useCallback((e) => {
+        const value = e.target.value;
+        dispatch({ type: actionTypes.SET_FIELD, field: 'aiUsed', value });
+
+        // Validate on change if already touched
+        if (touched.ai) {
+            const validation = validateAiUsed(value, aiRequired);
+            if (!validation.valid) {
+                dispatch({ type: actionTypes.SET_VALIDATION_ERROR, field: 'ai', error: validation.error });
+            } else {
+                dispatch({ type: actionTypes.CLEAR_VALIDATION_ERROR, field: 'ai' });
+            }
+        }
+    }, [touched.ai, aiRequired]);
+
     const handleNsfwChange = useCallback((e) => {
         // A manual toggle is authoritative: stop auto-detection from
         // overriding the user's choice for the current image, and clear the
@@ -3522,6 +3818,9 @@ function NewPost(props) {
             case 'tags':
                 validation = validateTags(tags);
                 break;
+            case 'ai':
+                validation = validateAiUsed(aiUsed, aiRequired);
+                break;
             default:
                 return;
         }
@@ -3531,7 +3830,7 @@ function NewPost(props) {
         } else {
             dispatch({ type: actionTypes.CLEAR_VALIDATION_ERROR, field });
         }
-    }, [title, description, tags]);
+    }, [title, description, tags, aiUsed, aiRequired]);
 
     const handleTabChange = useCallback((e, value) => {
         dispatch({ type: actionTypes.SET_FIELD, field: 'tabValue', value });
@@ -3642,7 +3941,7 @@ function NewPost(props) {
     // loader takes over until the feed refreshes.
     const handlePublishClick = useCallback(async () => {
         // Validate everything first; surface inline errors and bail if invalid.
-        const validation = validateAllFields(title, description, tags);
+        const validation = validateAllFields(title, description, tags, aiUsed, aiRequired);
         if (!validation.valid) {
             dispatch({ type: actionTypes.VALIDATE_ALL, errors: validation.errors });
             return;
@@ -3664,6 +3963,21 @@ function NewPost(props) {
             // misleading. We check here to fail fast with a clear message.
             if (!base64 || base64.length === 0) {
                 throw new Error(t("components.new_post.image_not_ready_yet_please_wait_a_moment_and"));
+            }
+
+            // Store build: last check, on the exact pixels being posted (the
+            // quantized picture is never checked on its own). Mature → erased;
+            // not checkable → not published, the draft stays for a retry.
+            if (STORE_GATE) {
+                const pixels = editedData || quantizedData || preview || await decodeBase64ToImageData(base64);
+                const outcome = await screenPicture(pixels);
+                if (!mountedRef.current) return;
+                if (outcome !== SCREEN.OK) {
+                    dispatch({ type: actionTypes.SET_FIELD, field: 'isPublishing', value: false });
+                    if (outcome === SCREEN.MATURE) eraseForStore(outcome);
+                    else notifyStoreGate(outcome);
+                    return;
+                }
             }
 
             const permlink = generatePermlink(title);
@@ -3690,6 +4004,12 @@ function NewPost(props) {
                 image: [],
                 description: (description || '').trim(),
                 nsfw: !!nsfw,
+                // AI disclosure (utils/ai_provenance.js), both always
+                // written. oc: original content, the author's own real
+                // picture before any style transformation. ai: which AI made
+                // or transformed it, in the author's words; "" when none.
+                oc: !!oc,
+                ai: (aiUsed || '').trim(),
                 license: licensePayload,
             };
 
@@ -3744,13 +4064,19 @@ function NewPost(props) {
             dispatch({ type: actionTypes.SET_FIELD, field: 'isPublishing', value: false });
             actions.trigger_snackbar(error.message || t("components.new_post.failed_to_publish_post_please_try_again"));
         }
-    }, [api, title, description, tags, nsfw, base64, preview, quantizedData, editedData, licenseCustomization, resetProps, onClose]);
+    }, [api, title, description, tags, nsfw, oc, aiUsed, aiRequired, base64, preview, quantizedData, editedData, licenseCustomization, resetProps, onClose, eraseForStore]);
 
     // Handle next/finish
     const handleNextOrFinish = useCallback(() => {
         if (currentStep === 0 && tabValue === 1) {
             // Generate from description
             if (!description.trim()) return;
+            // Store build: refuse a description that plainly asks for mature
+            // content before the loader even starts (processImage checks too).
+            if (STORE_GATE && isMaturePrompt(description)) {
+                notifyStoreGate(SCREEN.PROMPT);
+                return;
+            }
             dispatch({ type: actionTypes.SET_FIELD, field: 'isGenerating', value: true });
             processImage(true);
         } else if (currentStep === 0) {
@@ -4052,6 +4378,13 @@ function NewPost(props) {
                     onNsfwChange={handleNsfwChange}
                     nsfwDetecting={nsfwDetecting}
                     nsfwAutoFlagged={nsfwAutoFlagged}
+                    oc={oc}
+                    ocLocked={ocLocked}
+                    ocAutoOff={ocAutoOff}
+                    onOcChange={handleOcChange}
+                    aiUsed={aiUsed}
+                    aiPrefilled={aiRequired}
+                    onAiUsedChange={handleAiUsedChange}
                     onOpenLicense={handleOpenLicense}
                     onFieldBlur={handleFieldBlur}
                 />

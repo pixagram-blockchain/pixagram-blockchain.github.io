@@ -960,6 +960,8 @@ const styles = theme => ({
             margin: "0 0 1.5rem",
             padding: 0,
             textAlign: "start",
+            borderRadius: "21px",
+            backgroundColor: "#0c0c0c"
         },
         "& center .pixa-figure, & [align='center'] .pixa-figure, & .text-center .pixa-figure, & .align-center .pixa-figure, & .pixa-figure.text-center, & .pixa-figure.align-center": {
             textAlign: "center",
@@ -968,16 +970,17 @@ const styles = theme => ({
             textAlign: "right",
         },
         "& .pixa-figure img": {
+            borderRadius: "21px",
             display: "inline-block",
             verticalAlign: "top",   // no descender gap between picture and caption
         },
         "& .pixa-figcaption": {
             display: "block",
-            margin: "10px 0 0",
+            margin: "8px 12px 4px 8px",
             padding: 0,
             fontFamily: "'Normative Pro'",
             fontSize: "0.875rem",
-            lineHeight: 1.45,
+            lineHeight: 2,
             letterSpacing: "0.01em",
             color: "#9a9a9a",
             overflowWrap: "anywhere",
@@ -987,7 +990,7 @@ const styles = theme => ({
         },
         [theme.breakpoints.down("sm")]: {
             "& .pixa-figcaption": {
-                marginTop: 8,
+                margin: "6px 10px 4px 6px",
                 fontSize: "0.8125rem",
             },
         },

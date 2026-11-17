@@ -1,7 +1,7 @@
 /**
  * locales/pl.js — Polski
  *
- * Coverage: 2407 of 2542 keys (94.7 %).
+ * Coverage: 2415 of 2550 keys (94.7 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -884,6 +884,13 @@ export default {
             "retry": "Spróbuj ponownie"
         },
         "post_dialog": {
+            "origin": "Pochodzenie",
+            "original_content": "Treść oryginalna",
+            "not_original_content": "Treść nieoryginalna",
+            "original_content_tooltip": "Zadeklarowane przez autora: własne zdjęcie lub rysunek, przed jakąkolwiek zmianą stylu",
+            "ai_used": "Użyta AI",
+            "no_ai_declared": "Nie zadeklarowano AI",
+            "ai_used_tooltip": "Zadeklarowane przez autora: AI, która utworzyła lub przekształciła obraz",
             "for_sale": "Na sprzedaż",
             "last": "Ostatnia: {{soldPrice}}{{currency}}",
             "not_for_sale": "Nie na sprzedaż",
@@ -1089,7 +1096,16 @@ export default {
             "adjust_step": "Dostosuj ({{step}}/{{total}})",
             "post_step": "Opublikuj ({{step}}/{{total}})",
             "publish": "Opublikuj",
-            "ai_style": "Styl AI"
+            "ai_style": "Styl AI",
+            "original_content": "Treść oryginalna",
+            "oc_hint": "Włącz, jeśli przed jakąkolwiek zmianą stylu był to Twój własny, prawdziwy obraz — zdjęcie lub rysunek.",
+            "oc_file_declares_ai": "Wyłączono: plik obrazu podaje, że powstał lub był edytowany za pomocą AI — włącz, jeśli to pomyłka.",
+            "oc_generated": "Wygenerowano z Twojego opisu, więc to nie jest treść oryginalna.",
+            "ai_used": "Użyta AI",
+            "ai_used_prefilled": "Wypełniono AI, której użyła aplikacja. Dopisz każdą inną AI, która utworzyła lub zmieniła obraz.",
+            "ai_used_hint": "Zostaw puste, jeśli nie użyto AI. W przeciwnym razie podaj AI, która utworzyła lub zmieniła obraz.",
+            "ai_used_is_required": "Podaj AI, która utworzyła lub przekształciła ten obraz",
+            "ai_used_must_be_characters_or_less_currently": "Pole Użyta AI może mieć najwyżej {{AI_MAX_LENGTH}} znaków (obecnie {{ai_count}})"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Zbiorczy transfer Power",
@@ -1673,6 +1689,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "Praca",
+            "artwork_hint": "Edytuj obraz w edytorze pikseli. Zapis zastępuje go w łańcuchu; starą wersję przechowuje tylko historia bloków.",
+            "edit_in_pixel_editor": "Edytuj w edytorze pikseli",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "Treść pracy została wymazana: nie ma już obrazu do edycji.",
+            "artwork_encoding": "Kodowanie edytowanego obrazu…",
+            "artwork_encode_failed": "Nie udało się zakodować edytowanego obrazu. Naciśnij ponownie Gotowe w edytorze albo Resetuj.",
+            "artwork_too_large": "Edytowany obraz waży {{size}} kB, więcej niż {{max}} kB, które może wysłać edycja. Uprość go w edytorze albo naciśnij Resetuj.",
+            "artwork_updated": "Post zaktualizowany — nowa praca pojawi się za chwilę",
+            "original_content_not_declared": "Jeszcze nie zadeklarowano. Włącz, jeśli przed jakąkolwiek zmianą stylu był to Twój własny, prawdziwy obraz — zdjęcie lub rysunek.",
+            "ai_used_as_published": "Tak jak opublikowano: możesz zmienić sformułowanie lub dodać inną AI, ale nie usunąć.",
             "loading_the_on_chain_version": "Wczytywanie wersji z łańcucha…",
             "only_can_edit_this_post": "Tylko @{{authorUsername}} może edytować ten post.",
             "title": "Tytuł",
@@ -1694,7 +1722,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "Tagi: małe litery, bez kropek, min. 3 znaki, muszą zaczynać się od litery",
             "enable_this_if_your_content_contains_mature": "Włącz, jeśli Twoja treść zawiera materiały dla dorosłych lub wrażliwe",
             "if_this_post_is_a_dao_proposal": "Jeśli ten post jest propozycją DAO, powiązana propozycja również zostanie usunięta z łańcucha.",
-            "replacing_the_artwork_with_a_new_image": "Zastępowanie pracy nowym obrazem pojawi się tutaj w przyszłej aktualizacji.",
             "title_description_and_tags_for_this_post": "Tytuł, opis i tagi tego posta edytuje się w „Edytuj treść”. Tutaj możesz przełączać jego flagi widoczności.",
             "marks_the_post_as_deleted_in_its": "Oznacza post jako usunięty w jego metadanych: znika z każdego feedu, profilu i strony społeczności. Odwracalne — zmieniana jest tylko flaga w metadanych. Nie jest dodawany żaden tag, więc usuniętych postów nie da się przeglądać.",
             "erase_the_artwork_content_itself_the_post": "Wymaż samą treść pracy (ciało posta). Obraz zostaje zastąpiony w łańcuchu i nie da się go stąd przywrócić — starą wersję przechowuje tylko historia bloków. Oznacza post jako usunięty.",
@@ -5055,7 +5082,15 @@ export default {
             "view_zoom_out": "Pomniejsz",
             "view_grid_on": "Pokaż siatkę",
             "view_grid_off": "Ukryj siatkę",
-            "edits_applied": "Edytowano w edytorze pikseli"
+            "edits_applied": "Edytowano w edytorze pikseli",
+            "panels": "Panele",
+            "import": "Import",
+            "import_image": "Importuj obraz",
+            "import_hint": "Pixel art zachowuje swoje piksele, powiększony pixel art wraca do prawdziwego rozmiaru, a zdjęcie staje się pixel artem. Obraz unosi się nad aktywną warstwą, dopóki go nie zastosujesz. Możesz też upuścić lub wkleić obraz na płótno.",
+            "import_done_native": "Zaimportowano pixel art, {{width}} × {{height}}",
+            "import_done_upscaled": "Zaimportowano pixel art {{scale}}× w prawdziwym rozmiarze, {{width}} × {{height}}",
+            "import_done_photo": "Zdjęcie zamienione w pixel art, {{width}} × {{height}}",
+            "import_failed": "Tego pliku nie można odczytać jako obrazu."
         }
     }
 };

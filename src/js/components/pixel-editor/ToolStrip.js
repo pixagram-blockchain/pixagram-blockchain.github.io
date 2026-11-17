@@ -3,7 +3,9 @@
 // a scrolling toolbar across the top of phones
 //
 // Round 44 px buttons; the active tool is inverted (light disc, dark glyph),
-// the app's convention for "this one is on". The paint colours close the
+// the app's convention for "this one is on"; picking it again opens its
+// options (onPick tells the host which tool, and whether it was already on).
+// The paint colours close the
 // strip and stay in place while the tools scroll: a tap opens the Colors
 // panel, a long press or right-click swaps them. When tools are cut off, the
 // cut edge fades out to say "there is more".
@@ -27,7 +29,7 @@ import {
 } from "./icons";
 import { TOOL_IDS, TOOL_KEYS, toolLabel, tp } from "./labels";
 import { useEditorEvents, cssColor } from "./editorUtils";
-import { EASE } from "./ui";
+import { EASE, SURFACE, RADIUS, GAP } from "./ui";
 
 export const TOOL_ICONS = {
     "pencil": CreateIcon,
@@ -65,23 +67,30 @@ const fade = (dir, start, end) => {
 };
 
 const useStyles = makeStyles({
+    // Both are cards, like the canvas and the drawer.
     rail: {
         flex: "0 0 auto",
         width: 64,
+        marginRight: GAP,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        padding: "0 0 12px",
-        backgroundColor: "#000",
+        padding: "2px 0 8px",
+        borderRadius: RADIUS,
+        backgroundColor: SURFACE.panel,
+        overflow: "hidden",
     },
     strip: {
         flex: "0 0 auto",
         height: 56,
+        marginBottom: GAP,
         display: "flex",
         flexDirection: "row",
         alignItems: "center",
-        padding: "0 8px 0 0",
-        backgroundColor: "#000",
+        padding: "0 4px 0 0",
+        borderRadius: RADIUS,
+        backgroundColor: SURFACE.panel,
+        overflow: "hidden",
     },
     scrollV: {
         flex: "1 1 auto",
@@ -124,8 +133,8 @@ const useStyles = makeStyles({
         borderRadius: "50%",
         color: "#bbbbbb",
         transition: `background-color 160ms ${EASE}, color 160ms ${EASE}, transform 160ms ${EASE}`,
-        "&:hover": { backgroundColor: "#212121", color: "#ffffff" },
-        "&.Mui-focusVisible": { backgroundColor: "#2a2a2a", color: "#ffffff" },
+        "&:hover": { backgroundColor: SURFACE.hover, color: "#ffffff" },
+        "&.Mui-focusVisible": { backgroundColor: SURFACE.focus, color: "#ffffff" },
         "& .MuiSvgIcon-root": { fontSize: 22 },
     },
     toolOn: {
@@ -138,9 +147,9 @@ const useStyles = makeStyles({
         width: 48,
         height: 48,
         borderRadius: 16,
-        backgroundColor: "#262626",   // light enough for a black colour to show
+        backgroundColor: SURFACE.raised,   // light enough for a black colour to show
         transition: `background-color 160ms ${EASE}`,
-        "&:hover": { backgroundColor: "#313131" },
+        "&:hover": { backgroundColor: SURFACE.hover },
     },
     swatch: {
         position: "absolute",
@@ -182,7 +191,7 @@ function useOverflowEdges(ref, vertical) {
     return edges;
 }
 
-export default function ToolStrip({ ed, vertical, onOpenColors }) {
+export default function ToolStrip({ ed, vertical, onOpenColors, onPick }) {
     const classes = useStyles();
     useEditorEvents(ed, ["tool", "brush", "colors"]);
     const active = activeToolKey(ed);
@@ -231,7 +240,7 @@ export default function ToolStrip({ ed, vertical, onOpenColors }) {
                                 className={classes.tool + (on ? " " + classes.toolOn : "")}
                                 aria-label={toolLabel(id)}
                                 aria-pressed={on}
-                                onClick={() => chooseTool(ed, id)}
+                                onClick={() => { chooseTool(ed, id); if (onPick) onPick(id, on); }}
                             >
                                 <Icon />
                             </ButtonBase>

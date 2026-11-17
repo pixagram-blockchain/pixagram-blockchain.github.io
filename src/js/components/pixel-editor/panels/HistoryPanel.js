@@ -12,7 +12,7 @@ import ButtonBase from "@material-ui/core/ButtonBase";
 
 import { tp, historyLabel } from "../labels";
 import { useEditorEvents } from "../editorUtils";
-import { Section, Hint, EASE } from "../ui";
+import { Section, Hint, EASE, SURFACE } from "../ui";
 
 const useStyles = makeStyles({
     list: {
@@ -37,11 +37,11 @@ const useStyles = makeStyles({
         fontSize: 14,
         textAlign: "left",
         transition: `background-color 160ms ${EASE}, color 160ms ${EASE}`,
-        "&:hover": { backgroundColor: "#171717", color: "#ffffff" },
+        "&:hover": { backgroundColor: SURFACE.raised, color: "#ffffff" },
     },
     current: {
-        backgroundColor: "#e9e9e9 !important",
-        color: "#1d1d1d !important",
+        backgroundColor: `${SURFACE.on} !important`,
+        color: `${SURFACE.onInk} !important`,
     },
     undone: {
         color: "#5f5f5f",
@@ -56,7 +56,7 @@ const useStyles = makeStyles({
 
 const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-export default function HistoryPanel({ ed }) {
+export default function HistoryPanel({ ed, titled }) {
     const classes = useStyles();
     useEditorEvents(ed, ["history"]);
     const list = ed.history.list();
@@ -78,7 +78,7 @@ export default function HistoryPanel({ ed }) {
         );
     }
     return (
-        <Section title={tp("tab_history")}>
+        <Section title={titled ? undefined : tp("tab_history")}>
             <ol className={classes.list}>{rows}</ol>
             {list.length === 0 && <Hint>{tp("history_empty")}</Hint>}
         </Section>

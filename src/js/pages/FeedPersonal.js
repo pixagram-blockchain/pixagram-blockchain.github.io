@@ -281,6 +281,8 @@ const enrichPostForCard = (post, account, voterProfiles) => {
         upVotesNumber: countUpvotes(activeVotes),
         downVotesNumber: countDownvotes(activeVotes),
         active_votes: activeVotes, net_rshares: post.net_rshares != null ? String(post.net_rshares) : '0',
+        // Who shares the author reward, for the payout tooltip (PayoutSankey) — see Feed.js.
+        beneficiaries: Array.isArray(post.beneficiaries) ? post.beneficiaries : [],
         _voter_profiles: voterProfiles || {}, nsfw: isNsfwPost(post), deleted: isDeletedPost(post), tags,
         permlink: post.permlink || '', category: post.category || '', _content_type: post._content_type || 'pixel_art',
         _description_html: post._description_html || '', _summary: post._summary || '', json_metadata: post.json_metadata || '',

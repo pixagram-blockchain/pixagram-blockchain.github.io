@@ -1,7 +1,7 @@
 /**
  * locales/id.js — Bahasa Indonesia
  *
- * Coverage: 2387 of 2542 keys (93.9 %).
+ * Coverage: 2395 of 2550 keys (93.9 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -882,6 +882,13 @@ export default {
             "retry": "Coba lagi"
         },
         "post_dialog": {
+            "origin": "Asal",
+            "original_content": "Konten asli",
+            "not_original_content": "Bukan konten asli",
+            "original_content_tooltip": "Dinyatakan oleh pembuatnya: foto atau gambar tangannya sendiri, sebelum transformasi gaya apa pun",
+            "ai_used": "AI yang digunakan",
+            "no_ai_declared": "Tidak ada AI yang dinyatakan",
+            "ai_used_tooltip": "Dinyatakan oleh pembuatnya: AI yang membuat atau mengubah gambar",
             "for_sale": "Dijual",
             "last": "Terakhir: {{soldPrice}}{{currency}}",
             "not_for_sale": "Tidak dijual",
@@ -1087,7 +1094,16 @@ export default {
             "adjust_step": "Sesuaikan ({{step}}/{{total}})",
             "post_step": "Kirim ({{step}}/{{total}})",
             "publish": "Terbitkan",
-            "ai_style": "Gaya AI"
+            "ai_style": "Gaya AI",
+            "original_content": "Konten asli",
+            "oc_hint": "Aktifkan jika ini gambar asli milik Anda sendiri — foto atau gambar tangan — sebelum transformasi gaya apa pun.",
+            "oc_file_declares_ai": "Dinonaktifkan: file gambar menyatakan gambar ini dibuat atau diedit dengan AI — aktifkan jika ini keliru.",
+            "oc_generated": "Dibuat dari deskripsi Anda, jadi bukan konten asli.",
+            "ai_used": "AI yang digunakan",
+            "ai_used_prefilled": "Sudah diisi dengan AI yang dipakai aplikasi. Tambahkan AI lain yang membuat atau mengubah gambar.",
+            "ai_used_hint": "Kosongkan jika tidak ada AI yang terlibat. Jika ada, sebutkan AI yang membuat atau mengubah gambar.",
+            "ai_used_is_required": "Sebutkan AI yang membuat atau mengubah gambar ini",
+            "ai_used_must_be_characters_or_less_currently": "AI yang digunakan harus {{AI_MAX_LENGTH}} karakter atau kurang (saat ini {{ai_count}})"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Transfer Power massal",
@@ -1672,6 +1688,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "Karya",
+            "artwork_hint": "Sunting gambar di editor piksel. Saat disimpan, gambar diganti di blockchain; hanya riwayat blok yang menyimpan versi lama.",
+            "edit_in_pixel_editor": "Sunting di editor piksel",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "Konten karya sudah dihapus: tidak ada gambar yang tersisa untuk disunting.",
+            "artwork_encoding": "Mengodekan gambar yang disunting…",
+            "artwork_encode_failed": "Gambar yang disunting tidak dapat dikodekan. Tekan Selesai di editor sekali lagi, atau Setel ulang.",
+            "artwork_too_large": "Gambar yang disunting berukuran {{size}} kB, lebih dari {{max}} kB yang dapat dikirim satu suntingan. Sederhanakan di editor, atau tekan Setel ulang.",
+            "artwork_updated": "Kiriman diperbarui — karya baru akan muncul sebentar lagi",
+            "original_content_not_declared": "Belum dinyatakan. Aktifkan jika ini gambar asli milik Anda sendiri — foto atau gambar tangan — sebelum transformasi gaya apa pun.",
+            "ai_used_as_published": "Sesuai yang diterbitkan: Anda bisa mengubah kata-katanya atau menambahkan AI lain, tetapi tidak menghapusnya.",
             "loading_the_on_chain_version": "Memuat versi on-chain…",
             "only_can_edit_this_post": "Hanya @{{authorUsername}} yang dapat mengedit kiriman ini.",
             "title": "Judul",
@@ -1693,7 +1721,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "Tag: huruf kecil, tanpa titik, min. 3 karakter, diawali huruf",
             "enable_this_if_your_content_contains_mature": "Aktifkan jika konten Anda memuat materi dewasa atau sensitif",
             "if_this_post_is_a_dao_proposal": "Jika kiriman ini adalah proposal DAO, proposal terkait juga dihapus di blockchain.",
-            "replacing_the_artwork_with_a_new_image": "Penggantian karya dengan gambar baru akan hadir pada pembaruan mendatang.",
             "title_description_and_tags_for_this_post": "Judul, deskripsi, dan tag kiriman ini diubah dari \"Edit konten\". Di sini Anda dapat mengalihkan tanda visibilitasnya.",
             "marks_the_post_as_deleted_in_its": "Menandai kiriman sebagai dihapus di metadatanya: ia hilang dari setiap beranda, profil, dan halaman komunitas. Dapat dibatalkan — hanya tanda di metadata yang diubah. Tidak ada tag yang ditambahkan, sehingga kiriman terhapus tidak bisa ditelusuri.",
             "erase_the_artwork_content_itself_the_post": "Menghapus isi karyanya sendiri (badan kiriman). Gambar diganti di blockchain dan tidak dapat dipulihkan dari sini — hanya riwayat blok yang menyimpan versi lama. Kiriman ditandai terhapus.",
@@ -5056,7 +5083,15 @@ export default {
             "view_zoom_out": "Perkecil",
             "view_grid_on": "Tampilkan kisi",
             "view_grid_off": "Sembunyikan kisi",
-            "edits_applied": "Disunting di editor piksel"
+            "edits_applied": "Disunting di editor piksel",
+            "panels": "Panel",
+            "import": "Impor",
+            "import_image": "Impor gambar",
+            "import_hint": "Seni piksel mempertahankan pikselnya, seni piksel yang diperbesar dikembalikan ke ukuran aslinya, dan foto diubah menjadi seni piksel. Gambar mengambang di atas lapisan aktif sampai Anda menerapkannya. Anda juga bisa menjatuhkan atau menempelkan gambar di kanvas.",
+            "import_done_native": "Seni piksel diimpor, {{width}} × {{height}}",
+            "import_done_upscaled": "Seni piksel {{scale}}× diimpor dalam ukuran aslinya, {{width}} × {{height}}",
+            "import_done_photo": "Foto diubah menjadi seni piksel, {{width}} × {{height}}",
+            "import_failed": "File ini tidak dapat dibaca sebagai gambar."
         }
     }
 };

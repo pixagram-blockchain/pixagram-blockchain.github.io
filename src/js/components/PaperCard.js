@@ -20,11 +20,21 @@ import ProfileHoverAnchor from './ProfileHoverCard';
 import FadeAvatar from './FadeAvatar';
 import { ErrorBoundary } from './ErrorBoundary';
 import { t, tnode, useLanguage } from '../utils/text';
+import { isStoreBuild } from '../utils/store';
+
+// ── Store builds (Google Play / App Store, utils/store.js) ──────────────
+// The store policies count a blurred nude as a nude, so there a mature
+// artwork is HIDDEN (the canvas is not painted visible at all) instead of
+// blurred, and an artwork nobody has classified yet stays hidden until its
+// on-device verdict lands — no flash of it while the model runs. A verdict
+// that can't be computed answers "safe" (ensureNsfw fails open), so a broken
+// model never blanks the feed.
+const STORE_HIDE = isStoreBuild();
 
 // Version stamp — check in console: window.__PIXA_VERSIONS__
 if (typeof window !== 'undefined') {
     if (!window.__PIXA_VERSIONS__) window.__PIXA_VERSIONS__ = {};
-    window.__PIXA_VERSIONS__.PaperCard = '4.14.0-animated';
+    window.__PIXA_VERSIONS__.PaperCard = '4.15.0-bitmap-renders';
 }
 
 // ── Async, non-critical NSFW detector loading ───────────────────────
@@ -78,10 +88,15 @@ function loadNsfwDetect() {
 // classifier's synchronous cache — an unclassified artwork (module not
 // loaded, or no verdict for this id yet) is NOT blurred, which matches
 // what the card shows at that instant.
+//
+// In a store build an artwork with no verdict yet counts as blurred too: its
+// card shows nothing until classified (STORE_HIDE), and the post dialog's
+// arrows must not land on it either.
 export function isArtworkBlurred(data, id, nsfwEnabled) {
     if (nsfwEnabled) return false;                  // "show NSFW" on → nothing blurs
     if (data && data.nsfw === true) return true;    // author/server label
     const mod = getLoadedNsfwDetect();
+    if (STORE_HIDE) return !mod || mod.getCached(id) !== false;
     return !!mod && mod.getCached(id) === true;     // on-device verdict
 }
 
@@ -155,6 +170,8 @@ const styles = theme => ({
         // opacity reveal, so toggling `nsfw` at runtime doesn't fight
         // the reveal animation. Both can be active simultaneously.
         '&.nsfw-blur': { filter: 'blur(24px)' },
+        // Store builds: a mature artwork is not painted visible at all.
+        '&.nsfw-hidden': { visibility: 'hidden' },
     },
     cardHeader: {
         '& .MuiCardHeader-title': {
@@ -291,6 +308,7 @@ const CanvasImage = memo(function CanvasImage({
                                                   onOpen,
                                                   nsfwEnabled,
                                                   nsfwFlag,
+                                                  verdictPending = false, // store build: no NSFW verdict yet → keep unrevealed
                                                   canvasRef, // NEW: Accept external ref
                                                   active = true, // draw only once the card has been in (or near) view
                                               }) {
@@ -387,6 +405,12 @@ const CanvasImage = memo(function CanvasImage({
         };
     }, []);
 
+    // Paints `bmp`, which is ours to consume. Every pool render arrives that
+    // way: the pool keeps renders as bitmaps only, and its first argument is
+    // the render's { width, height }, not pixels. `imgd` is painted only
+    // when there is no bitmap and it really is ImageData: the 'square'
+    // renderer's source pixels, or the pool's last resort when the browser
+    // could not make a bitmap.
     const applyImage = useCallback((imgd, bmp) => {
         if (unmountedRef.current) {
             // Late arrival — drop. Close the bitmap so GPU memory is freed.
@@ -432,7 +456,7 @@ const CanvasImage = memo(function CanvasImage({
 
         if (bmp) {
             drawBitmap(bmp);
-        } else if (imgd) {
+        } else if (imgd && imgd.data) {
             createImageBitmap(imgd, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' })
                 .then((bm) => {
                     if (unmountedRef.current) {
@@ -492,39 +516,9 @@ const CanvasImage = memo(function CanvasImage({
                 renderer === 'xbrz'    ? scaleXbrz :
                     renderer === 'crt'     ? scaleCrt : scaleTri;
 
-        // The still pipeline: cache-first, then decode + upscale.
-        const drawStill = async () => {
-            // ── Cache-first fast path ────────────────────────────────────
-            // If the pool already holds THIS content at THIS scale for THIS
-            // algorithm (the 40-most-recent render cache), paint straight
-            // from it: no base64 decode, no PNG/WEBP decode, no upscale.
-            // This is the scroll-back path.
-            if (poolAlgo) {
-                const cachedRender = getCachedRender(id, poolAlgo, poolScale);
-                if (cachedRender) {
-                    cancelScheduled(pendingScheduleRef.current);
-                    pendingScheduleRef.current = scheduleIdle(() => {
-                        pendingScheduleRef.current = null;
-                        // Serve through the pool's master-bitmap layer: the
-                        // first scroll-back hit pays the ImageData raster once
-                        // (and pins it pool-side), every later repaint of this
-                        // artwork is a ~1 ms bitmap clone. The clone is ours to
-                        // consume; the pool entry is never detached. On a null
-                        // or a failure, fall back to the ImageData path
-                        // (applyImage mints its own bitmap, exactly as before).
-                        const acq = acquireCachedBitmap(id, poolAlgo, poolScale);
-                        if (acq) {
-                            acq.then(({ bitmap }) => guardedApply(cachedRender, bitmap))
-                                .catch(() => guardedApply(cachedRender));
-                        } else {
-                            guardedApply(cachedRender);
-                        }
-                    }, IDLE_TIMEOUT_CACHE_HIT_MS);
-                    return;
-                }
-            }
-
-            // ── Miss: full pipeline ──────────────────────────────────────
+        // The full pipeline: source pixels (png-db's ImageData) → upscale →
+        // a bitmap of the render, which the pool hands to guardedApply.
+        const drawFromSource = async () => {
             // get_new_img_data usually just joins the background decode that
             // png-db kicked off at measure time, so this await rarely pays
             // for the decode itself.
@@ -546,6 +540,37 @@ const CanvasImage = memo(function CanvasImage({
             // Cancel any previous scheduled draw before queueing a new one.
             cancelScheduled(pendingScheduleRef.current);
             pendingScheduleRef.current = scheduleIdle(run, IDLE_TIMEOUT_MISS_MS);
+        };
+
+        // The still pipeline: cache-first, then decode + upscale.
+        const drawStill = () => {
+            // ── Cache-first fast path ────────────────────────────────────
+            // If the pool already holds THIS content at THIS scale for THIS
+            // algorithm (the 40-most-recent render cache), paint straight
+            // from it: no base64 decode, no PNG/WEBP decode, no upscale.
+            // This is the scroll-back path.
+            if (poolAlgo && getCachedRender(id, poolAlgo, poolScale)) {
+                cancelScheduled(pendingScheduleRef.current);
+                pendingScheduleRef.current = scheduleIdle(() => {
+                    pendingScheduleRef.current = null;
+                    if (stale()) return;
+                    // The pool keeps each render as ONE bitmap and serves
+                    // clones of it (bitmap → bitmap, ~1 ms, no raster): the
+                    // clone is ours to consume, the pool's own is never
+                    // detached. There is no ImageData behind it to fall
+                    // back on, so if the entry went away while this waited
+                    // for its idle slot (null), or can no longer be cloned
+                    // (rejection), the card takes the full pipeline instead.
+                    const acq = acquireCachedBitmap(id, poolAlgo, poolScale);
+                    if (!acq) { drawFromSource(); return; }
+                    acq.then(({ bitmap }) => guardedApply(null, bitmap))
+                        .catch(() => { if (!stale()) drawFromSource(); });
+                }, IDLE_TIMEOUT_CACHE_HIT_MS);
+                return;
+            }
+
+            // ── Miss: full pipeline ──────────────────────────────────────
+            drawFromSource();
         };
 
         // ── Animated GIF / WebP ──────────────────────────────────────
@@ -616,13 +641,15 @@ const CanvasImage = memo(function CanvasImage({
     useEffect(() => { if (active) draw(); }, [draw, renderKey, active]);
 
     // Compose className: base + 'revealed' for opacity reveal + 'nsfw-blur'
-    // when the post is NSFW and the user has not enabled NSFW display.
+    // when the post is NSFW and the user has not enabled NSFW display. A
+    // store build hides instead of blurring, and holds the reveal while the
+    // verdict is pending (STORE_HIDE).
     const composedClassName = useMemo(() => {
         let c = className || '';
-        if (revealed) c += ' revealed';
-        if (nsfwFlag && !nsfwEnabled) c += ' nsfw-blur';
+        if (revealed && !verdictPending) c += ' revealed';
+        if (nsfwFlag && !nsfwEnabled) c += STORE_HIDE ? ' nsfw-hidden' : ' nsfw-blur';
         return c;
-    }, [className, revealed, nsfwFlag, nsfwEnabled]);
+    }, [className, revealed, verdictPending, nsfwFlag, nsfwEnabled]);
 
     return (
         <canvas
@@ -645,6 +672,7 @@ const CanvasImage = memo(function CanvasImage({
     a.active === b.active &&
     a.nsfwEnabled === b.nsfwEnabled &&
     a.nsfwFlag === b.nsfwFlag &&
+    a.verdictPending === b.verdictPending &&
     a.image_width === b.image_width &&
     a.image_height === b.image_height &&
     a.column_width === b.column_width &&
@@ -793,7 +821,13 @@ function PaperCardInner({
         // Kick off the (deduped) lazy load. The card is already on screen;
         // this only refines the NSFW verdict when the module arrives.
         loadNsfwDetect().then((mod) => {
-            if (cancelled || !mod) return;   // unmounted or module unavailable
+            if (cancelled) return;           // unmounted
+            if (!mod) {
+                // Module unavailable. A store build holds the artwork until a
+                // verdict exists — fail open here, as ensureNsfw does on errors.
+                if (STORE_HIDE) setDetectedNsfw(false);
+                return;
+            }
             mod.configure({ filterEnabled });
 
             // While we were loading, another card may have classified this id.
@@ -807,7 +841,7 @@ function PaperCardInner({
             mod
                 .ensureNsfw({ id, getImgData, alreadyFlagged: data.nsfw === true })
                 .then((verdict) => { if (!cancelled) setDetectedNsfw(verdict); })
-                .catch(() => {});
+                .catch(() => { if (!cancelled && STORE_HIDE) setDetectedNsfw(false); });
         });
 
         return () => { cancelled = true; };
@@ -815,6 +849,9 @@ function PaperCardInner({
 
     // Effective NSFW flag: server label OR on-device detection.
     const effectiveNsfwFlag = (data.nsfw === true) || (detectedNsfw === true);
+    // Store build: no verdict yet for an unlabelled artwork → it stays
+    // unrevealed and can't be opened until the classifier has answered.
+    const verdictPending = STORE_HIDE && !nsfw && data.nsfw !== true && detectedNsfw === undefined;
 
     // NEW: Helper function to get canvas bounding rect safely
     const getCanvasBoundingRect = useCallback(() => {
@@ -973,7 +1010,7 @@ function PaperCardInner({
             <ButtonBase
                 onContextMenu={e => e.preventDefault()}
                 style={{ width: '100%', borderRadius: (renderer === 'xbrz' || renderer === 'tri') ? '21px' : '0px' }}
-                onClick={() => (effectiveNsfwFlag && !nsfw) ? undefined : onOpen?.(data, getCanvasBoundingRect())}
+                onClick={() => ((effectiveNsfwFlag && !nsfw) || verdictPending) ? undefined : onOpen?.(data, getCanvasBoundingRect())}
             >
                 <CanvasImage
                     renderer={renderer}
@@ -993,6 +1030,7 @@ function PaperCardInner({
                     onOpen={() => onOpen?.(data, getCanvasBoundingRect())}
                     nsfwEnabled={nsfw}
                     nsfwFlag={effectiveNsfwFlag}
+                    verdictPending={verdictPending}
                     canvasRef={canvasRef} // NEW: Pass the ref down
                     active={hasBeenVisible}
                 />

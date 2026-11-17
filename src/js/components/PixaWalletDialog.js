@@ -1221,6 +1221,35 @@ const normalizeWalletAccount = (account) => {
 };
 
 /**
+ * Username of the person using the app, from the loggedInUser prop (Profile
+ * passes useActiveAccount's string; an { username } / { name } object is
+ * accepted too), or '' while nobody is known.
+ */
+const viewerName = (loggedInUser) => {
+    if (typeof loggedInUser === 'string') return loggedInUser;
+    if (loggedInUser && typeof loggedInUser === 'object') return loggedInUser.username || loggedInUser.name || '';
+    return '';
+};
+
+/**
+ * Whether the wallet on screen belongs to the person using the app.
+ *
+ * Decided from the two usernames whenever the viewer is known — the rule
+ * Profile.js uses for isOwnProfile, but applied to the account this dialog is
+ * actually showing, so it cannot lag a render behind a profile switch the way
+ * the separately stored prop does. The isOwnProfile prop only decides while
+ * no viewer is known, and a missing prop now means "not yours": a wallet only
+ * gets the own-wallet actions and "you" wording when something says it is
+ * the viewer's.
+ */
+const resolveOwnWallet = (props, account) => {
+    const viewer = viewerName(props.loggedInUser).toLowerCase();
+    const owner = ((account && account.username) || '').toLowerCase();
+    if (viewer && owner) return viewer === owner;
+    return props.isOwnProfile === true;
+};
+
+/**
  * First-paint prices for the wallet: PricesAPI's synchronous snapshot when the
  * api is already wired (it seeds itself with PXA at the 12-cent anchor and
  * PXS at the design Big Mac price, 6.22), else those same two numbers, so the
@@ -1243,13 +1272,14 @@ class PixaWalletDialog extends React.PureComponent {
     constructor(props) {
         super(props);
         const seedPrices = wallet_seed_prices(props.api);
+        const account = normalizeWalletAccount(props.account);
         this.state = {
             classes: props.classes,
             keepMounted: props.keepMounted || false,
             open: props.open,
             api: props.api,
             locales: props.locales,
-            account: normalizeWalletAccount(props.account),
+            account,
             _time_ago: timeAgo,
             _power_dialog_opened: "",
             _send_dialog_opened: "",
@@ -1399,46 +1429,73 @@ class PixaWalletDialog extends React.PureComponent {
             _confirm_action_callback: null,
             // First-open guided tour (null = inactive)
             _tour_steps: null,
-            // Own-profile vs other-profile distinction
-            _itsOwnProfile: props.isOwnProfile !== false,
+            // Own-profile vs other-profile distinction (see resolveOwnWallet)
+            _itsOwnProfile: resolveOwnWallet(props, account),
             _loggedInUser: props.loggedInUser || null,
         };
+    };
+
+    // Only the newest _fetch_wallet_data may write (see there); bumped on
+    // every load and on unmount.
+    _walletSeq = 0;
+
+    // Placeholders for the four detail views, as built in the constructor.
+    _blank_views = () => {
+        const cls = (this.state && this.state.classes || this.props.classes || {}).flexColumn;
+        return Array.of(<div className={cls}/>, <div className={cls}/>, <div className={cls}/>, <div className={cls}/>);
     };
 
     componentWillReceiveProps(new_props) {
         const normalizedAccount = normalizeWalletAccount(new_props.account);
         const prevUsername = (this.state.account || {}).username || '';
         const newUsername = normalizedAccount.username || '';
-        var isNewAccount = newUsername !== prevUsername;
+        const isNewAccount = newUsername !== prevUsername;
         // Drop the previous wallet's paging; an in-flight page sees the
         // swap (this._hist !== h) and discards its rows.
         if (isNewAccount) this._hist = null;
-        var isNewlyClosed = new_props.open === false && this.state.open;
-        var isNewlyOpened = new_props.open === true && !this.state.open;
+        const isNewlyClosed = new_props.open === false && this.state.open;
+        const isNewlyOpened = new_props.open === true && !this.state.open;
         const initialViewChanged = new_props.initialView !== undefined && new_props.initialView !== this.state._tab_value;
+        const wasOwn = !!this.state._itsOwnProfile;
         const merged = { ...new_props, account: normalizedAccount };
-        // Track own-profile distinction
-        if (new_props.isOwnProfile !== undefined) merged._itsOwnProfile = new_props.isOwnProfile !== false;
-        if (new_props.loggedInUser !== undefined) merged._loggedInUser = new_props.loggedInUser || null;
+        // Own-wallet distinction, re-derived on every update from the account
+        // actually shown (see resolveOwnWallet) — never carried over from the
+        // previous wallet or from a prop the parent hasn't caught up on yet.
+        merged._loggedInUser = new_props.loggedInUser || null;
+        merged._itsOwnProfile = resolveOwnWallet(new_props, normalizedAccount);
+        // The views cached for tabs not visited yet still hold the previous
+        // wallet (its figures, its "you"/"it" wording) and slide into sight
+        // during a swipe: start the new wallet from blank ones.
+        if (isNewAccount) merged._views = this._blank_views();
         this.setState(merged, () => {
-            if(isNewlyClosed || isNewAccount) {
+            if (isNewlyClosed) {
                 if (this.state._tour_steps) this._finish_tour("closed");
-                this.setState({...merged, _tab_value: false, _reward_claim: null, _inspect_open: false, _inspect_origin: null}, () => {
+                this.setState({_tab_value: false, _reward_claim: null, _inspect_open: false, _inspect_origin: null}, () => {
                     this.forceUpdate();
                 })
-            } else if (isNewlyOpened) {
-                // Apply initialView from props when opening
+            } else if (isNewlyOpened || isNewAccount) {
+                // Opening, or another wallet replacing this one while open
+                // (back/forward between two wallets): both land on initialView.
+                // The second case used to fall into the "closed" branch and
+                // always show the overview, whatever the address said.
+                if (isNewAccount && this.state._tour_steps) this._finish_tour("closed");
                 const viewValue = (new_props.initialView !== undefined && new_props.initialView !== null) ? new_props.initialView : false;
-                this.setState({_tab_value: viewValue}, () => {
+                this.setState({_tab_value: viewValue, _reward_claim: null, _inspect_open: false, _inspect_origin: null}, () => {
                     this.forceUpdate();
                 });
-                this._maybe_start_tour();
             } else if (new_props.open && initialViewChanged) {
                 // Sync view when parent changes it (e.g. browser back/forward).
                 // An open inspector belongs to the view being left.
                 this.setState({_tab_value: new_props.initialView, _inspect_open: false, _inspect_origin: null}, () => {
                     this.forceUpdate();
                 });
+            }
+            // First-open tour: on opening, on a wallet switch, or when the
+            // wallet turns out to be the viewer's own while open (session
+            // restored after the dialog appeared). _maybe_start_tour checks
+            // the rest (own wallet, not seen yet).
+            if (!isNewlyClosed && this.state.open && (isNewlyOpened || isNewAccount || (!wasOwn && this.state._itsOwnProfile))) {
+                this._maybe_start_tour();
             }
             if (isNewlyOpened || isNewAccount) {
                 this._fetch_wallet_data();
@@ -1680,6 +1737,14 @@ class PixaWalletDialog extends React.PureComponent {
         const { api, account } = this.state;
         if (!api || !account || !account.username) return;
 
+        // Only the newest load may write. An older one still in flight — the
+        // previous wallet after a switch, or an earlier refresh answering
+        // late — would otherwise paint its balances and delegation lists over
+        // the wallet on screen (e.g. your own figures under @someone-else).
+        const seq = ++this._walletSeq;
+        const superseded = () => seq !== this._walletSeq
+            || ((this.state.account || {}).username || '') !== account.username;
+
         // Instalment count / interval from the chain config (cached per
         // session in utils/powerDown). Never blocks the balances.
         if (!this._pdConfigRequested) {
@@ -1702,6 +1767,7 @@ class PixaWalletDialog extends React.PureComponent {
                 // 6.22 ÷ 0.12 → $6.22 while the feed is unset or implausible).
                 api.prices.get().catch(() => api.prices.getSync()),
             ]);
+            if (superseded()) return;
 
             const fullAccount = (accountsResult || [])[0];
             if (!fullAccount || !globalProps) return;
@@ -1985,6 +2051,7 @@ class PixaWalletDialog extends React.PureComponent {
             ] = await Promise.all([
                 _pOutgoing, _pSavings, _pRecurrent, _pConversions, _pCollateralized, _pHistory,
             ]);
+            if (superseded()) return;
 
             const rawHistory = (_historyResult && _historyResult.rows) || [];
             historySource = (_historyResult && _historyResult.source) || 'appbase';
@@ -2268,6 +2335,9 @@ class PixaWalletDialog extends React.PureComponent {
                     }));
                 }
             } catch (e) { /* ignore */ }
+            // The delegation scans and the profile read above awaited again;
+            // re-check before touching the paging cursor or the state.
+            if (superseded()) return;
 
             // Recompute delegated/received PXP from live delegation list and
             // reconcile against the account-object totals. Either source can
@@ -2578,10 +2648,15 @@ class PixaWalletDialog extends React.PureComponent {
                         `0.000000 ${_VESTS_SYMBOL}`
                     );
                     if (actions?.trigger_snackbar) actions.trigger_snackbar(t("components.pixa_wallet_dialog.delegation_cancelled_successfully"), 'success');
-                    // Optimistic update — remove from outgoing list immediately
+                    // Optimistic update — remove from outgoing list immediately.
+                    // The total drops by this row only: re-summing the list would
+                    // also drop whatever the account object counts that the list
+                    // doesn't hold (it is capped at 100 rows).
                     this.setState((prev) => {
-                        const updated = (prev._outgoingDelegations || []).filter(d => d.delegatee !== delegatee);
-                        const newDelegatedPxp = updated.reduce((sum, d) => sum + (d.pxp || 0), 0);
+                        const list = prev._outgoingDelegations || [];
+                        const removed = list.find(d => d.delegatee === delegatee);
+                        const updated = list.filter(d => d.delegatee !== delegatee);
+                        const newDelegatedPxp = Math.max(0, (prev._delegatedPxp || 0) - ((removed && removed.pxp) || 0));
                         return {
                             _outgoingDelegations: updated,
                             _delegatedPxp: newDelegatedPxp,
@@ -2897,6 +2972,9 @@ class PixaWalletDialog extends React.PureComponent {
     }
 
     componentWillUnmount() {
+        // In-flight wallet loads and history pages land nowhere.
+        this._walletSeq++;
+        this._hist = null;
         window.removeEventListener("resize", this._computeSize);
         if (this._unsub_settings) { this._unsub_settings(); this._unsub_settings = null; }
         if (this._refreshTimer) clearTimeout(this._refreshTimer);
@@ -3008,15 +3086,21 @@ class PixaWalletDialog extends React.PureComponent {
     // Armed when the wallet opens for the first time (per localStorage). The
     // short delay lets the entrance Fades and SwipeableViews settle so the
     // anchors measure at their real positions.
+    //
+    // Only on the viewer's own wallet: the copy speaks of "your estimated
+    // wealth" and "your influence" and walks through power up / down and
+    // delegation, which another user's wallet doesn't offer — and running it
+    // there would use up the one-time flag before the person ever opened
+    // their own.
     _tour_timer = null;
 
     _maybe_start_tour = () => {
-        if (this.state._tour_steps) return;
+        if (this.state._tour_steps || !this.state._itsOwnProfile) return;
         if (readTourState().wallet) return;
         if (this._tour_timer) clearTimeout(this._tour_timer);
         this._tour_timer = setTimeout(() => {
             this._tour_timer = null;
-            if (!this.state.open) return;
+            if (!this.state.open || !this.state._itsOwnProfile) return;
             if (readTourState().wallet) return;
             this.setState({ _tour_steps: this._build_tour_steps() });
         }, 700);
@@ -3334,33 +3418,69 @@ class PixaWalletDialog extends React.PureComponent {
                 to: to
             }), 'success');
 
-            // Optimistic update — immediately add to outgoing delegations list
-            // so user sees the new delegation without waiting for chain confirmation.
-            // Also resolve the profile image for the delegatee.
-            let delegateeImage = '';
+            // Optimistic update, so the new delegation shows without waiting
+            // for the chain. Which list it lands in depends on whose wallet
+            // this is:
+            //   • own wallet — the viewer delegated OUT: Outgoing list,
+            //     delegated PXP up;
+            //   • someone else's — the viewer delegated TO this account: its
+            //     Incoming list, received PXP up. (It used to be put in that
+            //     account's Outgoing list as if the account had delegated it,
+            //     and changed the account's delegated-out total.)
+            // A delegation replaces any earlier one between the same two
+            // accounts, so an existing row is updated and the total moves by
+            // the difference only.
+            const intoIncoming = !_itsOwnProfile;
+            if (intoIncoming && to !== account.username) {
+                // Not a delegation to the wallet on screen: nothing it shows changes.
+                this._close_delegate_dialog();
+                this._refresh_after_tx();
+                return true;
+            }
+            // Avatar of the account the new row names: the delegatee in
+            // Outgoing, the delegator (the viewer) in Incoming.
+            const rowAccount = intoIncoming ? delegatorUsername : to;
+            let rowImage = '';
             try {
-                const profiles = await api.accounts.getAccounts([to], true);
+                const profiles = await api.accounts.getAccounts([rowAccount], true);
                 if (profiles && profiles[0]) {
                     const p = profiles[0];
-                    delegateeImage = (p._profile && p._profile.profile_image) || '';
+                    rowImage = (p._profile && p._profile.profile_image) || '';
                 }
             } catch (e) { /* ignore — image will be fetched on next full refresh */ }
+            // Another wallet may have replaced this one during that read.
+            if (((this.state.account || {}).username || '') !== account.username) {
+                this._close_delegate_dialog();
+                this._refresh_after_tx();
+                return true;
+            }
 
             this.setState((prev) => {
-                const existing = (prev._outgoingDelegations || []);
-                // Update existing entry or add new one
-                const idx = existing.findIndex(d => d.delegatee === to);
                 const newEntry = {
                     delegator: delegatorUsername,
                     delegatee: to,
                     vesting_shares: formatted,
                     pxp: amount,
-                    image: delegateeImage,
+                    image: rowImage,
                 };
+                const listKey = intoIncoming ? '_incomingDelegations' : '_outgoingDelegations';
+                const existing = prev[listKey] || [];
+                const idx = intoIncoming
+                    ? existing.findIndex(d => d.delegator === delegatorUsername)
+                    : existing.findIndex(d => d.delegatee === to);
+                const before = idx >= 0 ? (Number(existing[idx].pxp) || 0) : 0;
                 const updated = idx >= 0
                     ? existing.map((d, i) => i === idx ? { ...d, ...newEntry } : d)
                     : [...existing, newEntry];
-                const newDelegatedPxp = updated.reduce((sum, d) => sum + (d.pxp || 0), 0);
+                if (intoIncoming) {
+                    const newReceivedPxp = Math.max(0, (prev._receivedPxp || 0) - before + amount);
+                    return {
+                        _incomingDelegations: updated,
+                        _receivedPxp: newReceivedPxp,
+                        _pxpBalance: (prev._ownPxp || 0) - (prev._delegatedPxp || 0) + newReceivedPxp,
+                    };
+                }
+                const newDelegatedPxp = Math.max(0, (prev._delegatedPxp || 0) - before + amount);
                 return {
                     _outgoingDelegations: updated,
                     _delegatedPxp: newDelegatedPxp,
@@ -3534,12 +3654,17 @@ class PixaWalletDialog extends React.PureComponent {
     };
 
     _compute_tab_margin = () => {
+        // A resize can land before the Tabs ref is set.
+        const el = this.state._tabs_el;
+        if (!el || typeof el.getBoundingClientRect !== 'function') return;
         if(this.state._view_right_mobile_enabled){
-            const {width} = this.state._tabs_el.getBoundingClientRect();
+            const {width} = el.getBoundingClientRect();
             this.setState({_margin_last_tab: Math.max(0, width-326)}, () => { this.forceUpdate(); });
         }else {
-            const {height} = this.state._tabs_el.getBoundingClientRect();
-            this.setState({_margin_last_tab: height-312}, () => { this.forceUpdate(); });
+            // Clamped like the mobile branch: in a window too short for the
+            // column, a negative margin pulled History up over the PXS tab.
+            const {height} = el.getBoundingClientRect();
+            this.setState({_margin_last_tab: Math.max(0, height-312)}, () => { this.forceUpdate(); });
         }
     }
 
@@ -3854,9 +3979,19 @@ class PixaWalletDialog extends React.PureComponent {
 
         // When viewing someone else's wallet, use the logged-in user for broadcasts.
         // _loggedInUser is a username string (from api.getActiveAccount()), not an object.
-        const _loggedInUsername = typeof _loggedInUser === 'string' ? _loggedInUser : (_loggedInUser && (_loggedInUser.username || _loggedInUser.name)) || '';
-        const broadcastAccount = _itsOwnProfile ? account : (_loggedInUsername ? { username: _loggedInUsername, name: _loggedInUsername } : account);
-        const wealthLabel = _itsOwnProfile ? "of your wealth" : "of its wealth";
+        const _loggedInUsername = viewerName(_loggedInUser);
+        // Nobody known (logged out, session not restored yet): an empty
+        // sender, NOT the wallet on screen — the send and delegate dialogs
+        // tag their own account "(you)" and disable it as a recipient, so
+        // falling back to `account` made a visitor's Quick Transfer to @bob
+        // read "@bob (you)". The handlers still resolve the real sender
+        // and ask the person to log in when there is none.
+        const broadcastAccount = _itsOwnProfile ? account : (_loggedInUsername ? { username: _loggedInUsername, name: _loggedInUsername } : { username: '', name: '' });
+        // "12.3 % of your wealth" / "… of its wealth" under each token's
+        // value — translated (it was hard-coded English in every language).
+        const wealthShare = (pct) => t(_itsOwnProfile
+            ? "components.pixa_wallet_dialog.pct_of_your_wealth"
+            : "components.pixa_wallet_dialog.pct_of_its_wealth", { pct });
 
         // Computed display values — every figure goes through utils/numberFormat
         // so grouping, decimal marks, percent and currency-code placement follow
@@ -4037,7 +4172,10 @@ class PixaWalletDialog extends React.PureComponent {
                         </div>
                     </div>
                     <div style={{width: "100%"}}>
-                        <Tooltip title={_pixaBalance <= 0 ? t("components.pixa_wallet_send_dialog.you_dont_have_any_to_transfer", { currency: "PXA" }) : ""} disableHoverListener={_pixaBalance > 0} disableFocusListener={_pixaBalance > 0} disableTouchListener={_pixaBalance > 0}>
+                        {/* "You don't have any PXA" is about the viewer's own balance: on
+                            someone else's wallet the transfer comes from the viewer, so
+                            the wallet's PXA doesn't matter (same rule as the PXA view). */}
+                        <Tooltip title={_itsOwnProfile && _pixaBalance <= 0 ? t("components.pixa_wallet_send_dialog.you_dont_have_any_to_transfer", { currency: "PXA" }) : ""} disableHoverListener={_itsOwnProfile ? _pixaBalance > 0 : true} disableFocusListener={_itsOwnProfile ? _pixaBalance > 0 : true} disableTouchListener={_itsOwnProfile ? _pixaBalance > 0 : true}>
                             <span style={{width: "100%"}}><Button color="primary" variant={"contained"} onClick={() => {this._open_send_dialog("PIXA");}} className={classes.whiteButton} style={{margin: "4px 0px 12px 0px"}} size={"large"} disabled={_itsOwnProfile ? _pixaBalance <= 0 : false}>{_itsOwnProfile ? <React.Fragment>{t("components.pixa_wallet_dialog.quick_transfer")} <CashFast style={{marginLeft: "8px"}}/></React.Fragment> : <React.Fragment><span style={{display: "grid", textAlign: "center", lineHeight: "1.3"}}>{t("components.pixa_wallet_dialog.quick_transfer_2")}<br/><span style={{fontSize: "0.75em"}}>{t("components.pixa_wallet_dialog.to", {
                                 username: account.username
                             })}</span></span> <CashFast style={{marginLeft: "8px"}}/></React.Fragment>}</Button></span>
@@ -4073,7 +4211,7 @@ class PixaWalletDialog extends React.PureComponent {
                                 </span>
                                 <span>
                                     <span className={"monospace"}>~ {pxpFiatDisplay}</span>
-                                    <span>{pxpPctDisplay} {wealthLabel}</span>
+                                    <span>{wealthShare(pxpPctDisplay)}</span>
                                 </span>
                             </Typography>
                             <Typography className={classes.pricedAt} variant="body2" color="textPrimary" component="p">{t("components.pixa_wallet_dialog.fungible_with_pxa")}</Typography>
@@ -4103,7 +4241,9 @@ class PixaWalletDialog extends React.PureComponent {
                                             <ListItemAvatar>
                                                 <Avatar src={d.image || ''} style={{borderRadius: "12px", cursor: "pointer", backgroundColor: "#000"}} className={"pixelated"} onClick={() => this._open_author(d.delegatee)} />
                                             </ListItemAvatar>
-                                            <ListItemText primary={<span style={{cursor: "pointer"}} onClick={() => this._open_author(d.delegatee)}>{`@${d.delegatee}`}</span>} secondary={t("components.pixa_wallet_dialog.you_delegated_pxp", {
+                                            <ListItemText primary={<span style={{cursor: "pointer"}} onClick={() => this._open_author(d.delegatee)}>{`@${d.delegatee}`}</span>} secondary={t(_itsOwnProfile
+                                                ? "components.pixa_wallet_dialog.you_delegated_pxp"
+                                                : "components.pixa_wallet_dialog.it_delegated_pxp", {
                                                 pxp: formatNumber(d.pxp, 2)
                                             })}/>
                                             {_itsOwnProfile && <ListItemSecondaryAction>
@@ -4127,7 +4267,9 @@ class PixaWalletDialog extends React.PureComponent {
                                             <ListItemAvatar>
                                                 <Avatar src={d.image || ''} style={{borderRadius: "12px", cursor: "pointer", backgroundColor: "#000"}} className={"pixelated"} onClick={() => this._open_author(d.delegator)} />
                                             </ListItemAvatar>
-                                            <ListItemText primary={<span style={{cursor: "pointer"}} onClick={() => this._open_author(d.delegator)}>{`@${d.delegator}`}</span>} secondary={t("components.pixa_wallet_dialog.pxp_delegated_to_you", {
+                                            <ListItemText primary={<span style={{cursor: "pointer"}} onClick={() => this._open_author(d.delegator)}>{`@${d.delegator}`}</span>} secondary={t(_itsOwnProfile
+                                                ? "components.pixa_wallet_dialog.pxp_delegated_to_you"
+                                                : "components.pixa_wallet_dialog.pxp_delegated_to_it", {
                                                 pxp: formatNumber(d.pxp || 0, 2)
                                             })}/>
                                         </ListItem>
@@ -4231,7 +4373,7 @@ class PixaWalletDialog extends React.PureComponent {
                             </span>
                                 <span>
                                 <span className={"monospace"}>~ {pixaFiatDisplay}</span>
-                                <span>{pixaPctDisplay} {wealthLabel}</span>
+                                <span>{wealthShare(pixaPctDisplay)}</span>
                             </span>
                             </Typography>
                             <Typography className={classes.pricedAt} variant="body2" color="textPrimary" component="p">{t("components.pixa_wallet_dialog.priced_at_exchange", {
@@ -4245,7 +4387,7 @@ class PixaWalletDialog extends React.PureComponent {
                                         { label: '1D', value: '1' },
                                         { label: '1W', value: '7' },
                                         { label: '1M', value: '30' },
-                                        { label: '1Y', value: '360' },
+                                        { label: '1Y', value: '365' },
                                     ].map(({ label, value }) => (
                                         <Button
                                             key={value}
@@ -4345,7 +4487,7 @@ class PixaWalletDialog extends React.PureComponent {
                                 </span>
                                 <span>
                                     <span className={"monospace"}>~ {pxsFiatDisplay}</span>
-                                    <span>{pxsPctDisplay} {wealthLabel}</span>
+                                    <span>{wealthShare(pxsPctDisplay)}</span>
                                 </span>
                             </Typography>
                             <Typography className={classes.pricedAt} variant="body2" color="textPrimary" component="p">{t("components.pixa_wallet_dialog.priced_at_witness_feed", {
@@ -4424,7 +4566,7 @@ class PixaWalletDialog extends React.PureComponent {
                                 </Tooltip>
                             </Typography>
                             {hasRewards && <Button className={classes.rewardClaim} color="primary" variant="text" onClick={this._claim_rewards} disabled={!_itsOwnProfile || _claiming_rewards}>
-                                <span style={{display: "inline", marginTop: 4, fontSize: "1.075rem"}}>{t("components.pixa_wallet_dialog.claim_reward")}</span> <span style={{fontWeight: "550", marginTop: -8}} className={"subtitle"} className={"monospace"} style={{display: "inline", fontWeight: "400"}}>{t("components.pixa_wallet_dialog.pxa_pxs_pxp_2", {
+                                <span style={{display: "inline", marginTop: 4, fontSize: "1.075rem"}}>{t("components.pixa_wallet_dialog.claim_reward")}</span> <span className={"monospace"} style={{display: "inline", fontWeight: "400"}}>{t("components.pixa_wallet_dialog.pxa_pxs_pxp_2", {
                                 rewardPixa: formatInteger(_rewardPixa),
                                 rewardPxs: formatInteger(_rewardPxs),
                                 rewardPxp: formatInteger(_rewardPxp)
@@ -4564,7 +4706,7 @@ class PixaWalletDialog extends React.PureComponent {
                             <Tab label={t("components.pixa_wallet_dialog.power")} icon={<PixaPower style={{transform: "scale(1.125)"}}/>} />
                         </Fade>
                         <Fade in={open} timeout={800}>
-                            <Tab label={t("components.pixa_wallet_dialog.pixa")} icon={<PixaLiquid style={{transform: "scale(1).125"}}/>} />
+                            <Tab label={t("components.pixa_wallet_dialog.pixa")} icon={<PixaLiquid style={{transform: "scale(1.125)"}}/>} />
                         </Fade>
                         <Fade in={open} timeout={1000}>
                             <Tab label={t("components.pixa_wallet_dialog.supra")} icon={<PixaSupra style={{transform: "scale(1.125)"}} />} />
@@ -4606,7 +4748,10 @@ class PixaWalletDialog extends React.PureComponent {
                                 resistance={true}
                                 springConfig={{tension: 450, friction: 60, duration: '360ms', easeFunction: 'cubic-bezier(0.280, 0.840, 0.420, 1)', delay: '5ms'}}
                                 index={_tab_value === false ? 1: 0}
-                                onChangeIndex={(v) => this._handle_tab_value_change({}, v ? 0: false)}
+                                // Children: [detail views, overview] — index 1 is the
+                                // overview here (the mobile stack is the other way
+                                // round), so a swipe to 1 means "overview".
+                                onChangeIndex={(v) => this._handle_tab_value_change({}, v ? false : 0)}
                                 disabled={false}
                                 key={"swipe-able-view-desktop-x"}
                             >

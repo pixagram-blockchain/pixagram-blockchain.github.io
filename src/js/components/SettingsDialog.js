@@ -35,6 +35,8 @@ import fuzzy from "fuzzy";
 
 import Globe from "./Globe";
 import GavelIcon from "@material-ui/icons/Gavel";
+import LockIcon from "@material-ui/icons/LockOutlined";
+import { isStoreBuild, getStoreName } from "../utils/store";
 import LicenseCustomizationDialog from "./LicenseCustomizationDialog";
 import { PIXA_LICENSE_BASE } from "../utils/pixa_license";
 import { hasDefaultLicense, resolveDefaultLicense, summarizeLicense } from "../utils/default_license";
@@ -160,8 +162,36 @@ const useStyles = makeStyles({
         flexWrap: "wrap",
         gap: 8,
         marginTop: 8
+    },
+    // ── Store build notice ──────────────────────────────────────────────────
+    // Under the two NSFW switches in the Google Play / App Store apps, where
+    // the store's content policy locks them (utils/store.js). Neutral, not
+    // amber: nothing is wrong, the setting just doesn't apply to this version.
+    storeNotice: {
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 8,
+        margin: "8px 0px 4px 0px",
+        padding: "10px 12px",
+        borderRadius: 12,
+        border: "1px solid rgba(255, 255, 255, 0.18)",
+        background: "rgba(255, 255, 255, 0.06)",
+        color: "#cfcfcf",
+        fontSize: 12,
+        lineHeight: 1.45
+    },
+    storeNoticeIcon: {
+        flex: "0 0 auto",
+        fontSize: 16,
+        marginTop: 1,
+        color: "#ffffff"
     }
 });
+
+// Google Play / App Store app: the two "show NSFW" switches stay visible but
+// locked (utils/settings.js already runs the app with their safe values).
+// Fixed for the page's lifetime, like the detection itself.
+const STORE_LOCKED = isStoreBuild();
 
 const VOTING_MARKS = [
     { value: 0, label: "0%" },
@@ -309,6 +339,7 @@ const SettingsDialog = (props) => {
     }, [_on_settings_changed]);
 
     const _handle_nsfw_enabled_switch_change = useCallback(() => {
+        if (STORE_LOCKED) return; // locked by the store's policy (switch is disabled too)
         if (settings._nsfw_enabled) {
             actions.trigger_sfx("ui_lock");
             setSettings(prev => ({ ...prev, _nsfw_enabled: false }));
@@ -319,6 +350,7 @@ const SettingsDialog = (props) => {
     }, [settings._nsfw_enabled, _on_settings_changed]);
 
     const _handle_nsfw_filter_switch_change = useCallback(() => {
+        if (STORE_LOCKED) return; // locked by the store's policy (switch is disabled too)
         actions.trigger_sfx("ui_lock");
         // _nsfw_filter: true = filtering ON (NSFW hidden from feed); false = shown.
         const newFilter = !(settings._nsfw_filter === true);
@@ -352,6 +384,7 @@ const SettingsDialog = (props) => {
     }, [settings._mode, _on_settings_changed]);
 
     const _on18_accept = useCallback(() => {
+        if (STORE_LOCKED) { set_18_open(false); return; }
         if (!settings._nsfw_enabled) {
             actions.trigger_sfx("ui_lock");
             setSettings(prev => ({ ...prev, _nsfw_enabled: true }));
@@ -740,7 +773,7 @@ const SettingsDialog = (props) => {
                     <FormControlLabel
                         className={classes.switch}
                         value={"nsfw_filter"}
-                        control={<Switch checked={!_nsfw_filter} onChange={_handle_nsfw_filter_switch_change} color="primary" />}
+                        control={<Switch checked={!_nsfw_filter} onChange={_handle_nsfw_filter_switch_change} color="primary" disabled={STORE_LOCKED} />}
                         label={nsfwSwitchLabel(
                             t("components.settings_dialog.dont_filter_nsfw_content"),
                             _nsfw_filter ? t("components.settings_dialog.nsfw_content_is_hidden") : t("components.settings_dialog.nsfw_content_is_shown")
@@ -750,13 +783,24 @@ const SettingsDialog = (props) => {
                     <FormControlLabel
                         className={classes.switch}
                         value={"nsfw_blur"}
-                        control={<Switch checked={_nsfw_enabled} onChange={_handle_nsfw_enabled_switch_change} color="primary" />}
+                        control={<Switch checked={_nsfw_enabled} onChange={_handle_nsfw_enabled_switch_change} color="primary" disabled={STORE_LOCKED} />}
                         label={nsfwSwitchLabel(
                             t("components.settings_dialog.dont_blur_nsfw_content"),
-                            _nsfw_enabled ? t("components.settings_dialog.nsfw_content_shows_normally") : t("components.settings_dialog.nsfw_content_shows_blurred")
+                            // A store build hides mature artworks outright rather
+                            // than blurring them (PaperCard), so "blurred" would be
+                            // the wrong word there.
+                            STORE_LOCKED
+                                ? t("components.settings_dialog.nsfw_content_is_hidden")
+                                : _nsfw_enabled ? t("components.settings_dialog.nsfw_content_shows_normally") : t("components.settings_dialog.nsfw_content_shows_blurred")
                         )}
                         labelPlacement="start"
                     />
+                    {STORE_LOCKED ? (
+                        <div className={classes.storeNotice} role="note">
+                            <LockIcon className={classes.storeNoticeIcon} aria-hidden="true" />
+                            <span>{t("components.store_policy.settings_locked", { store: getStoreName() })}</span>
+                        </div>
+                    ) : null}
                     <FormControlLabel
                         className={classes.switch}
                         value={"toxicity_helper"}

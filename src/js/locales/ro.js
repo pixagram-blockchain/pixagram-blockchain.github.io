@@ -1,7 +1,7 @@
 /**
  * locales/ro.js — Română
  *
- * Coverage: 2408 of 2542 keys (94.7 %).
+ * Coverage: 2416 of 2550 keys (94.7 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -884,6 +884,13 @@ export default {
             "retry": "Reîncearcă"
         },
         "post_dialog": {
+            "origin": "Origine",
+            "original_content": "Conținut original",
+            "not_original_content": "Conținut neoriginal",
+            "original_content_tooltip": "Declarat de autor: propria fotografie sau propriul desen, înainte de orice transformare de stil",
+            "ai_used": "AI folosit",
+            "no_ai_declared": "Niciun AI declarat",
+            "ai_used_tooltip": "Declarat de autor: AI-ul care a creat sau a transformat imaginea",
             "for_sale": "De vânzare",
             "last": "Ultimul: {{soldPrice}}{{currency}}",
             "not_for_sale": "Nu este de vânzare",
@@ -1089,7 +1096,16 @@ export default {
             "adjust_step": "Ajustează ({{step}}/{{total}})",
             "post_step": "Postează ({{step}}/{{total}})",
             "publish": "Publică",
-            "ai_style": "Stil AI"
+            "ai_style": "Stil AI",
+            "original_content": "Conținut original",
+            "oc_hint": "Activează-l dacă, înainte de orice transformare de stil, era propria ta imagine reală — o fotografie sau un desen.",
+            "oc_file_declares_ai": "Dezactivat: fișierul imaginii arată că a fost creată sau editată cu AI — activează-l dacă e greșit.",
+            "oc_generated": "Generată din descrierea ta, deci nu este conținut original.",
+            "ai_used": "AI folosit",
+            "ai_used_prefilled": "Precompletat cu AI-ul folosit de aplicație. Adaugă orice alt AI care a creat sau a modificat imaginea.",
+            "ai_used_hint": "Lasă gol dacă nu a fost implicat niciun AI. Altfel, numește AI-ul care a creat sau a modificat imaginea.",
+            "ai_used_is_required": "Numește AI-ul care a creat sau a transformat această imagine",
+            "ai_used_must_be_characters_or_less_currently": "AI folosit trebuie să aibă cel mult {{AI_MAX_LENGTH}} caractere (acum {{ai_count}})"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Transfer de Power în masă",
@@ -1673,6 +1689,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "Operă",
+            "artwork_hint": "Editează imaginea în editorul de pixeli. La salvare, este înlocuită on-chain; doar istoricul blocurilor păstrează versiunea veche.",
+            "edit_in_pixel_editor": "Editează în editorul de pixeli",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "Conținutul operei a fost șters: nu a mai rămas nicio imagine de editat.",
+            "artwork_encoding": "Se codifică imaginea editată…",
+            "artwork_encode_failed": "Imaginea editată nu a putut fi codificată. Apasă din nou Gata în editor sau Resetează.",
+            "artwork_too_large": "Imaginea editată are {{size}} kB, mai mult decât cei {{max}} kB pe care îi poate trimite o editare. Simplific-o în editor sau apasă Resetează.",
+            "artwork_updated": "Postare actualizată — noua operă apare într-o clipă",
+            "original_content_not_declared": "Nedeclarat încă. Activează-l dacă, înainte de orice transformare de stil, era propria ta imagine reală — o fotografie sau un desen.",
+            "ai_used_as_published": "Așa cum a fost publicat: îl poți reformula sau poți adăuga alt AI, dar nu îl poți elimina.",
             "loading_the_on_chain_version": "Se încarcă versiunea on-chain…",
             "only_can_edit_this_post": "Doar @{{authorUsername}} poate edita această postare.",
             "title": "Titlu",
@@ -1694,7 +1722,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "Taguri: litere mici, fără puncte, min. 3 caractere, trebuie să înceapă cu o literă",
             "enable_this_if_your_content_contains_mature": "Activează dacă conținutul tău include material matur sau sensibil",
             "if_this_post_is_a_dao_proposal": "Dacă această postare este o propunere DAO, propunerea legată este eliminată și on-chain.",
-            "replacing_the_artwork_with_a_new_image": "Înlocuirea operei cu o imagine nouă va ajunge aici într-o actualizare viitoare.",
             "title_description_and_tags_for_this_post": "Titlul, descrierea și tagurile acestei postări se editează din „Editează conținutul”. Aici îi poți comuta marcajele de vizibilitate.",
             "marks_the_post_as_deleted_in_its": "Marchează postarea ca ștearsă în metadatele ei: dispare din fiecare feed, profil și pagină de comunitate. Reversibil — se atinge doar marcajul din metadate. Nu se adaugă niciun tag, deci postările șterse nu pot fi răsfoite.",
             "erase_the_artwork_content_itself_the_post": "Șterge conținutul operei în sine (corpul postării). Imaginea este înlocuită on-chain și nu poate fi restaurată de aici — doar istoricul blocurilor păstrează versiunea veche. Marchează postarea ca ștearsă.",
@@ -5055,7 +5082,15 @@ export default {
             "view_zoom_out": "Micșorează",
             "view_grid_on": "Arată grila",
             "view_grid_off": "Ascunde grila",
-            "edits_applied": "Editată în editorul de pixeli"
+            "edits_applied": "Editată în editorul de pixeli",
+            "panels": "Panouri",
+            "import": "Import",
+            "import_image": "Importă o imagine",
+            "import_hint": "Pixel art-ul își păstrează pixelii, pixel art-ul mărit revine la dimensiunea reală, iar o fotografie devine pixel art. Imaginea plutește deasupra stratului activ până o aplici. Poți și să tragi sau să lipești o imagine pe pânză.",
+            "import_done_native": "Pixel art importat, {{width}} × {{height}}",
+            "import_done_upscaled": "Pixel art {{scale}}× importat la dimensiunea reală, {{width}} × {{height}}",
+            "import_done_photo": "Fotografie transformată în pixel art, {{width}} × {{height}}",
+            "import_failed": "Acest fișier nu poate fi citit ca imagine."
         }
     }
 };

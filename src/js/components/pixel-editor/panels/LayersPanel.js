@@ -6,6 +6,9 @@
 // same on phones): the row follows the pointer, the others make room, and
 // the drop is one "Move layer" step. Arrow keys on a focused handle move the
 // layer too. The sheet scrolls by itself when the drag nears its edges.
+//
+// Import image (under the actions) lets the host pick a file: the picture
+// floats over the active layer, ready to be moved and applied.
 // ============================================================================
 
 import * as React from "preact/compat";
@@ -27,10 +30,11 @@ import CallMergeIcon from "@material-ui/icons/CallMerge";
 import MergeTypeIcon from "@material-ui/icons/MergeType";
 import EditIcon from "@material-ui/icons/Edit";
 import DeleteOutlineIcon from "@material-ui/icons/DeleteOutline";
+import AddPhotoAlternateIcon from "@material-ui/icons/AddPhotoAlternate";
 
 import { tp, layerName, layerCopyName } from "../labels";
 import { useEditorEvents, thumbPixels, paintPixels } from "../editorUtils";
-import { Section, SliderField, EASE } from "../ui";
+import { Section, SliderField, Hint, EASE, SURFACE } from "../ui";
 
 const ROW_H = 60;   // row pitch: 56 px row + 4 px gap
 const THUMB = 40;
@@ -57,17 +61,17 @@ const useStyles = makeStyles({
         userSelect: "none",
         cursor: "pointer",
         transition: `transform 180ms ${EASE}, background-color 160ms ${EASE}, box-shadow 160ms ${EASE}`,
-        "&:hover": { backgroundColor: "#171717" },
-        "&:focus-visible": { outline: "none", backgroundColor: "#1d1d1d" },
+        "&:hover": { backgroundColor: SURFACE.raised },
+        "&:focus-visible": { outline: "none", backgroundColor: SURFACE.hover },
     },
     rowActive: {
-        backgroundColor: "#212121 !important",
+        backgroundColor: `${SURFACE.hover} !important`,
         color: "#ffffff",
     },
     rowDragging: {
         zIndex: 2,
         transition: "none !important",
-        backgroundColor: "#2a2a2a !important",
+        backgroundColor: `${SURFACE.focus} !important`,
         boxShadow: "0 10px 28px rgba(0,0,0,0.6)",
         cursor: "grabbing",
     },
@@ -123,7 +127,7 @@ const useStyles = makeStyles({
         fontFamily: `"Industry Book", "Normative Pro"`,
         fontSize: 14,
         color: "#ffffff",
-        backgroundColor: "#101010",
+        backgroundColor: SURFACE.stage,
         borderRadius: 10,
         padding: "2px 8px",
     },
@@ -145,12 +149,28 @@ const useStyles = makeStyles({
         width: 44,
         height: 44,
         borderRadius: "50%",
-        backgroundColor: "#171717",
+        backgroundColor: SURFACE.raised,
         color: "#dddddd",
         transition: `background-color 160ms ${EASE}`,
-        "&:hover": { backgroundColor: "#262626", color: "#ffffff" },
+        "&:hover": { backgroundColor: SURFACE.hover, color: "#ffffff" },
         "&.Mui-disabled": { opacity: 0.32 },
         "& .MuiSvgIcon-root": { fontSize: 20 },
+    },
+    importButton: {
+        width: "100%",
+        height: 48,
+        justifyContent: "flex-start",
+        gap: 12,
+        padding: "0 18px",
+        borderRadius: 24,
+        backgroundColor: SURFACE.raised,
+        color: "#eeeeee",
+        fontFamily: `"Industry Book", "Normative Pro"`,
+        fontSize: 14,
+        transition: `background-color 160ms ${EASE}`,
+        "&:hover": { backgroundColor: SURFACE.hover, color: "#ffffff" },
+        "&.Mui-focusVisible": { backgroundColor: SURFACE.focus },
+        "& .MuiSvgIcon-root": { fontSize: 22 },
     },
 });
 
@@ -192,7 +212,7 @@ function ActionButton({ classes, title, Icon, onClick, disabled }) {
     );
 }
 
-export default function LayersPanel({ ed }) {
+export default function LayersPanel({ ed, onImport }) {
     const classes = useStyles();
     useEditorEvents(ed, ["layers", "change", "document", "floating"]);
     const doc = ed.doc;
@@ -301,6 +321,7 @@ export default function LayersPanel({ ed }) {
                         >
                             <ButtonBase
                                 className={classes.handle}
+                                data-no-swipe
                                 aria-label={tp("drag_to_reorder")}
                                 title={tp("drag_to_reorder")}
                                 onPointerDown={(e) => startDrag(e, layer, i)}
@@ -371,6 +392,16 @@ export default function LayersPanel({ ed }) {
                 <ActionButton classes={classes} title={tp("rename_layer")} Icon={EditIcon} onClick={() => setRenaming({ id: active.id, value: active.name })} />
                 <ActionButton classes={classes} title={tp("delete_layer")} Icon={DeleteOutlineIcon} onClick={() => ed.run("layer.delete")} disabled={!ed.can("layer.delete", {})} />
             </div>
+
+            {onImport && (
+                <Section title={tp("import")}>
+                    <ButtonBase className={classes.importButton} onClick={onImport}>
+                        <AddPhotoAlternateIcon />
+                        <span>{tp("import_image")}</span>
+                    </ButtonBase>
+                    <Hint>{tp("import_hint")}</Hint>
+                </Section>
+            )}
 
             <Section title={tp("layer_opacity")}>
                 <SliderField

@@ -17,15 +17,16 @@
  *   '@pixagram/upscaler'       GPU renderers, presets, WasmXbrzPool
  *   '@pixagram/upscaler/wasm'  the WASM module (init, *_upscale_config, get_memory)
  *
- * Public API (unchanged):
+ * Public API:
  *   xbrzF(image_data, scale, callback, terminate, id, mode)
  *   hexF (image_data, scale, callback, terminate, id, mode)
  *   crtF (image_data, scale, callback, terminate, id, mode)
  *   sqrF (image_data, scale, callback, terminate, id, mode)
  *   triF (image_data, scale, callback, terminate, id, mode)
  *   cutF — compatibility alias for triF
+ *     callback(info, bitmap)            // see "One format" below
  *   releaseId(id)                       // drops callbacks, KEEPS cached renders
- *   getCachedRender(id, algo, scale)    // cache-first lookup (skip decode+upscale)
+ *   getCachedRender(id, algo, scale)    // is it cached? { width, height } | undefined
  *   acquireCachedBitmap(id, algo, scale)  // consumer-owned bitmap for a cached render
  *   acquireBestCachedBitmap(id, algo)     // …at the largest cached scale for this id
  *   clearRenderCache()
@@ -34,21 +35,39 @@
  *   playAnimation({data, width, height, algorithm, scale, onFrame, onEnd, onError})
  *                                       // animated GIF / WebP, one frame at a time
  *   animationSpec(algo, width, height, scale)  // effect + scale an animation frame gets
- *   configureRenderCache({maxEntries, maxBytes, maxBitmaps, maxBitmapBytes})
+ *   configureRenderCache({maxEntries, maxBytes})
  *   configureGpuGuard({maxOutputPixels})
  *   window.__PIXA_RENDER_POOL_STATS__()
  *
+ * One format: a finished render is kept as an ImageBitmap and as nothing
+ * else. The upscalers produce ImageData (WASM memory, GPU read-back), so
+ * each result is turned into a bitmap once, on arrival, and the ImageData
+ * is let go: the pool retains no ImageData. Source pixels are the other
+ * half of the rule — they stay ImageData, in png-db, which keeps no
+ * bitmap. Consumers get callback(info, bitmap):
+ *   bitmap  theirs to transferFromImageBitmap() or close()
+ *   info    the render's { width, height }, not its pixels
+ * Only when the browser cannot make a bitmap at all is a callback given
+ * (imageData, undefined) instead, so a consumer that can draw pixels
+ * still paints.
+ *
  * Render cache: the last MAX_CACHED_RENDERS (default 40) finished
- * upscales are retained as ImageData in a global LRU and survive card
- * unmount, so scrolling back repaints without re-decoding or
- * re-upscaling. The byte budgets scale with navigator.deviceMemory, a
- * render larger than half the budget is handed out but not cached, and
+ * upscales are retained, as pool-owned ImageBitmaps, in a global LRU and
+ * survive card unmount, so scrolling back repaints without re-decoding or
+ * re-upscaling. A cached bitmap never leaves the pool (bitmaps are
+ * single-consumer: transferFromImageBitmap detaches whatever the consumer
+ * gets): every serve is a clone, createImageBitmap(bitmap), which costs
+ * no raster. This is also what makes the dialog's hero animation reactive
+ * on reopens and revisits: the flight starts from a ~1 ms clone instead of
+ * a decode + upscale. The byte budget scales with navigator.deviceMemory,
+ * a render larger than half the budget is handed out but not cached, and
  * the cache is emptied on pagehide.
  *
  * Cold tier: a render evicted from the LRU (up to 4 MiB of pixels, CRT
- * excluded) is PNG-encoded at idle time into a Blob (ColdStore, 64 MiB).
- * Blob bytes live outside the renderer heap, so a scroll-back decodes the
- * PNG instead of re-running the decode + upscale.
+ * excluded) is PNG-encoded at idle time into a Blob (ColdStore, 64 MiB)
+ * and its bitmap closed. Blob bytes live outside the renderer heap, so a
+ * scroll-back decodes the PNG, straight into a bitmap, instead of
+ * re-running the decode + upscale.
  *
  * Release: the xBRZ worker pool (at most 4 workers) is disposed after
  * 30 s without jobs, the shared WebGL render target and backbuffer are
@@ -57,22 +76,6 @@
  * been read. Outputs are capped at 16 MP: the scale is lowered to fit
  * (cappedScale), and an image already too large to double is returned
  * as is.
- *
- * Master-bitmap layer: repeat serves of a cached render used to pay a
- * full ImageData→ImageBitmap raster every time (bitmaps are
- * single-consumer: transferFromImageBitmap detaches whatever the
- * consumer gets, so nothing handed out can be kept). The pool now pins
- * a pool-owned "master" ImageBitmap the first time a cached render is
- * RE-served (mint-on-hit — cold first paints cost exactly what they did
- * before), and every serve after that is a cheap bitmap→bitmap clone
- * instead of a raster. The master itself never leaves the pool, so no
- * consumer can detach it; consumers always receive their own clone.
- * Masters live under their own count/byte budget and are closed on
- * eviction independently of their ImageData, which stays and simply
- * re-mints a master on the next hit. This is what makes the dialog's
- * hero animation reactive on reopens and revisits: the flight starts
- * from a ~1 ms clone instead of a decode + upscale (or a multi-MB
- * raster).
  *
  * Animations (animated GIF / WebP): never upscaled as a whole and never
  * cached. playAnimation() streams the frames through a WasmAnimationPool
@@ -102,7 +105,7 @@ import {
     trimMemory,
 } from '@pixagram/upscaler';
 import { idle } from "./idle";
-import { ColdStore, imageDataToBlob, blobToImageData } from "./memory-kit";
+import { ColdStore } from "./memory-kit";
 // The WASM module is its own entry point: the package root exports only the
 // GPU renderers, presets and helpers, so importing init / *_upscale_config
 // from '@pixagram/upscaler' resolves to undefined.
@@ -723,16 +726,17 @@ async function xbrzUpscale(imgd, scale, tempCallback, processN = 1, mode = "GPU"
     // scale > 8: hand the 8x result over immediately, then refine through
     // the vtracer SVG path and resolve with the composited final image.
     // The preview is cached under the final key until the composite
-    // replaces it; it must never be kept in the cold tier under that key.
-    xbrzPreviews.add(imgd2);
+    // replaces it; it must never be kept in the cold tier under that key
+    // (the caller delivers it flagged as a preview).
     tempCallback(imgd2);
     ensureXbrzScratch();
     let svg_url;
     try {
         const { default: createSVG } = await import("./vtracer");
         // vtracer's prepareCanvas rewrites its input's pixels in place, and
-        // imgd2 has already been delivered and cached as the 8x preview:
-        // give it a copy, which only lives while the SVG is traced.
+        // imgd2 is still needed: it is the base layer of the composite
+        // below, and the final result if the SVG path fails. Give vtracer
+        // a copy, which only lives while the SVG is traced.
         const tracerInput = new ImageData(new Uint8ClampedArray(imgd2.data), imgd2.width, imgd2.height);
         svg_url = await createSVG(tracerInput, "blob", processN);
     } catch (e) {
@@ -899,28 +903,28 @@ class WorkerManager {
 const manager = new WorkerManager({});
 
 // ── Per-algorithm state ──────────────────────────────────────────────
-// callbacks[id]  → consumer callback (closes over a DOM canvas — must be
+// callbacks[key] → consumer callback (closes over a DOM canvas — must be
 //                  cleared aggressively on consumer unmount via releaseId)
-// data[id]       → cached upscaled ImageData (the render cache)
-// timestamp[id]  → LRU recency tick for the render cache
-// bitmaps[id]    → { bmp, bytes } pool-owned master ImageBitmap for the
-//                  same key (mint-on-hit; see serveBitmap below)
+// bitmaps[key]   → { bmp, bytes, info, preview }: the cached render, a
+//                  pool-owned ImageBitmap (the render cache)
+// timestamp[key] → LRU recency tick for the render cache
+// latest[key]    → ticket of the newest delivery in flight for the key
 //
-// The ImageData remains the source of truth. A master bitmap is only an
-// accelerator: it is NEVER handed to a consumer (a consumer's
+// The cached bitmap is the ONLY copy of a render the pool keeps: there is
+// no ImageData behind it. It is NEVER handed to a consumer (a consumer's
 // bitmaprenderer context would detach it via transferFromImageBitmap
 // and close() it — the failure mode the old bitmap cache died of).
-// Consumers always receive a fresh clone of the master; the master
-// stays home, is validated for detachment on every access, and is
-// closed on eviction while its ImageData lives on.
+// Consumers always receive a clone; the cached bitmap stays home, is
+// validated for detachment on every access, and is closed when it leaves
+// the cache.
 const ALGORITHMS = ['xbrz', 'hex', 'crt', 'tri', 'sqr'];
 
 let workerState = {
-    xbrz: { worker: false, callbacks: {}, data: {}, timestamp: {}, bitmaps: {} },
-    hex:  { worker: false, callbacks: {}, data: {}, timestamp: {}, bitmaps: {} },
-    sqr:  { worker: false, callbacks: {}, data: {}, timestamp: {}, bitmaps: {} },
-    crt:  { worker: false, callbacks: {}, data: {}, timestamp: {}, bitmaps: {} },
-    tri:  { worker: false, callbacks: {}, data: {}, timestamp: {}, bitmaps: {} },
+    xbrz: { worker: false, callbacks: {}, bitmaps: {}, timestamp: {}, latest: {} },
+    hex:  { worker: false, callbacks: {}, bitmaps: {}, timestamp: {}, latest: {} },
+    sqr:  { worker: false, callbacks: {}, bitmaps: {}, timestamp: {}, latest: {} },
+    crt:  { worker: false, callbacks: {}, bitmaps: {}, timestamp: {}, latest: {} },
+    tri:  { worker: false, callbacks: {}, bitmaps: {}, timestamp: {}, latest: {} },
 };
 
 // ── Render cache policy ──────────────────────────────────────────────
@@ -937,29 +941,19 @@ let workerState = {
 //                        outputs can't pile up N × multi-MB surfaces.
 // Recency uses a monotonic tick rather than Date.now()|0 — the old int32
 // truncation of an epoch timestamp overflows and can misorder the LRU.
-let workerStateSize = 0;   // bytes of cached ImageData across the pool
+let workerStateSize = 0;   // bytes of cached bitmaps across the pool (w*h*4)
 let workerStateCount = 0;  // number of cached renders across the pool
 let lruTick = 0;
 
 let MAX_CACHED_RENDERS = 40;
 let MAX_CACHED_BYTES = 128 * 1024 * 1024;
 
-// Master-bitmap budget — separate and smaller than the ImageData budget
-// because bitmaps typically live in GPU/driver memory. Recency rides the
-// SAME timestamp table as the render cache (a serve bumps both), so the
-// masters kept hot are exactly the renders being re-served.
-let bitmapBytes = 0;       // bytes of pinned master bitmaps (w*h*4)
-let bitmapCount = 0;
-let MAX_CACHED_BITMAPS = 16;
-let MAX_CACHED_BITMAP_BYTES = 64 * 1024 * 1024;
-
-// Size both budgets to the device instead of 128 + 64 MiB everywhere.
+// Size the budget to the device instead of 128 MiB everywhere.
 // navigator.deviceMemory is a rounded GB value that only Chromium reports;
 // elsewhere 4 GB is assumed.
 {
     const gb = (typeof navigator !== "undefined" && navigator.deviceMemory) || 4;
     MAX_CACHED_BYTES = (gb <= 2 ? 24 : gb <= 4 ? 48 : 96) * 1024 * 1024;
-    MAX_CACHED_BITMAP_BYTES = (gb <= 4 ? 16 : 32) * 1024 * 1024;
 }
 // Leaving the page: nothing in the render cache is worth keeping.
 if (typeof addEventListener === "function") {
@@ -976,47 +970,86 @@ function cacheableBytes(bytes) {
 // Card-size renders evicted from the cache above are PNG-encoded in idle
 // time and kept as Blobs, whose bytes live in the browser process (paged
 // to disk when its Blob pool fills), not in this page. A re-show decodes
-// the PNG instead of decoding the source and upscaling again. Pixel art
-// compresses well (about 15x for xBRZ, 58x hex, 116x nearest-neighbour at
-// 8x); CRT scanlines barely compress (about 3x), so CRT is skipped.
+// the PNG, straight into a bitmap, instead of decoding the source and
+// upscaling again. Pixel art compresses well (about 15x for xBRZ, 58x
+// hex, 116x nearest-neighbour at 8x); CRT scanlines barely compress
+// (about 3x), so CRT is skipped.
 const COLD_MAX_ENTRY_BYTES = 4 * 1024 * 1024; // card-size renders only
-const COLD_MAX_QUEUED = 4;                     // evicted ImageData waiting to encode
+const COLD_MAX_QUEUED = 4;                     // evicted bitmaps waiting to encode
 const coldRenders = new ColdStore({ maxBytes: 64 * 1024 * 1024 });
-// 8x previews of xBRZ renders above 8x (see xbrzUpscale). Evicted while
-// vtracer still runs, a preview would otherwise be kept under the final
-// render's key, and every later scroll-back would show it instead.
-const xbrzPreviews = new WeakSet();
 let coldEncodeChain = Promise.resolve();
 let coldEncodesQueued = 0;
 
-function keepCold(algorithm, key, imgd) {
-    if (algorithm === "crt" || !imgd || !imgd.data || xbrzPreviews.has(imgd)) return;
-    if (imgd.data.byteLength > COLD_MAX_ENTRY_BYTES) return;
-    if (coldEncodesQueued >= COLD_MAX_QUEUED || coldRenders.has(key)) return;
-    if (typeof OffscreenCanvas === "undefined" && typeof document === "undefined") return;
+/** PNG-encode a bitmap. The scratch canvas is software-backed and is
+ *  shrunk as soon as the encoder is done with it (see releaseXbrzScratch). */
+async function bitmapToBlob(bmp) {
+    const width = bmp.width;
+    const height = bmp.height;
+    if (!(width > 0) || !(height > 0)) throw new Error("bitmap is detached");
+    let canvas;
+    if (typeof OffscreenCanvas !== "undefined") {
+        canvas = new OffscreenCanvas(width, height);
+    } else {
+        canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+    }
+    try {
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) throw new Error("no 2D context");
+        ctx.drawImage(bmp, 0, 0);
+        if (typeof canvas.convertToBlob === "function") {
+            return await canvas.convertToBlob({ type: "image/png" });
+        }
+        return await new Promise((resolve, reject) => {
+            canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("PNG encode failed"))), "image/png");
+        });
+    } finally {
+        canvas.width = 1;
+        canvas.height = 1;
+    }
+}
+
+/**
+ * Offer an evicted render to the cold tier. Returns true when the tier took
+ * the bitmap — it then closes it once the PNG exists (or the encode failed)
+ * — and false when the bitmap stays with the caller.
+ */
+function keepCold(algorithm, key, rec) {
+    // `preview`: the 8x pass of an xBRZ render above 8x (see xbrzUpscale).
+    // Evicted while vtracer still runs, it would otherwise be kept under
+    // the final render's key, and every later scroll-back would show it.
+    if (algorithm === "crt" || rec.preview) return false;
+    if (rec.bytes > COLD_MAX_ENTRY_BYTES || !(rec.bmp.width > 0)) return false;
+    if (coldEncodesQueued >= COLD_MAX_QUEUED || coldRenders.has(key)) return false;
+    if (typeof OffscreenCanvas === "undefined" && typeof document === "undefined") return false;
+    const bmp = rec.bmp;
     coldEncodesQueued++;
     idle(() => {
         // One encode at a time; each holds one full-size canvas while it runs.
         coldEncodeChain = coldEncodeChain
-            .then(() => imageDataToBlob(imgd))
+            .then(() => bitmapToBlob(bmp))
             .then((blob) => coldRenders.put(key, blob))
             .catch(() => {})
-            .finally(() => { coldEncodesQueued--; });
+            .finally(() => { closeBitmap(bmp); coldEncodesQueued--; });
     });
+    return true;
 }
 
-/** A render kept in the cold tier, decoded back to ImageData; null on a
- *  miss, or when the Blob no longer decodes (the entry is then dropped). */
+/** A render kept in the cold tier, decoded straight into a bitmap that
+ *  belongs to the caller; null on a miss, or when the Blob no longer
+ *  decodes (the entry is then dropped). */
 async function loadCold(fullId) {
     let blob = null;
     try { blob = await coldRenders.getBlob(fullId); } catch (e) { return null; }
     if (!blob) return null;
     try {
-        return await blobToImageData(blob);
-    } catch (e) {
-        coldRenders.delete(fullId).catch(() => {});
-        return null;
-    }
+        const bmp = await createImageBitmap(blob);
+        if (bmp.width > 0 && bmp.height > 0) return bmp;
+        closeBitmap(bmp);
+    } catch (e) {}
+    coldRenders.delete(fullId).catch(() => {});
+    return null;
 }
 
 // ── GPU memory ───────────────────────────────────────────────────────
@@ -1041,14 +1074,14 @@ if (typeof document !== "undefined" && typeof document.addEventListener === "fun
     });
 }
 
-/** Tune render-cache bounds at runtime (e.g. lower on constrained devices). */
-export function configureRenderCache({ maxEntries, maxBytes, maxBitmaps, maxBitmapBytes } = {}) {
+/** Tune render-cache bounds at runtime (e.g. lower on constrained devices).
+ *  `maxBitmaps` / `maxBitmapBytes` used to bound a second, bitmap copy of
+ *  the cached renders. The cache is that one set of bitmaps now, so they
+ *  are accepted and ignored: `maxEntries` / `maxBytes` are the bounds. */
+export function configureRenderCache({ maxEntries, maxBytes } = {}) {
     if (Number.isFinite(maxEntries) && maxEntries >= 0) MAX_CACHED_RENDERS = maxEntries | 0;
     if (Number.isFinite(maxBytes) && maxBytes >= 0) MAX_CACHED_BYTES = maxBytes;
-    if (Number.isFinite(maxBitmaps) && maxBitmaps >= 0) MAX_CACHED_BITMAPS = maxBitmaps | 0;
-    if (Number.isFinite(maxBitmapBytes) && maxBitmapBytes >= 0) MAX_CACHED_BITMAP_BYTES = maxBitmapBytes;
     trimRenderCache();
-    trimBitmaps();
 }
 
 // Switching algorithms: terminate the workers for inactive algorithms
@@ -1063,132 +1096,86 @@ function terminateOtherWorkers(currentWorker) {
     }
 }
 
-/** Remove one cached render and fix the global accounting. */
-function dropEntry(algorithm, key) {
-    const state = workerState[algorithm];
-    dropMaster(algorithm, key); // a master never outlives its ImageData
-    const entry = state.data[key];
-    if (entry === undefined) return;
-    keepCold(algorithm, key, entry);
-    workerStateSize -= (entry && entry.data && entry.data.byteLength) | 0;
-    workerStateCount -= 1;
-    delete state.data[key];
-    delete state.timestamp[key];
-    if (workerStateSize < 0) workerStateSize = 0;
-    if (workerStateCount < 0) workerStateCount = 0;
-}
-
-// ── Master bitmaps (mint-on-hit accelerator) ─────────────────────────
-
-/** The pool-owned master ImageBitmap for a key, or null. Self-heals: a
- *  master that reads as detached (width 0 — someone transferred or
- *  closed a borrowed reference) is dropped instead of served. */
-function getMaster(algorithm, key) {
-    const rec = workerState[algorithm].bitmaps[key];
-    if (!rec) return null;
-    if (!rec.bmp || !(rec.bmp.width > 0)) { dropMaster(algorithm, key); return null; }
-    return rec.bmp;
-}
-
-/** Unpin + close a master. Accounting uses the bytes recorded at adopt
- *  time, so a detached bitmap (width 0) still balances the books. */
-function dropMaster(algorithm, key) {
+/** Remove one cached render and fix the global accounting. Its bitmap is
+ *  the only copy of those pixels: with `keep`, the cold tier may take it
+ *  (see keepCold); otherwise it is closed right here. */
+function dropEntry(algorithm, key, keep = true) {
     const state = workerState[algorithm];
     const rec = state.bitmaps[key];
-    if (!rec) return;
+    if (rec === undefined) return;
     delete state.bitmaps[key];
-    bitmapBytes -= rec.bytes | 0;
-    bitmapCount -= 1;
-    if (bitmapBytes < 0) bitmapBytes = 0;
-    if (bitmapCount < 0) bitmapCount = 0;
-    try { rec.bmp && rec.bmp.close && rec.bmp.close(); } catch (e) {}
+    delete state.timestamp[key];
+    workerStateSize -= rec.bytes;
+    workerStateCount -= 1;
+    if (workerStateSize < 0) workerStateSize = 0;
+    if (workerStateCount < 0) workerStateCount = 0;
+    if (!keep || !keepCold(algorithm, key, rec)) closeBitmap(rec.bmp);
 }
 
-/** Pin `bmp` as the master for a key (replacing any previous master —
- *  the xbrz>8x path overwrites the 8x preview with the SVG composite,
- *  and the master must follow the pixels). Then trim to budget without
- *  evicting the key just adopted. */
-function adoptMaster(algorithm, key, bmp) {
-    if (!bmp || !(bmp.width > 0)) return;
-    dropMaster(algorithm, key);
-    const bytes = bmp.width * bmp.height * 4;
-    workerState[algorithm].bitmaps[key] = { bmp, bytes };
-    bitmapBytes += bytes;
-    bitmapCount += 1;
-    trimBitmaps(algorithm, key);
+/** The cached render for a key, or null. Self-heals: a bitmap that reads
+ *  as detached (width 0 — someone transferred or closed a borrowed
+ *  reference) is dropped instead of served. */
+function liveEntry(algorithm, key) {
+    const rec = workerState[algorithm].bitmaps[key];
+    if (rec === undefined) return null;
+    if (!(rec.bmp.width > 0)) { dropEntry(algorithm, key, false); return null; }
+    return rec;
 }
 
-/** Evict the least recently used master across ALL algorithms (recency =
- *  the shared render-cache timestamps), never touching the protected key. */
-function evictOldestBitmap(protectAlgo, protectKey) {
-    let bestAlgo = null, bestKey = null, bestVal = Infinity;
-    for (let i = 0; i < ALGORITHMS.length; i++) {
-        const a = ALGORITHMS[i];
-        const bitmaps = workerState[a].bitmaps;
-        const ts = workerState[a].timestamp;
-        for (const k in bitmaps) {
-            if (a === protectAlgo && k === protectKey) continue;
-            const t = ts[k] !== undefined ? ts[k] : -1;
-            if (t < bestVal) { bestVal = t; bestAlgo = a; bestKey = k; }
-        }
-    }
-    if (bestKey === null) return false;
-    dropMaster(bestAlgo, bestKey);
-    return true;
-}
-
-function trimBitmaps(protectAlgo, protectKey) {
-    while (bitmapCount > MAX_CACHED_BITMAPS || bitmapBytes > MAX_CACHED_BITMAP_BYTES) {
-        if (!evictOldestBitmap(protectAlgo, protectKey)) break;
-    }
+/** File `bmp` as the render for a key; the pool owns it from here on. It
+ *  replaces whatever the key held (the xbrz>8x path overwrites the 8x
+ *  preview with the SVG composite), then the cache is trimmed to budget
+ *  without evicting the key just filed: its first clone is about to be
+ *  made. */
+function storeRender(algorithm, key, bmp, bytes, info, preview) {
+    const state = workerState[algorithm];
+    dropEntry(algorithm, key, false); // replaced pixels are closed, never kept cold
+    state.bitmaps[key] = { bmp, bytes, info, preview: !!preview };
+    state.timestamp[key] = ++lruTick;
+    workerStateSize += bytes;
+    workerStateCount += 1;
+    trimRenderCache(algorithm, key);
 }
 
 /**
- * Serve a consumer-owned ImageBitmap for a cached render, through the
- * master layer: the first serve per key pays one ImageData→bitmap raster
- * and pins the result as the pool's master; every serve after that is a
- * cheap bitmap→bitmap clone. Whatever this resolves to belongs to the
- * caller (safe to transferFromImageBitmap / close) — never the master.
+ * A consumer-owned clone of a cached render: bitmap → bitmap, so no
+ * raster and no ImageData (Chromium does not even copy the pixels: the
+ * clone, and the canvas it is transferred into, share the cached bitmap's
+ * store). Whatever this resolves to belongs to the caller (safe to
+ * transferFromImageBitmap / close) — never the cached bitmap itself.
  *
- * Concurrency note: two simultaneous first-serves of one key can both
- * mint; the second adopt replaces (closes) the first master, and the
- * loser's clone then rejects and falls back to a direct re-raster. Rare,
- * benign, and cheaper to tolerate than to serialize.
+ * Resolves to null when the key is not cached, or when its bitmap can no
+ * longer be cloned (closed or lost under us). That entry is forgotten, and
+ * the caller renders again as on a miss.
  */
-async function serveBitmap(algorithm, key, imageData) {
-    const existing = getMaster(algorithm, key);
-    if (existing) {
-        try { return await createImageBitmap(existing); }
-        catch (e) { dropMaster(algorithm, key); /* closed under us — re-mint below */ }
-    }
-    const minted = await createImageBitmap(imageData, 0, 0, imageData.width, imageData.height);
-    const bytes = minted.width * minted.height * 4;
-    // Never pin a master that alone busts the budget (a 32x render of a
-    // large source can be tens of MB) — serve it uncached instead.
-    if (bytes > MAX_CACHED_BITMAP_BYTES) return minted;
-    adoptMaster(algorithm, key, minted);
-    if (!getMaster(algorithm, key)) return minted; // budget rejected the pin
+async function cloneRender(algorithm, key) {
+    const rec = liveEntry(algorithm, key);
+    if (!rec) return null;
     try {
-        return await createImageBitmap(minted);
-    } catch (e) {
-        // Clone failed (context loss / detach race) — the pin is unusable.
-        dropMaster(algorithm, key);
-        return await createImageBitmap(imageData, 0, 0, imageData.width, imageData.height);
-    }
+        const clone = await createImageBitmap(rec.bmp);
+        if (clone.width > 0) return clone;
+        closeBitmap(clone);
+    } catch (e) {}
+    // (Unless a newer render has taken the key while we waited.)
+    if (workerState[algorithm].bitmaps[key] === rec) dropEntry(algorithm, key, false);
+    return null;
 }
 
-// Evict the least recently used render across ALL algorithms. Callbacks
-// are untouched: cache eviction must never cancel a live consumer (the
-// old implementation deleted callbacks here, which under memory pressure
-// could drop the final xbrz>8x composite for a still-mounted card).
-function evictOldestGlobal() {
+// Evict the least recently used render across ALL algorithms, never the
+// protected key. Callbacks are untouched: cache eviction must never cancel
+// a live consumer (the old implementation deleted callbacks here, which
+// under memory pressure could drop the final xbrz>8x composite for a
+// still-mounted card).
+function evictOldestGlobal(protectAlgo, protectKey) {
     let bestAlgo = null;
     let bestKey = null;
     let bestVal = Infinity;
     for (let i = 0; i < ALGORITHMS.length; i++) {
-        const ts = workerState[ALGORITHMS[i]].timestamp;
+        const a = ALGORITHMS[i];
+        const ts = workerState[a].timestamp;
         for (const k in ts) {
-            if (ts[k] < bestVal) { bestVal = ts[k]; bestAlgo = ALGORITHMS[i]; bestKey = k; }
+            if (a === protectAlgo && k === protectKey) continue;
+            if (ts[k] < bestVal) { bestVal = ts[k]; bestAlgo = a; bestKey = k; }
         }
     }
     if (bestKey === null) return false;
@@ -1196,9 +1183,9 @@ function evictOldestGlobal() {
     return true;
 }
 
-function trimRenderCache() {
+function trimRenderCache(protectAlgo, protectKey) {
     while (workerStateCount > MAX_CACHED_RENDERS || workerStateSize > MAX_CACHED_BYTES) {
-        if (!evictOldestGlobal()) break;
+        if (!evictOldestGlobal(protectAlgo, protectKey)) break;
     }
 }
 
@@ -1206,17 +1193,12 @@ function trimRenderCache() {
 export function clearRenderCache() {
     for (const algo of ALGORITHMS) {
         const bitmaps = workerState[algo].bitmaps;
-        for (const k in bitmaps) {
-            try { bitmaps[k].bmp && bitmaps[k].bmp.close && bitmaps[k].bmp.close(); } catch (e) {}
-        }
+        for (const k in bitmaps) closeBitmap(bitmaps[k].bmp);
         workerState[algo].bitmaps = {};
-        workerState[algo].data = {};
         workerState[algo].timestamp = {};
     }
     workerStateSize = 0;
     workerStateCount = 0;
-    bitmapBytes = 0;
-    bitmapCount = 0;
 }
 
 /**
@@ -1227,49 +1209,60 @@ export function clearRenderCache() {
 export function dropRendersAbove(id, bytes) {
     if (id == null) return;
     for (const algo of ALGORITHMS) {
-        const data = workerState[algo].data;
+        const bitmaps = workerState[algo].bitmaps;
         const prefix = id + "-" + algo + "-";
-        for (const k in data) {
-            if (!k.startsWith(prefix)) continue;
-            const d = data[k];
-            if (d && d.data && d.data.byteLength > bytes) dropEntry(algo, k);
+        for (const k in bitmaps) {
+            if (k.startsWith(prefix) && bitmaps[k].bytes > bytes) dropEntry(algo, k);
         }
     }
 }
 
 /**
- * Cache-first lookup. Returns the finished upscaled ImageData for
- * id+algorithm+scale and bumps its recency, or undefined on a miss.
- * A consumer that hits here can skip the ENTIRE source pipeline for this
- * draw — no base64 decode, no PNG/WEBP decode, no upscale — and just
- * mint a bitmap from the returned ImageData. The returned ImageData is
- * pool-owned and must not be mutated.
+ * Cache-first lookup. Tells whether the finished render for
+ * id+algorithm+scale is cached, and bumps its recency: returns its
+ * { width, height }, or undefined on a miss. There are no pixels to
+ * return: the pool keeps bitmaps, not ImageData. A consumer that hits here
+ * can skip the ENTIRE source pipeline for this draw — no base64 decode, no
+ * PNG/WEBP decode, no upscale — and paint a clone from
+ * acquireCachedBitmap().
  */
 export function getCachedRender(id, algorithm, scale) {
     const state = workerState[algorithm];
     if (!state) return undefined;
     const key = id + "-" + algorithm + "-" + scale;
-    const hit = state.data[key];
-    if (hit !== undefined) state.timestamp[key] = ++lruTick;
-    return hit;
+    const rec = liveEntry(algorithm, key);
+    if (!rec) return undefined;
+    state.timestamp[key] = ++lruTick;
+    return rec.info;
+}
+
+/** Clone the cached render under `key` for a consumer; null synchronously
+ *  on a miss. Shared by the two acquire* lookups below. */
+function serveCached(algorithm, key, scale) {
+    const rec = liveEntry(algorithm, key);
+    if (!rec) return null;
+    workerState[algorithm].timestamp[key] = ++lruTick;
+    const info = rec.info;
+    return cloneRender(algorithm, key).then((bitmap) => {
+        if (!bitmap) throw new Error("cached render is no longer servable");
+        // `imgd` used to be the cached ImageData. It is kept, as the
+        // render's { width, height }, for callers that read its size.
+        return { bitmap, scale, width: info.width, height: info.height, imgd: info };
+    });
 }
 
 /**
  * Consumer-owned bitmap for a cached render. Returns null SYNCHRONOUSLY
  * on a miss (so callers can branch without awaiting), else a Promise of
- * { imgd, bitmap, scale } where `bitmap` is the caller's to consume
- * (transferFromImageBitmap / close) and `imgd` is the pool-owned
- * ImageData (read-only, as with getCachedRender). First call per key
- * pays one raster and pins the master; later calls are cheap clones.
+ * { bitmap, scale, width, height } where `bitmap` is the caller's to
+ * consume (transferFromImageBitmap / close): a clone of the cached one.
+ * The promise rejects if the entry stopped being servable while the clone
+ * was made; render again then, as on a miss.
  */
 export function acquireCachedBitmap(id, algorithm, scale) {
     const state = workerState[algorithm];
     if (!state) return null;
-    const key = id + "-" + algorithm + "-" + scale;
-    const imgd = state.data[key];
-    if (imgd === undefined) return null;
-    state.timestamp[key] = ++lruTick;
-    return serveBitmap(algorithm, key, imgd).then((bitmap) => ({ imgd, bitmap, scale }));
+    return serveCached(algorithm, id + "-" + algorithm + "-" + scale, scale);
 }
 
 /**
@@ -1286,77 +1279,111 @@ export function acquireBestCachedBitmap(id, algorithm) {
     const prefix = id + "-" + algorithm + "-";
     let bestKey = null;
     let bestScale = -Infinity;
-    for (const k in state.data) {
+    for (const k in state.bitmaps) {
         if (!k.startsWith(prefix)) continue;
         const s = parseFloat(k.slice(prefix.length));
         if (Number.isFinite(s) && s > bestScale) { bestScale = s; bestKey = k; }
     }
     if (bestKey === null) return null;
-    const imgd = state.data[bestKey];
-    state.timestamp[bestKey] = ++lruTick;
-    return serveBitmap(algorithm, bestKey, imgd).then((bitmap) => ({ imgd, bitmap, scale: bestScale }));
+    return serveCached(algorithm, bestKey, bestScale);
+}
+
+// ── Delivery ─────────────────────────────────────────────────────────
+// A finished render arrives as the upscaler's ImageData (received) or,
+// from the cold tier, already as a bitmap. Either way ONE bitmap is filed
+// for it and the live consumer, if any, gets a clone. The ImageData is
+// not kept: once its bitmap exists, nothing in the pool references it.
+//
+// A key can have two deliveries in flight (xbrz>8x: the 8x preview, then
+// the SVG composite), and each one waits on createImageBitmap. Tickets
+// keep them in order: a delivery that is no longer the newest for its key
+// closes what it made and stays silent.
+let deliverySeq = 0;
+
+function openDelivery(state, key) {
+    return (state.latest[key] = ++deliverySeq);
+}
+
+function closeDelivery(state, key, ticket) {
+    if (state.latest[key] === ticket) delete state.latest[key];
+}
+
+/**
+ * File `bmp` as the render for `key` and hand the registered consumer (if
+ * one is still mounted) a clone of its own. Resolves to false only when a
+ * consumer is waiting and no bitmap could be made for it.
+ */
+async function deliver(algorithm, key, bmp, preview, ticket) {
+    const state = workerState[algorithm];
+    if (state.latest[key] !== ticket) { closeBitmap(bmp); return true; }
+
+    const info = Object.freeze({ width: bmp.width, height: bmp.height });
+    const bytes = bmp.width * bmp.height * 4;
+
+    if (!cacheableBytes(bytes)) {
+        // Too big to share the cache with card renders: the consumer gets
+        // the only copy. Whatever the key held shows older pixels.
+        dropEntry(algorithm, key, false);
+        const cb = state.callbacks[key];
+        if (typeof cb !== "function") { closeBitmap(bmp); return true; }
+        cb(info, bmp);
+        return true;
+    }
+
+    // Filed even when the consumer has already unmounted. Virtualized
+    // feeds release cards freely while renders are in flight; retaining
+    // the result is the point of the render cache (scrolling back repaints
+    // from here with zero recompute), and it is bounded by the LRU.
+    storeRender(algorithm, key, bmp, bytes, info, preview);
+    if (typeof state.callbacks[key] !== "function") { trimRenderCache(); return true; }
+
+    const clone = await cloneRender(algorithm, key);
+    trimRenderCache(); // only a budget of zero entries evicts the new key here
+    // Re-check after the await: a newer delivery may have taken over, or
+    // the consumer may have unmounted while the clone was made.
+    if (state.latest[key] !== ticket) { closeBitmap(clone); return true; }
+    const cb = state.callbacks[key];
+    if (typeof cb !== "function") { closeBitmap(clone); return true; }
+    if (!clone) return false;
+    cb(info, clone);
+    return true;
 }
 
 // ── Worker reply handler ─────────────────────────────────────────────
-// Caches the finished render, then routes a consumer-owned bitmap to the
-// registered callback (if one is still mounted).
-async function received(r, id2, algorithm2) {
+// A finished render, as the upscaler's ImageData `r`. Turns it into the
+// pool's bitmap, files that and serves the consumer; `r` itself is not
+// retained. `preview` marks the 8x pass of an xbrz>8x render, which calls
+// this twice per key — the 8x preview, then the SVG composite.
+async function received(r, id2, algorithm2, preview = false) {
     const state = workerState[algorithm2];
     if (!state || !r) return;
-
-    // 1) Cache the ImageData — even when the consumer has already
-    // unmounted. Virtualized feeds release cards freely while renders
-    // are in flight; retaining the result is the point of the render
-    // cache (scrolling back repaints from here with zero recompute), and
-    // ImageData holds no DOM or GPU handles, so retention is safe under
-    // the LRU bounds. (The xbrz>8x path calls this twice per id — the 8x
-    // preview, then the SVG composite — the accounting handles the
-    // overwrite.)
-    if (state.data[id2] !== undefined) {
-        workerStateSize -= (state.data[id2].data && state.data[id2].data.byteLength) | 0;
-        workerStateCount -= 1;
-        // The pixels for this key are being replaced (xbrz>8x: the SVG
-        // composite overwrites the 8x preview) — a master minted off the
-        // old pixels would serve stale content, so it dies with them.
-        dropMaster(algorithm2, id2);
-    }
-    const rBytes = (r.data && r.data.byteLength) | 0;
-    if (cacheableBytes(rBytes)) {
-        state.data[id2] = r;
-        state.timestamp[id2] = ++lruTick;
-        workerStateSize += rBytes;
-        workerStateCount += 1;
-        trimRenderCache();
-    } else {
-        // Too big to share the cache with card renders: serve it uncached.
-        // (The accounting for any previous entry under this key was undone
-        // above, so the stale pixels must go too.)
-        delete state.data[id2];
-        delete state.timestamp[id2];
-    }
-
-    // 2) Serve the live consumer, if any, with a bitmap of its own.
-    const cb = state.callbacks[id2];
-    if (typeof cb !== "function") return;
-
-    let bmp;
+    const ticket = openDelivery(state, id2);
     try {
-        bmp = await createImageBitmap(r, 0, 0, r.width, r.height);
-    } catch (e) {
-        // If bitmap creation fails, still hand the ImageData to the
-        // consumer — its fallback path can drawImage from ImageData.
-        cb(r, undefined);
-        return;
-    }
+        if (!cacheableBytes(r.width * r.height * 4) && typeof state.callbacks[id2] !== "function") {
+            // Too big to cache and nobody is waiting for it: there is no
+            // bitmap to make. The key's previous pixels are stale all the same.
+            dropEntry(algorithm2, id2, false);
+            return;
+        }
 
-    // Re-check after the await: consumer may have unmounted while we
-    // were awaiting createImageBitmap.
-    const cbStill = state.callbacks[id2];
-    if (typeof cbStill !== "function") {
-        try { bmp.close && bmp.close(); } catch (e) {}
-        return;
+        let bmp = null;
+        try {
+            bmp = await createImageBitmap(r, 0, 0, r.width, r.height);
+        } catch (err) {
+            logOnce("warn", "no bitmap for a finished render; it is handed over as pixels and not cached:", err);
+        }
+        if (bmp && (await deliver(algorithm2, id2, bmp, preview, ticket))) return;
+
+        // The browser could not make the bitmap (or the consumer's clone of
+        // it), so nothing is cached. Hand the pixels themselves to the
+        // consumer — its fallback path can still draw from ImageData.
+        if (state.latest[id2] !== ticket) return;
+        dropEntry(algorithm2, id2, false);
+        const cb = state.callbacks[id2];
+        if (typeof cb === "function") cb(r, undefined);
+    } finally {
+        closeDelivery(state, id2, ticket);
     }
-    cbStill(r, bmp);
 }
 
 // ── Main entry ────────────────────────────────────────────────────────
@@ -1412,34 +1439,27 @@ async function processWorker(algorithm, image_data, scale, callback, terminate =
 
     const fullId = id + "-" + algorithm + "-" + scale;
     terminateOtherWorkers(algorithm);
-    workerState[algorithm].callbacks[fullId] = callback;
+    const state = workerState[algorithm];
+    state.callbacks[fullId] = callback;
 
-    // Cache hit: serve from the cached ImageData with a freshly minted
-    // bitmap. (The old path handed out the cached bitmap object itself,
-    // which the consumer then detached via transferFromImageBitmap and
-    // close()d — poisoning the cache for every later hit on that key.)
-    const cached = workerState[algorithm].data[fullId];
-    if (typeof cached !== "undefined") {
-        workerState[algorithm].timestamp[fullId] = ++lruTick;
-        // A hit is hot by definition — serve through the master layer:
-        // the first hit pays the raster once and pins it, every later
-        // hit is a cheap bitmap→bitmap clone (see serveBitmap).
-        serveBitmap(algorithm, fullId, cached)
-            .then((bmp) => {
-                const cb = workerState[algorithm].callbacks[fullId];
-                if (typeof cb !== "function") {
-                    try { bmp.close && bmp.close(); } catch (e) {}
-                    return;
-                }
-                try { cb(cached, bmp); } catch (e) {}
-            })
-            .catch(() => {
-                const cb = workerState[algorithm].callbacks[fullId];
-                if (typeof cb === "function") {
-                    try { cb(cached, undefined); } catch (e) {}
-                }
-            });
-        return;
+    // Cache hit: serve a clone of the cached bitmap. (The old path handed
+    // out the cached bitmap object itself, which the consumer then
+    // detached via transferFromImageBitmap and close()d — poisoning the
+    // cache for every later hit on that key.)
+    const cached = liveEntry(algorithm, fullId);
+    if (cached) {
+        state.timestamp[fullId] = ++lruTick;
+        const bmp = await cloneRender(algorithm, fullId);
+        if (bmp) {
+            const cb = state.callbacks[fullId];
+            if (typeof cb !== "function") {
+                closeBitmap(bmp);
+                return;
+            }
+            try { cb(cached.info, bmp); } catch (e) {}
+            return;
+        }
+        // No longer servable (closed or lost under us): render it again.
     }
 
     // Cold tier: a card render evicted earlier, kept as a PNG Blob. Only a
@@ -1447,9 +1467,13 @@ async function processWorker(algorithm, image_data, scale, callback, terminate =
     // must not, or it would be called a second time.
     const fromCold = await loadCold(fullId);
     if (fromCold) {
-        try { await received(fromCold, fullId, algorithm); }
+        const ticket = openDelivery(state, fullId);
+        let served = true;
+        try { served = await deliver(algorithm, fullId, fromCold, false, ticket); }
         catch (err) { logOnce("error", `${algorithm} consumer failed:`, err); }
-        return;
+        finally { closeDelivery(state, fullId, ticket); }
+        if (served) return;
+        // Decoded, but no bitmap could be handed over: render it again.
     }
 
     if (workerState[algorithm].worker) {
@@ -1481,7 +1505,11 @@ async function processWorker(algorithm, image_data, scale, callback, terminate =
         } else if (algorithm === "xbrz") {
             // Only the xbrz/vtracer path consumes the live-callback count.
             const n = Object.keys(workerState[algorithm].callbacks).length;
-            const imgd = await xbrzUpscale(image_data, scale, (tempImgd) => { received(tempImgd, fullId, algorithm); }, n, mode);
+            const imgd = await xbrzUpscale(image_data, scale, (tempImgd) => {
+                // The 8x preview of a render above 8x; the composite follows.
+                received(tempImgd, fullId, algorithm, true)
+                    .catch((err) => logOnce("error", `${algorithm} consumer failed:`, err));
+            }, n, mode);
             await received(imgd, fullId, algorithm);
             disposeGpuExcept("xbrz");
         } else if (algorithm === "crt") {
@@ -1540,7 +1568,7 @@ export function sqrF(image_data, scale, callback, terminate, id, mode) {
 // Call this from a component's unmount cleanup. It releases the pool's
 // reference to the consumer CALLBACK — the closure that pins a DOM
 // canvas, which is the actual leak vector — but deliberately KEEPS the
-// cached renders: they hold plain pixel data, they're bounded by the
+// cached renders: they are bitmaps the pool owns, they're bounded by the
 // LRU, and they're exactly what makes remounting the same card (scroll
 // away, scroll back) paint instantly instead of re-running the whole
 // decode + upscale pipeline.
@@ -1567,13 +1595,17 @@ export function releaseId(id) {
 if (typeof window !== 'undefined') {
     window.__PIXA_RENDER_POOL_STATS__ = function () {
         const out = {
+            // The render cache: ImageBitmaps only (w*h*4 bytes each).
             totalBytes: workerStateSize,
             totalCached: workerStateCount,
-            bitmapBytes: bitmapBytes,
-            bitmapCached: bitmapCount,
+            // The same bitmaps again, under the names of the former
+            // two-tier cache: there is no second set, and no ImageData.
+            bitmapBytes: workerStateSize,
+            bitmapCached: workerStateCount,
+            imageDataBytes: 0,
             limits: {
                 maxEntries: MAX_CACHED_RENDERS, maxBytes: MAX_CACHED_BYTES,
-                maxBitmaps: MAX_CACHED_BITMAPS, maxBitmapBytes: MAX_CACHED_BITMAP_BYTES,
+                maxBitmaps: MAX_CACHED_RENDERS, maxBitmapBytes: MAX_CACHED_BYTES,
             },
             // probedMaxDim is null until the first GPU-eligible render
             // runs the probe (getGpuLimits is lazy).
@@ -1597,8 +1629,8 @@ if (typeof window !== 'undefined') {
         for (const a of ALGORITHMS) {
             out.algorithms[a] = {
                 callbacks: Object.keys(workerState[a].callbacks).length,
-                cached: Object.keys(workerState[a].data).length,
-                masters: Object.keys(workerState[a].bitmaps).length,
+                cached: Object.keys(workerState[a].bitmaps).length,
+                masters: Object.keys(workerState[a].bitmaps).length, // = cached
             };
         }
         return out;

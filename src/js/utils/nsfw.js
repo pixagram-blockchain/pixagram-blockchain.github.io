@@ -1,39 +1,45 @@
 /**
  * nsfw-detect.js
  * ---------------------------------------------------------------------------
- * Main-thread facade over @pixagram/nsfw-lite (binary sfw / nsfw classifier).
+ * Main-thread facade over @pixagram/eve (binary sfw / nsfw classifier: EVE-Nano,
+ * 8-bit, one of 13 model inputs chosen from the picture's aspect ratio).
  *
- * The classifier package owns its own Web Worker (with an automatic
- * main-thread fallback) and request batching, so this module NO LONGER needs a
- * hand-rolled worker or a ./nsfw.worker.js file — that file can be deleted.
+ * @pixagram/eve runs where it is imported and has no Web Worker of its own, so
+ * ./nsfw.worker.js is back: a small module worker that imports the package and
+ * answers this module's requests. The model, ONNX Runtime and the package's
+ * pixel readback all live there. If a worker cannot start, the package is
+ * imported here instead (dynamically, so it stays out of the main bundle
+ * otherwise) and runs on the main thread: the "auto" behaviour of before.
  * What stays here is the app-specific glue:
  *   - a per-post-id verdict cache in IndexedDB (classify each id once/device),
  *   - the render-time gating rules,
  *   - the synchronous getCached() lookup used by the render path.
  *
  * Public API (unchanged):
- *   configure({ filterEnabled, threshold, thresholds, wasmPaths, inputSize, ... })
+ *   configure({ filterEnabled, threshold, thresholds, wasmPaths, useWorker, ... })
  *   ensureNsfw({ id, getImgData, alreadyFlagged }) -> Promise<boolean>
  *   getCached(id) -> boolean | undefined
  *   warmup() -> Promise<void>
+ *   classifyImage(source, { width, height, threshold }) -> Promise<{ ok, nsfw, score }>
+ *       on-demand check for the store builds' creation gate (no cache, ignores
+ *       filterEnabled, reports failures as ok:false)
+ *   warmupClassifier() -> Promise<void>   model load for classifyImage()
  *   dispose()
  *
  * `getImgData` is the same async () => ImageData PaperCard already builds from
- * png-db. ensureNsfw() turns that ImageData into an ImageBitmap for the
- * detector. The package does NOT move the bitmap to its worker: it draws it on
- * the main thread, reads it back with getImageData, and transfers those pixels.
- * So when the source is larger than the model input, the bitmap is created
- * already shrunk to fit inside inputSize x inputSize (aspect ratio kept,
- * nearest filter). That makes the main-thread readback and the transfer tiny,
- * while the model input stays identical: the package's own letterbox then
- * resizes 1:1 and only adds the padding bars. createImageBitmap only reads the
- * source pixels, so the caller's ImageData is never neutered.
+ * png-db. ensureNsfw() turns that ImageData into an ImageBitmap and TRANSFERS
+ * the bitmap to the worker. When the picture is larger than the model input it
+ * will get, the bitmap is created already shrunk to the exact size the package
+ * would letterbox it to (same input shape, same rounding, nearest filter). That
+ * keeps the transfer and the worker's readback tiny while the model input stays
+ * identical: the package then resizes 1:1 and only adds the padding bars. (The
+ * few sizes for which that would not hold are sent whole: see fitForModel.)
+ * createImageBitmap only reads the source pixels, so the caller's ImageData is
+ * never neutered.
  */
 
 "use strict";
 
-// Adjust the specifier if you vendor the package under a different name/path.
-import { NsfwDetector } from "@pixagram/nsfw-lite";
 import { ByteLRU } from "./memory-kit";
 
 // --- Memory bounds -----------------------------------------------------------
@@ -48,12 +54,15 @@ const IDB_MAX_RECORDS = 20000;
 // next classification starts a new one.
 const DETECTOR_IDLE_MS = 2 * 60 * 1000;
 // --- IndexedDB verdict cache ----------------------------------------------
-// The model changed (old 5-class EfficientNet -> binary MobileNetV4), and the
-// cache key is the IMAGE content hash, not the model — so a verdict cached by
-// the old model must NOT be reused for the new one. The DB name is bumped to
-// start this model with a clean cache; the old "pixagram-nsfw" DB is left
-// untouched. To reclaim its space: indexedDB.deleteDatabase("pixagram-nsfw").
-const DB_NAME = "pixagram-nsfw-lite";
+// The model changed again (binary MobileNetV4 -> EVE-Nano), and the cache key
+// is the IMAGE content hash, not the model — so a verdict cached by an older
+// model must NOT be reused for this one (its scores are on another scale). The
+// DB name is bumped to start this model with a clean cache; the older DBs are
+// left untouched. To reclaim their space:
+//   indexedDB.deleteDatabase("pixagram-nsfw-lite");   // MobileNetV4
+//   indexedDB.deleteDatabase("pixagram-nsfw");        // EfficientNet
+// Bump the name again whenever the model embedded in @pixagram/eve changes.
+const DB_NAME = "pixagram-nsfw-eve";
 const STORE = "verdicts";
 const DB_VERSION = 1;
 
@@ -145,8 +154,6 @@ function log(...args) {
     if (config.debug) console.log("[nsfw]", ...args);
 }
 
-const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
-
 // --- Config ----------------------------------------------------------------
 const config = {
     filterEnabled: false, // set true when the user has NSFW filtering ON
@@ -155,26 +162,26 @@ const config = {
     // Turn on with configure({ debug: true }).
     debug: true,
     // Binary gate: an image is flagged when P(nsfw) >= thresholds.nsfw.
-    thresholds: { nsfw: 0.40 },
-    // Model input edge: preprocess.size of the embedded model (160 for the
-    // current build). Sources larger than this are shrunk to fit inside
-    // inputSize x inputSize before they reach the detector. It MUST equal the
-    // model's size — if you ship a model trained at another resolution, change
-    // it here too, or the package would resize a second time and the model
-    // would no longer see the pixels it was trained on.
-    inputSize: 160,
-    // Passed through to NsfwDetector.create(). wasmPaths usually MUST point at
-    // wherever onnxruntime-web's .wasm/.mjs assets are served from for the model
-    // to load; the rest are optional.
+    // The scale is this model's, not the previous one's: the 8-bit EVE file
+    // answers between 0.11 and 0.89, so a gate at or below 0.11 flags every
+    // image and one above 0.89 flags none.
+    thresholds: { nsfw: 0.8 },
+    // Passed to @pixagram/eve's load(). The model is embedded in the package;
+    // only onnxruntime-web's own WASM binary is fetched. Leave wasmPaths unset
+    // when the bundler copies that binary (Vite, webpack 5 do); otherwise point
+    // it at the folder that serves ort-wasm-simd-threaded.wasm and .mjs.
     runtime: {
-        useWorker: "auto",   // "auto" (default) | true | false
-        backend: isMobile ? "wasm" : "auto",   // "auto" tries WebGPU then WASM | "webgpu" | "wasm"
-        wasmPaths: undefined, // e.g. "/ort/"
+        useWorker: "auto",   // "auto" (default): worker, else main thread | true | false
+        wasmPaths: undefined, // e.g. "/ort/" (resolved against the page, for the worker too)
         numThreads: 1, // >1 needs cross-origin isolation (COOP/COEP)
-        maxBatch: isMobile ? 4 : 8, // images per batched inference (package default 8)
-        batchDelayMs: 24, // coalescing window (package default 12ms)
     },
 };
+
+// useWorker "auto": set once a worker could not start where the main thread
+// then could; from then on the main thread is used directly. When both fail
+// (offline, WASM binary not found) it stays false and the next call tries the
+// worker again.
+let _workerFailed = false;
 
 export function configure(opts = {}) {
     if (typeof opts.filterEnabled === "boolean") config.filterEnabled = opts.filterEnabled;
@@ -186,53 +193,241 @@ export function configure(opts = {}) {
     if (typeof opts.threshold === "number") {
         config.thresholds = Object.assign({}, config.thresholds, { nsfw: opts.threshold });
     }
-    // Must match the model's input size (see config.inputSize).
-    if (Number.isInteger(opts.inputSize) && opts.inputSize > 0) config.inputSize = opts.inputSize;
-    // Engine/runtime options forwarded to the detector.
-    for (const k of ["useWorker", "backend", "wasmPaths", "numThreads", "maxBatch", "batchDelayMs"]) {
-        if (k in opts) config.runtime[k] = opts[k];
+    // Runtime options, used the next time the detector starts. The previous
+    // package's inputSize, backend, maxBatch and batchDelayMs are accepted and
+    // ignored: the model inputs come from the package, it runs on WASM, and
+    // images are classified one by one.
+    for (const k of ["useWorker", "wasmPaths", "numThreads"]) {
+        if (k in opts) {
+            config.runtime[k] = opts[k];
+            _workerFailed = false; // new settings: the worker gets another try
+        }
     }
 }
 
 // --- Detector (single shared instance, lazily created) --------------------
-// Replaces the old manual worker + reqId protocol: NsfwDetector internally
-// spawns a worker (or falls back to the main thread) and batches calls, so
-// many ensureNsfw() calls during a render coalesce into few inferences.
+// The "detector" is the client of ./nsfw.worker.js or, when a worker cannot
+// start, @pixagram/eve itself on the main thread. Either way it offers:
+//   kind      "worker" | "main"
+//   shapes    the model inputs, [[width, height], ...], in the package's order
+//   nearest   true when the model resizes nearest-neighbour (this one does)
+//   classify(bitmap) -> Promise<{ score, inputSize, ms }>   the bitmap is
+//             consumed; images run one after the other, there is no batching
+//   dispose()
+// Requests to the worker are matched to their answers by a sequence number.
+
+// How long the worker may take to fetch its script and report ready before the
+// main-thread fallback takes over. What follows (the model load and a first
+// test picture) is not timed: it waits for onnxruntime-web's WASM binary,
+// however slow the network.
+const WORKER_START_MS = 30000;
+
+// load() options for the package. A worker resolves a relative URL against its
+// own script, not the page, so wasmPaths is made absolute here.
+function runtimeOptions() {
+    const r = config.runtime;
+    const base = typeof document !== "undefined" ? document.baseURI : self.location.href;
+    const abs = (u) => { try { return new URL(u, base).href; } catch (e) { return String(u); } };
+    const opts = {};
+    const wp = r.wasmPaths;
+    if (typeof wp === "string" || (typeof URL !== "undefined" && wp instanceof URL)) {
+        opts.wasmPaths = abs(wp);
+    } else if (wp && typeof wp === "object") {
+        opts.wasmPaths = {};
+        for (const k of ["wasm", "mjs"]) {
+            if (wp[k] != null) opts.wasmPaths[k] = abs(wp[k]);
+        }
+    }
+    if (Number.isInteger(r.numThreads) && r.numThreads >= 0) opts.numThreads = r.numThreads;
+    return opts;
+}
+
+// `onDead` is called if the worker dies after it started (a crash): the
+// requests in flight are rejected and the next call starts a new detector.
+function createWorkerDetector(onDead) {
+    return new Promise((resolve, reject) => {
+        let worker;
+        try {
+            // Keep this exact form: bundlers (webpack 5, Vite) recognise it and
+            // emit the worker file, and @pixagram/eve for it, by themselves.
+            worker = new Worker(new URL("./nsfw.worker.js", import.meta.url), { type: "module" });
+        } catch (e) {
+            reject(e);
+            return;
+        }
+
+        const pending = new Map();   // seq -> { resolve, reject }
+        let seq = 0;
+        let started = false;
+        let dead = false;
+        let startTimer = 0;
+        const end = (err) => {
+            if (dead) return;
+            dead = true;
+            clearTimeout(startTimer);
+            try { worker.terminate(); } catch (e) {}
+            for (const p of pending.values()) p.reject(err);
+            pending.clear();
+            if (started) onDead(); else reject(err);
+        };
+        const call = (msg, transfer) => new Promise((res, rej) => {
+            if (dead) { rej(new Error("worker ended")); return; }
+            const id = ++seq;
+            pending.set(id, { resolve: res, reject: rej });
+            try {
+                worker.postMessage(Object.assign({ id }, msg), transfer || []);
+            } catch (e) {
+                pending.delete(id);
+                rej(e);
+            }
+        });
+        startTimer = setTimeout(() => end(new Error("worker did not start")), WORKER_START_MS);
+
+        worker.onmessage = (ev) => {
+            const m = ev.data || {};
+            if (m.type === "ready") {
+                // The script is in and knows the model's inputs. Load the model,
+                // then have the worker classify a 2 x 2 picture: to read a
+                // transferred bitmap back it needs OffscreenCanvas, which Safari
+                // before 16.4 and Firefox before 105 do not have. There the model
+                // loads but no picture can be classified, so a worker that fails
+                // this is a worker that could not start ("auto": main thread).
+                clearTimeout(startTimer);
+                call({ type: "load", options: runtimeOptions() })
+                    .then(() => createImageBitmap(new ImageData(2, 2)))
+                    .then((probe) => call({ type: "classify", source: probe }, [probe]))
+                    .then(() => {
+                        started = true;
+                        resolve({
+                            kind: "worker",
+                            shapes: m.shapes,
+                            nearest: m.interpolation === "nearest",
+                            classify: (bitmap) => call({ type: "classify", source: bitmap }, [bitmap]),
+                            dispose: () => end(new Error("detector disposed")),
+                        });
+                    }, end);
+                return;
+            }
+            const p = pending.get(m.id);
+            if (!p) return;
+            pending.delete(m.id);
+            if (m.ok) p.resolve(m); else p.reject(new Error(m.error || "worker error"));
+        };
+        worker.onerror = (ev) => {
+            if (ev && ev.preventDefault) ev.preventDefault();
+            end(new Error((ev && ev.message) || "worker failed"));
+        };
+        worker.onmessageerror = () => end(new Error("worker message could not be read"));
+    });
+}
+
+async function createMainDetector() {
+    const eve = await import("@pixagram/eve");
+    await eve.dispose(); // a clean start, so that load() takes the options
+    await eve.load(runtimeOptions());
+    return {
+        kind: "main",
+        shapes: eve.info.inputShapes,
+        nearest: eve.info.interpolation === "nearest",
+        classify: (bitmap) => eve.classify(bitmap),
+        dispose: () => eve.dispose(),
+    };
+}
+
 let _detectorPromise = null;
 function getDetector() {
     if (_detectorPromise) return _detectorPromise;
-    const r = config.runtime;
-    _detectorPromise = NsfwDetector.create({
-        useWorker: r.useWorker,
-        backend: r.backend,
-        wasmPaths: r.wasmPaths,
-        numThreads: r.numThreads,
-        maxBatch: r.maxBatch,
-        batchDelayMs: r.batchDelayMs,
-        // Baked for completeness/debug; the live gate below is what we trust, so
-        // configure({ threshold }) still works without recreating the detector.
-        thresholds: { nsfw: config.thresholds.nsfw },
-    }).catch((e) => {
-        _detectorPromise = null; // allow a later call to retry creation
+    const mode = config.runtime.useWorker;
+    const haveWorker = typeof Worker !== "undefined";
+    let mine = null;
+    const forget = () => { if (_detectorPromise === mine) _detectorPromise = null; };
+    let starting;
+    if (haveWorker && (mode === true || (mode !== false && !_workerFailed))) {
+        starting = createWorkerDetector(forget).catch((e) => {
+            if (mode === true) throw e; // a worker was required
+            log("worker unavailable -> main thread:", e && e.message);
+            return createMainDetector().then((detector) => {
+                _workerFailed = true;
+                return detector;
+            });
+        });
+    } else if (mode === true) {
+        starting = Promise.reject(new Error("Web Workers are not available"));
+    } else {
+        starting = createMainDetector();
+    }
+    mine = starting.catch((e) => {
+        forget(); // allow a later call to retry creation
         throw e;
     });
-    return _detectorPromise;
+    _detectorPromise = mine;
+    return mine;
 }
 
 // --- Pre-shrink helpers -----------------------------------------------------
-// Fit (w, h) inside S x S without distortion, with the same rounding as the
-// trainer's letterbox and the package's resizeToSquare (round half up, >= 1px).
-// Both sides are computed here on purpose: when only resizeWidth or only
-// resizeHeight is given, createImageBitmap derives the other side with ceil(),
-// which is 1px off the trainer's rounding for about half of all sizes
+// Fit (w, h) inside bw x bh without distortion, with the same rounding as the
+// trainer's letterbox and the package's (round half up, >= 1px, never larger
+// than the box). Both sides are computed here on purpose: when only resizeWidth
+// or only resizeHeight is given, createImageBitmap derives the other side with
+// ceil(), which is 1px off the trainer's rounding for about half of all sizes
 // (e.g. 161x92 -> 160x92 instead of 160x91).
-function fitInside(w, h, S) {
-    const scale = Math.min(S / w, S / h);
+function fitInside(w, h, bw, bh = bw) {
+    const scale = Math.min(bw / w, bh / h);
     return {
         scale,
-        width: Math.max(1, Math.round(w * scale)),
-        height: Math.max(1, Math.round(h * scale)),
+        width: Math.max(1, Math.min(bw, Math.round(w * scale))),
+        height: Math.max(1, Math.min(bh, Math.round(h * scale))),
     };
+}
+
+// The model input a w x h picture gets: the rule of @pixagram/eve and of the
+// trainer. EVE has one input per aspect ratio, all within the same pixel
+// budget; the one that keeps the most of the picture maximises the INTEGER
+// min(BW*h, BH*w), and a tie goes to the earlier shape. The rule is repeated
+// here so that the shrink can happen on this side of the worker. Every answer
+// carries the input the package really used, and checkInput() reports a
+// difference.
+function modelInputFor(w, h, shapes) {
+    const iw = Math.max(1, Math.floor(w));
+    const ih = Math.max(1, Math.floor(h));
+    let best = shapes[0];
+    let bestKey = -1;
+    for (const shape of shapes) {
+        const key = Math.min(shape[0] * ih, shape[1] * iw);
+        if (key > bestKey) {
+            best = shape;
+            bestKey = key;
+        }
+    }
+    return best;
+}
+
+// The size a w x h picture has inside its model input. A bitmap created at
+// exactly this size is letterboxed 1:1 by the package, so the model sees the
+// same pixels as from the full picture — PROVIDED the package gives the small
+// bitmap the same input. It decides from the bitmap's own size, and for about
+// one size in 200 the rounding lands on a tie between two inputs that goes the
+// other way (83x266 belongs to 80x320 and shrinks to 80x256, which ties with
+// 96x256, the earlier shape). `keepsInput` says whether the shrunk size is
+// safe; when it is not, the picture is sent whole and the package does it all.
+function fitForModel(w, h, shapes) {
+    const input = modelInputFor(w, h, shapes);
+    const fit = fitInside(w, h, input[0], input[1]);
+    fit.input = input;
+    fit.keepsInput = modelInputFor(fit.width, fit.height, shapes) === input;
+    return fit;
+}
+
+// Not debug-gated and shown once: if this ever prints, pictures are being
+// resized twice and the verdicts are not the model's.
+let _inputWarned = false;
+function checkInput(expected, res) {
+    const got = res && res.inputSize;
+    if (_inputWarned || !expected || !got || (got[0] === expected[0] && got[1] === expected[1])) return;
+    _inputWarned = true;
+    console.warn("[nsfw] the model used input " + got.join("x") + " where " + expected.join("x") +
+        " was expected: nsfw-detect.js and @pixagram/eve no longer choose the model input the" +
+        " same way (see modelInputFor)");
 }
 
 // The model was trained with nearest-neighbour resizing, so the shrink must use
@@ -329,11 +524,14 @@ export function primeCache() {
 // End the detector's worker after DETECTOR_IDLE_MS without a classification.
 // Unlike dispose(), this leaves in-flight bookkeeping alone and re-arms itself
 // while calls are pending; getDetector() recreates the worker on demand.
+// `_adhocPending` counts classifyImage() calls, which have no id and so are
+// not in `inflight`.
 let _idleTimer = 0;
+let _adhocPending = 0;
 function endDetectorWhenIdle() {
     clearTimeout(_idleTimer);
     _idleTimer = setTimeout(() => {
-        if (inflight.size > 0) { endDetectorWhenIdle(); return; }
+        if (inflight.size > 0 || _adhocPending > 0) { endDetectorWhenIdle(); return; }
         if (_detectorPromise) {
             const p = _detectorPromise;
             _detectorPromise = null;
@@ -445,13 +643,22 @@ export async function ensureNsfw({ id, getImgData, alreadyFlagged }) {
             return false;
         }
 
+        // The detector knows the model's inputs, which the shrink below needs.
+        let detector = null;
+        try {
+            detector = await getDetector();
+        } catch (e) {
+            log(id, "detector unavailable -> fail-open:", e && e.message);
+            return false; // fail-open
+        }
+
         // The detector takes an ImageBitmap. When the source is bigger than the
-        // model input, create it already shrunk to fit inside
-        // inputSize x inputSize — no distortion, no padding (the package adds
-        // the letterbox bars itself, and with a bitmap that already fits its
-        // own resize is exactly 1:1, so the model sees the same pixels as
-        // before). Smaller sources (most sprites) are passed at native size and
-        // upscaled by the package, as before.
+        // model input it will get, create it already shrunk to the size it has
+        // inside that input — no distortion, no padding (the package adds the
+        // letterbox bars itself, and with a bitmap of that size its own resize
+        // is exactly 1:1, so the model sees the same pixels as from the full
+        // picture). Smaller sources (most sprites) are passed at native size
+        // and upscaled by the package, as before.
         //
         // The options mirror the render path in PaperCard's CanvasImage so the
         // classifier sees exactly the pixels we'd display:
@@ -466,8 +673,8 @@ export async function ensureNsfw({ id, getImgData, alreadyFlagged }) {
         //                                  where the browser honours it).
         // createImageBitmap only READS imgd, so the caller's ImageData is never
         // neutered by this.
-        const fit = fitInside(imgd.width, imgd.height, config.inputSize);
-        const shrink = fit.scale < 1 && (await pixelatedResizeWorks());
+        const fit = fitForModel(imgd.width, imgd.height, detector.shapes);
+        const shrink = fit.scale < 1 && fit.keepsInput && detector.nearest && (await pixelatedResizeWorks());
         const bitmapOpts = { premultiplyAlpha: "none", colorSpaceConversion: "none" };
         if (shrink) {
             bitmapOpts.resizeWidth = fit.width;
@@ -482,36 +689,36 @@ export async function ensureNsfw({ id, getImgData, alreadyFlagged }) {
             log(id, "createImageBitmap failed -> fail-open:", e && e.message);
             return false; // fail-open
         }
-        // Read the size before classify(): the bitmap may be closed afterwards.
+        // Read the size before classify(): the bitmap is handed over (the
+        // worker takes it by transfer, which leaves it empty here).
         const sent = `${bitmap.width}x${bitmap.height}`;
 
-        let score = 0, sfw = 0, triggers = [], workerMs = 0, backend = null;
+        let score = 0, workerMs = 0, modelInput = "";
         try {
-            const detector = await getDetector();
             const res = await detector.classify(bitmap);
-            const s = res && res.scores;
-            score = s && typeof s.nsfw === "number" ? s.nsfw : 0;
-            sfw = s && typeof s.sfw === "number" ? s.sfw : 0;
-            triggers = (res && res.triggers) || [];
-            workerMs = (res && res.ms) || 0;
-            backend = (res && res.backend) || null;
+            // A verdict is only stored for a real probability.
+            if (!res || typeof res.score !== "number" || res.score !== res.score) throw new Error("no score");
+            score = res.score;
+            workerMs = res.ms || 0;
+            modelInput = res.inputSize ? res.inputSize.join("x") : "";
+            checkInput(fit.input, res);
         } catch (e) {
             log(id, "classify error:", e && e.message);
             return false; // fail-open
         } finally {
-            // We own the bitmap and the package has finished reading it once
-            // classify() settles, so release its memory now.
+            // Ours to release. After a transfer this is a no-op, and the
+            // worker closes the copy it received.
             try { bitmap.close && bitmap.close(); } catch (e) {}
             endDetectorWhenIdle();
         }
 
         const verdict = score >= config.thresholds.nsfw;
-        const rec = { id, nsfw: verdict, score, sfw, triggers, ms: workerMs, backend, ts: Date.now() };
+        const rec = { id, nsfw: verdict, score, ms: workerMs, ts: Date.now() };
         memCache.set(id, rec);
         idbPut(rec);
         config.debug && log(id, {
-            nsfw: verdict, score: +Number(score).toFixed(3), backend, ms: workerMs,
-            input: `${imgd.width}x${imgd.height}`, sent,
+            nsfw: verdict, score: +Number(score).toFixed(3), on: detector.kind, ms: workerMs,
+            input: `${imgd.width}x${imgd.height}`, sent, model: modelInput,
         });
         return verdict;
     })();
@@ -519,6 +726,153 @@ export async function ensureNsfw({ id, getImgData, alreadyFlagged }) {
     inflight.set(id, work);
     try { return await work; }
     finally { inflight.delete(id); }
+}
+
+// --- Public: classify one image on demand -----------------------------------
+// The creation gate of the store builds (components/NewPost.js, see
+// utils/store.js) checks every picture that enters the wizard, whatever the
+// "show NSFW" setting. Unlike ensureNsfw() it ignores filterEnabled, keeps no
+// cache (a draft is not a post) and REPORTS a failure instead of answering
+// "safe", so the caller decides whether that fails open or closed.
+
+// Longest side a source is brought down to when the browser can't shrink it
+// nearest-neighbour itself (pixelatedResizeWorks() false): small enough that
+// the package's own resize to the model input doesn't have to read a 12 MP
+// photo back, large enough to leave that resize most of the work.
+const FALLBACK_MAX_SIDE = 640;
+
+const isBlob = (x) => typeof Blob !== "undefined" && x instanceof Blob;
+
+function sourceSize(source) {
+    if (!source) return null;
+    const width = source.naturalWidth || source.videoWidth || source.width || 0;
+    const height = source.naturalHeight || source.videoHeight || source.height || 0;
+    return width > 0 && height > 0 ? { width, height } : null;
+}
+
+// An <img> for a Blob createImageBitmap refuses (SVG in Chromium, some older
+// WebViews). `revoke` frees its object URL.
+function decodeBlobAsImage(blob) {
+    return new Promise((resolve, reject) => {
+        let url;
+        try { url = URL.createObjectURL(blob); } catch (e) { reject(e); return; }
+        const img = new Image();
+        img.onload = () => resolve({ img, revoke: () => URL.revokeObjectURL(url) });
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("image decode failed")); };
+        img.src = url;
+    });
+}
+
+// The bitmap handed to the detector: shrunk to its size inside the model input
+// with the training filter when the browser can (same rules as ensureNsfw);
+// when it cannot, to FALLBACK_MAX_SIDE with a smooth filter; else as is (a
+// small picture, or one of the few sizes fitForModel() says not to shrink).
+// Falls back to a plain createImageBitmap when the options are refused.
+// Resolves to { bitmap, input }: `input` is the model input the package must
+// then report (see checkInput), or null where that cannot be told in advance.
+async function bitmapForModel(detector, drawable, width, height) {
+    const base = { premultiplyAlpha: "none", colorSpaceConversion: "none" };
+    const fit = fitForModel(width, height, detector.shapes);
+    const nearest = detector.nearest && (await pixelatedResizeWorks());
+    let opts = base;
+    let input = fit.input;
+    if (nearest && fit.scale < 1 && fit.keepsInput) {
+        opts = { ...base, resizeWidth: fit.width, resizeHeight: fit.height, resizeQuality: "pixelated" };
+    } else if (!nearest && Math.max(width, height) > FALLBACK_MAX_SIDE) {
+        const near = fitInside(width, height, FALLBACK_MAX_SIDE);
+        opts = { ...base, resizeWidth: near.width, resizeHeight: near.height, resizeQuality: "medium" };
+        input = null; // a smooth pre-shrink may round the aspect ratio across two inputs
+    }
+    try {
+        return { bitmap: await createImageBitmap(drawable, opts), input };
+    } catch (e) {
+        return { bitmap: await createImageBitmap(drawable), input: null };
+    }
+}
+
+/**
+ * @param {ImageData|ImageBitmap|Blob|HTMLImageElement|HTMLCanvasElement|OffscreenCanvas} source
+ * @param {object} [opts]
+ * @param {number} [opts.width]      decoded width of a Blob source, when known
+ *                                   (spares a full-size decode before the shrink)
+ * @param {number} [opts.height]     decoded height of a Blob source, when known
+ * @param {number} [opts.threshold]  P(nsfw) gate; default: the configured one
+ * @returns {Promise<{ok: boolean, nsfw: boolean, score: number}>}
+ *   ok:false when the image could not be classified (decode or model failure).
+ */
+export async function classifyImage(source, opts = {}) {
+    const threshold = typeof opts.threshold === "number" ? opts.threshold : config.thresholds.nsfw;
+    clearTimeout(_idleTimer);
+    _adhocPending++;
+    const owned = [];     // bitmaps made here, closed in `finally`
+    let revoke = null;
+    try {
+        // First: the detector knows the model's inputs, which the shrink needs.
+        const detector = await getDetector();
+        let drawable = source;
+        let size = null;
+        let bitmap = null;
+        let expected = null;
+        if (isBlob(source)) {
+            try {
+                if (opts.width > 0 && opts.height > 0) {
+                    // Size known: decode straight to the model's size.
+                    size = { width: opts.width, height: opts.height };
+                    const made = await bitmapForModel(detector, source, size.width, size.height);
+                    bitmap = made.bitmap;
+                    expected = made.input;
+                    owned.push(bitmap);
+                } else {
+                    drawable = await createImageBitmap(source, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+                    owned.push(drawable);
+                }
+            } catch (e) {
+                bitmap = null;
+                const decoded = await decodeBlobAsImage(source);
+                revoke = decoded.revoke;
+                drawable = decoded.img;
+            }
+        }
+        if (!bitmap) {
+            size = sourceSize(drawable);
+            if (!size) throw new Error("no image size");
+            const made = await bitmapForModel(detector, drawable, size.width, size.height);
+            bitmap = made.bitmap;
+            expected = made.input;
+            owned.push(bitmap);
+        }
+
+        // Read the size before classify(): the worker takes the bitmap by transfer.
+        const sent = `${bitmap.width}x${bitmap.height}`;
+        const res = await detector.classify(bitmap);
+        if (!res || typeof res.score !== "number" || res.score !== res.score) throw new Error("no score");
+        checkInput(expected, res);
+        const score = res.score;
+        const nsfw = score >= threshold;
+        config.debug && log("adhoc", { nsfw, score: +Number(score).toFixed(3), on: detector.kind, input: `${size.width}x${size.height}`, sent });
+        return { ok: true, nsfw, score };
+    } catch (e) {
+        log("adhoc classify failed:", e && e.message);
+        return { ok: false, nsfw: false, score: 0 };
+    } finally {
+        for (const bmp of owned) {
+            try { bmp && bmp.close && bmp.close(); } catch (e) {}
+        }
+        if (revoke) revoke();
+        _adhocPending--;
+        endDetectorWhenIdle();
+    }
+}
+
+/**
+ * Load the model ahead of a classifyImage() call, whatever filterEnabled says
+ * (warmup() is a no-op while the feed filter is off). Best-effort.
+ */
+export function warmupClassifier() {
+    return Promise.all([
+        getDetector().then(() => {}).catch(() => {}),
+        pixelatedResizeWorks(),
+    ]).then(() => { endDetectorWhenIdle(); });
 }
 
 /** Tear down the detector (e.g. when filtering is turned off for the session). */
@@ -540,5 +894,7 @@ export default {
     getCached,
     warmup,
     primeCache,
+    classifyImage,
+    warmupClassifier,
     dispose,
 };

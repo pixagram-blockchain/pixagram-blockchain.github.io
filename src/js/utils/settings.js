@@ -1,6 +1,10 @@
 import { CURRENCY_COUNTRIES, DEFAULT_NODES, CUSTOM_API_NODE_ID } from "./constants";
 import get_browser_locales from "./locales";
 import { LacertaDB } from "@pixagram/lacerta-db";
+// Store builds (Google Play / App Store) run with the mature-content settings
+// locked. Applied to every bag this module hands out — never to the stored
+// document, which the Play app shares with Chrome (see utils/store.js).
+import { applyStorePolicy, withoutStoreLockedKeys } from "./store";
 
 // ── ONE LacertaDB instance, ONE database ─────────────────────────────────────
 // Constructed HERE because this module lives in the main bundle and runs at
@@ -506,14 +510,20 @@ const _subscribers = new Set();
 // Update the cache and notify every subscriber. Called whenever we resolve a
 // fresh settings object (init / get / set). Subscriber errors are swallowed so
 // one bad listener can't break the others or the write that triggered them.
+//
+// What is emitted (and returned) is the bag the app RUNS with: in a store
+// build, the stored values with the store's locked settings applied
+// (applyStorePolicy). Every caller below hands that same bag to its callback,
+// while the document written to the database keeps the user's own values.
 const _emit = (settings) => {
     if (!settings) return settings;
-    _cache = settings;
-    _write_boot_hint(settings);
+    const effective = applyStorePolicy(settings);
+    _cache = effective;
+    _write_boot_hint(effective);
     for (const fn of _subscribers) {
-        try { fn(settings); } catch (e) { /* listener error — ignore */ }
+        try { fn(effective); } catch (e) { /* listener error — ignore */ }
     }
-    return settings;
+    return effective;
 };
 
 /**
@@ -521,7 +531,7 @@ const _emit = (settings) => {
  * caching them) until the first async load lands, so callers always get a usable
  * object — in particular a valid `currency`/`locales` — on the very first paint.
  */
-export const get_cached_settings = () => _cache || _get_default_settings();
+export const get_cached_settings = () => _cache || applyStorePolicy(_get_default_settings());
 
 /** Convenience: the current display currency, synchronously. */
 export const get_cached_currency = () => (get_cached_settings().currency || "USD");
@@ -579,8 +589,7 @@ export const init = async (resolve) => {
         // stored (or the api.pixagram.com default on a first run) is what the
         // API connects to now; if that endpoint is still nobody's choice, the
         // race below may settle it a moment later, once, and persist it.
-        _emit(settings);
-        resolve(settings);
+        resolve(_emit(settings));
 
         // Migrated from the legacy database: persist to the new home in the
         // background (the resolved bag already carries the values), and only
@@ -658,11 +667,10 @@ export const get_settings = async (callback_function_info) => {
             settings = _get_default_settings();
         }
 
-        _emit(settings);
-        callback_function_info(settings);
+        callback_function_info(_emit(settings));
     } catch (error) {
         console.error('Error getting settings:', error);
-        callback_function_info(_get_default_settings());
+        callback_function_info(applyStorePolicy(_get_default_settings()));
     }
 };
 
@@ -682,10 +690,12 @@ export const set_settings = async (info = {}, callback_function_info = () => {})
         // Merge with new settings. The base is brought to the current shape
         // first, so a document that still carries the legacy node keys loses
         // them on this write; the patch is normalized so `api_node_url` is
-        // always stored canonical.
+        // always stored canonical. A store build cannot write the settings it
+        // locks: they stay what the user chose on the web (utils/store.js).
+        const patch = withoutStoreLockedKeys(info) || {};
         const baseSettings = currentSettings ? _normalize_bag(currentSettings) : _get_default_settings();
         const newSettings = _merge_object(baseSettings, {
-            ..._normalize_patch(info, baseSettings),
+            ..._normalize_patch(patch, baseSettings),
             lastModified: Date.now()
         });
 
@@ -696,8 +706,7 @@ export const set_settings = async (info = {}, callback_function_info = () => {})
             await settingsDB.quickStore.add("main_settings", newSettings);
         }
 
-        _emit(newSettings);
-        callback_function_info(newSettings);
+        callback_function_info(_emit(newSettings));
     } catch (error) {
         console.error('Error setting settings:', error);
         callback_function_info();

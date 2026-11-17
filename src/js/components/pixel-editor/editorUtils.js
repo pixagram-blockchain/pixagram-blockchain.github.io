@@ -2,6 +2,7 @@
 // pixel-editor/editorUtils.js — glue between the editor core and React
 //
 //   useEditorEvents(ed, types)   re-render on editor events, ≤ 1 per frame
+//   PanelActive                  context: false pauses the panels inside
 //   documentFromImageData(...)   ImageData → one-layer Document
 //   imageDataFromDocument(doc)   flattened Document → ImageData
 //   paintPixels(canvas, ...)     packed pixels into a canvas, 1:1
@@ -9,8 +10,16 @@
 //   cssColor(c)                  packed colour → CSS rgba()
 // ============================================================================
 
-import { useEffect, useReducer } from "preact/compat";
+import { createContext, useContext, useLayoutEffect, useReducer } from "preact/compat";
 import { Document, Layer } from "../../utils/pixa-editor/index.js";
+
+/**
+ * Whether the panel around is the one on show. The drawer keeps every panel
+ * side by side (a swipe moves between them); those out of view are paused:
+ * they stop listening, and render once with the editor's state of the moment
+ * when they come back into view (the context changing re-renders them).
+ */
+export const PanelActive = createContext(true);
 
 /**
  * Re-renders the calling component when one of the editor events fires,
@@ -18,14 +27,20 @@ import { Document, Layer } from "../../utils/pixa-editor/index.js";
  * to what it shows, so a stroke or a slider drag does not repaint the whole
  * dialog — only the parts that read the state that changed.
  *
+ * It subscribes in a layout effect: before the first paint, and before the
+ * parent's own layout effects (the dialog attaches the canvas in one, which
+ * already reports the zoom), so nothing fired at mount is missed. Inside a
+ * paused panel (PanelActive false) it does not listen at all.
+ *
  * @param {object|null} ed  the editor (nothing happens while it is null)
  * @param {string[]} types  editor event names
  */
 export function useEditorEvents(ed, types) {
     const [, bump] = useReducer((n) => n + 1, 0);
+    const active = useContext(PanelActive);
     const key = types.join(" ");
-    useEffect(() => {
-        if (!ed) return undefined;
+    useLayoutEffect(() => {
+        if (!ed || !active) return undefined;
         let raf = 0;
         const schedule = () => {
             if (raf) return;
@@ -39,7 +54,7 @@ export function useEditorEvents(ed, types) {
             offs.forEach((off) => off());
             if (raf) cancelAnimationFrame(raf);
         };
-    }, [ed, key]);
+    }, [ed, key, active]);
 }
 
 // ImageData bytes are R, G, B, A; read as little-endian 32-bit words they are

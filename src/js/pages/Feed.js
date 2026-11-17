@@ -393,6 +393,13 @@ const enrichPostForCard = (post, account, voterProfiles) => {
         // Post-level rshares as the chain saw them — lets the card price its
         // own pending vote on the fund's reward curve (useVotePayoutEstimate).
         net_rshares: post.net_rshares != null ? String(post.net_rshares) : '0',
+        // Who shares the author reward ([{ account, weight }], basis points):
+        // REWARD_BENEFICIARY on everything published from the app, other front
+        // ends' on theirs. The payout tooltip (PayoutSankey) splits the
+        // creators' part with them; without this field it showed the author
+        // at 100 %. The other card builders (FeedPersonal, Profile,
+        // utils/blogCard) carry it the same way.
+        beneficiaries: Array.isArray(post.beneficiaries) ? post.beneficiaries : [],
         _voter_profiles: voterProfiles || {},
         nsfw: isNsfwPost(post),
         deleted: isDeletedPost(post),

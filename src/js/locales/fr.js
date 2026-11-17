@@ -1,7 +1,7 @@
 /**
  * locales/fr.js — Français
  *
- * Coverage: 2374 of 2542 keys (93.4 %).
+ * Coverage: 2382 of 2550 keys (93.4 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -881,6 +881,13 @@ export default {
             "retry": "Réessayer"
         },
         "post_dialog": {
+            "origin": "Origine",
+            "original_content": "Contenu original",
+            "not_original_content": "Contenu non original",
+            "original_content_tooltip": "Déclaré par l’auteur : sa propre photo ou son propre dessin, avant toute transformation de style",
+            "ai_used": "IA utilisée",
+            "no_ai_declared": "Aucune IA déclarée",
+            "ai_used_tooltip": "Déclaré par l’auteur : l’IA qui a créé ou transformé l’image",
             "for_sale": "À vendre",
             "last": "Dernier : {{soldPrice}}{{currency}}",
             "not_for_sale": "Pas à vendre",
@@ -1086,7 +1093,16 @@ export default {
             "adjust_step": "Ajuster ({{step}}/{{total}})",
             "post_step": "Publier ({{step}}/{{total}})",
             "publish": "Publier",
-            "ai_style": "Style IA"
+            "ai_style": "Style IA",
+            "original_content": "Contenu original",
+            "oc_hint": "Activez-le si c’était votre propre image réelle — une photo ou un dessin — avant toute transformation de style.",
+            "oc_file_declares_ai": "Désactivé : le fichier de l’image indique qu’elle a été créée ou retouchée avec l’IA — réactivez-le si c’est une erreur.",
+            "oc_generated": "Générée à partir de votre description : ce n’est pas un contenu original.",
+            "ai_used": "IA utilisée",
+            "ai_used_prefilled": "Prérempli avec l’IA utilisée par l’application. Ajoutez toute autre IA qui a créé ou modifié l’image.",
+            "ai_used_hint": "Laissez vide si aucune IA n’a été utilisée. Sinon, indiquez l’IA qui a créé ou modifié l’image.",
+            "ai_used_is_required": "Indiquez l’IA qui a créé ou transformé cette image",
+            "ai_used_must_be_characters_or_less_currently": "Le champ IA utilisée doit comporter au maximum {{AI_MAX_LENGTH}} caractères (actuellement {{ai_count}})"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Transfert de Power groupé",
@@ -1671,6 +1687,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "Œuvre",
+            "artwork_hint": "Modifiez l’image dans l’éditeur de pixels. L’enregistrement la remplace en chaîne ; seul l’historique des blocs conserve l’ancienne version.",
+            "edit_in_pixel_editor": "Modifier dans l’éditeur de pixels",
+            "artwork_size": "{{size}} ko",
+            "artwork_size_change": "{{before}} ko → {{after}} ko",
+            "artwork_erased": "Le contenu de l’œuvre a été effacé : il ne reste aucune image à modifier.",
+            "artwork_encoding": "Encodage de l’image modifiée…",
+            "artwork_encode_failed": "L’image modifiée n’a pas pu être encodée. Appuyez de nouveau sur Terminé dans l’éditeur, ou sur Réinitialiser.",
+            "artwork_too_large": "L’image modifiée pèse {{size}} ko, plus que les {{max}} ko qu’une modification peut envoyer. Simplifiez-la dans l’éditeur, ou appuyez sur Réinitialiser.",
+            "artwork_updated": "Publication mise à jour — la nouvelle œuvre apparaît dans un instant",
+            "original_content_not_declared": "Pas encore déclaré. Activez-le si c’était votre propre image réelle — une photo ou un dessin — avant toute transformation de style.",
+            "ai_used_as_published": "Tel que publié : vous pouvez le reformuler ou ajouter une autre IA, mais pas le supprimer.",
             "loading_the_on_chain_version": "Chargement de la version en chaîne…",
             "only_can_edit_this_post": "Seul @{{authorUsername}} peut modifier cette publication.",
             "title": "Titre",
@@ -1692,7 +1720,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "Mots-clés : en minuscules, sans point, 3 caractères min., commençant par une lettre",
             "enable_this_if_your_content_contains_mature": "Activez si votre contenu comporte des éléments pour adultes ou sensibles",
             "if_this_post_is_a_dao_proposal": "Si cette publication est une proposition DAO, la proposition liée est également supprimée en chaîne.",
-            "replacing_the_artwork_with_a_new_image": "Le remplacement de l’œuvre par une nouvelle image arrivera dans une prochaine mise à jour.",
             "title_description_and_tags_for_this_post": "Le titre, la description et les mots-clés de cette publication se modifient depuis « Modifier le contenu ». Ici, vous pouvez basculer ses indicateurs de visibilité.",
             "marks_the_post_as_deleted_in_its": "Marque la publication comme supprimée dans ses métadonnées : elle disparaît de tous les fils, profils et pages de communauté. Réversible — seul l’indicateur de métadonnées est modifié. Aucun mot-clé n’est ajouté, les publications supprimées ne sont donc pas parcourables.",
             "erase_the_artwork_content_itself_the_post": "Efface le contenu de l’œuvre elle-même (le corps de la publication). L’image est remplacée en chaîne et ne peut pas être restaurée d’ici — seul l’historique des blocs conserve l’ancienne version. Marque la publication comme supprimée.",
@@ -5055,7 +5082,15 @@ export default {
             "view_zoom_out": "Zoom arrière",
             "view_grid_on": "Afficher la grille",
             "view_grid_off": "Masquer la grille",
-            "edits_applied": "Modifiée dans l’éditeur de pixels"
+            "edits_applied": "Modifiée dans l’éditeur de pixels",
+            "panels": "Panneaux",
+            "import": "Importer",
+            "import_image": "Importer une image",
+            "import_hint": "Le pixel art garde ses pixels, le pixel art agrandi est ramené à sa taille, et une photo devient du pixel art. L’image flotte au-dessus du calque actif jusqu’à ce que vous l’appliquiez. Vous pouvez aussi déposer ou coller une image sur le canevas.",
+            "import_done_native": "Pixel art importé, {{width}} × {{height}}",
+            "import_done_upscaled": "Pixel art {{scale}}× importé à sa vraie taille, {{width}} × {{height}}",
+            "import_done_photo": "Photo transformée en pixel art, {{width}} × {{height}}",
+            "import_failed": "Ce fichier ne peut pas être lu comme une image."
         }
     }
 };

@@ -2,9 +2,10 @@
 // pixel-editor/panels/ToolPanel.js — options of the active tool
 //
 //   pencil / eraser   tip, size, opacity, pixel-perfect, blend, mirror
-//   selection tools   mode (replace / add / subtract), tolerance and
-//                     neighbours for the colour tools, width and tip for the
-//                     line and brush selections
+//   selection tools   mode (replace / add / subtract); for the colour tools
+//                     the tolerance first (picking one on a wide screen opens
+//                     this panel for it), then neighbours and comparison;
+//                     width and tip for the line and brush selections
 //   picker, move, mirror axis   how they work, in one line
 // ============================================================================
 
@@ -18,7 +19,7 @@ import { TIP_SHAPES, tipOffsets } from "../../../utils/pixa-editor/index.js";
 import { tp, toolLabel, toolHint } from "../labels";
 import { useEditorEvents } from "../editorUtils";
 import { activeToolKey } from "../ToolStrip";
-import { Section, Segmented, SliderField, SwitchField, Hint, EASE } from "../ui";
+import { Section, Segmented, SliderField, SwitchField, Hint, EASE, SURFACE } from "../ui";
 
 const useStyles = makeStyles({
     tips: {
@@ -30,15 +31,15 @@ const useStyles = makeStyles({
         width: 44,
         height: 44,
         borderRadius: 14,
-        backgroundColor: "#171717",
+        backgroundColor: SURFACE.raised,
         color: "#dddddd",
         transition: `background-color 160ms ${EASE}, color 160ms ${EASE}, opacity 160ms ${EASE}`,
-        "&:hover": { backgroundColor: "#262626", color: "#ffffff" },
+        "&:hover": { backgroundColor: SURFACE.hover, color: "#ffffff" },
         "&.Mui-disabled": { opacity: 0.32 },
     },
     tipOn: {
-        backgroundColor: "#e9e9e9 !important",
-        color: "#1d1d1d !important",
+        backgroundColor: `${SURFACE.on} !important`,
+        color: `${SURFACE.onInk} !important`,
     },
     stack: {
         display: "flex",
@@ -48,10 +49,10 @@ const useStyles = makeStyles({
     centerAxes: {
         alignSelf: "flex-start",
         color: "#dddddd",
-        backgroundColor: "#171717",
+        backgroundColor: SURFACE.raised,
         borderRadius: "16px !important",
         textTransform: "none",
-        "&:hover": { backgroundColor: "#262626" },
+        "&:hover": { backgroundColor: SURFACE.hover },
     },
 });
 
@@ -173,6 +174,16 @@ function SelectionOptions({ ed, id, classes }) {
     const tipTool = id === "select-line" || id === "select-brush";
     return (
         <React.Fragment>
+            {colourTool && (
+                <SliderField
+                    label={tp("tolerance")}
+                    value={Math.round(s.threshold * 100)}
+                    min={0}
+                    max={100}
+                    format={(v) => `${v}%`}
+                    onChange={(v) => ed.setSelectionSettings({ threshold: v / 100 })}
+                />
+            )}
             <Section title={tp("mode")}>
                 <Segmented
                     ariaLabel={tp("mode")}
@@ -187,14 +198,6 @@ function SelectionOptions({ ed, id, classes }) {
             </Section>
             {colourTool && (
                 <React.Fragment>
-                    <SliderField
-                        label={tp("tolerance")}
-                        value={Math.round(s.threshold * 100)}
-                        min={0}
-                        max={100}
-                        format={(v) => `${v}%`}
-                        onChange={(v) => ed.setSelectionSettings({ threshold: v / 100 })}
-                    />
                     {id === "select-area" && (
                         <Section title={tp("neighbors")}>
                             <Segmented

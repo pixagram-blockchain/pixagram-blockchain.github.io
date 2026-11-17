@@ -1,7 +1,7 @@
 /**
  * locales/no.js — Norsk (bokmål)
  *
- * Coverage: 2374 of 2542 keys (93.4 %).
+ * Coverage: 2382 of 2550 keys (93.4 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -881,6 +881,13 @@ export default {
             "retry": "Prøv igjen"
         },
         "post_dialog": {
+            "origin": "Opprinnelse",
+            "original_content": "Originalt innhold",
+            "not_original_content": "Ikke originalt innhold",
+            "original_content_tooltip": "Oppgitt av opphavspersonen: eget foto eller egen tegning, før noen stiltransformasjon",
+            "ai_used": "Brukt KI",
+            "no_ai_declared": "Ingen KI oppgitt",
+            "ai_used_tooltip": "Oppgitt av opphavspersonen: KI-en som laget eller transformerte bildet",
             "for_sale": "Til salgs",
             "last": "Sist: {{soldPrice}}{{currency}}",
             "not_for_sale": "Ikke til salgs",
@@ -1086,7 +1093,16 @@ export default {
             "adjust_step": "Juster ({{step}}/{{total}})",
             "post_step": "Publiser ({{step}}/{{total}})",
             "publish": "Publiser",
-            "ai_style": "AI-stil"
+            "ai_style": "AI-stil",
+            "original_content": "Originalt innhold",
+            "oc_hint": "Slå på hvis det var ditt eget ekte bilde — et foto eller en tegning — før noen stiltransformasjon.",
+            "oc_file_declares_ai": "Slått av: bildefilen oppgir at den er laget eller redigert med KI — slå det på hvis det er feil.",
+            "oc_generated": "Generert ut fra beskrivelsen din, så det er ikke originalt innhold.",
+            "ai_used": "Brukt KI",
+            "ai_used_prefilled": "Forhåndsutfylt med KI-en appen brukte. Legg til all annen KI som har laget eller endret bildet.",
+            "ai_used_hint": "La feltet stå tomt hvis ingen KI var involvert. Ellers oppgir du KI-en som laget eller endret bildet.",
+            "ai_used_is_required": "Oppgi KI-en som laget eller transformerte dette bildet",
+            "ai_used_must_be_characters_or_less_currently": "Brukt KI må være på {{AI_MAX_LENGTH}} tegn eller mindre (nå {{ai_count}})"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Power-masseoverføring",
@@ -1670,6 +1686,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "Kunstverk",
+            "artwork_hint": "Rediger bildet i pikselredigeringen. Når du lagrer, erstattes det på kjeden; bare blokkhistorikken beholder den gamle versjonen.",
+            "edit_in_pixel_editor": "Rediger i pikselredigeringen",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "Kunstverkinnholdet er slettet: det er ikke noe bilde igjen å redigere.",
+            "artwork_encoding": "Koder det redigerte bildet…",
+            "artwork_encode_failed": "Det redigerte bildet kunne ikke kodes. Trykk på Ferdig i redigeringen igjen, eller på Tilbakestill.",
+            "artwork_too_large": "Det redigerte bildet er på {{size}} kB, mer enn de {{max}} kB en redigering kan sende. Forenkle det i redigeringen, eller trykk på Tilbakestill.",
+            "artwork_updated": "Innlegg oppdatert — det nye kunstverket vises om et øyeblikk",
+            "original_content_not_declared": "Ikke oppgitt ennå. Slå på hvis det var ditt eget ekte bilde — et foto eller en tegning — før noen stiltransformasjon.",
+            "ai_used_as_published": "Som publisert: du kan omformulere det eller legge til en annen KI, men ikke fjerne det.",
             "loading_the_on_chain_version": "Laster versjonen på kjeden …",
             "only_can_edit_this_post": "Bare @{{authorUsername}} kan redigere dette innlegget.",
             "title": "Tittel",
@@ -1691,7 +1719,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "Emneknagger: små bokstaver, ingen punktum, min. 3 tegn, må begynne med en bokstav",
             "enable_this_if_your_content_contains_mature": "Aktiver dette hvis innholdet ditt inneholder voksent eller sensitivt materiale",
             "if_this_post_is_a_dao_proposal": "Hvis dette innlegget er et DAO-forslag, fjernes det tilknyttede forslaget også på kjeden.",
-            "replacing_the_artwork_with_a_new_image": "Å erstatte kunstverket med et nytt bilde kommer hit i en fremtidig oppdatering.",
             "title_description_and_tags_for_this_post": "Tittel, beskrivelse og emneknagger for dette innlegget redigeres fra «Rediger innhold». Her kan du slå synlighetsflaggene av og på.",
             "marks_the_post_as_deleted_in_its": "Merker innlegget som slettet i metadataene: det forsvinner fra alle feeder, profiler og fellesskapssider. Reversibelt — bare metadataflagget berøres. Ingen emneknagg legges til, så slettede innlegg kan ikke blas gjennom.",
             "erase_the_artwork_content_itself_the_post": "Slett selve kunstverkinnholdet (innleggskroppen). Bildet erstattes på kjeden og kan ikke gjenopprettes herfra — bare blokkhistorikken beholder den gamle versjonen. Merker innlegget som slettet.",
@@ -5052,7 +5079,15 @@ export default {
             "view_zoom_out": "Zoom ut",
             "view_grid_on": "Vis rutenettet",
             "view_grid_off": "Skjul rutenettet",
-            "edits_applied": "Redigert i pikselredigeringen"
+            "edits_applied": "Redigert i pikselredigeringen",
+            "panels": "Paneler",
+            "import": "Importer",
+            "import_image": "Importer bilde",
+            "import_hint": "Pikselkunst beholder pikslene sine, forstørret pikselkunst skaleres tilbake, og et foto blir pikselkunst. Bildet svever over det aktive laget til du bruker det. Du kan også slippe eller lime inn et bilde på lerretet.",
+            "import_done_native": "Pikselkunst importert, {{width}} × {{height}}",
+            "import_done_upscaled": "{{scale}}× pikselkunst importert i sin virkelige størrelse, {{width}} × {{height}}",
+            "import_done_photo": "Foto gjort om til pikselkunst, {{width}} × {{height}}",
+            "import_failed": "Denne filen kan ikke leses som et bilde."
         }
     }
 };

@@ -606,6 +606,8 @@ const enrichPostForCard = (post, account, voterProfiles) => {
         upVotesNumber: countUpvotes(activeVotes),
         downVotesNumber: countDownvotes(activeVotes),
         active_votes: activeVotes, net_rshares: post.net_rshares != null ? String(post.net_rshares) : '0',
+        // Who shares the author reward, for the payout tooltip (PayoutSankey) — see Feed.js.
+        beneficiaries: Array.isArray(post.beneficiaries) ? post.beneficiaries : [],
         _voter_profiles: voterProfiles || {}, nsfw: isNsfwPost(post), deleted: isDeletedPost(post), tags,
         permlink: post.permlink || '', category: resolveRootCategory(post), _content_type: post._content_type || resolveContentType(post) || 'pixel_art',
         _description_html: post._description_html || '', _summary: post._summary || '', json_metadata: post.json_metadata || '',
@@ -626,6 +628,9 @@ const enrichCommentForCard = (comment, account, index, voterProfiles) => {
         upVotesNumber: countUpvotes(activeVotes),
         downVotesNumber: countDownvotes(activeVotes),
         active_votes: activeVotes, net_rshares: comment.net_rshares != null ? String(comment.net_rshares) : '0', _voter_profiles: voterProfiles || {},
+        // Who shares the author reward, for the payout tooltip (PayoutSankey) —
+        // see Feed.js. Comment entities carry it from pixaproxyapi v4.9.1.
+        beneficiaries: Array.isArray(comment.beneficiaries) ? comment.beneficiaries : [],
         permlink: comment.permlink || '', parent_author: comment.parent_author || '', parent_permlink: comment.parent_permlink || '',
         root_author: comment.root_author || '', root_permlink: comment.root_permlink || '', category: resolveRootCategory(comment),
         // Type of the ROOT this comment hangs under — what the title links to,
@@ -654,6 +659,9 @@ const transformRepliesToCardFormat = (rawReplies, profileOwnerAccount, voterProf
             upVotesNumber: countUpvotes(activeVotes),
             downVotesNumber: countDownvotes(activeVotes),
             active_votes: activeVotes, net_rshares: r.net_rshares != null ? String(r.net_rshares) : '0', _voter_profiles: voterProfiles || {}, originalComment: '',
+            // Who shares the author reward, for the payout tooltip (PayoutSankey) —
+            // see Feed.js. Comment entities carry it from pixaproxyapi v4.9.1.
+            beneficiaries: Array.isArray(r.beneficiaries) ? r.beneficiaries : [],
             permlink: r.permlink || '', parent_author: r.parent_author || '', parent_permlink: r.parent_permlink || '',
             root_author: r.root_author || '', root_permlink: r.root_permlink || '', category: resolveRootCategory(r),
             _content_type: resolveContentType(r),

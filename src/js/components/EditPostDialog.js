@@ -21,13 +21,20 @@ import DeleteForeverRounded from "@material-ui/icons/DeleteForeverRounded";
 import LockRounded from "@material-ui/icons/LockRounded";
 import GavelIcon from "@material-ui/icons/Gavel";
 import CheckCircleIcon from "@material-ui/icons/CheckCircle";
+import BrushRounded from "@material-ui/icons/BrushRounded";
 import LicenseCustomizationDialog from "./LicenseCustomizationDialog";
+import PixelEditorDialog, { preloadPixelEditor } from "./pixel-editor";
 import { PIXA_LICENSE_BASE, createDefaultCustomization } from "../utils/pixa_license";
+import { readAiDisclosure, editedAiDisclosure } from "../utils/ai_provenance";
+import {
+    ARTWORK, ARTWORK_BODY_MAX_LENGTH, readArtworkBody, decodeArtworkBody, encodeArtworkBody, sameImageData, artworkKb
+} from "../utils/artwork_body";
+import { nsfwImageKey, warmNsfwCheck, peekNsfw, checkNsfw } from "../utils/nsfw_suggest";
 import * as actions from "../actions/utils";
 
-import { t, tk, tx, useLanguage } from "../utils/text";
+import { t, tk, tx, useLanguage, getLocaleCode } from "../utils/text";
 
-const { useState, useEffect, useCallback, useMemo } = React;
+const { useState, useEffect, useCallback, useMemo, useRef } = React;
 
 /* ════════════════════════════════════════════════════════════════════════
  * EditPostDialog — edit the metadata of an existing post (pixel art or blog)
@@ -44,14 +51,26 @@ const { useState, useEffect, useCallback, useMemo } = React;
  * payload on save (every field defined — a missing nested key makes the
  * comment-op signature diverge from the bytes the chain reconstructs).
  *
+ * Pixel-art posts carry NewPost's AI disclosure too: the "Original content"
+ * switch (json_metadata.oc) under NSFW, and the "AI used" field (.ai) below
+ * it (utils/ai_provenance.js). A post published before those keys existed
+ * shows the switch as not declared, and gains the keys only once the author
+ * sets one here. An AI the post declares can be reworded, not removed.
+ *
+ * The artwork itself (the body: one lossless WebP as a data URI) opens in
+ * NewPost's pixel editor. The post's picture is decoded when the editor is
+ * first asked for, the editor's Done is encoded as NewPost encodes a new
+ * artwork (utils/artwork_body.js), and Save sends it as the new body. A Done
+ * without a change replaces nothing; Reset drops the edits; a picture over
+ * what one request to the API can carry cannot be saved. Like the picture
+ * NewPost publishes, the edited one gets the on-device NSFW check, which
+ * turns the NSFW switch on when it looks sensitive (utils/nsfw_suggest.js).
+ *
  * For pixel-art posts a separate, explicitly-confirmed danger action erases
  * the body content itself (the encoded artwork) — irreversible by design,
  * per the platform's soft-delete model: posts with votes can never be
  * removed with delete_comment, so "deleting" a pixel-art post means wiping
- * its body and tagging it `deleted`.
- *
- * Body modification (replacing the artwork image) is intentionally left as
- * a stub section — the dialog is structured so it can host it later.
+ * its body and tagging it `deleted`. Erasing wins over an edited artwork.
  *
  * All writes go through api.broadcast.updateComment(), which performs
  * HIVE-style content patching (same permlink + parent ⇒ edit) and emits
@@ -62,12 +81,34 @@ const VALIDATION = {
     TITLE_MAX_LENGTH_PIXEL: 24,   // matches NewPost
     TITLE_MAX_LENGTH_BLOG: 250,   // chain limit is < 256
     DESCRIPTION_MAX_LENGTH: 1024,
+    AI_MAX_LENGTH: 128,           // matches NewPost's "AI used" field
     TAGS_MAX_COUNT: 5,
     TAG_MIN_LENGTH: 3,
     TAG_PATTERN: /^[a-z][a-z0-9\-]*$/,
     TAG_STARTS_WITH_NUMBER_OR_MINUS: /^[0-9\-]/,
     TAG_CONTAINS_DOT: /\./
 };
+
+// The artwork in the pixel editor, from one opening of the dialog to the next.
+const ARTWORK_IDLE = Object.freeze({
+    source: null,         // ImageData of the post's picture, decoded once
+    opening: false,       // decoding it for the editor
+    failed: false,        // it could not be decoded
+    editorOpen: false,
+    edited: null,         // ImageData from the editor's Done, when it changed the picture
+    project: null,        // the editor's layered project, to reopen with the layers
+    body: null,           // `edited` encoded: the new post body
+    encoding: false,
+    encodeFailed: false,
+});
+
+// A weight shown to the user, with the app locale's decimal separator (as NewPost).
+const formatKb = (kb) => Number(kb).toLocaleString(getLocaleCode(), {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+});
+// The heaviest artwork an edit can send, counted as artworkKb counts: 750 kB.
+const ARTWORK_MAX_KB = Math.floor(ARTWORK_BODY_MAX_LENGTH * 3 / 4 / 1000);
 
 // `error` is a tk() descriptor — resolve it with tx() where it is shown. The
 // messages are the same as NewPost's, so its keys are reused.
@@ -146,6 +187,25 @@ const styles = theme => ({
         borderRadius: "21px",
         border: "1px solid #333",
     },
+    artworkBox: {
+        marginTop: theme.spacing(1),
+        marginBottom: theme.spacing(1),
+        padding: theme.spacing(1.5),
+        borderRadius: "21px",
+        border: "1px solid #333",
+        transition: "opacity 200ms",
+    },
+    artworkThumb: {
+        width: 64,
+        height: 64,
+        flexShrink: 0,
+        objectFit: "contain",
+        imageRendering: "pixelated",
+        borderRadius: 12,
+        // Transparent pixels show as a dark checkerboard.
+        background: "repeating-conic-gradient(#2a2a2a 0% 25%, #202020 0% 50%) 50% / 12px 12px",
+    },
+    artworkMeta: { color: "#888", fontSize: "0.75rem", marginTop: 2 },
     licenseTitle: {
         display: "flex",
         alignItems: "center",
@@ -268,6 +328,23 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
     const [description, setDescription] = useState("");
     const [tags, setTags] = useState([]);
     const [nsfw, setNsfw] = useState(false);
+    // NSFW check of an edited picture (see the effect below): running, and
+    // whether the switch is on because of it. The refs let that effect read
+    // the switch without re-running on it; nsfwOverrideRef is the author
+    // setting the switch for the picture nsfwKeyRef names.
+    const [nsfwChecking, setNsfwChecking] = useState(false);
+    const [nsfwAuto, setNsfwAuto] = useState(false);
+    const nsfwRef = useRef(false);
+    nsfwRef.current = nsfw;
+    const nsfwAutoRef = useRef(false);
+    nsfwAutoRef.current = nsfwAuto;
+    const nsfwOverrideRef = useRef(false);
+    const nsfwKeyRef = useRef(null);
+    // AI disclosure — pixel-art only (json_metadata.oc / .ai, see NewPost).
+    // `oc` stays null while the post has never declared it and the author
+    // hasn't touched the switch: nothing is written for it then.
+    const [oc, setOc] = useState(null);
+    const [aiUsed, setAiUsed] = useState("");
     const [deleted, setDeleted] = useState(false);
     // PIXA_LICENSE — pixel-art only. Hydrated from meta.license, edited via
     // NewPost's LicenseCustomizationDialog, re-broadcast in full on save.
@@ -278,6 +355,13 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
     const [eraseBody, setEraseBody] = useState(false);
     // Snapshot of the raw on-chain version, used to detect changes
     const [original, setOriginal] = useState(null);
+    // The artwork in the pixel editor (pixel art only), see ARTWORK_IDLE.
+    // Decodes and encodes run in the background: each takes a token, and a
+    // result whose token is no longer the latest is dropped (a Reset, a newer
+    // Done, a close or another opening came in between).
+    const [artwork, setArtwork] = useState(ARTWORK_IDLE);
+    const artworkTokenRef = useRef(0);
+    useEffect(() => () => { artworkTokenRef.current++; }, []);
 
     const authorUsername = getAuthorUsername(data);
     const permlink = data?.permlink || "";
@@ -287,6 +371,14 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
 
     // ── Hydrate from the chain whenever the dialog opens ────────────────
     useEffect(() => {
+        // An artwork edit belongs to one opening: closing drops its pixels
+        // (several MB for a large picture), and opening starts from the post.
+        artworkTokenRef.current++;
+        setArtwork(ARTWORK_IDLE);
+        setNsfwChecking(false);
+        setNsfwAuto(false);
+        nsfwOverrideRef.current = false;
+        nsfwKeyRef.current = null;
         if (!open) return;
         let cancelled = false;
         setLoading(true);
@@ -329,6 +421,12 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                 }));
                 setNsfw(meta.nsfw === true || meta.nsfw === "true" || meta.nsfw === 1
                     || metaTags.some(t => t.toLowerCase() === "nsfw"));
+                // AI disclosure as stored (the raw metadata keeps an empty
+                // `ai`, which the sanitized copy would have dropped).
+                const disclosure = readAiDisclosure(meta);
+                const storedAi = typeof meta.ai === "string" ? meta.ai : "";
+                setOc(disclosure ? disclosure.oc : null);
+                setAiUsed(storedAi);
                 setDeleted(isDeleted);
                 // License — map the stored payload back onto a customization
                 // object; fall back to the platform defaults field by field
@@ -352,6 +450,14 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                     metaTags,
                     isDeleted,
                     bodyLength: (raw.body || "").length,
+                    // The artwork as stored, and what it is: a picture the
+                    // pixel editor can open, an erased one, or neither.
+                    body: typeof raw.body === "string" ? raw.body : "",
+                    artwork: readArtworkBody(raw.body),
+                    // Whether the post carries the AI disclosure, and the AI
+                    // it declares (which may be reworded, not removed).
+                    aiDeclared: !!disclosure,
+                    ai: storedAi,
                 });
                 setLoading(false);
             } catch (e) {
@@ -390,11 +496,29 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
         ? tk("words.maximum_tags_max_count_tags_allowed", {
         TAGS_MAX_COUNT: VALIDATION.TAGS_MAX_COUNT
     }) : null;
+    // "AI used": NewPost's limit and messages. An AI the post declares can be
+    // reworded or added to, never emptied.
+    const aiError = aiUsed.length > VALIDATION.AI_MAX_LENGTH
+        ? tk("components.new_post.ai_used_must_be_characters_or_less_currently", {
+            AI_MAX_LENGTH: VALIDATION.AI_MAX_LENGTH,
+            ai_count: aiUsed.length
+        })
+        : ((original?.ai || "").trim() && !aiUsed.trim())
+            ? tk("components.new_post.ai_used_is_required")
+            : null;
+    // The artwork: an edited picture is what Save sends as the body (unless
+    // the artwork is being erased), so Save waits until it is encoded and
+    // refuses one that could not be, or that one request cannot carry.
+    const artworkPending = isPixelArt && !!artwork.edited && !eraseBody;
+    const artworkTooLarge = !!artwork.body && artwork.body.length > ARTWORK_BODY_MAX_LENGTH;
+    const artworkReady = artworkPending && !!artwork.body && !artworkTooLarge;
     // Blog posts edit their title / description / tags through "Edit Content"
     // (the blog editor), so those fields aren't shown here and don't gate the
     // save — only NSFW and the Deleted flag do.
     const canSave = !loading && !saving && !loadError
-        && (isPixelArt ? (!titleError && !descriptionError && !tagsError) : true)
+        && (isPixelArt ? (!titleError && !descriptionError && !tagsError && !aiError) : true)
+        && (!artworkPending || artworkReady)
+        && !nsfwChecking   // an edited picture's NSFW check decides the switch first
         && account && account === authorUsername;
 
     const getCounterClass = (count, max) => {
@@ -402,6 +526,111 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
         if (count > max * 0.8) return classes.charCounterWarning;
         return classes.charCounter;
     };
+
+    // ── Artwork (pixel editor) ──────────────────────────────────────────
+    const originalBody = original?.body || "";
+    const openArtworkEditor = useCallback(async () => {
+        preloadPixelEditor();
+        // The edited picture gets the NSFW check: load the classifier while
+        // the author draws, so that the check after Done is quick.
+        warmNsfwCheck();
+        if (artwork.source) {
+            setArtwork((a) => ({ ...a, editorOpen: true }));
+            return;
+        }
+        // The post's picture is decoded once, the first time it is needed.
+        const token = ++artworkTokenRef.current;
+        setArtwork((a) => ({ ...a, opening: true, failed: false }));
+        const source = await decodeArtworkBody(originalBody).catch(() => null);
+        if (token !== artworkTokenRef.current) return;
+        setArtwork((a) => (source
+            ? { ...a, opening: false, source, editorOpen: true }
+            : { ...a, opening: false, failed: true }));
+    }, [artwork.source, originalBody]);
+
+    const closeArtworkEditor = useCallback(() => {
+        setArtwork((a) => ({ ...a, editorOpen: false }));
+    }, []);
+
+    // The editor's Done. The picture is kept only if it differs from the
+    // post's, and encoded right away so that Save has nothing to wait for.
+    const saveArtworkEdits = useCallback(({ imageData, project }) => {
+        if (artwork.edited && imageData && sameImageData(imageData, artwork.edited) && !artwork.encodeFailed) {
+            // Done again on the same picture: its encoding (done or under way) still holds.
+            setArtwork((a) => ({ ...a, editorOpen: false, project: project || a.project }));
+            return;
+        }
+        const token = ++artworkTokenRef.current;
+        if (!imageData || sameImageData(imageData, artwork.source)) {
+            setArtwork((a) => ({ ...a, editorOpen: false, edited: null, project: null, body: null, encoding: false, encodeFailed: false }));
+            return;
+        }
+        setArtwork((a) => ({ ...a, editorOpen: false, edited: imageData, project: project || null, body: null, encoding: true, encodeFailed: false }));
+        encodeArtworkBody(imageData).then((body) => {
+            if (token === artworkTokenRef.current) setArtwork((a) => ({ ...a, body, encoding: false }));
+        }, (error) => {
+            console.warn("[EditPostDialog] artwork encoding failed:", error?.message);
+            if (token === artworkTokenRef.current) setArtwork((a) => ({ ...a, encoding: false, encodeFailed: true }));
+        });
+    }, [artwork.source, artwork.edited, artwork.encodeFailed]);
+
+    const resetArtworkEdits = useCallback(() => {
+        artworkTokenRef.current++;
+        setArtwork((a) => ({ ...a, edited: null, project: null, body: null, encoding: false, encodeFailed: false }));
+    }, []);
+
+    // ── NSFW check of an edited picture ─────────────────────────────────
+    // NewPost's rule, for the picture the pixel editor gave back: the
+    // on-device classifier turns the NSFW switch on when the picture looks
+    // sensitive, unless the switch is already on, or the author has set it
+    // for this picture. A flag the check set goes with its picture (Reset,
+    // a Done without a change, erasing the artwork), and with a later edit
+    // that no longer looks sensitive. Save waits for the check, which counts
+    // as "not sensitive" when it cannot run or takes too long.
+    useEffect(() => {
+        if (!isPixelArt) return undefined;
+        if (!artwork.edited || eraseBody) {
+            if (nsfwAutoRef.current) { setNsfw(false); setNsfwAuto(false); }
+            return undefined;
+        }
+        if (!artworkReady) return undefined; // still encoding, or nothing Save would send
+        const key = nsfwImageKey(artwork.body);
+        if (nsfwKeyRef.current !== key) {
+            // Another picture: a fresh suggestion, whatever the author set for the last one.
+            nsfwKeyRef.current = key;
+            nsfwOverrideRef.current = false;
+        }
+        if (nsfwOverrideRef.current) return undefined;
+        if (nsfwRef.current && !nsfwAutoRef.current) return undefined; // on already, not by the check
+        const pixels = artwork.edited;
+        let cancelled = false;
+        const apply = (verdict) => {
+            if (cancelled || nsfwOverrideRef.current) return;
+            if (verdict) { setNsfw(true); setNsfwAuto(true); }
+            else if (nsfwAutoRef.current) { setNsfw(false); setNsfwAuto(false); }
+        };
+        // A verdict this device already has: no spinner, no wait.
+        const cached = peekNsfw(key);
+        if (cached !== undefined) {
+            apply(cached);
+            return () => { cancelled = true; };
+        }
+        setNsfwChecking(true);
+        checkNsfw({ key, getImgData: async () => pixels }).then((verdict) => {
+            if (cancelled) return;
+            setNsfwChecking(false);
+            apply(verdict);
+        });
+        return () => { cancelled = true; setNsfwChecking(false); };
+    }, [isPixelArt, artwork.edited, artwork.body, artworkReady, eraseBody]);
+
+    // A hand on the switch decides, for the picture of the moment.
+    const handleNsfwChange = useCallback((e) => {
+        nsfwOverrideRef.current = true;
+        setNsfwAuto(false);
+        setNsfwChecking(false); // a check still running no longer matters
+        setNsfw(e.target.checked);
+    }, []);
 
     // ── Danger zone (pixel art body erasure) ────────────────────────────
     const armErase = useCallback(() => setEraseArmed(true), []);
@@ -484,7 +713,20 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                     governingLaw: licenseCustomization?.governingLaw || { jurisdiction: "" },
                     isCustomized: !!licenseCustomization?.isCustomized,
                 };
+                // AI disclosure (`oc`, `ai`): rewritten when the post carries
+                // it, added only once the author sets it on an older post —
+                // never null (see editedAiDisclosure).
+                Object.assign(metaPatch, editedAiDisclosure({
+                    declared: !!original.aiDeclared,
+                    oc,
+                    ai: aiUsed,
+                }));
             }
+
+            // The new body, when there is one: the erase marker, or the
+            // artwork edited in the pixel editor (erasing wins). Omitted
+            // otherwise, and updateComment resends the current body.
+            const newBody = eraseBody ? "deleted" : (artworkReady ? artwork.body : null);
 
             await api.broadcast.updateComment({
                 author: authorUsername,
@@ -494,12 +736,14 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                 // editor) — updateComment preserves any field left undefined.
                 ...(isPixelArt ? { title: title.trim() } : {}),
                 jsonMetadata: metaPatch,       // shallow-merged onto current metadata
-                // Pixel-art "delete the body content": replace the encoded
-                // artwork with a marker. Omitted otherwise (body unchanged).
-                ...(eraseBody ? { body: "deleted" } : {}),
+                ...(newBody ? { body: newBody } : {}),
             });
 
-            actions.trigger_snackbar(deleted ? t("components.edit_post_dialog.post_updated_marked_as_deleted") : t("components.edit_post_dialog.post_updated"));
+            actions.trigger_snackbar(deleted
+                ? t("components.edit_post_dialog.post_updated_marked_as_deleted")
+                : (artworkReady
+                    ? t("components.edit_post_dialog.artwork_updated")
+                    : t("components.edit_post_dialog.post_updated")));
             onUpdated?.({
                 author: authorUsername,
                 permlink,
@@ -509,6 +753,9 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                 nsfw: !!nsfw,
                 deleted: !!deleted,
                 bodyErased: !!eraseBody,
+                // The post shows another picture now: views drawn from the
+                // previous one (PostDialog's canvas) have to be redrawn.
+                artworkReplaced: artworkReady,
                 // The merged metadata string the chain now holds — lets the
                 // open Post/BlogPost dialogs refresh data.json_metadata so
                 // their license viewers and inspectors stay accurate.
@@ -521,10 +768,47 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
             actions.trigger_snackbar(e.message || t("components.edit_post_dialog.failed_to_update_post"));
             setSaving(false);
         }
-    }, [canSave, api, original, tags, deleted, description, nsfw, title, eraseBody,
-        isPixelArt, licenseCustomization, authorUsername, permlink, onUpdated, onClose]);
+    }, [canSave, api, original, tags, deleted, description, nsfw, oc, aiUsed, title, eraseBody,
+        artworkReady, artwork.body, isPixelArt, licenseCustomization, authorUsername, permlink, onUpdated, onClose]);
 
     const notOwner = !!account && !!authorUsername && account !== authorUsername;
+
+    // ── Artwork box ─────────────────────────────────────────────────────
+    const artworkInfo = original?.artwork || null;
+    const artworkEditable = isPixelArt && artworkInfo?.status === ARTWORK.EDITABLE && !artwork.failed;
+    const artworkCanOpen = artworkEditable && !artwork.opening && !eraseBody && !saving && !notOwner;
+    // A picture the app's gate let through (its type is known) can be shown,
+    // edited or not; the edited one once it is encoded.
+    const artworkThumb = artwork.body || (artworkInfo?.mime ? originalBody : null);
+    const artworkDims = artwork.edited || (artworkInfo?.width && artworkInfo?.height ? artworkInfo : null);
+    const artworkMeta = !artworkInfo?.mime ? "" : [
+        artworkDims && t("components.pixel_editor.size_px", { width: artworkDims.width, height: artworkDims.height }),
+        artwork.body
+            ? t("components.edit_post_dialog.artwork_size_change", {
+                before: formatKb(artworkKb(originalBody)),
+                after: formatKb(artworkKb(artwork.body))
+            })
+            : t("components.edit_post_dialog.artwork_size", { size: formatKb(artworkKb(originalBody)) }),
+    ].filter(Boolean).join(" · ");
+    let artworkCaption = t("components.edit_post_dialog.artwork_hint");
+    let artworkProblem = false;
+    if (!artworkInfo || artworkInfo.status === ARTWORK.ERASED) {
+        artworkCaption = t("components.edit_post_dialog.artwork_erased");
+    } else if (!artworkEditable) {
+        artworkCaption = t("components.pixel_editor.could_not_open");
+        artworkProblem = true;
+    } else if (artwork.edited && artwork.encoding) {
+        artworkCaption = t("components.edit_post_dialog.artwork_encoding");
+    } else if (artwork.edited && artwork.encodeFailed) {
+        artworkCaption = t("components.edit_post_dialog.artwork_encode_failed");
+        artworkProblem = true;
+    } else if (artworkTooLarge) {
+        artworkCaption = t("components.edit_post_dialog.artwork_too_large", {
+            size: formatKb(artworkKb(artwork.body)),
+            max: ARTWORK_MAX_KB.toLocaleString(getLocaleCode())
+        });
+        artworkProblem = true;
+    }
 
     return (
         <React.Fragment>
@@ -575,6 +859,66 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
 
                                 {isPixelArt && (
                                     <React.Fragment>
+                                        {/* The artwork itself, edited in NewPost's pixel editor.
+                                            Dimmed while an erase is pending: erasing wins. */}
+                                        <Box className={classes.artworkBox} style={eraseBody ? { opacity: 0.45 } : undefined}>
+                                            <Box display="flex" alignItems="center" style={{ gap: 12 }}>
+                                                {artworkThumb && (
+                                                    <img src={artworkThumb} alt="" className={classes.artworkThumb} />
+                                                )}
+                                                <Box flex={1} minWidth={0}>
+                                                    <Typography className={classes.licenseTitle}>
+                                                        <BrushRounded /> {t("components.edit_post_dialog.artwork")}
+                                                    </Typography>
+                                                    {artworkMeta && (
+                                                        <Typography className={classes.artworkMeta}>{artworkMeta}</Typography>
+                                                    )}
+                                                </Box>
+                                                {artwork.edited && (
+                                                    <Chip
+                                                        icon={artwork.encoding
+                                                            ? <CircularProgress size={12} style={{ color: "#888", marginLeft: 6 }} />
+                                                            : <CheckCircleIcon />}
+                                                        label={t("components.pixel_editor.edits_applied")}
+                                                        size="small"
+                                                        className={classes.configuredChip}
+                                                    />
+                                                )}
+                                            </Box>
+                                            <Typography variant="caption" style={{ color: artworkProblem ? "#bbb" : "#888", display: "block", marginTop: 8 }}>
+                                                {artworkCaption}
+                                            </Typography>
+                                            {artworkEditable && (
+                                                <Box display="flex" style={{ gap: 8 }}>
+                                                    <Button
+                                                        size="small"
+                                                        className={classes.licenseButton}
+                                                        disabled={!artworkCanOpen}
+                                                        startIcon={artwork.opening
+                                                            ? <CircularProgress size={14} style={{ color: "#888" }} />
+                                                            : <BrushRounded />}
+                                                        onClick={openArtworkEditor}
+                                                        onMouseEnter={preloadPixelEditor}
+                                                        onFocus={preloadPixelEditor}
+                                                        onTouchStart={preloadPixelEditor}
+                                                    >
+                                                        {t("components.edit_post_dialog.edit_in_pixel_editor")}
+                                                    </Button>
+                                                    {artwork.edited && (
+                                                        <Button
+                                                            size="small"
+                                                            className={classes.licenseButton}
+                                                            style={{ color: "#888" }}
+                                                            disabled={saving}
+                                                            onClick={resetArtworkEdits}
+                                                        >
+                                                            {t("words.reset")}
+                                                        </Button>
+                                                    )}
+                                                </Box>
+                                            )}
+                                        </Box>
+
                                         <TextField
                                             style={{ marginTop: 8 }}
                                             value={title}
@@ -710,16 +1054,84 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                                         control={
                                             <Switch
                                                 checked={nsfw}
-                                                onChange={(e) => setNsfw(e.target.checked)}
+                                                onChange={handleNsfwChange}
                                                 color="primary"
                                             />
                                         }
-                                        label={t("words.not_safe_for_work")}
+                                        label={
+                                            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                                {t("words.not_safe_for_work")}
+                                                {nsfwChecking && (
+                                                    <CircularProgress size={12} thickness={5} style={{ color: "#888" }} />
+                                                )}
+                                            </span>
+                                        }
                                     />
-                                    <Typography variant="caption" style={{ color: "#888", display: "block", marginLeft: 48 }}>
-                                        {t("components.edit_post_dialog.enable_this_if_your_content_contains_mature")}
+                                    {/* NewPost's captions for its own check of the picture it publishes. */}
+                                    <Typography variant="caption" style={{ color: nsfwAuto ? "#aaa" : "#888", display: "block", marginLeft: 48 }}>
+                                        {nsfwChecking
+                                            ? t("components.new_post.analyzing_image_for_sensitive_content")
+                                            : nsfwAuto
+                                                ? t("components.new_post.automatically_flagged_from_image_analysis")
+                                                : t("components.edit_post_dialog.enable_this_if_your_content_contains_mature")}
                                     </Typography>
+
+                                    {/* Original content (json_metadata.oc), as in NewPost:
+                                        the picture was the author's own real picture before
+                                        any style transformation. Off and "not declared" for a
+                                        post published before the key existed. */}
+                                    {isPixelArt && (
+                                        <React.Fragment>
+                                            <FormControlLabel
+                                                style={{ marginTop: 8 }}
+                                                control={
+                                                    <Switch
+                                                        checked={oc === true}
+                                                        onChange={(e) => setOc(e.target.checked)}
+                                                        color="primary"
+                                                    />
+                                                }
+                                                label={t("components.new_post.original_content")}
+                                            />
+                                            <Typography variant="caption" style={{ color: "#888", display: "block", marginLeft: 48 }}>
+                                                {oc === null
+                                                    ? t("components.edit_post_dialog.original_content_not_declared")
+                                                    : t("components.new_post.oc_hint")}
+                                            </Typography>
+                                        </React.Fragment>
+                                    )}
                                 </Box>
+
+                                {/* AI used (json_metadata.ai), as in NewPost: which AI made or
+                                    transformed the picture, in the author's words. */}
+                                {isPixelArt && (
+                                    <React.Fragment>
+                                        <TextField
+                                            style={{ marginTop: 16 }}
+                                            value={aiUsed}
+                                            fullWidth
+                                            label={t("components.new_post.ai_used")}
+                                            variant="outlined"
+                                            onChange={(e) => setAiUsed(e.target.value)}
+                                            error={!!aiError}
+                                            inputProps={{ maxLength: VALIDATION.AI_MAX_LENGTH + 10 }}
+                                        />
+                                        <Box display="flex" justifyContent="space-between" alignItems="flex-start">
+                                            {aiError ? (
+                                                <Typography className={classes.errorText}>{tx(aiError)}</Typography>
+                                            ) : (
+                                                <Typography className={classes.errorText} style={{ color: "#666" }}>
+                                                    {(original?.ai || "").trim()
+                                                        ? t("components.edit_post_dialog.ai_used_as_published")
+                                                        : t("components.new_post.ai_used_hint")}
+                                                </Typography>
+                                            )}
+                                            <Typography className={getCounterClass(aiUsed.length, VALIDATION.AI_MAX_LENGTH)}>
+                                                {aiUsed.length}/{VALIDATION.AI_MAX_LENGTH}
+                                            </Typography>
+                                        </Box>
+                                    </React.Fragment>
+                                )}
 
                                 {isPixelArt && licenseCustomization && (
                                     <Box className={classes.licenseBox}>
@@ -837,9 +1249,6 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                                                 </Button>
                                             </Box>
                                         )}
-                                        <Typography variant="caption" style={{ color: "#555", display: "block", marginTop: 8 }}>
-                                            {t("components.edit_post_dialog.replacing_the_artwork_with_a_new_image")}
-                                        </Typography>
                                     </Box>
                                 )}
                             </div>
@@ -868,6 +1277,18 @@ function EditPostDialogInner({ classes, open, onClose, api, account, data, onUpd
                     onSave={saveLicenseCustomization}
                     licenseBase={PIXA_LICENSE_BASE}
                     initialCustomization={licenseCustomization}
+                />
+            )}
+            {/* NewPost's pixel editor (code-split: nothing loads before the
+                first opening), on the edited picture with its layers when
+                there is one, else on the post's. */}
+            {isPixelArt && (
+                <PixelEditorDialog
+                    open={!!open && artwork.editorOpen}
+                    image={artwork.edited || artwork.source}
+                    project={artwork.edited ? artwork.project : null}
+                    onClose={closeArtworkEditor}
+                    onSave={saveArtworkEdits}
                 />
             )}
         </React.Fragment>

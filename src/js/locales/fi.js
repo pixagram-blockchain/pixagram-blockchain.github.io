@@ -1,7 +1,7 @@
 /**
  * locales/fi.js — Suomi
  *
- * Coverage: 2374 of 2542 keys (93.4 %).
+ * Coverage: 2382 of 2550 keys (93.4 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -881,6 +881,13 @@ export default {
             "retry": "Yritä uudelleen"
         },
         "post_dialog": {
+            "origin": "Alkuperä",
+            "original_content": "Alkuperäinen sisältö",
+            "not_original_content": "Ei alkuperäistä sisältöä",
+            "original_content_tooltip": "Tekijän ilmoittama: oma valokuva tai piirros ennen tyylimuunnosta",
+            "ai_used": "Käytetty tekoäly",
+            "no_ai_declared": "Tekoälyä ei ilmoitettu",
+            "ai_used_tooltip": "Tekijän ilmoittama: tekoäly, joka loi tai muunsi kuvan",
             "for_sale": "Myynnissä",
             "last": "Viimeisin: {{soldPrice}}{{currency}}",
             "not_for_sale": "Ei myynnissä",
@@ -1086,7 +1093,16 @@ export default {
             "adjust_step": "Säädä ({{step}}/{{total}})",
             "post_step": "Julkaise ({{step}}/{{total}})",
             "publish": "Julkaise",
-            "ai_style": "Tekoälytyyli"
+            "ai_style": "Tekoälytyyli",
+            "original_content": "Alkuperäinen sisältö",
+            "oc_hint": "Kytke päälle, jos tämä oli oma aito kuvasi — valokuva tai piirros — ennen tyylimuunnosta.",
+            "oc_file_declares_ai": "Pois päältä: kuvatiedoston mukaan se on luotu tai sitä on muokattu tekoälyllä — kytke päälle, jos tämä on väärin.",
+            "oc_generated": "Luotu kuvauksestasi, joten se ei ole alkuperäistä sisältöä.",
+            "ai_used": "Käytetty tekoäly",
+            "ai_used_prefilled": "Esitäytetty sovelluksen käyttämällä tekoälyllä. Lisää muut tekoälyt, jotka loivat tai muuttivat kuvaa.",
+            "ai_used_hint": "Jätä tyhjäksi, jos tekoälyä ei käytetty. Muuten mainitse tekoäly, joka loi tai muutti kuvaa.",
+            "ai_used_is_required": "Mainitse tekoäly, joka loi tai muunsi tämän kuvan",
+            "ai_used_must_be_characters_or_less_currently": "Käytetty tekoäly saa olla enintään {{AI_MAX_LENGTH}} merkkiä (nyt {{ai_count}})"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Power-massasiirto",
@@ -1670,6 +1686,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "Teos",
+            "artwork_hint": "Muokkaa kuvaa pikselieditorissa. Tallennus korvaa sen ketjussa; vain lohkohistoria säilyttää vanhan version.",
+            "edit_in_pixel_editor": "Muokkaa pikselieditorissa",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "Teoksen sisältö on tyhjennetty: muokattavaa kuvaa ei ole jäljellä.",
+            "artwork_encoding": "Muokattua kuvaa koodataan…",
+            "artwork_encode_failed": "Muokattua kuvaa ei voitu koodata. Paina editorissa uudelleen Valmis tai Nollaa.",
+            "artwork_too_large": "Muokattu kuva on {{size}} kB, enemmän kuin {{max}} kB, jonka muokkaus voi lähettää. Yksinkertaista sitä editorissa tai paina Nollaa.",
+            "artwork_updated": "Julkaisu päivitetty — uusi teos näkyy hetken kuluttua",
+            "original_content_not_declared": "Ei vielä ilmoitettu. Kytke päälle, jos tämä oli oma aito kuvasi — valokuva tai piirros — ennen tyylimuunnosta.",
+            "ai_used_as_published": "Kuten julkaistu: voit muotoilla sen uudelleen tai lisätä toisen tekoälyn, mutta et poistaa sitä.",
             "loading_the_on_chain_version": "Ladataan ketjussa olevaa versiota…",
             "only_can_edit_this_post": "Vain @{{authorUsername}} voi muokata tätä julkaisua.",
             "title": "Otsikko",
@@ -1691,7 +1719,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "Tunnisteet: pienaakkosin, ei pisteitä, väh. 3 merkkiä, alettava kirjaimella",
             "enable_this_if_your_content_contains_mature": "Ota tämä käyttöön, jos sisältösi sisältää aikuisille tarkoitettua tai arkaluonteista aineistoa",
             "if_this_post_is_a_dao_proposal": "Jos tämä julkaisu on DAO-ehdotus, myös siihen linkitetty ehdotus poistetaan ketjusta.",
-            "replacing_the_artwork_with_a_new_image": "Teoksen korvaaminen uudella kuvalla tulee tähän tulevassa päivityksessä.",
             "title_description_and_tags_for_this_post": "Tämän julkaisun otsikkoa, kuvausta ja tunnisteita muokataan kohdasta ”Muokkaa sisältöä”. Täällä voit vaihtaa sen näkyvyyslippuja.",
             "marks_the_post_as_deleted_in_its": "Merkitsee julkaisun poistetuksi sen metatiedoissa: se katoaa jokaisesta syötteestä, profiilista ja yhteisösivulta. Peruutettavissa — vain metatietolippuun kosketaan. Tunnistetta ei lisätä, joten poistettuja julkaisuja ei voi selata.",
             "erase_the_artwork_content_itself_the_post": "Tyhjennä itse teoksen sisältö (julkaisun runko). Kuva korvataan ketjussa, eikä sitä voi palauttaa täältä — vain lohkohistoria säilyttää vanhan version. Merkitsee julkaisun poistetuksi.",
@@ -5052,7 +5079,15 @@ export default {
             "view_zoom_out": "Loitonna",
             "view_grid_on": "Näytä ruudukko",
             "view_grid_off": "Piilota ruudukko",
-            "edits_applied": "Muokattu pikselieditorissa"
+            "edits_applied": "Muokattu pikselieditorissa",
+            "panels": "Paneelit",
+            "import": "Tuonti",
+            "import_image": "Tuo kuva",
+            "import_hint": "Pikseligrafiikka säilyttää pikselinsä, suurennettu pikseligrafiikka skaalataan takaisin ja valokuvasta tulee pikseligrafiikkaa. Kuva kelluu aktiivisen tason päällä, kunnes käytät sen. Voit myös pudottaa tai liittää kuvan kankaalle.",
+            "import_done_native": "Pikseligrafiikka tuotu, {{width}} × {{height}}",
+            "import_done_upscaled": "{{scale}}× pikseligrafiikka tuotu oikeassa koossaan, {{width}} × {{height}}",
+            "import_done_photo": "Valokuva muutettu pikseligrafiikaksi, {{width}} × {{height}}",
+            "import_failed": "Tätä tiedostoa ei voi lukea kuvana."
         }
     }
 };

@@ -1,7 +1,7 @@
 /**
  * locales/it.js — Italiano
  *
- * Coverage: 2374 of 2542 keys (93.4 %).
+ * Coverage: 2382 of 2550 keys (93.4 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -881,6 +881,13 @@ export default {
             "retry": "Riprova"
         },
         "post_dialog": {
+            "origin": "Origine",
+            "original_content": "Contenuto originale",
+            "not_original_content": "Contenuto non originale",
+            "original_content_tooltip": "Dichiarato dall’autore: una sua foto o un suo disegno, prima di qualsiasi trasformazione di stile",
+            "ai_used": "IA utilizzata",
+            "no_ai_declared": "Nessuna IA dichiarata",
+            "ai_used_tooltip": "Dichiarato dall’autore: l’IA che ha creato o trasformato l’immagine",
             "for_sale": "In vendita",
             "last": "Ultimo: {{soldPrice}}{{currency}}",
             "not_for_sale": "Non in vendita",
@@ -1086,7 +1093,16 @@ export default {
             "adjust_step": "Regola ({{step}}/{{total}})",
             "post_step": "Pubblica ({{step}}/{{total}})",
             "publish": "Pubblica",
-            "ai_style": "Stile IA"
+            "ai_style": "Stile IA",
+            "original_content": "Contenuto originale",
+            "oc_hint": "Attivalo se prima di qualsiasi trasformazione di stile era una tua immagine reale, una foto o un disegno.",
+            "oc_file_declares_ai": "Disattivato: il file dell’immagine indica che è stata creata o modificata con l’IA — attivalo se è un errore.",
+            "oc_generated": "Generata dalla tua descrizione, quindi non è contenuto originale.",
+            "ai_used": "IA utilizzata",
+            "ai_used_prefilled": "Precompilato con l’IA usata dall’app. Aggiungi qualsiasi altra IA che ha creato o modificato l’immagine.",
+            "ai_used_hint": "Lascia vuoto se non è stata usata alcuna IA. Altrimenti indica l’IA che ha creato o modificato l’immagine.",
+            "ai_used_is_required": "Indica l’IA che ha creato o trasformato questa immagine",
+            "ai_used_must_be_characters_or_less_currently": "IA utilizzata deve avere al massimo {{AI_MAX_LENGTH}} caratteri (attualmente {{ai_count}})"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Trasferimento Power multiplo",
@@ -1671,6 +1687,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "Opera",
+            "artwork_hint": "Modifica l’immagine nell’editor di pixel. Salvando, viene sostituita on-chain; solo la cronologia dei blocchi conserva la vecchia versione.",
+            "edit_in_pixel_editor": "Modifica nell’editor di pixel",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "Il contenuto dell’opera è stato cancellato: non resta alcuna immagine da modificare.",
+            "artwork_encoding": "Codifica dell’immagine modificata…",
+            "artwork_encode_failed": "Non è stato possibile codificare l’immagine modificata. Premi di nuovo Fatto nell’editor, oppure Reimposta.",
+            "artwork_too_large": "L’immagine modificata pesa {{size}} kB, più dei {{max}} kB che una modifica può inviare. Semplificala nell’editor, oppure premi Reimposta.",
+            "artwork_updated": "Post aggiornato: la nuova opera apparirà tra un momento",
+            "original_content_not_declared": "Non ancora dichiarato. Attivalo se prima di qualsiasi trasformazione di stile era una tua immagine reale, una foto o un disegno.",
+            "ai_used_as_published": "Come pubblicato: puoi riformularlo o aggiungere un’altra IA, ma non rimuoverlo.",
             "loading_the_on_chain_version": "Caricamento della versione on-chain…",
             "only_can_edit_this_post": "Solo @{{authorUsername}} può modificare questo post.",
             "title": "Titolo",
@@ -1692,7 +1720,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "Tag: minuscoli, senza punti, min. 3 caratteri, devono iniziare con una lettera",
             "enable_this_if_your_content_contains_mature": "Attiva se il tuo contenuto include materiale per adulti o sensibile",
             "if_this_post_is_a_dao_proposal": "Se questo post è una proposta DAO, anche la proposta collegata viene rimossa on-chain.",
-            "replacing_the_artwork_with_a_new_image": "La sostituzione dell’opera con una nuova immagine arriverà in un aggiornamento futuro.",
             "title_description_and_tags_for_this_post": "Titolo, descrizione e tag di questo post si modificano da «Modifica il contenuto». Qui puoi cambiare i suoi flag di visibilità.",
             "marks_the_post_as_deleted_in_its": "Contrassegna il post come eliminato nei suoi metadati: sparisce da ogni feed, profilo e pagina della community. Reversibile — viene toccato solo il flag nei metadati. Non viene aggiunto alcun tag, quindi i post eliminati non sono sfogliabili.",
             "erase_the_artwork_content_itself_the_post": "Cancella il contenuto dell’opera stessa (il corpo del post). L’immagine viene sostituita on-chain e non può essere ripristinata da qui — solo la cronologia dei blocchi conserva la vecchia versione. Contrassegna il post come eliminato.",
@@ -5055,7 +5082,15 @@ export default {
             "view_zoom_out": "Rimpicciolisci",
             "view_grid_on": "Mostra la griglia",
             "view_grid_off": "Nascondi la griglia",
-            "edits_applied": "Modificata nell’editor di pixel"
+            "edits_applied": "Modificata nell’editor di pixel",
+            "panels": "Pannelli",
+            "import": "Importa",
+            "import_image": "Importa immagine",
+            "import_hint": "La pixel art mantiene i suoi pixel, la pixel art ingrandita torna alla sua dimensione e una foto diventa pixel art. L’immagine fluttua sopra il livello attivo finché non la applichi. Puoi anche trascinare o incollare un’immagine sulla tela.",
+            "import_done_native": "Pixel art importata, {{width}} × {{height}}",
+            "import_done_upscaled": "Pixel art {{scale}}× importata alla sua vera dimensione, {{width}} × {{height}}",
+            "import_done_photo": "Foto trasformata in pixel art, {{width}} × {{height}}",
+            "import_failed": "Questo file non può essere letto come immagine."
         }
     }
 };

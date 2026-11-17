@@ -1,4 +1,5 @@
 import {Client} from "@gradio/client";
+import { AI_TYPE } from "../ai_provenance";
 
 /**
  * Resizes a Blob image to approximately 1 Megapixel (1MP) and converts it to JPEG.
@@ -102,6 +103,35 @@ const STYLE_OFFSETS = {
         img2img_strength: -0.1, // image strength
     },
 };
+
+// ── Provenance ────────────────────────────────────────────────────────────
+// What made a picture here, as processImageFile reports it: { type, model }.
+// `model` pre-fills the Post step's "AI used" field, published as
+// json_metadata.ai (utils/ai_provenance.js). Keep it in step with the Space:
+// its base checkpoint, the LoRA each style loads, and the identity adapter
+// `identity_preserve` turns on (FaceID).
+const BASE_MODEL = "SDXL";
+const LORA_NAMES = {
+    retroart: "RetroArt",
+    lucasart: "LucasArt",
+    vga: "VGA",
+    homm: "HoMM",
+};
+const loraLabel = (style) => `${LORA_NAMES[style] || style} LoRA`;
+
+// transform(): the picture is redrawn with the style's LoRA while FaceID
+// keeps the subject's identity.
+export const describeTransform = (style = PRESETS_TRANSFORM.lora_style) => ({
+    type: AI_TYPE.TRANSFORMATION,
+    model: [BASE_MODEL, loraLabel(style), ...(PRESETS_TRANSFORM.identity_preserve ? ["FaceID"] : [])].join(" + "),
+});
+
+// generate(): text to image with the presets' LoRA. There is no picture, so
+// no face for FaceID to keep.
+export const describeGenerate = () => ({
+    type: AI_TYPE.GENERATION,
+    model: [BASE_MODEL, loraLabel(PRESETS_TRANSFORM.lora_style)].join(" + "),
+});
 
 // style: LoRA preset — "retroart" | "lucasart" | "vga" | "homm".
 // turbo: one 768 px tile instead of the 1280 px pass (TURBO_TRANSFORM).

@@ -28,7 +28,7 @@ import CircularColorPicker from "../../ColorPicker";
 import { pack, toHex, fromHex, interop } from "../../../utils/pixa-editor/index.js";
 import { tp } from "../labels";
 import { useEditorEvents, cssColor } from "../editorUtils";
-import { Section, SliderField, Hint, EASE } from "../ui";
+import { Section, SliderField, Hint, EASE, SURFACE } from "../ui";
 
 const CHECKER = "repeating-conic-gradient(#3a3a3a 0% 25%, #262626 0% 50%) 50% / 8px 8px";
 const MAX_SWATCHES = 128;
@@ -61,16 +61,16 @@ const useStyles = makeStyles({
         gap: 10,
         padding: "0 14px 0 8px",
         borderRadius: 24,
-        backgroundColor: "#171717",
+        backgroundColor: SURFACE.raised,
         color: "#bbbbbb",
         fontFamily: `"Industry Book", "Normative Pro"`,
         fontSize: 13,
         transition: `background-color 160ms ${EASE}, color 160ms ${EASE}`,
-        "&:hover": { backgroundColor: "#212121", color: "#ffffff" },
+        "&:hover": { backgroundColor: SURFACE.hover, color: "#ffffff" },
     },
     targetOn: {
-        backgroundColor: "#e9e9e9 !important",
-        color: "#1d1d1d !important",
+        backgroundColor: `${SURFACE.on} !important`,
+        color: `${SURFACE.onInk} !important`,
     },
     dot: {
         position: "relative",
@@ -91,9 +91,9 @@ const useStyles = makeStyles({
     swap: {
         width: 48,
         height: 48,
-        backgroundColor: "#171717",
+        backgroundColor: SURFACE.raised,
         color: "#dddddd",
-        "&:hover": { backgroundColor: "#262626" },
+        "&:hover": { backgroundColor: SURFACE.hover },
     },
     picker: {
         display: "flex",
@@ -144,7 +144,7 @@ const useStyles = makeStyles({
     },
     swatchOn: {
         transform: "scale(0.82)",
-        boxShadow: "0 0 0 3px #101010, 0 0 0 5px #e9e9e9",
+        boxShadow: `0 0 0 3px ${SURFACE.panel}, 0 0 0 5px ${SURFACE.on}`,
         "&:hover": { transform: "scale(0.86)" },
     },
 });
@@ -278,7 +278,8 @@ export default function ColorsPanel({ ed, narrow }) {
                 </Tooltip>
             </div>
 
-            <div className={classes.picker} onPointerDownCapture={() => { touched.current = true; }}>
+            {/* data-no-swipe: a drag on the wheel picks a colour, it does not swipe the drawer */}
+            <div className={classes.picker} data-no-swipe onPointerDownCapture={() => { touched.current = true; }}>
                 <CircularColorPicker key={pickerKey} color={{ r, g, b, a: 1 }} size={size} onChange={onPicker} />
             </div>
         </div>

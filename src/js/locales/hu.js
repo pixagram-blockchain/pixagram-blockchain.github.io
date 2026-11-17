@@ -1,7 +1,7 @@
 /**
  * locales/hu.js — Magyar
  *
- * Coverage: 2374 of 2542 keys (93.4 %).
+ * Coverage: 2382 of 2550 keys (93.4 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -881,6 +881,13 @@ export default {
             "retry": "Újrapróbálás"
         },
         "post_dialog": {
+            "origin": "Eredet",
+            "original_content": "Eredeti tartalom",
+            "not_original_content": "Nem eredeti tartalom",
+            "original_content_tooltip": "A szerző nyilatkozata: saját fotó vagy rajz, bármilyen stílusátalakítás előtt",
+            "ai_used": "Használt MI",
+            "no_ai_declared": "Nincs megadott MI",
+            "ai_used_tooltip": "A szerző nyilatkozata: az MI, amely a képet készítette vagy átalakította",
             "for_sale": "Eladó",
             "last": "Utolsó: {{soldPrice}}{{currency}}",
             "not_for_sale": "Nem eladó",
@@ -1086,7 +1093,16 @@ export default {
             "adjust_step": "Igazítás ({{step}}/{{total}})",
             "post_step": "Közzététel ({{step}}/{{total}})",
             "publish": "Közzététel",
-            "ai_style": "AI-stílus"
+            "ai_style": "AI-stílus",
+            "original_content": "Eredeti tartalom",
+            "oc_hint": "Kapcsold be, ha bármilyen stílusátalakítás előtt ez a saját valódi képed volt — fotó vagy rajz.",
+            "oc_file_declares_ai": "Kikapcsolva: a képfájl szerint MI-vel készült vagy szerkesztették — kapcsold be, ha ez téves.",
+            "oc_generated": "A leírásodból készült, ezért nem eredeti tartalom.",
+            "ai_used": "Használt MI",
+            "ai_used_prefilled": "Előre kitöltve az alkalmazás által használt MI-vel. Add hozzá a többi MI-t is, amely a képet készítette vagy módosította.",
+            "ai_used_hint": "Hagyd üresen, ha nem volt szerepe MI-nek. Ellenkező esetben add meg, melyik MI készítette vagy módosította a képet.",
+            "ai_used_is_required": "Add meg, melyik MI készítette vagy alakította át ezt a képet",
+            "ai_used_must_be_characters_or_less_currently": "A Használt MI legfeljebb {{AI_MAX_LENGTH}} karakter lehet (jelenleg {{ai_count}})"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Tömeges Power-átutalás",
@@ -1670,6 +1686,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "Alkotás",
+            "artwork_hint": "Szerkeszd a képet a pixelszerkesztőben. Mentéskor a láncon lecserélődik; csak a blokk-előzmények őrzik a régi verziót.",
+            "edit_in_pixel_editor": "Szerkesztés a pixelszerkesztőben",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "Az alkotás tartalmát törölték: nem maradt szerkeszthető kép.",
+            "artwork_encoding": "A szerkesztett kép kódolása…",
+            "artwork_encode_failed": "A szerkesztett képet nem sikerült kódolni. Nyomd meg újra a Kész gombot a szerkesztőben, vagy a Visszaállítást.",
+            "artwork_too_large": "A szerkesztett kép {{size}} kB, több a {{max}} kB-nál, amennyit egy szerkesztés elküldhet. Egyszerűsítsd a szerkesztőben, vagy nyomd meg a Visszaállítást.",
+            "artwork_updated": "Bejegyzés frissítve — az új alkotás egy pillanat múlva megjelenik",
+            "original_content_not_declared": "Még nincs megadva. Kapcsold be, ha bármilyen stílusátalakítás előtt ez a saját valódi képed volt — fotó vagy rajz.",
+            "ai_used_as_published": "Ahogy közzétetted: átfogalmazhatod vagy hozzáadhatsz másik MI-t, de nem törölheted.",
             "loading_the_on_chain_version": "A láncon lévő verzió betöltése…",
             "only_can_edit_this_post": "Ezt a bejegyzést csak @{{authorUsername}} szerkesztheti.",
             "title": "Cím",
@@ -1691,7 +1719,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "Címkék: kisbetűvel, pont nélkül, min. 3 karakter, betűvel kell kezdődnie",
             "enable_this_if_your_content_contains_mature": "Kapcsold be, ha a tartalmad felnőtt vagy érzékeny anyagot tartalmaz",
             "if_this_post_is_a_dao_proposal": "Ha ez a bejegyzés DAO-javaslat, a hozzá kapcsolt javaslat is eltávolításra kerül a láncról.",
-            "replacing_the_artwork_with_a_new_image": "Az alkotás új képre cserélése egy jövőbeli frissítésben kerül ide.",
             "title_description_and_tags_for_this_post": "A bejegyzés címe, leírása és címkéi a „Tartalom szerkesztése” alatt módosíthatók. Itt a láthatósági jelzőit kapcsolhatod.",
             "marks_the_post_as_deleted_in_its": "Töröltként jelöli meg a bejegyzést a metaadataiban: eltűnik minden hírfolyamból, profilból és közösségi oldalról. Visszafordítható — csak a metaadat-jelzőt érinti. Címke nem kerül hozzáadásra, így a törölt bejegyzések nem böngészhetők.",
             "erase_the_artwork_content_itself_the_post": "Töröld magát az alkotás tartalmát (a bejegyzés törzsét). A kép a láncon lecserélődik, és innen nem állítható vissza — csak a blokk-előzmények őrzik a régi verziót. A bejegyzést töröltként jelöli meg.",
@@ -5052,7 +5079,15 @@ export default {
             "view_zoom_out": "Kicsinyítés",
             "view_grid_on": "Rács megjelenítése",
             "view_grid_off": "Rács elrejtése",
-            "edits_applied": "A pixelszerkesztőben módosítva"
+            "edits_applied": "A pixelszerkesztőben módosítva",
+            "panels": "Panelek",
+            "import": "Importálás",
+            "import_image": "Kép importálása",
+            "import_hint": "A pixelgrafika megtartja a pixeleit, a felnagyított pixelgrafika visszaskálázódik, a fénykép pedig pixelgrafikává válik. A kép az aktív réteg fölött lebeg, amíg nem alkalmazod. Képet a vászonra húzva vagy beillesztve is importálhatsz.",
+            "import_done_native": "Pixelgrafika importálva, {{width}} × {{height}}",
+            "import_done_upscaled": "{{scale}}×-es pixelgrafika valódi méretben importálva, {{width}} × {{height}}",
+            "import_done_photo": "Fénykép pixelgrafikává alakítva, {{width}} × {{height}}",
+            "import_failed": "Ez a fájl nem olvasható be képként."
         }
     }
 };

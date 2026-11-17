@@ -1,7 +1,7 @@
 /**
  * locales/ko.js — 한국어
  *
- * Coverage: 2387 of 2542 keys (93.9 %).
+ * Coverage: 2395 of 2550 keys (93.9 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -882,6 +882,13 @@ export default {
             "retry": "다시 시도"
         },
         "post_dialog": {
+            "origin": "출처",
+            "original_content": "원본 콘텐츠",
+            "not_original_content": "원본 콘텐츠 아님",
+            "original_content_tooltip": "작가의 신고: 스타일 변환 전 직접 찍거나 그린 사진 또는 그림",
+            "ai_used": "사용한 AI",
+            "no_ai_declared": "신고된 AI 없음",
+            "ai_used_tooltip": "작가의 신고: 이미지를 만들거나 변환한 AI",
             "for_sale": "판매 중",
             "last": "최근: {{soldPrice}}{{currency}}",
             "not_for_sale": "판매하지 않음",
@@ -1087,7 +1094,16 @@ export default {
             "adjust_step": "조정({{step}}/{{total}})",
             "post_step": "게시({{step}}/{{total}})",
             "publish": "게시",
-            "ai_style": "AI 스타일"
+            "ai_style": "AI 스타일",
+            "original_content": "원본 콘텐츠",
+            "oc_hint": "스타일 변환 전에 직접 찍거나 그린 실제 이미지(사진 또는 그림)였다면 켜세요.",
+            "oc_file_declares_ai": "꺼짐: 이미지 파일에 AI로 생성 또는 편집되었다고 기록되어 있습니다 — 잘못되었다면 켜세요.",
+            "oc_generated": "설명으로 생성되었으므로 원본 콘텐츠가 아닙니다.",
+            "ai_used": "사용한 AI",
+            "ai_used_prefilled": "앱이 사용한 AI로 미리 채워졌습니다. 이미지를 만들거나 바꾼 다른 AI가 있다면 추가하세요.",
+            "ai_used_hint": "AI를 사용하지 않았다면 비워 두세요. 사용했다면 이미지를 만들거나 바꾼 AI를 적어 주세요.",
+            "ai_used_is_required": "이 이미지를 만들거나 변환한 AI를 적어 주세요",
+            "ai_used_must_be_characters_or_less_currently": "사용한 AI는 {{AI_MAX_LENGTH}}자 이하여야 합니다(현재 {{ai_count}}자)"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Power 일괄 전송",
@@ -1672,6 +1688,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "작품",
+            "artwork_hint": "픽셀 편집기에서 이미지를 편집하세요. 저장하면 체인에서 대체되며, 이전 버전은 블록 기록에만 남습니다.",
+            "edit_in_pixel_editor": "픽셀 편집기에서 편집",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "작품 내용이 지워졌습니다. 편집할 이미지가 남아 있지 않습니다.",
+            "artwork_encoding": "편집한 이미지를 인코딩하는 중…",
+            "artwork_encode_failed": "편집한 이미지를 인코딩하지 못했습니다. 편집기에서 '완료'를 다시 누르거나 '초기화'를 누르세요.",
+            "artwork_too_large": "편집한 이미지는 {{size}} kB로, 한 번의 수정으로 보낼 수 있는 {{max}} kB를 넘습니다. 편집기에서 단순하게 만들거나 '초기화'를 누르세요.",
+            "artwork_updated": "게시물을 수정했습니다. 새 작품이 곧 표시됩니다",
+            "original_content_not_declared": "아직 신고되지 않았습니다. 스타일 변환 전에 직접 찍거나 그린 실제 이미지(사진 또는 그림)였다면 켜세요.",
+            "ai_used_as_published": "게시된 그대로입니다: 표현을 바꾸거나 다른 AI를 추가할 수 있지만 삭제할 수는 없습니다.",
             "loading_the_on_chain_version": "온체인 버전을 불러오는 중…",
             "only_can_edit_this_post": "@{{authorUsername}} 님만 이 게시물을 편집할 수 있습니다.",
             "title": "제목",
@@ -1693,7 +1721,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "태그: 소문자, 마침표 없음, 최소 3자, 영문자로 시작",
             "enable_this_if_your_content_contains_mature": "콘텐츠에 성인용 또는 민감한 내용이 있으면 켜세요",
             "if_this_post_is_a_dao_proposal": "이 게시물이 DAO 제안이라면 연결된 제안도 체인에서 함께 삭제됩니다.",
-            "replacing_the_artwork_with_a_new_image": "작품을 새 이미지로 교체하는 기능은 향후 업데이트에서 제공됩니다.",
             "title_description_and_tags_for_this_post": "이 게시물의 제목, 설명, 태그는 ‘내용 편집’에서 수정합니다. 여기서는 표시 플래그를 전환할 수 있습니다.",
             "marks_the_post_as_deleted_in_its": "게시물을 메타데이터에서 삭제됨으로 표시합니다. 모든 피드, 프로필, 커뮤니티 페이지에서 사라집니다. 되돌릴 수 있으며 메타데이터 플래그만 변경됩니다. 태그가 추가되지 않으므로 삭제된 게시물은 목록으로 볼 수 없습니다.",
             "erase_the_artwork_content_itself_the_post": "작품 내용 자체(게시물 본문)를 지웁니다. 이미지는 체인에서 대체되며 여기서 복원할 수 없습니다 — 이전 버전은 블록 기록에만 남습니다. 게시물은 삭제됨으로 표시됩니다.",
@@ -5056,7 +5083,15 @@ export default {
             "view_zoom_out": "축소",
             "view_grid_on": "격자 보이기",
             "view_grid_off": "격자 숨기기",
-            "edits_applied": "픽셀 편집기에서 편집됨"
+            "edits_applied": "픽셀 편집기에서 편집됨",
+            "panels": "패널",
+            "import": "가져오기",
+            "import_image": "이미지 가져오기",
+            "import_hint": "픽셀 아트는 픽셀을 그대로 유지하고, 확대된 픽셀 아트는 원래 크기로 되돌리며, 사진은 픽셀 아트로 바뀝니다. 이미지는 적용할 때까지 활성 레이어 위에 떠 있습니다. 캔버스에 이미지를 끌어다 놓거나 붙여넣을 수도 있습니다.",
+            "import_done_native": "픽셀 아트를 가져왔습니다, {{width}} × {{height}}",
+            "import_done_upscaled": "{{scale}}배 픽셀 아트를 원래 크기로 가져왔습니다, {{width}} × {{height}}",
+            "import_done_photo": "사진을 픽셀 아트로 바꿨습니다, {{width}} × {{height}}",
+            "import_failed": "이 파일은 이미지로 읽을 수 없습니다."
         }
     }
 };

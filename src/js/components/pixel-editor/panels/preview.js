@@ -18,7 +18,7 @@ import Button from "@material-ui/core/Button";
 import CheckIcon from "@material-ui/icons/Check";
 
 import { tp } from "../labels";
-import { SliderField, SwitchField, Hint } from "../ui";
+import { SliderField, SwitchField, Hint, SURFACE } from "../ui";
 
 export function usePreview(ed) {
     const [preview, setPreview] = useState(null);   // { key, id, args, session }
@@ -80,7 +80,7 @@ const useStyles = makeStyles({
         margin: "0 0 12px",
         padding: "12px 12px 8px",
         borderRadius: 21,
-        backgroundColor: "#171717",
+        backgroundColor: SURFACE.raised,
     },
     head: {
         display: "flex",

@@ -1,7 +1,7 @@
 /**
  * locales/da.js — Dansk
  *
- * Coverage: 2374 of 2542 keys (93.4 %).
+ * Coverage: 2382 of 2550 keys (93.4 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -881,6 +881,13 @@ export default {
             "retry": "Prøv igen"
         },
         "post_dialog": {
+            "origin": "Oprindelse",
+            "original_content": "Originalt indhold",
+            "not_original_content": "Ikke originalt indhold",
+            "original_content_tooltip": "Angivet af ophavspersonen: eget foto eller egen tegning, før enhver stiltransformation",
+            "ai_used": "Brugt AI",
+            "no_ai_declared": "Ingen AI angivet",
+            "ai_used_tooltip": "Angivet af ophavspersonen: den AI, der har lavet eller transformeret billedet",
             "for_sale": "Til salg",
             "last": "Senest: {{soldPrice}}{{currency}}",
             "not_for_sale": "Ikke til salg",
@@ -1086,7 +1093,16 @@ export default {
             "adjust_step": "Justér ({{step}}/{{total}})",
             "post_step": "Udgiv ({{step}}/{{total}})",
             "publish": "Udgiv",
-            "ai_style": "AI-stil"
+            "ai_style": "AI-stil",
+            "original_content": "Originalt indhold",
+            "oc_hint": "Slå til, hvis det var dit eget ægte billede — et foto eller en tegning — før enhver stiltransformation.",
+            "oc_file_declares_ai": "Slået fra: billedfilen angiver, at den er lavet eller redigeret med AI — slå det til, hvis det er forkert.",
+            "oc_generated": "Genereret ud fra din beskrivelse og derfor ikke originalt indhold.",
+            "ai_used": "Brugt AI",
+            "ai_used_prefilled": "Udfyldt på forhånd med den AI, appen brugte. Tilføj enhver anden AI, der har lavet eller ændret billedet.",
+            "ai_used_hint": "Lad feltet stå tomt, hvis ingen AI var involveret. Ellers skal du nævne den AI, der har lavet eller ændret billedet.",
+            "ai_used_is_required": "Nævn den AI, der har lavet eller transformeret dette billede",
+            "ai_used_must_be_characters_or_less_currently": "Brugt AI må højst være {{AI_MAX_LENGTH}} tegn (i øjeblikket {{ai_count}})"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Masseoverførsel af Power",
@@ -1670,6 +1686,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "Kunstværk",
+            "artwork_hint": "Rediger billedet i pixeleditoren. Når du gemmer, erstattes det on-chain; kun blokhistorikken bevarer den gamle version.",
+            "edit_in_pixel_editor": "Rediger i pixeleditoren",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "Kunstværkets indhold er slettet: der er intet billede tilbage at redigere.",
+            "artwork_encoding": "Koder det redigerede billede…",
+            "artwork_encode_failed": "Det redigerede billede kunne ikke kodes. Tryk på Færdig i editoren igen, eller på Nulstil.",
+            "artwork_too_large": "Det redigerede billede fylder {{size}} kB, mere end de {{max}} kB, en redigering kan sende. Forenkl det i editoren, eller tryk på Nulstil.",
+            "artwork_updated": "Indlæg opdateret — det nye kunstværk vises om et øjeblik",
+            "original_content_not_declared": "Ikke angivet endnu. Slå til, hvis det var dit eget ægte billede — et foto eller en tegning — før enhver stiltransformation.",
+            "ai_used_as_published": "Som udgivet: du kan omformulere det eller tilføje en anden AI, men ikke fjerne det.",
             "loading_the_on_chain_version": "Indlæser on-chain-versionen…",
             "only_can_edit_this_post": "Kun @{{authorUsername}} kan redigere dette indlæg.",
             "title": "Titel",
@@ -1691,7 +1719,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "Tags: små bogstaver, ingen punktummer, min. 3 tegn, skal starte med et bogstav",
             "enable_this_if_your_content_contains_mature": "Slå til, hvis dit indhold rummer voksent eller følsomt materiale",
             "if_this_post_is_a_dao_proposal": "Hvis dette indlæg er et DAO-forslag, fjernes det tilknyttede forslag også on-chain.",
-            "replacing_the_artwork_with_a_new_image": "Udskiftning af kunstværket med et nyt billede kommer i en fremtidig opdatering.",
             "title_description_and_tags_for_this_post": "Titel, beskrivelse og tags for dette indlæg redigeres via ”Redigér indhold”. Her kan du slå dets synlighedsflag til og fra.",
             "marks_the_post_as_deleted_in_its": "Markerer indlægget som slettet i dets metadata: det forsvinder fra alle feeds, profiler og fællesskabssider. Kan fortrydes — kun metadata-flaget berøres. Der tilføjes intet tag, så slettede indlæg kan ikke gennemses.",
             "erase_the_artwork_content_itself_the_post": "Sletter selve kunstværkets indhold (indlæggets brødtekst). Billedet erstattes on-chain og kan ikke gendannes herfra — kun blokhistorikken bevarer den gamle version. Markerer indlægget som slettet.",
@@ -5052,7 +5079,15 @@ export default {
             "view_zoom_out": "Zoom ud",
             "view_grid_on": "Vis gitteret",
             "view_grid_off": "Skjul gitteret",
-            "edits_applied": "Redigeret i pixeleditoren"
+            "edits_applied": "Redigeret i pixeleditoren",
+            "panels": "Paneler",
+            "import": "Importér",
+            "import_image": "Importér billede",
+            "import_hint": "Pixelkunst beholder sine pixels, forstørret pixelkunst skaleres tilbage, og et foto bliver til pixelkunst. Billedet svæver over det aktive lag, indtil du anvender det. Du kan også slippe eller indsætte et billede på lærredet.",
+            "import_done_native": "Pixelkunst importeret, {{width}} × {{height}}",
+            "import_done_upscaled": "{{scale}}× pixelkunst importeret i sin rigtige størrelse, {{width}} × {{height}}",
+            "import_done_photo": "Foto omdannet til pixelkunst, {{width}} × {{height}}",
+            "import_failed": "Denne fil kan ikke læses som et billede."
         }
     }
 };

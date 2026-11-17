@@ -1,43 +1,8 @@
-import {generate, transform} from "./AI";
-import { downscale_rgba, WasmDownscaleConfig, downscale_prepared, prepare_rgba } from 'smart-downscaler';
+import {generate, transform, describeGenerate, describeTransform} from "./AI";
+import { NO_AI } from "../ai_provenance";
+import * as sd from 'smart-downscaler/bundler';
+sd.init();
 import { isHeic, probe, toFile, init as initHeic, resetWasm as resetHeicWasm } from "@pixagram/heic";
-
-// Function to smooth the image data
-function smoothImageData(imageData) {
-    "use strict";
-    const { width, height, data } = imageData;
-    const pixels = new Uint32Array(data.buffer);
-
-    function getColor (x, y, pxls, w) { "use strict"; return pxls[y * w + x | 0] }
-    function setColor (x, y, color, pxls, w) { "use strict"; pxls[y * w + x | 0] = color >>> 0; }
-
-    let currentColor = 0, colorCount = {}, neighbors = new Uint32Array(8), color = 0;
-    for (let y = 1; y < height - 1; y = y+1|0) {
-        for (let x = 1; x < width - 1; x = x+1|0) {
-            colorCount = {};
-            currentColor = getColor(x, y, pixels, width);
-            neighbors[0] = getColor(x - 1, y - 1, pixels, width);
-            neighbors[1] = getColor(x, y - 1, pixels, width);
-            neighbors[2] = getColor(x + 1, y - 1, pixels, width);
-            neighbors[3] = getColor(x - 1, y, pixels, width);
-            neighbors[4] = getColor(x + 1, y, pixels, width);
-            neighbors[5] = getColor(x - 1, y + 1, pixels, width);
-            neighbors[6] = getColor(x, y + 1, pixels, width);
-            neighbors[7] = getColor(x + 1, y + 1, pixels, width);
-
-            for(var i = 0; i < 8; i++){
-                color = neighbors[i];
-                colorCount[color] = (colorCount[color] || 0) + 1;
-                if(i >= 5 && colorCount[color] >= 6) {
-                    setColor(x, y, color, pixels, width);
-                }
-            }
-        }
-    }
-
-    const outputData = new Uint8ClampedArray(pixels.buffer);
-    return new ImageData(outputData, width, height);
-}
 
 // Function to compute the new scaling ratio
 function computeRatio(originalWidth, originalHeight, maxPixels) {
@@ -264,75 +229,75 @@ export const isArtworkPixelart = async function(file, maxWidth, maxHeight, maxCo
     }
 }
 
-// Build the downscaler config. Preprocess + segmentation settings here must be
-// identical between prepare() and downscale_prepared() (they define the prepared image).
-function buildDownscaleConfig(colors) {
-    const config = new WasmDownscaleConfig();
-    config.palette_size = colors;
-    config.palette_strategy = 'hue';          // exact source colors; try 'oklab' to let color_rarity/detail_boost shape the palette too
-    config.segmentation_method = "hierarchy_fast";
-    config.two_pass_refinement = true;
-    config.region_weight = 0.15;
-    config.neighbor_weight = 0.15;                // lowered from 0.24 — less erosion of thin features (lips, eyes)
-    config.max_resolution_mp = 1.0;             // (prepare-time) resolution cap
-    config.max_color_preprocess = 16384;           // (prepare-time) color pre-quantization
-    config.k_centroid = 4;                        // "Salient" — keep colorful minorities in mixed tiles (was 2=Dominant)
-    config.k_centroid_iterations = 2;
-
-    // Rare / important color preservation (lips, eyes, highlights):
-    config.reserve_colors = Math.max(2, Math.round(colors / 6)); // hard guarantee: 32→4, 48→6, 64→8 slots
-    config.detail_boost = 0.8;                    // saliency weighting toward detail-rich colors (replaces the previously-inert edge_weight)
-    config.color_rarity = 0.35;                   // damp frequency vote so large flat areas don't monopolize the palette
-
-    // NEW — restore saturation lost when colors merge, and isolate skin tones:
-    config.chroma_recovery = 0.6;                 // push palette colors back toward source mean chroma (perceptual, gamut-clamped)
-    config.skin_protection = 0.5;                 // extract skin vs non-skin in separate domains so they never merge
-
+// Build a configuration. Every binding call consumes the object it is given,
+// so a fresh one is built per call.
+//
+// The same options must be used for prepare_rgba() and downscale_prepared():
+// quality, engine, the resolution / colour limits, alpha handling and
+// exact-colour mode are baked into the prepared image. `colors` may differ
+// freely between calls (and is irrelevant for prepare).
+function buildDownscaleConfig(colors = 256) {
+    const config = sd.WasmDownscaleConfig.fast();   // PAX engine, automatic compensation
+    // 'medoid': every output colour is a colour of the source (no compensation,
+    // no colour reduction, nearest-neighbour resolution cap).
+    if (colors !== undefined) {
+        config.palette_size = colors;           // 1–256; out-of-range values are clamped by the library
+    }
     return config;
+}
+
+// Copy a binding result into an ImageData and release its WebAssembly memory
+// right away (wasm-bindgen would only free it at garbage collection).
+function takeImageData(result) {
+    try {
+        return new ImageData(result.data, result.width, result.height);
+    } finally {
+        result.free();
+    }
 }
 
 // Output (target) dimensions for a given max-size, from the ORIGINAL image dims.
 function targetDims(origWidth, origHeight, size) {
     const ratio = computeRatio(origWidth, origHeight, size * size);
-    return [Math.round(origWidth * ratio), Math.round(origHeight * ratio)];
+    return [Math.max(1, Math.round(origWidth * ratio)), Math.max(1, Math.round(origHeight * ratio))];
 }
 
-// One-shot path: preprocess + downscale in a single call (used by quantizeImageData
-// and any caller that doesn't reuse a prepared image).
+// One-shot path: prepare + downscale in a single call (for callers that don't
+// reuse a prepared image). `fast` selects the "fast" quality mode; it used to
+// be accepted and ignored.
 function generateScaledImageData(options, imgd, fast = false) {
     const [newWidth, newHeight] = targetDims(imgd.width, imgd.height, options.size);
-    const config = buildDownscaleConfig(options.colors);
 
-    const result = downscale_rgba(
+    return takeImageData(sd.downscale(
         imgd.data,
         imgd.width,
         imgd.height,
         newWidth,
         newHeight,
-        config
-    );
-
-    return new ImageData(result.data, result.width, result.height);
+        buildDownscaleConfig(options.colors)
+    ));
 }
 
-// Reuse path: downscale from an already-prepared image. Preprocessing + segmentation
-// were computed ONCE in prepare_rgba; here we only run palette + tiling per size.
+// Reuse path: downscale from an already-prepared image. The size-independent
+// work (resolution cap, conversion to the working colour space, structural
+// analysis) was done ONCE in prepare_rgba; here only extraction, palette and
+// assignment run per size.
 function generateScaledFromPrepared(options, prepared, origWidth, origHeight) {
     const [newWidth, newHeight] = targetDims(origWidth, origHeight, options.size);
-    const config = buildDownscaleConfig(options.colors);
 
-    const result = downscale_prepared(
+    return takeImageData(sd.downscale_prepared(
         prepared,
         newWidth,
         newHeight,
-        config
-    );
-
-    return new ImageData(result.data, result.width, result.height);
+        buildDownscaleConfig(options.colors)
+    ));
 }
 
 // Export the generateScaledImageData function for use in quantization
 export { generateScaledImageData };
+
+// Let the browser handle input and paint between two long synchronous steps.
+const yieldToBrowser = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 // Normalize an upload to a browser-decodable file, converting HEIC exactly once.
 //
@@ -382,6 +347,13 @@ export const normalizeUpload = async function(file) {
 // style: the AI LoRA ("retroart" | "lucasart" | "vga" | "homm"); turbo: one
 // 768 px tile instead of the 1280 px pass (~4x faster). Both only matter when
 // use_ai is set.
+//
+// The result's `ai` says which branch below ran, { type, model }, which the
+// post's AI disclosure is pre-filled from (utils/ai_provenance.js):
+// describeGenerate() for text to image, describeTransform(style) for image
+// to image, NO_AI otherwise. It follows the branch, not the caller's intent:
+// a description with a picture is a transformation of that picture,
+// whichever tab asked for it.
 export const processImageFile = async function ({file, description},
                                                 maxWidth,
                                                 maxHeight,
@@ -403,7 +375,7 @@ export const processImageFile = async function ({file, description},
         { name: "XXL" ,size: 320, colors: 64 },
     ];
 
-    const continue_it = async (blob, title) => {
+    const continue_it = async (blob, title, ai = NO_AI) => {
         const maxPixels = maxWidth * maxHeight;
 
         // Decoded already shrunk to ≤ maxWidth×maxHeight px of area (see
@@ -411,10 +383,10 @@ export const processImageFile = async function ({file, description},
         // The drawImage below still finishes the job if the browser ignored
         // the resize request.
         const bitmap = await decodeBitmap(blob, maxPixels, "pixelated");
-        const ratio = computeRatio(bitmap.width, bitmap.height, maxPixels);
+        const scale = computeRatio(bitmap.width, bitmap.height, maxPixels);
 
-        const resizedWidth = parseInt(Math.round(bitmap.width * ratio));
-        const resizedHeight = parseInt(Math.round(bitmap.height * ratio));
+        const resizedWidth = Math.round(bitmap.width * scale);
+        const resizedHeight = Math.round(bitmap.height * scale);
 
         const canvasOriginal = createCanvas(resizedWidth, resizedHeight);
         const canvasWidth = canvasOriginal.width;
@@ -431,21 +403,31 @@ export const processImageFile = async function ({file, description},
             // instead of waiting for GC (Safari's total canvas budget).
             releaseCanvas(canvasOriginal);
         }
+        // A second ImageData over the SAME pixel buffer (no copy: a 2560 px
+        // picture is 26 MB). Nothing here writes to it — the downscaler only
+        // reads its input — but a caller that edits one in place edits both.
         const imagedata = new ImageData(new Uint8ClampedArray(imagedataOriginal.data.buffer), imagedataOriginal.width, imagedataOriginal.height);
         const cachedBuffer = imagedata;
-
-        // Prepare ONCE: resolution capping, color pre-quantization, and segmentation
-        // are independent of the target size, so we compute them a single time and
-        // reuse the handle across all preview sizes. palette_size in this config is
-        // irrelevant for prepare (only preprocess + segmentation settings matter).
-        const prepared = prepare_rgba(
-            cachedBuffer.data,
-            cachedBuffer.width,
-            cachedBuffer.height,
-            buildDownscaleConfig(2048)
-        );
         const origWidth = cachedBuffer.width;
         const origHeight = cachedBuffer.height;
+
+        // Prepare ONCE: resolution cap, alpha handling, conversion to the working
+        // colour space and structural analysis don't depend on the target size or
+        // the palette, so they are computed a single time and the handle is reused
+        // for every preview. The pixels are copied into WebAssembly memory here;
+        // cachedBuffer is not referenced by the handle afterwards.
+        let prepared = sd.prepare(
+            cachedBuffer.data,
+            origWidth,
+            origHeight,
+            buildDownscaleConfig(16192)
+        );
+        const livePrepared = () => {
+            if (!prepared) {
+                throw new Error("Previews are no longer available: disposePrepared() was called");
+            }
+            return prepared;
+        };
 
         // Create a preview generator function that can be called on-demand
         const generatePreview = (sizeName) => {
@@ -454,13 +436,21 @@ export const processImageFile = async function ({file, description},
                 throw new Error(`Unknown size: ${sizeName}`);
             }
 
-            return generateScaledFromPrepared(sizeConfig, prepared, origWidth, origHeight);
+            return generateScaledFromPrepared(sizeConfig, livePrepared(), origWidth, origHeight);
         };
 
-        // Create a batch generator for preloading
+        // Create a batch generator for preloading. Each size is one synchronous
+        // WebAssembly call (0.1–0.3 s); the browser gets a turn between two of
+        // them, so the progress callback's update can actually be painted. If
+        // disposePrepared() is called meanwhile, the sizes done so far are returned.
         const generateAllPreviews = async (progressCallback) => {
             const previews = {};
             for (let i = 0; i < outputSizes.length; i++) {
+                if (!prepared) { break; }
+                if (i > 0) {
+                    await yieldToBrowser();
+                    if (!prepared) { break; }
+                }
                 const size = outputSizes[i];
                 previews[size.name] = generateScaledFromPrepared(size, prepared, origWidth, origHeight);
                 if (progressCallback) {
@@ -470,10 +460,15 @@ export const processImageFile = async function ({file, description},
             return previews;
         };
 
-        // Frees the prepared image's WASM memory. Optional — wasm-bindgen also frees
-        // on GC — but call it when you're done generating previews to release sooner.
+        // Frees the prepared image's WASM memory (≈ 13 MB for a 1 MP working
+        // image). Optional — wasm-bindgen also frees on GC — but call it when
+        // you're done generating previews to release sooner. Safe to call twice.
         const disposePrepared = () => {
-            try { prepared.free(); } catch (e) { /* already freed / GC'd */ }
+            const handle = prepared;
+            prepared = null;
+            if (handle) {
+                try { handle.free(); } catch (e) { /* already freed / GC'd */ }
+            }
         };
 
         return {
@@ -488,7 +483,8 @@ export const processImageFile = async function ({file, description},
             canvasWidth,
             canvasHeight,
             cachedBuffer, // Store the buffer for future use
-            prompt: title || ""
+            prompt: title || "",
+            ai // What made the picture: { type, model }
         };
     }
 
@@ -497,20 +493,28 @@ export const processImageFile = async function ({file, description},
     // upload already normalized by the caller (or by isArtworkPixelart) is free.
     if (file instanceof Blob) { file = await normalizeUpload(file); }
 
+    // NOTE (unchanged from the previous version, see the hand-over notes): a
+    // promise passes ONE value to then(), so `title` below is undefined unless
+    // ./AI resolves with a custom thenable; and the try/catch only sees a
+    // synchronous throw of transform(), not a rejected promise.
     if(typeof file === "undefined" && typeof description === "string") {
 
-        return generate(description, ratio, steps, callback, callback2).then((blob, title) => continue_it(blob, title));
+        return generate(description, ratio, steps, callback, callback2).then((blob, title) => continue_it(blob, title, describeGenerate()));
 
     }else if(use_ai){
         try {
-            return transform(file, steps, fidelity, callback, callback2, description, style, turbo).then((blob, title) => continue_it(blob, title));
+            return transform(file, steps, fidelity, callback, callback2, description, style, turbo).then((blob, title) => continue_it(blob, title, describeTransform(style)));
         } catch (e) {
-            return continue_it(file, "");
+            return continue_it(file, "", NO_AI);
         }
     } else {
-        return continue_it(file, "");
+        return continue_it(file, "", NO_AI);
     }
 };
+
+// A picture with at most this many distinct colours is indexed-colour art: a
+// palette (256 entries at most) can hold every colour it has.
+const INDEXED_ART_MAX_COLORS = 256;
 
 // Custom quantization function that can be called from the component.
 //
@@ -518,24 +522,43 @@ export const processImageFile = async function ({file, description},
 // probe's ImageData when the upload skipped the converter). Target dimensions
 // are an exact per-axis division so that an "Nx" downscale of artwork that was
 // enlarged Nx lands back on its native pixel grid (e.g. 400×200 at 4x →
-// 100×50). The previous implementation routed through the size²-area heuristic
-// of generateScaledImageData, which is only exact for square images (400×200
-// at 4x came out 141×71).
+// 100×50).
 //
 // The first parameter is kept for call-site compatibility but is no longer
 // read: the authoritative dimensions are inputBuffer's own.
-export const quantizeImageData = function(canvas, inputBuffer, downscaleRatio, numColors) {
+//
+// options.exactColors — build the palette only from colours that exist in the
+//   source (what the old 'hue' setting was meant to do). Left undefined, it is
+//   decided from the picture: on for indexed-colour art (≤ 256 colours), off
+//   for everything else. For pixel art this matters twice: a reduction to
+//   fewer colours never invents an in-between shade, and a picture above the
+//   working-resolution cap (1 MP, e.g. a 32×32 sprite exported at 40x) is
+//   sampled rather than averaged before the reduction. Measured on enlarged
+//   sprites of 0.02–4.2 MP reduced back to their native grid with enough
+//   colours: identical to the original, pixel for pixel. Without exact colours
+//   that only holds up to the cap; above it the structure is still right but
+//   colours drift by a few levels (up to 4 of 255 in "balanced", 14 in "fast").
+//   For photographs the default (off) gives the better palette.
+// options.fast — use the "fast" quality mode (live sliders).
+export const quantizeImageData = function(canvas, inputBuffer, downscaleRatio, numColors, { exactColors, fast = false } = {}) {
+    if (!(downscaleRatio > 0)) {
+        throw new RangeError(`quantizeImageData: downscaleRatio must be a positive number (got ${downscaleRatio})`);
+    }
     const newWidth = Math.max(1, Math.round(inputBuffer.width / downscaleRatio));
     const newHeight = Math.max(1, Math.round(inputBuffer.height / downscaleRatio));
 
-    const result = downscale_rgba(
+    // Photographs leave this loop after a few hundred pixels; indexed art is
+    // scanned once (≈ 15 ms per megapixel).
+    const exact = exactColors === undefined
+        ? countColorsUpTo(inputBuffer.data, INDEXED_ART_MAX_COLORS + 1) <= INDEXED_ART_MAX_COLORS
+        : Boolean(exactColors);
+
+    return takeImageData(sd.downscale(
         inputBuffer.data,
         inputBuffer.width,
         inputBuffer.height,
         newWidth,
         newHeight,
         buildDownscaleConfig(numColors)
-    );
-
-    return new ImageData(result.data, result.width, result.height);
+    ));
 };

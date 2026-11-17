@@ -130,9 +130,10 @@ export function registerAppCommands(editor) {
   });
 
   // ---------------------------------------------------------------- view
-  c.register({ id: 'view.fit', label: 'Fit', isEnabled: hasView, run: (ed) => { view(ed).fit(); } });
-  c.register({ id: 'view.zoomIn', label: 'Zoom in', isEnabled: hasView, run: (ed) => { view(ed).zoomBy(1.25); } });
-  c.register({ id: 'view.zoomOut', label: 'Zoom out', isEnabled: hasView, run: (ed) => { view(ed).zoomBy(0.8); } });
+  // Fit and the zoom steps glide there; view.zoom and view.pan (for scripts) are immediate.
+  c.register({ id: 'view.fit', label: 'Fit', isEnabled: hasView, run: (ed) => { view(ed).fitGlide(); } });
+  c.register({ id: 'view.zoomIn', label: 'Zoom in', isEnabled: hasView, run: (ed) => { view(ed).zoomStep(1); } });
+  c.register({ id: 'view.zoomOut', label: 'Zoom out', isEnabled: hasView, run: (ed) => { view(ed).zoomStep(-1); } });
   c.register({
     id: 'view.zoom', label: 'Zoom', isEnabled: (ed, a) => hasView(ed) && a.scale > 0,
     run: (ed, a) => { view(ed).zoomTo(a.scale, a.x, a.y); },

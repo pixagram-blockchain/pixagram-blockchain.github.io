@@ -1,7 +1,7 @@
 /**
  * locales/zh.js — 中文
  *
- * Coverage: 2387 of 2542 keys (93.9 %).
+ * Coverage: 2395 of 2550 keys (93.9 %).
  * Everything not defined here falls back to en.js automatically, so this
  * file is safe to ship and safe to extend one namespace at a time.
  *
@@ -882,6 +882,13 @@ export default {
             "retry": "重试"
         },
         "post_dialog": {
+            "origin": "来源",
+            "original_content": "原创内容",
+            "not_original_content": "非原创内容",
+            "original_content_tooltip": "作者声明：在任何风格转换之前，是其本人的照片或绘画",
+            "ai_used": "使用的 AI",
+            "no_ai_declared": "未声明使用 AI",
+            "ai_used_tooltip": "作者声明：生成或转换这张图片的 AI",
             "for_sale": "出售中",
             "last": "最近：{{soldPrice}}{{currency}}",
             "not_for_sale": "非卖品",
@@ -1087,7 +1094,16 @@ export default {
             "adjust_step": "调整（{{step}}/{{total}}）",
             "post_step": "发布（{{step}}/{{total}}）",
             "publish": "发布",
-            "ai_style": "AI 风格"
+            "ai_style": "AI 风格",
+            "original_content": "原创内容",
+            "oc_hint": "如果在任何风格转换之前，这是你自己的真实图片（照片或绘画），请开启。",
+            "oc_file_declares_ai": "已关闭：图片文件声明其由 AI 生成或编辑 —— 如有误，请开启。",
+            "oc_generated": "根据你的描述生成，因此不是原创内容。",
+            "ai_used": "使用的 AI",
+            "ai_used_prefilled": "已预填应用所用的 AI。请补充其他生成或修改过这张图片的 AI。",
+            "ai_used_hint": "如未使用 AI，请留空；否则请填写生成或修改图片的 AI。",
+            "ai_used_is_required": "请填写生成或转换这张图片的 AI",
+            "ai_used_must_be_characters_or_less_currently": "使用的 AI 不得超过 {{AI_MAX_LENGTH}} 个字符（当前 {{ai_count}} 个）"
         },
         "pixa_wallet_bulk_power_dialog": {
             "bulk_power_transfer": "Power 批量转账",
@@ -1672,6 +1688,18 @@ export default {
             "n_colors": "%n {{{_plurals.color}}}"
         },
         "edit_post_dialog": {
+            "artwork": "作品",
+            "artwork_hint": "在像素编辑器中编辑图片。保存后会在链上替换，只有区块历史保留旧版本。",
+            "edit_in_pixel_editor": "在像素编辑器中编辑",
+            "artwork_size": "{{size}} kB",
+            "artwork_size_change": "{{before}} kB → {{after}} kB",
+            "artwork_erased": "作品内容已被清除：没有可编辑的图片了。",
+            "artwork_encoding": "正在编码编辑后的图片…",
+            "artwork_encode_failed": "无法编码编辑后的图片。请在编辑器中再次点击“完成”，或点击“重置”。",
+            "artwork_too_large": "编辑后的图片为 {{size}} kB，超过了一次编辑可发送的 {{max}} kB。请在编辑器中简化，或点击“重置”。",
+            "artwork_updated": "帖子已更新，新作品稍后显示",
+            "original_content_not_declared": "尚未声明。如果在任何风格转换之前，这是你自己的真实图片（照片或绘画），请开启。",
+            "ai_used_as_published": "与发布时一致：你可以改写或补充其他 AI，但不能删除。",
             "loading_the_on_chain_version": "正在加载链上版本…",
             "only_can_edit_this_post": "只有 @{{authorUsername}} 可以编辑此帖子。",
             "title": "标题",
@@ -1693,7 +1721,6 @@ export default {
             "tags_lowercase_no_dots_min_3_chars": "标签：小写、不含句点、至少 3 个字符、以字母开头",
             "enable_this_if_your_content_contains_mature": "如果你的内容包含成人或敏感材料，请开启",
             "if_this_post_is_a_dao_proposal": "如果这条帖子是 DAO 提案，关联提案也会在链上一并移除。",
-            "replacing_the_artwork_with_a_new_image": "用新图片替换作品的功能将在后续更新中提供。",
             "title_description_and_tags_for_this_post": "该帖子的标题、描述和标签在“编辑内容”中修改。此处可切换其可见性标记。",
             "marks_the_post_as_deleted_in_its": "在元数据中将帖子标记为已删除：它会从所有动态、个人资料和社区页面中消失。可撤销 —— 仅改动元数据标记。不会添加标签，因此已删除的帖子无法被浏览。",
             "erase_the_artwork_content_itself_the_post": "清除作品内容本身（帖子正文）。图片会在链上被替换，无法从此处恢复 —— 只有区块历史保留旧版本。同时将帖子标记为已删除。",
@@ -5056,7 +5083,15 @@ export default {
             "view_zoom_out": "缩小",
             "view_grid_on": "显示网格",
             "view_grid_off": "隐藏网格",
-            "edits_applied": "已在像素编辑器中编辑"
+            "edits_applied": "已在像素编辑器中编辑",
+            "panels": "面板",
+            "import": "导入",
+            "import_image": "导入图片",
+            "import_hint": "像素画保留原有像素，放大的像素画会还原为真实尺寸，照片则会转为像素画。图片会浮在当前图层上方，直到你应用它。也可以把图片拖放或粘贴到画布上。",
+            "import_done_native": "已导入像素画，{{width}} × {{height}}",
+            "import_done_upscaled": "已按真实尺寸导入 {{scale}} 倍像素画，{{width}} × {{height}}",
+            "import_done_photo": "照片已转为像素画，{{width}} × {{height}}",
+            "import_failed": "无法将此文件读取为图片。"
         }
     }
 };

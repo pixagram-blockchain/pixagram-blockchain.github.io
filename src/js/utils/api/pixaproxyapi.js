@@ -189,8 +189,8 @@
  *     the tab's memory alone (UnlockKeyDialog).
  *
  * v4.9.0: Reward beneficiary. Every post (blog and artwork) and every
- * comment created through this API pays @rex 10 % of its author rewards
- * (REWARD_BENEFICIARY, utils/constants.js).
+ * comment created through this API pays @rex a share of its author rewards
+ * (REWARD_BENEFICIARY, utils/constants.js: account and weight).
  *   - PixaProxyAPI#_broadcastOperations — where comment(), _send() (so
  *     sendOperations() and commentOptions()) and the offline queue's drain
  *     all meet — follows each `comment` that creates a comment with a
@@ -218,7 +218,15 @@
  *     field while the node read its default 10000, so the signature never
  *     matched and every call failed. It sends `percent_pxs` now.
  *
- * @version 4.9.0
+ * v4.9.1: Comments carry their beneficiaries. SanitizationPipeline#
+ * sanitizeComment dropped `beneficiaries` (and `max_accepted_payout`,
+ * `percent_pxs`), which sanitizePost has always kept: a comment's payout
+ * breakdown (PayoutSankey) showed its author at 100 % although every comment
+ * published from the app pays REWARD_BENEFICIARY, and other front ends'
+ * comments theirs. The comment entity now has the same payout fields as a
+ * post's, through the same validators.
+ *
+ * @version 4.9.1
  *
  * API Groups and Methods:
  *
@@ -400,7 +408,7 @@
  *   - updateAccount2(params) — params.externalKey bypasses keyManager
  *   - updateProfile(account, profileObject, externalKey?)
  *   - vote(voter, author, permlink, weight)
- *   - comment(params)                  // a new post/comment pays REWARD_BENEFICIARY (@rex 10 %)
+ *   - comment(params)                  // a new post/comment pays REWARD_BENEFICIARY (@rex)
  *   - commentOptions(params)           // beneficiaries set here include @rex's share
  *   - transfer(from, to, amount, memo)
  *   - transferToVesting(from, to, amount)
@@ -1831,7 +1839,7 @@ export class PixaProxyAPI {
 
             this._wireSessionEvents();
 
-            console.log('[PixaProxyAPI] Initialized successfully v4.9.0');
+            console.log('[PixaProxyAPI] Initialized successfully v4.9.1');
             return this;
         } catch (error) {
             console.error('[PixaProxyAPI] Initialization failed:', error);
@@ -2239,7 +2247,7 @@ export class PixaProxyAPI {
 
     /**
      * v4.9.0: `operations` with the reward beneficiary — REWARD_BENEFICIARY,
-     * @rex at 10 % (utils/constants.js) — for every comment the bundle
+     * @rex at its weight (utils/constants.js) — for every comment the bundle
      * creates, and in every beneficiary list it sets (applyRewardBeneficiary).
      *
      * A `comment` operation creates a comment, or edits the one already at
@@ -6178,9 +6186,10 @@ const RECURRENT_TRANSFER_CANCEL = Object.freeze({ recurrence: 24, executions: 2 
 // ============================================
 // Reward beneficiary (v4.9.0)
 // ============================================
-// A comment that a transaction creates pays REWARD_BENEFICIARY (@rex, 10 %,
-// utils/constants.js). PixaProxyAPI#_withRewardBeneficiary finds out which of
-// a bundle's comments are new and hands them to applyRewardBeneficiary().
+// A comment that a transaction creates pays REWARD_BENEFICIARY (@rex at its
+// weight, utils/constants.js). PixaProxyAPI#_withRewardBeneficiary finds out
+// which of a bundle's comments are new and hands them to
+// applyRewardBeneficiary().
 
 /**
  * The payout options a new comment has on Pixa, as a fresh post reads back
@@ -6664,7 +6673,7 @@ class BroadcastAPI {
     /**
      * Publish a post (parentAuthor '') — blog or artwork — or a comment.
      *
-     * v4.9.0: a new one pays the reward beneficiary, @rex at 10 %
+     * v4.9.0: a new one pays the reward beneficiary, @rex at its weight
      * (REWARD_BENEFICIARY): PixaProxyAPI#_broadcastOperations sends a
      * comment_options carrying it in the same transaction. On a permlink that
      * already exists the chain takes this as an edit, which goes out as
@@ -11246,13 +11255,25 @@ class SanitizationPipeline {
             total_payout_value:         translateAssetFromChain(VALIDATORS.safe_asset(raw.total_payout_value) || '0.000 PXS'),
             curator_payout_value:       translateAssetFromChain(VALIDATORS.safe_asset(raw.curator_payout_value) || '0.000 PXS'),
             total_pending_payout_value: translateAssetFromChain(VALIDATORS.safe_asset(raw.total_pending_payout_value) || '0.000 PXS'),
+            // v4.9.1: a comment's payout settings, as posts carry them.
+            max_accepted_payout:        translateAssetFromChain(VALIDATORS.safe_asset(raw.max_accepted_payout) || '1000000.000 PXS'),
             promoted:                   translateAssetFromChain(VALIDATORS.safe_asset(raw.promoted) || '0.000 PXS'),
+            percent_pxs:                VALIDATORS.safe_percent(raw.percent_pxs) ?? 10000,
             author_rewards:             VALIDATORS.safe_number(raw.author_rewards) ?? 0,
 
             // Flags
             allow_replies:          VALIDATORS.safe_bool(raw.allow_replies) ?? true,
             allow_votes:            VALIDATORS.safe_bool(raw.allow_votes) ?? true,
             allow_curation_rewards: VALIDATORS.safe_bool(raw.allow_curation_rewards) ?? true,
+
+            // Beneficiaries — v4.9.1: dropped here before, so a comment's
+            // payout breakdown showed the author at 100 % although every
+            // comment published from the app pays REWARD_BENEFICIARY (and
+            // other front ends' comments theirs). Bridge and condenser
+            // replies both carry the field.
+            beneficiaries: Array.isArray(raw.beneficiaries)
+                ? raw.beneficiaries.map(VALIDATORS.safe_beneficiary).filter(Boolean)
+                : [],
 
             // Navigation / root
             url:           VALIDATORS.safe_url_path(raw.url) || `/@${author}/${permlink}`,

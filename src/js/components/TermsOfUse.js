@@ -3,8 +3,10 @@ import withStyles from "@material-ui/core/styles/withStyles";
 import { t } from "../utils/text";
 import { withLanguage } from "../utils/withLanguage";
 
-// Pixagram Terms of Use — version 4, last updated 1 September 2026 (Pixa Rex
-// S.A. as Operator). Every string lives in locales/en.js under
+// Pixagram Terms of Use — version 4.1, last updated 16 November 2026 (Pixa
+// Rex S.A. as Operator; 4.1 adds "Store Versions" at the end of Section 8).
+// The version line keeps its historical key,
+// version_4_last_updated_1_september_2026. Every string lives in locales/en.js under
 // components.terms_of_use, one key per paragraph / bullet, in document order.
 // Rendered by AppInfoDialog (Terms tab) and by the agreement modal of
 // CreateAccountDialog. Structure mirrors the source document: numbered
@@ -130,6 +132,8 @@ class TermsOfUse extends React.PureComponent {
                 <p>{t("components.terms_of_use.jurisdiction_lists_any_court_or_public_authority")}</p>
                 <p>{t("components.terms_of_use.default_lists_the_official_interface_may_apply")}</p>
                 <p>{t("components.terms_of_use.territory_and_circumvention_the_interface_determ")}</p>
+                {/* Version 4.1: the app-store versions (Google Play, App Store). */}
+                <p>{t("components.terms_of_use.store_versions_versions_of_the_interface_distrib")}</p>
                 <h2>{t("components.terms_of_use.9_third_party_services")}</h2>
                 <ul>
                     <li><p>{t("components.terms_of_use.the_interface_may_enable_interaction_with_protoc")}</p></li>
