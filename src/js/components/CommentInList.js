@@ -107,7 +107,9 @@ const LiveTimeAgoSpan = React.forwardRef(function LiveTimeAgoSpan({ date, option
 // How many comment levels to render inline before navigation is required.
 // 3 -> the comment itself (level 1), its direct replies (level 2) and their
 // replies (level 3). Deeper levels are reached via "Show Replies".
-const MAX_VISIBLE_DEPTH = 3;
+// Exported: a host that opens a thread on a pinned comment (PostDialog's
+// "#replies&focus=…") needs it to know which level is the last one drawn.
+export const MAX_VISIBLE_DEPTH = 3;
 
 /**
  * Shareable link to one comment. A comment has no page of its own: its link
@@ -705,8 +707,15 @@ class CommentInList extends React.PureComponent {
             _menu_mounted: false,
             depth: props.depth || 0,
             _loadedReplies: undefined,
+            // data.children as it was when _loadedReplies was asked for: the
+            // list is only good for that count (see _maybe_load_replies).
+            _loadedChildren: undefined,
             _repliesLoading: false,
         };
+        // One number per reply load: an answer is only taken by the load that
+        // is still the current one.
+        this._repliesTicket = 0;
+        this._unmounted = false;
     };
 
     componentDidMount() {
@@ -715,6 +724,7 @@ class CommentInList extends React.PureComponent {
     }
 
     componentWillUnmount() {
+        this._unmounted = true;
         liveEditListeners.delete(this._on_live_edit);
     }
 
@@ -757,12 +767,16 @@ class CommentInList extends React.PureComponent {
         // When the underlying comment changes *identity* (different permlink),
         // drop any replies we lazily loaded for the previous one so they re-fetch.
         // A new object for the *same* comment — e.g. a silent background refresh —
-        // keeps its loaded replies, so we don't re-hit the network on every poll.
+        // keeps its loaded replies, so we don't re-hit the network on every poll:
+        // _maybe_load_replies (below) only reloads them when that new object
+        // carries another `children` count, i.e. when the thread under this
+        // comment really changed.
         if (data_changed || id_changed) {
             const prevPermlink = (this.st4te.data || {}).permlink || "";
             const nextPermlink = (new_props.data || {}).permlink || "";
             if (prevPermlink !== nextPermlink) {
                 extraState._loadedReplies = undefined;
+                extraState._loadedChildren = undefined;
                 extraState._repliesLoading = false;
             }
         }
@@ -781,7 +795,7 @@ class CommentInList extends React.PureComponent {
                         this.forceUpdate(cb);
                     }
                 }
-                this._maybe_load_replies();
+                this._maybe_load_replies(new_props);
             });
         }
     }
@@ -849,35 +863,86 @@ class CommentInList extends React.PureComponent {
         return [];
     };
 
-    _maybe_load_replies = () => {
+    /* Loads the replies this node draws inline — and loads them AGAIN when the
+     * comment's `children` count moves.
+     *
+     * They used to be loaded once per comment and kept for as long as the node
+     * stayed mounted, whatever the host's refreshes said. `children` (every
+     * descendant, as the indexer counts them) is the one thing a refreshed copy
+     * of the comment tells us about the thread below it: a count that moved
+     * means a reply was added or removed somewhere under this comment, and the
+     * list loaded earlier is no longer that thread. So a reply — the reader's
+     * own, sent a moment ago and indexed after this node had loaded, or anyone
+     * else's — never appeared under a comment that already had replies; only a
+     * comment going from none to some loaded (its first load). A refresh that
+     * carries the same count still costs nothing.
+     *
+     * The reload cascades by itself: this node's new list hands each child a
+     * new `data`, whose count is compared the same way.
+     */
+    _maybe_load_replies = (props) => {
+        if (this._unmounted) return;
         const depth = this.st4te.depth || 0;
         const data = this.st4te.data || {};
+        const children = data.children || 0;
 
-        // Only levels that render replies inline need the data, and only when the
-        // comment actually has replies to show.
-        const wantsInlineReplies = depth < (MAX_VISIBLE_DEPTH - 1) && (data.children || 0) > 0;
-        if (!wantsInlineReplies) return;
+        // Only levels that render replies inline need the data.
+        if (depth >= (MAX_VISIBLE_DEPTH - 1)) return;
 
-        // Already have them (eagerly or from a prior load), or already loading.
+        // Supplied eagerly by the host.
         if (Array.isArray(data.replies)) return;
-        if (Array.isArray(this.st4te._loadedReplies) || this.st4te._repliesLoading) return;
 
-        const loader = this.props.onLoadReplies;
+        // Nothing below (any more): whatever was loaded is gone with it.
+        if (children <= 0) {
+            if (Array.isArray(this.st4te._loadedReplies) && this.st4te._loadedReplies.length > 0) {
+                this._repliesTicket++;
+                this.setSt4te({ _loadedReplies: undefined, _loadedChildren: undefined, _repliesLoading: false }, () => { this.forceUpdate(); });
+            }
+            return;
+        }
+
+        // A load is out: its answer re-checks the count when it lands.
+        if (this.st4te._repliesLoading) return;
+        // Loaded, and for this very count. (An answer that came back EMPTY for
+        // a comment that has replies settles nothing — _loadedChildren stays
+        // unset — so the host's next refresh asks again instead of leaving the
+        // comment without its replies for as long as it stays mounted.)
+        if (Array.isArray(this.st4te._loadedReplies) && this.st4te._loadedChildren === children) return;
+
+        // From componentWillReceiveProps `this.props` is still the previous
+        // set: take the loader of the props being received, or a host that
+        // swaps it (PostDialog's is rebuilt when its api arrives) is asked
+        // through the one it has just retired.
+        const loader = (props || this.props).onLoadReplies;
         if (typeof loader !== "function") return;
 
+        const ticket = ++this._repliesTicket;
+        const key = commentKeyOf(data);
+        // The list on screen stays up while its replacement loads.
         this.setSt4te({ _repliesLoading: true }, () => { this.forceUpdate(); });
 
+        const settle = (replies) => {
+            // Not this node's current load any more: the slot was re-pointed at
+            // another comment while the request was out (it has its own load),
+            // or the node is gone. The answer used to be taken regardless — the
+            // previous comment's replies under the new one.
+            if (this._unmounted || ticket !== this._repliesTicket || commentKeyOf(this.st4te.data) !== key) return;
+            this.setSt4te(
+                // A reload inside the edit window may still serve the old body.
+                { _loadedReplies: withCommentEdits(replies), _loadedChildren: replies.length > 0 ? children : undefined, _repliesLoading: false },
+                () => { this.forceUpdate(); }
+            );
+            // The count moved again while this load was out: its answer may
+            // predate that. (Only then — an empty answer is retried by the next
+            // refresh, never from here, or it would ask in a loop.)
+            if (((this.st4te.data || {}).children || 0) !== children) this._maybe_load_replies();
+        };
+
         Promise.resolve(loader(data))
-            .then((replies) => {
-                this.setSt4te(
-                    // A reload inside the edit window may still serve the old body.
-                    { _loadedReplies: withCommentEdits(Array.isArray(replies) ? replies : []), _repliesLoading: false },
-                    () => { this.forceUpdate(); }
-                );
-            })
+            .then((replies) => { settle(Array.isArray(replies) ? replies : []); })
             .catch((e) => {
                 console.warn("[CommentInList] failed to load replies:", e && e.message);
-                this.setSt4te({ _loadedReplies: [], _repliesLoading: false }, () => { this.forceUpdate(); });
+                settle([]);
             });
     };
 
@@ -1162,13 +1227,23 @@ class CommentInList extends React.PureComponent {
 
         const depth = this.st4te.depth || 0;
         const replies = this._get_replies();
-        // Levels above the deepest visible one render their replies inline, so
-        // they never need the "Show Replies" affordance. Only the deepest
-        // visible level (depth MAX_VISIBLE_DEPTH - 1) offers it, since that
-        // level's own replies are not rendered.
-        const renderRepliesInline = depth < (MAX_VISIBLE_DEPTH - 1) && replies.length > 0;
-        const showRepliesButton = depth >= (MAX_VISIBLE_DEPTH - 1) && numberReplies > 0;
-        const repliesLoading = !!this.st4te._repliesLoading;
+        const inlineLevel = depth < (MAX_VISIBLE_DEPTH - 1);
+        const renderRepliesInline = inlineLevel && replies.length > 0;
+        // Replies on their way: a load is out, or the first one is about to
+        // start (componentDidMount / a re-pointed slot).
+        const repliesLoading = !!this.st4te._repliesLoading
+            || (inlineLevel && numberReplies > 0 && !Array.isArray(data.replies)
+                && !Array.isArray(this.st4te._loadedReplies) && typeof this.props.onLoadReplies === "function");
+        // "Show Replies" is the way down to replies that are NOT drawn here.
+        // That is always the case on the deepest visible level (depth
+        // MAX_VISIBLE_DEPTH - 1), whose replies are never rendered. Above it
+        // the replies are inline — unless their load came back empty or failed
+        // (a network error, an indexer that is behind, a host that wires no
+        // loader): the comment then said nothing of its replies and offered no
+        // way to reach them. It offers the same link, and the host opens the
+        // thread with a fetch of its own.
+        const showRepliesButton = numberReplies > 0 && !renderRepliesInline && !repliesLoading
+            && (!inlineLevel || typeof this.props.onShowReplies === "function");
 
         // Delta from initial state — avoids double-counting votes already in data counts
         const upVotesNumber = (data.upVotesNumber || 0) + (voted === 1 ? 1 : 0) - (_initialVoted === 1 ? 1 : 0);
@@ -1352,7 +1427,9 @@ class CommentInList extends React.PureComponent {
                 ))}
             </div>
         );
-        const repliesLoadingIndicator = repliesLoading && (
+        // Only while there is nothing to show yet: a reload keeps the current
+        // list up and swaps it when the new one lands.
+        const repliesLoadingIndicator = repliesLoading && !renderRepliesInline && (
             <div className={classes.repliesLoading}>
                 <CircularProgress size={18} thickness={4} style={ST_C_888} />
                 <span style={ST_ML_8}>{t("components.comment_in_list.loading_replies")}</span>

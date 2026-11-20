@@ -160,7 +160,7 @@ const config = {
     // Per-verdict console logging. Off by default: at feed scale this is one
     // log line per image, which is noise (and a small cost) in production.
     // Turn on with configure({ debug: true }).
-    debug: true,
+    debug: false,
     // Binary gate: an image is flagged when P(nsfw) >= thresholds.nsfw.
     // The scale is this model's, not the previous one's: the 8-bit EVE file
     // answers between 0.11 and 0.89, so a gate at or below 0.11 flags every

@@ -1,10 +1,12 @@
 import * as React from "preact/compat";
 import Tabs from "@material-ui/core/Tabs";
 import Tab from "@material-ui/core/Tab";
+import ButtonBase from "@material-ui/core/ButtonBase";
 import History from "@material-ui/icons/History";
 import Image from "@material-ui/icons/Image";
 import Reply from "@material-ui/icons/Reply";
 import Comment from "@material-ui/icons/CommentRounded";
+import AddAPhoto from "@material-ui/icons/AddAPhoto";
 import Tooltip from "@material-ui/core/Tooltip";
 
 import { t, useLanguage } from "../utils/text";
@@ -22,14 +24,30 @@ import { t, useLanguage } from "../utils/text";
 const LABEL_ROW = { display: "inline-flex", alignItems: "center" };
 const LABEL_TEXT = { marginLeft: 8 };
 
+// ── The bar's root element ─────────────────────────────────────────────
+// MUI renders the Tabs root through `component`. This one is the same <div>
+// with room for one more child, `trailing`, placed after the tab scroller:
+// INSIDE the bar's own element — sliding, hiding and entering with it as
+// one — yet OUTSIDE the tablist, whose children have to be tabs (its
+// arrow-key navigation walks DOM siblings). That is where the mobile create
+// button lives: part of the bar, not a second shape floating over it.
+const TabsBar = React.forwardRef(function TabsBar({ trailing, children, ...rest }, ref) {
+    return <div ref={ref} {...rest}>{children}{trailing}</div>;
+});
+
 // Whether the bar is tucked away: slid down off the bottom edge on mobile,
 // up off the top edge on desktop. Profile passes `hidden`, a flag that flips
 // a few times per scroll; the raw y/scrollTop pair is still accepted and
 // reduced to the same flag with the thresholds this bar has always used.
-const isTucked = ({ hidden, lessThan960w, y, scrollTop }) => (
-    hidden !== undefined
-        ? !!hidden
-        : (lessThan960w ? !(y > 48 || scrollTop <= 72) : (-48 > y && scrollTop >= 72))
+// `forceHidden` tucks it whatever the scroll position: Profile sets it while
+// the mobile card is expanded. It used to be passed and ignored here — only
+// the floating create button stepped away — and the bar now holds that button.
+const isTucked = ({ hidden, forceHidden, lessThan960w, y, scrollTop }) => (
+    forceHidden
+        ? true
+        : hidden !== undefined
+            ? !!hidden
+            : (lessThan960w ? !(y > 48 || scrollTop <= 72) : (-48 > y && scrollTop >= 72))
 );
 
 // Shallow, like the default memo compare, except that the raw scroll numbers
@@ -52,9 +70,13 @@ const ProfileTabs = React.memo(({
                                     onChange,
                                     lessThan960w,
                                     hidden,
+                                    forceHidden,
                                     y,
                                     isOwnProfile,
-                                    scrollTop
+                                    scrollTop,
+                                    onCreate,
+                                    createLabel,
+                                    createOpen
                                 }) => {
     useLanguage();
 
@@ -78,17 +100,45 @@ const ProfileTabs = React.memo(({
         <span style={LABEL_ROW}><History /><span style={LABEL_TEXT}>{historyLabel}</span></span>,
     ], labelDeps);
 
+    // ── Create button (mobile, own profile) ────────────────────────────
+    // The circle at the bottom bar's centre, bigger than the bar: where a
+    // round button used to float over a gap between the second and third
+    // tab, the bar itself now swells around it. The page styles draw that
+    // bulge and keep the middle of the tab row free (mainTabWithCreate), and
+    // size this button to the circle (mainTabCreate); TabsBar renders it
+    // inside the bar's root, so bar and button are one element, one outline.
+    // While the dialog it opens is up (`createOpen`), the white area — the
+    // tab indicator — leaves its tab and rests on the circle: one more class
+    // on the bar (mainTabCreateActive), nothing measured or timed in here.
+    const showCreate = !!(lessThan960w && isOwnProfile && onCreate);
+    const createActive = showCreate && !!createOpen;
+    const createButton = React.useMemo(() => (showCreate ? (
+        <Tooltip title={createLabel || ""}>
+            <ButtonBase className={classes.mainTabCreate} onClick={onCreate} aria-label={createLabel}
+                        aria-haspopup="dialog" aria-expanded={createActive} focusRipple>
+                <AddAPhoto />
+            </ButtonBase>
+        </Tooltip>
+    ) : null), [showCreate, createActive, createLabel, onCreate, classes.mainTabCreate]);
+    const barClassName = !showCreate ? classes.mainTab
+        : `${classes.mainTab} ${classes.mainTabWithCreate}${createActive ? ` ${classes.mainTabCreateActive}` : ""}`;
+
     const tabsStyle = lessThan960w ? {bottom: 0, top: "auto"}: {bottom: "auto", top: 0};
-    const tucked = isTucked({ hidden, lessThan960w, y, scrollTop });
+    const tucked = isTucked({ hidden, forceHidden, lessThan960w, y, scrollTop });
+    // Tucked under the bottom edge, the bar goes 16px further when it carries
+    // the create circle, which stands proud of it: 8px with the 64px circle,
+    // and this leaves room for one up to 80px (BULGE_D in the page styles).
     const transform = lessThan960w ?
-        `translateY(${tucked ? 72 : 0}px)` :
+        `translateY(${tucked ? (showCreate ? 88 : 72) : 0}px)` :
         `translateY(${tucked ? -88 : 0}px)`;
 
     return (
         <Tabs
+            component={TabsBar}
+            trailing={createButton}
             data-tour="profile-tabs"
             style={{...tabsStyle, transform}}
-            className={classes.mainTab}
+            className={barClassName}
             value={category}
             variant="fullWidth"
             indicatorColor="primary"
@@ -103,12 +153,10 @@ const ProfileTabs = React.memo(({
             <Tab
                 icon={lessThan960w ? MOBILE_ICONS[1] : undefined}
                 label={lessThan960w ? undefined : DESKTOP_LABELS[1]}
-                style={(lessThan960w && isOwnProfile) ? {marginRight: 24}: {}}
             />
             <Tab
                 icon={lessThan960w ? MOBILE_ICONS[2] : undefined}
                 label={lessThan960w ? undefined : DESKTOP_LABELS[2]}
-                style={(lessThan960w && isOwnProfile) ? {marginLeft: 24}: {}}
             />
             <Tab
                 icon={lessThan960w ? MOBILE_ICONS[3] : undefined}

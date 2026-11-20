@@ -44,7 +44,6 @@ import DeleteCommentModal from "../components/DeleteCommentModal";
 import Timeline from "@material-ui/lab/Timeline";
 import Fab from "@material-ui/core/Fab";
 import PhotoCameraRounded from "@material-ui/icons/PhotoCameraRounded";
-import AddAPhoto from "@material-ui/icons/AddAPhoto";
 
 import { t, useLanguage, getLocaleCode } from "../utils/text";
 import { toHistoryRecord, ownString } from "../utils/chainOps";
@@ -150,6 +149,41 @@ const FAB_AWAY_SCALE = 0.85;
 // false, then the Backdrop fades for ~195ms — the FAB comes back after that.
 const FAB_RETURN_DELAY_MS = 260;
 
+// ── Bottom bar: the create bulge (mobile, own profile) ──────────────────
+// The tab bar swells into a circle at its centre — the create button — and
+// the two are ONE outline: where the circle leaves the bar's straight edge a
+// concave arc joins them, tangent to both, so the silhouette has no corner
+// anywhere. The circle is melted into the bar, not laid on it: it is drawn
+// in the bar's own colour UNDER everything the bar holds, so the white area
+// (the tab indicator) travels over it like over the rest of the bar — and
+// comes to rest ON it, as a circle, for as long as the new-post dialog is
+// open (mainTabCreateActive below).
+// BULGE_PATH is the centre piece, as a clip-path for a BULGE_D square centred
+// on the bar: the circle's caps above and below the bar, the four joining
+// arcs, and the stretch of bar between them.
+const TAB_BAR_H = 48;   // the bar's height (MUI Tabs' min-height)
+const BULGE_D = 64;     // the circle: 8px proud of the bar, above and below (ProfileTabs tucks the hidden bar far enough for up to 80)
+const BULGE_JOIN = 21;  // radius of the joining arcs — the bar's own corner radius
+const BULGE_SPOT = BULGE_D - 12;   // the white area at rest on the circle: 6px in from its edge, as the tabs' pill is from the bar's
+const BULGE_PATH = (() => {
+    const R = BULGE_D / 2, h = TAB_BAR_H / 2, r = BULGE_JOIN;
+    // A joining arc is part of a circle of radius r resting on the bar's edge
+    // from outside and touching the big circle: its centre lies r beyond the
+    // edge and R + r from the middle. xf is where the outline leaves the
+    // edge, (tx, ty) where the arc hands over to the circle. The joins stay
+    // inside the square as long as r ≤ h² / 2(R − h) — 36 with these sizes.
+    const xf = Math.sqrt((R + r) * (R + r) - (h + r) * (h + r));
+    const k = R / (R + r), tx = k * xf, ty = k * (h + r);
+    const n = (v) => +(R + v).toFixed(3);   // centre origin → box coordinates
+    // s = 1: the top cap, left to right; s = -1: the bottom cap, right to left.
+    const cap = (s) => `A${r},${r} 0 0 0 ${n(-s * tx)},${n(-s * ty)} A${R},${R} 0 0 1 ${n(s * tx)},${n(-s * ty)} A${r},${r} 0 0 0 ${n(s * xf)},${n(-s * h)}`;
+    // Between the caps the piece runs straight through the bar, so the two
+    // OVERLAP along the bar's edges instead of sharing them: a shared edge is
+    // where a hairline of the page behind shows through on screens with a
+    // fractional pixel ratio.
+    return `path("M${n(-xf)},${n(-h)} ${cap(1)} V${n(h)} ${cap(-1)} Z")`;
+})();
+
 const styles = theme => ({
     root: { position: "absolute", width: "100%", height: "100%", display: "flex", overflow: "hidden" },
     viewLeft: { width: "100%", marginRight: "396px", position: "relative", [theme.breakpoints.down("sm")]: { marginRight: "0px" } },
@@ -180,6 +214,9 @@ const styles = theme => ({
         "& .MuiCardHeader-subheader": { filter: "opacity(1)", transition: `all ${TF}`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
         "& svg": { transition: `transform ${TF}` },
     },
+    // The create FAB — desktop only. On mobile the create action is the circle
+    // at the centre of the bottom tab bar (mainTabWithCreate / mainTabCreate
+    // below), so this class no longer carries a mobile variant.
     mainFab: {
         animation: `$slideInFromBottom ${TE}`,
         "@global": { "@keyframes slideInFromBottom": slideKF('Y', 160) },
@@ -205,11 +242,6 @@ const styles = theme => ({
         "& .MuiTouchRipple-child": { backgroundImage: RIPPLE },
         "& .MuiFab-extended": { padding: "0 24px", height: 64, fontSize: "1.125rem" },
         "& .MuiFab-extended .MuiSvgIcon-root": { fontSize: "1.75rem" },
-        [theme.breakpoints.down("sm")]: {
-            bottom: "calc(env(safe-area-inset-bottom, 0px) - 88px)", right: "50%", transform: "translateX(50%)",
-            "& .MuiButtonBase-root": { width: 64, height: 64 },
-            "@global": { "@keyframes slideInFromBottom": { "0%": { transform: "translateX(50%) translateY(160px)", filter: "opacity(0)" }, "100%": { transform: "translateX(50%) translateY(0px)", filter: "opacity(1)" } } },
-        },
     },
     viewMobileCardOpened: {
         borderRadius: "0px 0px 21px 21px", boxShadow: "0px 0px 16px 4px black", transition: `all ${TF}`, overflow: "visible",
@@ -231,16 +263,110 @@ const styles = theme => ({
     profileImageMobile: { borderRadius: "0px 12px 12px 0px", display: "block", width: "72px", height: "72px", backgroundPosition: "50% 50%", backgroundSize: "cover", transition: `all ${TF}` },
     profileImageMobileOpened: { borderRadius: "8px", display: "block", width: "40px", height: "40px", margin: "-18px 16px -16px -72px", backgroundPosition: "50% 50%", backgroundSize: "cover", transition: `all ${TF}` },
     profileImageMobileBig: { borderRadius: "24px", display: "block", width: "160px", height: "160px", margin: "0px", backgroundPosition: "50% 50%", backgroundSize: "cover", transition: `all ${TF}` },
+    // The tab bar: the top bar on desktop, the bottom bar on mobile — where, on
+    // your own profile, it swells into the create button at its centre (the
+    // three classes after this one). Tabs and button are one element
+    // (ProfileTabs renders the button inside this root) and one outline: it
+    // enters, slides and hides as a whole, and nothing floats over it. The
+    // white area — the indicator — marks the tab, or the create circle while
+    // the new-post dialog is open.
     mainTab: {
         animation: `$slideInFromTop ${TE}`, "@global": { "@keyframes slideInFromTop": slideKF('Y', -160) },
-        [theme.breakpoints.down("sm")]: { animation: `$slideInFromBottom ${TE}`, "@global": { "@keyframes slideInFromBottom": slideKF('Y', 160) } },
+        [theme.breakpoints.down("sm")]: {
+            animation: `$slideInFromBottom ${TE}`, "@global": { "@keyframes slideInFromBottom": slideKF('Y', 160) },
+            // With the create slot in its middle the bottom bar leaves each
+            // tab 54px on a 320px screen, so the 72px floor below must not
+            // apply here: it already pushed the last tab past the bar's edge
+            // on a 360px screen. `&&` outranks that rule whatever their order.
+            "&& .MuiTab-root": { minWidth: "0px !important" },
+        },
         backgroundColor: "#101010", "& .MuiTab-root": { minWidth: "72px !important" },
         "& .MuiTab-textColorPrimary.Mui-selected": { backgroundColor: "transparent" },
         "& .MuiTab-textColorPrimary.Mui-selected .MuiTab-wrapper": { color: "#101010 !important" },
         "& .MuiTab-fullWidth": { backgroundColor: "transparent", color: "#989898", transition: `all 225ms ${E} 0ms`, borderRadius: "21px" },
         "& .MuiTab-fullWidth:hover": { backgroundColor: "rgba(255,255,255,0.06)" },
         "& span.MuiTabs-indicator": { zIndex: "-1", height: "48px", backgroundColor: "#c7c7c7", borderRadius: "21px", transform: "scale3d(0.875, 0.75, 1)" },
+        // The third and fourth tab ALWAYS sit in a later flex `order` group
+        // than the first two. On its own that moves nothing; it is what lets
+        // mainTabWithCreate (next) slot a spacer between the two pairs without
+        // touching the tabs. Set together with the spacer it would not be
+        // instant: `order` is an animatable integer, the tabs' `transition:
+        // all` above eases it in over 225ms, and MUI — which measures the
+        // indicator right after the render — would park it on the cell the
+        // tab was about to leave.
+        "& .MuiTab-root:nth-child(n+3)": { order: 2 },
         margin: "21px 16px 16px 16px", width: "calc(100% - 32px)", borderRadius: "21px", position: "absolute", left: 0, zIndex: 1, transition: `transform ${TM}`,
+    },
+    // Own profile on mobile: the bar swells into the create button at its
+    // centre (geometry: BULGE_PATH, above the styles).
+    //  · Bulge — `::before` paints the centre piece in the bar's own colour,
+    //    which it inherits, and the root stops clipping so the circle's caps
+    //    can stand proud of it. z-index -1 puts it in the indicator's layer
+    //    and, coming first in the tree, UNDER it: the bulge is bar, and the
+    //    white area passes over it as it does over the rest of the bar. It
+    //    grows out of the bar when it appears (scaled to the bar's height it
+    //    is flush with it). Without clip-path: path() it is the plain circle.
+    //  · Slot — the middle of the tab row is kept free by a pseudo-element,
+    //    `order` 1, between the two tab pairs (see mainTab), where margins on
+    //    the middle tabs used to: the row's DOM stays tabs only, and the
+    //    space opens in a single layout pass, so the indicator MUI measures
+    //    right after is the final one. A fifth of the bar, and never less
+    //    than the circle plus 4px either side (that floor alone where max()
+    //    is unknown).
+    //  · The tab row stops clipping too: at rest on the circle the white
+    //    area is taller than the row (mainTabCreateActive). MUI sets that
+    //    clip inline on the scroller, hence the `!important`.
+    //  · A tab's icon turns dark as the white area reaches it — a 200ms fade
+    //    from the idle grey — not the instant the tab is picked, when it
+    //    would sit dark on the dark bar until the white area got there. That
+    //    wait shows every time the white area comes back from the circle.
+    mainTabWithCreate: {
+        "&&": { overflow: "visible" },
+        "& .MuiTabs-scroller": { overflow: "visible !important" },
+        "& .MuiTab-textColorPrimary.Mui-selected .MuiTab-wrapper": { transition: "color 200ms linear 60ms" },
+        "&::before": {
+            content: '""', position: "absolute", left: "50%", top: "50%", zIndex: -1, width: BULGE_D, height: BULGE_D, margin: `${-BULGE_D / 2}px 0 0 ${-BULGE_D / 2}px`,
+            backgroundColor: "inherit", borderRadius: "50%", pointerEvents: "none",
+            animation: `$profileTabBulgeIn 225ms ${E} 0ms`,
+            "@supports (clip-path: path('M0 0'))": { borderRadius: 0, clipPath: BULGE_PATH },
+        },
+        "@global": { "@keyframes profileTabBulgeIn": { "0%": { transform: `scaleY(${TAB_BAR_H / BULGE_D})` }, "100%": { transform: "scaleY(1)" } } },
+        "& .MuiTabs-flexContainer::after": { content: '""', order: 1, flex: `0 0 max(20%, ${BULGE_D + 8}px)`, fallbacks: { flex: `0 0 ${BULGE_D + 8}px` } },
+    },
+    // The create button: the circle's hit area, hover tint and ripple, centred
+    // on the bulge. It paints nothing of its own at rest — no fill, no glow —
+    // so nothing lies over the white area when that comes to the circle: only
+    // the icon, light on the bar and dark on the white area (below). The tint
+    // is for pointer devices only (on touch it would stick after the tap).
+    mainTabCreate: {
+        position: "absolute", left: "50%", top: "50%", width: BULGE_D, height: BULGE_D, margin: `${-BULGE_D / 2}px 0 0 ${-BULGE_D / 2}px`, borderRadius: "50%", color: "#f6f6f6",
+        transition: `background-color 225ms ${E} 0ms, color 200ms linear 0ms`,
+        animation: `$profileTabCreateIn 225ms ${E} 0ms`,
+        "@global": { "@keyframes profileTabCreateIn": { "0%": { filter: "opacity(0)", transform: "scale(0.6)" }, "100%": { filter: "opacity(1)", transform: "scale(1)" } } },
+        "& .MuiSvgIcon-root": { fontSize: "1.75rem" },
+        "&:hover": { backgroundColor: "rgba(255,255,255,0.06)" },
+        "@media (hover: none)": { "&:hover": { backgroundColor: "transparent" } },
+        "& .MuiTouchRipple-child": { backgroundImage: RIPPLE },
+    },
+    // While the new-post dialog is open the white area is in the middle: the
+    // tab indicator itself leaves its tab, travels to the circle and settles
+    // on it as a BULGE_SPOT circle — one element, so it slides and reshapes in
+    // a single 300ms move (MUI's own transition on the indicator), and goes
+    // back the same way when the dialog closes. `!important` is what beats the
+    // inline left/width MUI measured for the tab; those stay untouched, which
+    // is why the way back needs no measuring. The tab keeps its selected
+    // state (its panel is still the one behind the dialog) but hands the dark
+    // icon over to the create button: its own returns to the idle grey at
+    // once, as a tab's does when another is picked. The button's icon fades
+    // through mid-grey — legible on bar and white alike — while the white
+    // area arrives under it.
+    mainTabCreateActive: {
+        "&& span.MuiTabs-indicator": {
+            left: `calc(50% - ${BULGE_SPOT / 2}px) !important`, width: `${BULGE_SPOT}px !important`,
+            height: BULGE_SPOT, bottom: (TAB_BAR_H - BULGE_SPOT) / 2, transform: "none", borderRadius: BULGE_SPOT / 2,
+        },
+        "&& .MuiTab-textColorPrimary.Mui-selected .MuiTab-wrapper": { color: "#989898 !important", transition: "none" },
+        "& $mainTabCreate": { color: "#101010", transition: `background-color 225ms ${E} 0ms, color 200ms linear 60ms` },
     },
     followButtons: { display: "flex", gap: "16px", justifyContent: "center", padding: "16px 32px", "& .MuiButtonGroup-groupedContainedHorizontal:not(:last-child)": { borderRight: "1px solid #000" }, "& .MuiButtonGroup-groupedHorizontal": { borderRadius: "32px", color: "rgb(183 183 183)", backgroundColor: "#1e1e1e", "&:hover": { color: "rgb(220 220 220)", backgroundColor: "#212121" } } },
     followButtonsMobile: { width: "100%", display: "flex", flexFlow: "column", gap: "16px", justifyContent: "center", padding: "16px 16px", "& .MuiButtonGroup-groupedContainedHorizontal:not(:last-child)": { borderRight: "1px solid #000" }, "& .MuiButtonGroup-root": { display: "block" }, "& .MuiButtonGroup-groupedHorizontal": { borderRadius: "32px", marginBottom: "12px", color: "rgb(183 183 183)", backgroundColor: "#1e1e1e", "&:hover": { color: "rgb(220 220 220)", backgroundColor: "#212121" } } },
@@ -2737,24 +2863,24 @@ const ProfileMobileCardLive = ({ scrollStore, ...rest }) => {
     return <ProfileMobileCard {...rest} hidden={hidden} />;
 };
 
-// The create FAB only cares whether it's shown — scrolling up, or near the
-// top — so it re-renders when that flips (or a prop changes) instead of on
-// every tick. Same transforms and markup as before. `label` arrives as a
-// string from the page, whose useLanguage() re-renders on a switch.
+// The create FAB — desktop only: on mobile the create action is the circle
+// at the centre of the bottom tab bar (ProfileTabs), which hides and shows
+// with the bar itself. It only cares whether it's shown — scrolling up, or
+// near the top — so it re-renders when that flips (or a prop changes)
+// instead of on every tick. `label` arrives as a string from the page, whose
+// useLanguage() re-renders on a switch.
 const isCreateFabShown = (scrollTop, scrollY) => scrollY > 48 || scrollTop <= 72;
 const CREATE_FAB_ICON_STYLE = { marginRight: 12 };
+const CREATE_FAB_SHOWN_STYLE = { transform: "translateY(-96px)" };
+const CREATE_FAB_HIDDEN_STYLE = { transform: "translateY(8px)" };
 
-const ProfileCreateFab = memo(function ProfileCreateFab({ className, scrollStore, isMobile, pushedDown, visible, label, onClick }) {
+const ProfileCreateFab = memo(function ProfileCreateFab({ className, scrollStore, visible, label, onClick }) {
     const shown = useScrollFlag(scrollStore, isCreateFabShown);
-    const transform = isMobile
-        ? `translateX(50%) translateY(${pushedDown ? 200 : (shown ? -96 : 56)}px)`
-        : `translateY(${shown ? -96 : 8}px)`;
-    const style = useMemo(() => ({ transform }), [transform]);
     return (
-        <div className={className} style={style}>
-            {visible && <Fab onClick={onClick} variant="extended" size={isMobile ? "small" : "medium"}>
-                {isMobile ? <AddAPhoto/> : <PhotoCameraRounded style={CREATE_FAB_ICON_STYLE}/>}
-                {isMobile ? null : <span>{label}</span>}
+        <div className={className} style={shown ? CREATE_FAB_SHOWN_STYLE : CREATE_FAB_HIDDEN_STYLE}>
+            {visible && <Fab onClick={onClick} variant="extended" size="medium">
+                <PhotoCameraRounded style={CREATE_FAB_ICON_STYLE}/>
+                <span>{label}</span>
             </Fab>}
         </div>
     );
@@ -3594,15 +3720,19 @@ const Profile = ({ classes, settings, pathname, api }) => {
     // The tab bar, mobile card and create FAB read their hidden/shown flag
     // from grid.scrollStore and re-render themselves when it flips; nothing
     // else on this page re-renders with the scroll.
+    // The create action is one control per layout: on mobile the tab bar
+    // swells into it at its centre (own profile only — it takes onCreate and
+    // decides), on desktop it is the floating FAB.
     return (
         <React.Fragment>
             <div className={classes.root}>
                 {isMobile && <ProfileMobileCardLive scrollStore={scrollStore} {...sidebarProps} expanded={mobileCardExpanded} height={windowHeight} onToggleExpanded={toggleMobileCard} onCloseExpanded={closeMobileCard} />}
                 <div className={classes.viewLeft}>
-                    <ProfileTabsLive scrollStore={scrollStore} classes={classes} category={category} isOwnProfile={profile.isOwnProfile} onChange={handleCategoryChange} lessThan960w={isMobile} forceHidden={bottomBarHidden} />
-                    <ProfileCreateFab className={classes.mainFab} scrollStore={scrollStore} isMobile={isMobile}
-                                      pushedDown={bottomBarHidden} visible={!!profile.isOwnProfile}
-                                      label={createLabel} onClick={openCreateArtwork} />
+                    <ProfileTabsLive scrollStore={scrollStore} classes={classes} category={category} isOwnProfile={profile.isOwnProfile} onChange={handleCategoryChange} lessThan960w={isMobile} forceHidden={bottomBarHidden}
+                                     onCreate={openCreateArtwork} createLabel={createLabel} createOpen={createArtworkOpen} />
+                    {!isMobile && <ProfileCreateFab className={classes.mainFab} scrollStore={scrollStore}
+                                                    visible={!!profile.isOwnProfile}
+                                                    label={createLabel} onClick={openCreateArtwork} />}
                     {emptyState}
                 </div>
                 {!isMobile && <ProfileSidebar {...sidebarProps} fabAway={fabAway} />}

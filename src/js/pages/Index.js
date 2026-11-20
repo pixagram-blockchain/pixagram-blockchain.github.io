@@ -30,7 +30,7 @@ import { update_meta_title } from "../utils/meta-tags";
 import {
     PAGE_ROUTES, isPostUrl, hostPageForPostUrl,
     splitMetaPath, parseMeta, formatMeta, isHomePath, parseFeedFocusHash,
-    BROWSE_PATH, entryMeta, HELP_TELEGRAM_URL, DEFAULT_NODES,
+    BROWSE_PATH, entryMeta, DEFAULT_NODES,
 } from "../utils/constants";
 // The sort tag links open on: trending until the reader picks another on the
 // feed. Imported here, at boot, so it follows the address from the first
@@ -43,15 +43,16 @@ import ToolbarMenuOption from "../components/ToolbarMenuOption";
 // The toolbar search (hook, bar, dropdown, rows, artwork masonry) lives in
 // components/search. useSearch keeps useBlockchainSearch's contract and adds
 // user/community profiles and the artwork leg (pixagram-search Worker).
-import { useSearch, SearchBar, artworkPath, compactFilters } from "../components/search";
+// sectionMark marks the History subheader, which Index renders, as a section of
+// the results list like the search's own (sections.js): the list's subheader
+// in focus is part of the search's address (§8d).
+import { useSearch, SearchBar, artworkPath, compactFilters, sectionMark } from "../components/search";
 import VoteIcon from "../icons/Vote";
 // The portals' own icon (the drawer's portal rows): the toolbar's Portals button.
 import CommunityIcon from "../icons/Community";
 // The wallet's Trade button wears the same chart icon.
 import TradeIcon from "@material-ui/icons/ShowChartRounded";
 import SettingsIcon from "@material-ui/icons/Settings";
-import HelpIcon from "@material-ui/icons/Help";
-import TelegramIcon from "@material-ui/icons/Telegram";
 import Button from "@material-ui/core/Button";
 import ListSubheader from "@material-ui/core/ListSubheader";
 import ListItem from "@material-ui/core/ListItem";
@@ -208,8 +209,8 @@ const OVERLAY_HOSTS_BY_POST_KIND = {
 // visitors never download it. Seen/skipped state is one localStorage entry:
 //   { intro: true, feed: true, community: true, profile: true }
 // Completing OR skipping a page's tour marks that page seen; the intro steps
-// (menu, governance, info, settings) are prepended once, to whichever
-// tourable page is visited first.
+// (the left menu down to its Info row, then governance and settings in the
+// toolbar) are prepended once, to whichever tourable page is visited first.
 
 const LazyTour = React.lazy(() => import("../components/Tour"));
 
@@ -301,6 +302,34 @@ function expandCardIfNeeded(anchorSelector, toggleSelector) {
     } catch (e) {}
 }
 
+// The Info row closes the left menu's scrolling view (MenuContent's Help &
+// info section, the last one), so on most screens it sits below the fold.
+// Its step brings it into view as it starts — at once, not with a smooth
+// scroll, so the row is in place by the time the tour looks for it. Only an
+// anchor that has a box is scrolled: on the compact layout the desktop rail
+// stays mounted, hidden, next to the drawer's copy of the menu.
+function revealMenuAnchor(anchorSelector) {
+    try {
+        const anchors = document.querySelectorAll(anchorSelector);
+        for (let i = 0; i < anchors.length; i++) {
+            const r = anchors[i].getBoundingClientRect();
+            if (r.width > 1 && r.height > 1) {
+                anchors[i].scrollIntoView({ block: "nearest" });
+                return;
+            }
+        }
+    } catch (e) {}
+}
+
+// …and the menu's scrolling view (MenuContent marks it "menu-scroll") goes
+// back to its top once the tour is over — see finishTour.
+function resetMenuScroll() {
+    try {
+        const views = document.querySelectorAll('[data-tour="menu-scroll"]');
+        for (let i = 0; i < views.length; i++) views[i].scrollTop = 0;
+    } catch (e) {}
+}
+
 // ── Step builders ────────────────────────────────────────────────────────────
 // Steps whose anchor isn't in the DOM (wrong layout, or a data-tour attribute
 // not wired up yet in a sibling component) are skipped by the engine after a
@@ -351,15 +380,20 @@ function buildIntroSteps(compact) {
             title: t("components.tour.categories"),
             content: t("components.tour.tag_chips_that_filter_what_you_see"),
         },
+        // Info is a row of the left menu now (its last section, Help & info),
+        // so its step comes with the other menu steps, before the tour moves
+        // up to the toolbar.
+        {
+            target: '[data-tour="nav-info"]',
+            placement: "right",
+            title: t("components.index.info"),
+            content: t("components.tour.guides_and_details_about_how_the_platform"),
+            onEnter: () => revealMenuAnchor('[data-tour="nav-info"]'),
+        },
         {
             target: '[data-tour="nav-governance"]',
             title: t("words.governance"),
             content: t("components.tour.pixagram_runs_on_its_own_blockchain_vote"),
-        },
-        {
-            target: '[data-tour="nav-info"]',
-            title: t("components.index.info"),
-            content: t("components.tour.guides_and_details_about_how_the_platform"),
         },
         {
             target: '[data-tour="nav-settings"]',
@@ -1488,18 +1522,30 @@ function useMetaDialogs(meta, route, manager, gate, extrasRef) {
 // §8d — useSearchMeta: the toolbar search ↔ "+search-<payload>"
 // ═════════════════════════════════════════════════════════════════════════════
 // The search is an overlay like the dialogs, but its state lives in useSearch
-// (query, filters, filter panel), not in the slot. Both sides are compared as
-// canonical keys (formatMeta) and reconciled whenever either moves:
+// (query, filters, filter panel, and the results list's subheader in focus),
+// not in the slot. Both sides are compared as canonical keys (formatMeta) and
+// reconciled whenever either moves:
 //
 //   the person opens it (types, pulls the filter panel out)   → push
-//   types or filters while it is open                         → replace, once
+//   types or filters while it is open, or scrolls the
+//   results to another section                                → replace, once
 //                                                               per pause
 //   closes it (✕, click-away, input emptied)                  → step back
 //   the address moves (back/forward, a link, a reload)        → restore the
 //                                                               search, or reset it
 //
+// The subheader in focus (components/search/sections.js) is the sticky
+// subheader standing at the top of the results — "users", "tags",
+// "communities", "history", "posts" or "artworks" — and none while the list is
+// at its top (scroll 0). Restored, the list goes back to that subheader once
+// its results are in, and the search comes back as the full-screen panel for
+// any of them; for none it comes back in the toolbar, its list at the top
+// (SearchBar carries both out, on useSearch's order).
+//
 // A result click pushes its page and resets the search in one go, so the
-// search entry stays one step back: the back arrow returns to the results.
+// search entry stays one step back: the back arrow returns to the results —
+// at the section they were left at, since the entry is written (flush) just
+// before the click leaves it.
 // When both sides moved at once, the address wins — navigating is the explicit
 // act — and a write still waiting for its pause lands only on the entry it was
 // typed on (route.visit), never on one navigated to since. The address is read
@@ -1508,23 +1554,29 @@ function useMetaDialogs(meta, route, manager, gate, extrasRef) {
 // search queries the chain right away.
 //
 // Returns { flush }: write the search onto the current entry now, for a
-// navigation that takes it along (setTagNavigation), so the entry left behind
-// holds it as it is, not as it was at the last pause.
+// navigation that leaves it behind (a result opened) or takes it along
+// (setTagNavigation), so the entry left behind holds it as it is, not as it
+// was at the last pause.
 
 const SEARCH_ADDRESS_DELAY_MS = 400; // one address update per typing pause (Safari caps history calls)
 
-// The address key of a search state; "" while it is closed.
-function searchKey(open, query, filters, panel) {
-    return open ? formatMeta({ kind: "search", query, filters: compactFilters(filters), panel }) : "";
+// The address key of a search state; "" while it is closed. `focus`: the
+// results list's subheader in focus — for none (null) the meta is the one it
+// always was, so an address without it is canonical and means none.
+function searchKey(open, query, filters, panel, focus) {
+    if (!open) return "";
+    const meta = { kind: "search", query, filters: compactFilters(filters), panel };
+    if (focus) meta.focus = focus;
+    return formatMeta(meta);
 }
 
 function useSearchMeta(search, meta, route, ready) {
-    const { query, results, isOpen, restore, reset } = search;
+    const { query, results, isOpen, focus, restore, reset } = search;
     const { visit, visitRef, openMeta, updateMeta, closeMeta, readMeta } = route;
 
     const stateKey = useMemo(
-        () => searchKey(isOpen, query, results.filters, results.filtersOpen),
-        [isOpen, query, results.filters, results.filtersOpen],
+        () => searchKey(isOpen, query, results.filters, results.filtersOpen, focus),
+        [isOpen, query, results.filters, results.filtersOpen, focus],
     );
     // Only a dependency (with `visit`): it re-runs the effect when the address moves.
     const urlKey = meta && meta.kind === "search" ? formatMeta(meta) : "";
@@ -1587,9 +1639,12 @@ function useSearchMeta(search, meta, route, ready) {
                 return;
             }
             const r = restore(readMeta());
-            const got = searchKey(r.open, r.query, r.filters, r.panel);
+            const got = searchKey(r.open, r.query, r.filters, r.panel, r.focus);
             // A link can hold what the search can't show as such (junk
             // filters, nothing left open): the address takes the search's word.
+            // (So it does later, if the list cannot stand at the subheader the
+            // link names — a section with nothing to show: the list tells where
+            // it stands instead, and that is written like any other move.)
             if (got !== url) {
                 if (got) updateMeta(parseMeta(got));
                 else closeMeta();
@@ -2607,14 +2662,17 @@ const ToolbarMenuButton = React.memo(
 );
 
 // ── useToolbarLabelsFit ──────────────────────────────────────────────────────
-// The secondary buttons (Ask Help, Portals, Governance, Info) carry their
-// labels from 1280 px (styles.toolbarMenuButtons drops them below) — but only
-// while the labelled group, right-aligned, keeps clear of the Trade button,
-// and how wide it is depends on the language. Measured with the real fonts,
-// the five labelled buttons need a 1400 px window in English, 1531 px in
-// French, 1565 px in Russian; the four of before already ran into Trade from
-// 1280 px in most languages (French until 1408 px, Russian until 1445 px).
-// So the width is measured rather than assumed: whenever the group shows its
+// The secondary buttons (Portals, Governance) carry their labels from
+// 1280 px (styles.toolbarMenuButtons drops them below) — but only while the
+// labelled group, right-aligned, keeps clear of the Trade button, and how
+// wide it is depends on the language. The group is shorter than it was: Ask
+// Help and Info left it for the left menu's Help & info section
+// (MenuContent). Measured with the real fonts, it needed a 1400 px window in
+// English, 1531 px in French, 1565 px in Russian with both, and with Info
+// alone it still ran into Trade from 1280 px in most languages (French until
+// 1408 px, Russian until 1445 px). What the remaining three need has not
+// been measured again, and doesn't have to be, since the width is measured
+// rather than assumed: whenever the group shows its
 // labels, its width is kept for the language; while it shows icons only, that
 // width tells whether the labels would fit again (a language not measured yet
 // is shown labelled once, to be measured — before paint, from the layout
@@ -2692,7 +2750,7 @@ const ToolbarComponent = React.memo(
          onOpenMenuDrawer, onResetSearch, onSearchChange,
          onGoHome, onGoToUsername, onGoToTag, onGoToCommunity, onGoToArtwork,
          onSetTagNavigation,
-         onTrade, onPortals, onWitnesses, onAppinfo, onSettings, onToolbarMenu,
+         onTrade, onPortals, onWitnesses, onSettings, onToolbarMenu,
      }) => {
         const lang = useLanguage();
         const groupRef = useRef(null);
@@ -2732,46 +2790,26 @@ const ToolbarComponent = React.memo(
                     ref={groupRef}
                     className={labelsOff ? classes.toolbarMenuButtons + " " + classes.toolbarMenuButtonsIconOnly : classes.toolbarMenuButtons}
                 >
-                    {/* Ask Help: the community's Telegram group. A real link
-                        (href → MUI renders an <a>) rather than a window.open
-                        handler, so it keeps link behaviour — middle-click,
-                        copy link, and phones handing t.me to the Telegram app. */}
-                    <Fade in timeout={500}>
-                        <Tooltip title={t("components.index.ask_the_community_on_telegram")}>
-                            <Button
-                                className={classes.toolbarSecondaryButton}
-                                href={HELP_TELEGRAM_URL}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                            >
-                                <TelegramIcon /> <span className="text">{t("words.ask_help")}</span>
-                            </Button>
-                        </Tooltip>
-                    </Fade>
+                    {/* Ask Help and Info are no longer here: they are the two
+                        rows of "Help & info", the last section of the left
+                        menu (MenuContent — AskHelpTile, InfoTile). */}
                     {/* Portals: the portal directory (+portals, §8e) — every
                         portal, searchable, with the button to create one. */}
-                    <Fade in timeout={600}>
+                    <Fade in timeout={500}>
                         <Tooltip title={t("components.index.browse_search_and_create_portals")}>
                             <Button className={classes.toolbarSecondaryButton} onClick={onPortals}>
                                 <CommunityIcon /> <span className="text">{t("words.portals")}</span>
                             </Button>
                         </Tooltip>
                     </Fade>
-                    <Fade in timeout={700}>
+                    <Fade in timeout={600}>
                         <Tooltip title={t("components.index.elect_the_blockchain_guardians")}>
                             <Button className={classes.toolbarSecondaryButton} onClick={onWitnesses} data-tour="nav-governance">
                                 <VoteIcon /> <span className="text">{t("words.governance")}</span>
                             </Button>
                         </Tooltip>
                     </Fade>
-                    <Fade in timeout={800}>
-                        <Tooltip title={t("components.index.navigate_through_the_information")}>
-                            <Button className={classes.toolbarSecondaryButton} onClick={onAppinfo} data-tour="nav-info">
-                                <HelpIcon /> <span className="text">{t("components.index.info")}</span>
-                            </Button>
-                        </Tooltip>
-                    </Fade>
-                    <Fade in timeout={900}>
+                    <Fade in timeout={700}>
                         <Tooltip title={t("components.index.open_the_settings_panel")}>
                             <IconButton
                                 style={{ marginLeft: 8 }}
@@ -3135,9 +3173,10 @@ const styles = (theme) => {
     // Search-bar styles moved to components/search/styles.js (SearchBar owns them).
     const buttonTransition = `225ms ${EASE}`;
     // The toolbar's secondary buttons without their labels: icon-sized (36 px,
-    // MUI's 64 px minimum dropped) and 4 px apart, so all five clear the Trade
-    // button down to the 960 px where the compact layout takes over (at 64 px
-    // each, even the four of before ran into it below ~1000 px).
+    // MUI's 64 px minimum dropped) and 4 px apart, so they clear the Trade
+    // button down to the 960 px where the compact layout takes over. (Sized
+    // for the five buttons the group once held; three are left, Ask Help and
+    // Info having moved to the left menu.)
     const iconOnlyToolbarButtons = {
         "& .text": { display: "none" },
         "& $toolbarSecondaryButton": {
@@ -3798,9 +3837,10 @@ function Index({ classes, history, settings: rawSettings }) {
 
     const finishTour = useCallback((reason) => {
         const forPage = tourPageRef.current;
+        const hadIntro = tourIncludesIntroRef.current;
         if (forPage) {
             const patch = { [forPage]: true };
-            if (tourIncludesIntroRef.current) patch.intro = true;
+            if (hadIntro) patch.intro = true;
             writeTourState(patch);
         }
         tourPageRef.current = null;
@@ -3811,6 +3851,9 @@ function Index({ classes, history, settings: rawSettings }) {
         if (forPage === "profile" && reason !== "navigated") {
             clickProfileTab(0);
         }
+        // The intro's Info step scrolled the left menu down to its last
+        // section: back to the top, however the tour ended.
+        if (hadIntro) resetMenuScroll();
     }, []);
 
     // Arm the tour on the first visit to a tourable page, once the app shell
@@ -3938,43 +3981,52 @@ function Index({ classes, history, settings: rawSettings }) {
     }, [shareAnimationEnded]);
 
     // ── Navigation helpers ────────────────────────────────────────────────
-    // These depend ONLY on `search.reset` (stable, [] deps) — NOT the whole
-    // `search` object, whose identity changes on every keystroke because of
-    // `query`/`results`. Without this, every character typed in the search
-    // bar minted fresh goToUsername/goToTag/goToCommunity callbacks, which
-    // propagated through ToolbarComponent → SearchResults → every list row
-    // and re-rendered each row's onClick — far more work than the search
-    // itself.
+    // These depend ONLY on `search.reset` and the address flush (both stable)
+    // — NOT the whole `search` object, whose identity changes on every
+    // keystroke because of `query`/`results`. Without this, every character
+    // typed in the search bar minted fresh goToUsername/goToTag/goToCommunity
+    // callbacks, which propagated through ToolbarComponent → SearchResults →
+    // every list row and re-rendered each row's onClick — far more work than
+    // the search itself.
     const searchReset = search.reset;
+    // A result opened leaves the search's entry one step back, for the back
+    // arrow to return to: written first (flush), so it holds the search as it
+    // is at the click — the section its list stands at included — not as at
+    // the last pause. `flush` is stable, like `search.reset`, and does nothing
+    // while the address shows no search.
+    const flushSearchAddress = searchAddress.flush;
     const goHome = useCallback(() => history.back(), [history]);
     const goToUsername = useCallback((n) => {
         const cleaned = String(n || "").replaceAll("@", "");
         if (!cleaned) return;  // refuse to push the broken `/@` URL
+        flushSearchAddress();
         history.push("/@" + cleaned);
         searchReset();
-    }, [history, searchReset]);
+    }, [history, searchReset, flushSearchAddress]);
     // A tag (a search row, a History entry) opens in the sort the reader is
     // browsing: trending until they pick another on the feed (utils/feedSort).
     const goToTag = useCallback((n) => {
+        flushSearchAddress();
         history.push(feedTagPath(n));
         searchReset();
-    }, [history, searchReset]);
+    }, [history, searchReset, flushSearchAddress]);
     const goToCommunity = useCallback((name) => {
+        flushSearchAddress();
         history.push("/" + name);
         searchReset();
-    }, [history, searchReset]);
+    }, [history, searchReset, flushSearchAddress]);
     const goToArtwork = useCallback((item) => {
         const path = artworkPath(item);
         if (!path) return;
+        flushSearchAddress();
         history.push(path);
         searchReset();
-    }, [history, searchReset]);
+    }, [history, searchReset, flushSearchAddress]);
     // The one way out of the search that keeps it open (there is no reset
     // here), so its suffix rides along to the tag page and the search stays
     // in the address. The entry it came from stays one step back — flushed
     // first, so it holds the search as it is now, not as at the last pause.
     const readMeta = metaRoute.readMeta;
-    const flushSearchAddress = searchAddress.flush;
     const setTagNavigation = useCallback((tagname) => {
         flushSearchAddress();
         const shown = readMeta();
@@ -4005,6 +4057,9 @@ function Index({ classes, history, settings: rawSettings }) {
         tab: data?.tab,
         section: data?.section,
     }), [openMeta]);
+    // Info: only the ⋮ menu's entry calls this now. Its toolbar button moved
+    // to the left menu, whose Info row (MenuContent's Help & info section)
+    // sends the META event instead.
     const openAppinfo = useCallback((data) => openMeta({ kind: "info", tab: data?.tab }), [openMeta]);
     const openSettings = useCallback(() => openMeta({ kind: "settings" }), [openMeta]);
     // The portal directory: the toolbar's Portals button and the ⋮ menu's
@@ -4209,7 +4264,7 @@ function Index({ classes, history, settings: rawSettings }) {
         if (!search.isOpen || !historyTags.length) return null;
         return (
             <React.Fragment>
-                <ListSubheader className={classes.subheaderSticky}>{t("words.history")}</ListSubheader>
+                <ListSubheader className={classes.subheaderSticky} {...sectionMark("history")}>{t("words.history")}</ListSubheader>
                 {historyTags.slice(0, 7).map((o, i) => (
                     <ListItem key={"$-" + i} className={classes.historyList}>
                         <ListItemText
@@ -4301,7 +4356,6 @@ function Index({ classes, history, settings: rawSettings }) {
                             onTrade={openTrade}
                             onPortals={openPortals}
                             onWitnesses={openWitnesses}
-                            onAppinfo={openAppinfo}
                             onSettings={openSettings}
                             onToolbarMenu={openToolbarMenu}
                         />

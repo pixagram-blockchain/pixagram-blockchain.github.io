@@ -5,7 +5,8 @@
 //
 //   useSearch(apiRef, { lang })  hook — same contract as the old useBlockchainSearch
 //                            ({ query, results, handleChange, reset, isOpen }) plus
-//                            `controls` for the filter UI and the box; results carry
+//                            `controls` for the filter UI and the box, `focus` (the list's
+//                            subheader in focus) and `restore` for the address; results carry
 //                            user/community profiles, artworks, posts, the filters and the
 //                            panel state, and from the v3 Worker the suggestions, the answer
 //                            to a question, "did you mean" and the placeholder's examples
@@ -31,6 +32,9 @@
 //                            sight (controls.loadMore → searchApi.searchMore)
 //   artworkPath(item)        "/<category>/@author/permlink" for history.push
 //   filters.js / tags.js     the filter state model → /search parameters; tag validity
+//   sections.js              the list's sections and its subheader in focus (search.focus), which
+//                            the address keeps: sectionMark(key) marks a subheader (Index marks
+//                            its History one), normalizeFocus(v) checks a key from the address
 //   intent.js                when a text deserves an answer; the ghost text
 //   wikiUrl(url)             a documentation link on GitHub (what the Worker still sends) →
 //                            the same page in the wiki on pixa.org (wiki.js)
@@ -39,6 +43,9 @@
 //   const search = useSearch(apiRef, { lang: processedSettings._know_the_settings ? processedSettings._language : null });
 //   <SearchBar open={search.isOpen} value={search.query} results={search.results}
 //              controls={search.controls} … onGoToArtwork={goToArtwork} />
+//   search.focus goes into the search's address with the query, the filters and the panel
+//   (Index §8d), and comes back through search.restore({ …, focus }); Index's History
+//   subheader carries {...sectionMark("history")}.
 
 export { useSearch, SEARCH_IDLE, profileOf } from "./useSearch";
 export { SearchBar } from "./SearchBar";
@@ -67,6 +74,7 @@ export {
     hasFilters, countFilters, filtersToParams, filtersKey, normalizeFilters, compactFilters, toggleIn, accountName,
 } from "./filters";
 export { normalizeTag, isValidTag } from "./tags";
+export { SECTIONS, SECTION_ATTR, sectionMark, normalizeFocus, focusOf, scrollToFocus } from "./sections";
 export { searchStyles } from "./styles";
 export { highlightNode } from "./highlight";
 export { SEARCH_API_URL, LIMITS, DEFAULT_COLORS, MORE_AHEAD_PX } from "./config";

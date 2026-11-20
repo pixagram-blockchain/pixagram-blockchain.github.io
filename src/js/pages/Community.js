@@ -129,6 +129,24 @@ const FAB_AWAY_SCALE = 0.85;
 // false, then the Backdrop fades for ~195ms — the FAB comes back after that.
 const FAB_RETURN_DELAY_MS = 260;
 
+// ── Post list scroller geometry ─────────────────────────────────────────
+// The list scrolls in a content-box scroller whose paddings keep the cards
+// clear of the chrome laid over it (the sort bar — top on desktop, bottom on
+// mobile — and the mobile community header). One source for the CSS
+// (styles.masonry) and for the height handed to the Masonry
+// (useCommunityGrid), because the two have to add up:
+//
+//   top + height + bottom = the window's height
+//
+// The list ends where the height ends, `bottom` px above the fold. Mobile's
+// `bottom` used to be missing from the sum (height = window − 80, under
+// 80 + 32 of padding), which put the scroller's last 32px — and the end of
+// the list with them — below the screen.
+const LIST_PADDING_DESKTOP = { top: 66, bottom: 32 };
+// bottom: the sort bar (48px + its 16px bottom margin) + desktop's 32px, so
+// the last card can always be brought clear of the bar.
+const LIST_PADDING_MOBILE = { top: 80, bottom: 96 };
+
 const styles = (theme) => ({
     root: {
         position: "absolute", width: "100%", height: "100%",
@@ -310,12 +328,28 @@ const styles = (theme) => ({
             zIndex: 0, position: "absolute", margin: 0, scrollBehavior: "smooth",
             overscrollBehavior: "none", boxSizing: "content-box !important", touchAction: "pan-y",
             overflow: "hidden overlay !important", // no will-change: scroll-position (Chrome composites scrollers anyway)
-            padding: "66px 16px 32px 412px", height: "100%",
-            [theme.breakpoints.down("sm")]: { padding: "80px 16px 32px 16px", width: "calc(100% - 32px)" },
+            padding: `${LIST_PADDING_DESKTOP.top}px 16px ${LIST_PADDING_DESKTOP.bottom}px 412px`, height: "100%",
+            [theme.breakpoints.down("sm")]: {
+                padding: `${LIST_PADDING_MOBILE.top}px 16px ${LIST_PADDING_MOBILE.bottom}px 16px`,
+                width: "calc(100% - 32px)",
+            },
+            // The Masonry sizes this box itself — inline height / max-height
+            // = the list's total height — and that is the scroll range, so
+            // neither is overridden here. They used to be pinned to 100%,
+            // which left the range to the overflow of whichever cards were
+            // mounted: it ended flush with the last card's bottom edge, with
+            // none of the bottom padding after it, on a scroller whose own
+            // bottom edge sat below the fold — the end of the last post was
+            // out of reach. And with an overscan no larger than that padding
+            // the range stopped growing after the first screen.
+            // No bottom margin either (it was 444px): the Masonry drops
+            // scroll offsets past total height − height, so room added
+            // outside this box is room it never renders for — a direct jump
+            // into it leaves the list unrendered. The space after the last
+            // card is the scroller's bottom padding.
             "& > .ReactVirtualized__Masonry__innerScrollContainer": {
                 top: "auto !important", left: "auto !important", overflow: "initial !important",
-                marginBottom: "444px", boxSizing: "content-box",
-                height: "100% !important", maxHeight: "100% !important",
+                boxSizing: "content-box",
             },
         },
     },
@@ -749,10 +783,24 @@ const useCommunityGrid = ({ windowWidth, windowHeight, isMobile, overscanByPixel
 
     // Page chrome — Community-specific, derived from the shared core.
     const pageWidth = isMobile ? windowWidth : windowWidth - 396 - 300;
-    const postListHeight = windowHeight - (isMobile ? 80 : 96);
+    // The scroller is a content box: this height plus its two paddings is
+    // the box on screen, and has to come to the window's height (see
+    // LIST_PADDING_*).
+    const pad = isMobile ? LIST_PADDING_MOBILE : LIST_PADDING_DESKTOP;
+    const postListHeight = windowHeight - pad.top - pad.bottom;
+    // The Masonry windows its cells against that height alone, yet cards
+    // stay on screen across the paddings above and below it — its overscan
+    // has to reach at least that far, whatever the device preset is. Only
+    // ever raised; left alone when the core doesn't set one.
+    const overscan = core.overscanByPixels;
+    const listOverscanByPixels = typeof overscan === 'number'
+        ? Math.max(overscan, pad.top, pad.bottom) : overscan;
     const { tabsHidden, headerHidden, shouldCollapseMobileCard } = core.chrome;
 
-    return { ...core, pageWidth, postListHeight, tabsHidden, headerHidden, shouldCollapseMobileCard };
+    return {
+        ...core, overscanByPixels: listOverscanByPixels,
+        pageWidth, postListHeight, tabsHidden, headerHidden, shouldCollapseMobileCard,
+    };
 };
 
 // ── usePostNavigation ──────────────────────────────────────────────────

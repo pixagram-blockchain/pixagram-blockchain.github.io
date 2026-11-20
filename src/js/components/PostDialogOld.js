@@ -87,6 +87,7 @@ async function getMetadata(src){
     const imgd = await pngdby.get_new_img_data(imgOBJ);
     const r = analyze_colors(imgd.data, 256, "hilbert");
 
+    console.log(r)
     return {
         imgd,
         colors: r.to_json(),

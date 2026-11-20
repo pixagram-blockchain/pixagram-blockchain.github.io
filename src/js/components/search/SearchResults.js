@@ -12,6 +12,7 @@ import { t, useLanguage } from "../../utils/text";
 import { NO_SLOTS, tr } from "./highlight";
 import { COMMUNITY_ACCOUNT_RE } from "./config";
 import { hasFilters } from "./filters";
+import { sectionMark } from "./sections";
 import { isValidTag, normalizeTag } from "./tags";
 import { SearchFilters } from "./SearchFilters";
 import { UserResult } from "./UserResult";
@@ -37,6 +38,9 @@ import { AnswerCard } from "./AnswerCard";
 // full-screen panel (fullScreen.js), the dropdown fills it under the input row
 // and the masonry takes `columns`. The Posts and Artworks sections carry
 // data-search-index: scrolling them into sight is what opens the panel.
+// Every subheader carries its section's key (sections.js, sectionMark): the one
+// standing at the top of the list is the subheader in focus, which the address
+// keeps (History's is marked the same way where Index renders it).
 //
 // The Tags section offers the typed term itself ("#term") on a line of its own,
 // above the other matches, only when it is a valid tag (see tags.js) or a tag the
@@ -125,7 +129,7 @@ export const SearchResults = React.memo(
 
         const postSection = posts.length > 0 ? (
             <div className={indexClass} data-search-index="posts">
-                <ListSubheader className={classes.subheaderSticky}>{tr(t, "words.posts", "Posts")}</ListSubheader>
+                <ListSubheader className={classes.subheaderSticky} {...sectionMark("posts")}>{tr(t, "words.posts", "Posts")}</ListSubheader>
                 {posts.map((post) => (
                     <PostResult key={"p-" + post.id} classes={classes} post={post} query={query} communityTitles={communityTitles} onGoToPost={goToPost} />
                 ))}
@@ -144,7 +148,7 @@ export const SearchResults = React.memo(
 
         const artworkSection = (artworks.length > 0 || artworksLoading) ? (
             <div className={indexClass} data-search-index="artworks">
-                <ListSubheader className={classes.subheaderSticky}>{tr(t, "words.artworks", "Artworks")}</ListSubheader>
+                <ListSubheader className={classes.subheaderSticky} {...sectionMark("artworks")}>{tr(t, "words.artworks", "Artworks")}</ListSubheader>
                 {overviewLine}
                 {artworks.length > 0 ? (
                     <React.Fragment>
@@ -228,7 +232,7 @@ export const SearchResults = React.memo(
                         ) : hasAny ? (
                             <List dense>
                                 {users.length > 0 && (
-                                    <ListSubheader className={classes.subheaderSticky}>{tr(t, "components.search_results.users", "Users")}</ListSubheader>
+                                    <ListSubheader className={classes.subheaderSticky} {...sectionMark("users")}>{tr(t, "components.search_results.users", "Users")}</ListSubheader>
                                 )}
                                 {users.length > 0 && (
                                     <li className={classes.userGrid}>
@@ -239,7 +243,7 @@ export const SearchResults = React.memo(
                                 )}
 
                                 {(tagIsValid || otherTags.length > 0) && (
-                                    <ListSubheader className={classes.subheaderSticky}>{tr(t, "words.tags", "Tags")}</ListSubheader>
+                                    <ListSubheader className={classes.subheaderSticky} {...sectionMark("tags")}>{tr(t, "words.tags", "Tags")}</ListSubheader>
                                 )}
                                 {tagIsValid && (
                                     <TagResult classes={classes} name={tag} exact query={tag} onGoToTag={onGoToTag} />
@@ -253,7 +257,7 @@ export const SearchResults = React.memo(
                                 )}
 
                                 {communities.length > 0 && (
-                                    <ListSubheader className={classes.subheaderSticky}>{tr(t, "words.communities", "Communities")}</ListSubheader>
+                                    <ListSubheader className={classes.subheaderSticky} {...sectionMark("communities")}>{tr(t, "words.communities", "Communities")}</ListSubheader>
                                 )}
                                 {communities.map((community) => (
                                     <CommunityResult key={"c-" + community.name} classes={classes} community={community} query={query} onGoToCommunity={onGoToCommunity} />

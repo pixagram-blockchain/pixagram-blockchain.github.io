@@ -1,24 +1,94 @@
-import { ColorImageConverter } from "vtracer-color";
-import { SIMDopeCreate, SIMDopeCreateConfAdd } from "simdope";
+import { VTracer, resolveOptions } from "@pixagram/vtracer";
 
-// Configuration for SIMD color operations
-const MODE = SIMDopeCreateConfAdd({
-    create: { new_of: true, new_uint32: true, new_uint32b: true },
-    properties: { uint32: true, hex: true },
-    methods: {
-        get_element: true,
-        euclidean_match_with: true,
-        slice_uint32: true,
-        get_deduplicated_sorted_uint32a: true
+/*
+ * Raster -> SVG, on top of @pixagram/vtracer.
+ *
+ * Same exports and call signatures as the vtracer-color version of this file,
+ * with these differences in how the work gets done:
+ *
+ *  - The conversion runs in a worker instead of in 25 ms slices on the main
+ *    thread, and nothing is added to the document: no hidden <canvas>, no
+ *    hidden <svg>, no element ids.
+ *  - Transparency is handled by the tracer: pixels with alpha 0 get no shape.
+ *    The black <-> #161616 swap and the '#000000' -> 'transparent' rewrite are
+ *    gone, so black stays black and the input ImageData is never modified.
+ *  - With output "blob" the SVG never becomes a JS string: its bytes move
+ *    from the worker straight into the Blob.
+ *  - Markup: paths carry fill="#rrggbb" (not style="fill: ...") and absolute
+ *    coordinates (no translate()), and the root has width, height and a
+ *    viewBox, so the image scales when drawn larger.
+ */
+
+/** Upper bound on tracer workers. They start on demand and stop after 30 s idle. */
+const MAX_WORKERS = 2;
+
+const RADIANS_TO_DEGREES = 180 / Math.PI;
+
+/**
+ * The settings this module has always used, in @pixagram/vtracer units.
+ * vtracer-color took them as:
+ *   corner_threshold: 1 / 60, splice_threshold: 1 / 45   (radians)
+ *   filter_speckle: 16                                   (an area: 4 x 4 px)
+ *   color_precision: 0                                   (bits dropped: 8 kept)
+ *
+ * hierarchical: vtracer-color's "cutout" re-clustered the image and simplified
+ * every shape's closed outline on its own; that is what "stacked" polygons
+ * are here (same long straight edges, and no gaps between neighbours because
+ * shapes overlap). "cutout" was needed back then so that the shapes rewritten
+ * to 'transparent' showed the canvas rather than a lower layer; with real
+ * transparency that reason is gone. This engine's "cutout" is a different
+ * algorithm (a mosaic with shared borders) that hugs the pixel staircase much
+ * more closely - pass { hierarchical: "cutout" } to createConverter for it.
+ */
+const DEFAULT_OPTIONS = {
+    mode: "polygon",
+    clustering: "color",
+    hierarchical: "stacked",
+    cornerThreshold: (1 / 60) * RADIANS_TO_DEGREES,
+    lengthThreshold: 6.0,
+    maxIterations: 1,
+    spliceThreshold: (1 / 45) * RADIANS_TO_DEGREES,
+    filterSpeckle: 4,
+    colorPrecision: 8,
+    layerDifference: 0,
+    pathPrecision: 2,
+    xmlHeader: false,
+};
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+/**
+ * Old option names (snake_case, vtracer-color units) -> @pixagram/vtracer.
+ * Anything else is passed through, so the new camelCase names work as they are.
+ */
+const LEGACY_OPTIONS = {
+    canvas_id: () => null,
+    svg_id: () => null,
+    clustering_mode: (v) => ["clustering", v],
+    corner_threshold: (v) => ["cornerThreshold", clamp(v * RADIANS_TO_DEGREES, 0, 180)],
+    splice_threshold: (v) => ["spliceThreshold", clamp(v * RADIANS_TO_DEGREES, 0, 180)],
+    length_threshold: (v) => ["lengthThreshold", v],
+    max_iterations: (v) => ["maxIterations", clamp(v, 0, 64)],
+    filter_speckle: (v) => ["filterSpeckle", Math.round(Math.sqrt(Math.max(0, v)))],
+    color_precision: (v) => ["colorPrecision", clamp(8 - v, 1, 8)],
+    layer_difference: (v) => ["layerDifference", v],
+    path_precision: (v) => ["pathPrecision", v],
+};
+
+function toTracerOptions(options = {}) {
+    const out = {};
+    for (const [key, value] of Object.entries(options)) {
+        if (value === undefined) continue;
+        const legacy = LEGACY_OPTIONS[key];
+        if (!legacy) {
+            out[key] = value;
+            continue;
+        }
+        const mapped = legacy(value);
+        if (mapped) out[mapped[0]] = mapped[1];
     }
-});
-
-const { Color, Colors } = SIMDopeCreate(MODE);
-const serializer = new XMLSerializer();
-
-// Pre-computed constants for color replacement
-const BLACK_UINT32 = 0x000000FF;
-const REPLACEMENT_UINT32 = 0x161616FF;
+    return out;
+}
 
 /**
  * Error thrown when a conversion is cancelled
@@ -31,228 +101,14 @@ export class ConversionCancelledError extends Error {
     }
 }
 
-/**
- * Efficiently replaces black pixels with a near-black substitute
- * to preserve transparency distinction in vectorization.
- *
- * @param {Uint32Array} pixels - Pixel buffer as Uint32Array
- * @returns {void} - Mutates in place
- */
-function replaceBlackPixels(pixels) {
-    // Direct comparison is ~100x faster than Color.new_uint32().euclidean_match_with()
-    for (let i = 0, len = pixels.length; i < len; i++) {
-        if (pixels[i] === BLACK_UINT32) {
-            pixels[i] = REPLACEMENT_UINT32;
-        }
+let tracer = null;
+
+function getTracer() {
+    if (tracer === null) {
+        const cores = (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 2;
+        tracer = new VTracer({ workers: clamp(cores - 1, 1, MAX_WORKERS) });
     }
-}
-
-/**
- * Creates final SVG string with color corrections applied.
- * Single-pass regex replacement for performance.
- */
-function createOutputSvg(svgElement, canvasElement, output) {
-    if (!svgElement || !canvasElement) {
-        console.error('SVG or Canvas element not found');
-        return null;
-    }
-
-    // Clean up element attributes before serialization
-    svgElement.removeAttribute("style");
-    svgElement.removeAttribute("id");
-
-    let svgString = serializer.serializeToString(svgElement);
-
-    // Single-pass replacement using a map for O(1) lookups
-    const colorReplacements = {
-        '#000000': 'transparent',
-        '#161616': '#000000'
-    };
-
-    svgString = svgString.replace(
-        /style="fill: (#[0-9a-fA-F]{6});"/g,
-        (match, color) => {
-            const replacement = colorReplacements[color.toLowerCase()];
-            return replacement
-                ? `style="fill: ${replacement};"`
-                : match;
-        }
-    );
-
-    // Clean up DOM elements
-    svgElement.remove();
-    canvasElement.remove();
-
-    if (output === "svg") {
-        return svgString;
-    } else if (output === "blob") {
-        const blob = new Blob([svgString], { type: 'image/svg+xml' });
-        return URL.createObjectURL(blob);
-    }
-
-    return svgString;
-}
-
-/**
- * Converter runner with proper lifecycle management.
- * Each instance owns its resources exclusively.
- */
-class ConverterRunner {
-    #converter = null;
-    #stopped = false;
-    #frameId = null;
-    #n = null;
-
-    constructor(canvasId, svgId, options = {}, n = null) {
-        this.canvasId = canvasId;
-        this.svgId = svgId;
-        this.#n = n;
-        this.options = {
-            mode: "polygon",
-            clustering_mode: "color",
-            hierarchical: "cutout",
-            corner_threshold: 1 / 60,
-            length_threshold: 6.0,
-            max_iterations: 1,
-            splice_threshold: 1 / 45,
-            filter_speckle: 16,
-            color_precision: 0,
-            layer_difference: 0,
-            path_precision: 2,
-            ...options
-        };
-    }
-
-    #initConverter() {
-        // Always free existing converter before creating new one
-        this.#freeConverter();
-        const config = JSON.stringify({
-            canvas_id: this.canvasId,
-            svg_id: this.svgId,
-            ...this.options
-        });
-
-        this.#converter = ColorImageConverter.new_with_string(config);
-        this.#converter.init();
-    }
-
-    #freeConverter() {
-        if (this.#converter) {
-            try {
-                this.#converter.free();
-            } catch (e) {
-                console.warn('Converter already freed:', e);
-            }
-            this.#converter = null;
-        }
-    }
-
-    run(output = "svg") {
-        return new Promise((resolve, reject) => {
-            this.#stopped = false;
-            this.#initConverter();
-
-            const tick = () => {
-                if (this.#stopped) {
-                    this.#freeConverter();
-                    reject(new ConversionCancelledError(this.#n));
-                    return;
-                }
-
-                try {
-                    let done = false;
-                    const startTick = performance.now();
-
-                    // Process for up to 25ms per frame
-                    while (!(done = this.#converter.tick()) && performance.now() - startTick < 25) {}
-
-                    if (!done) {
-                        this.#frameId = requestAnimationFrame(tick);
-                    } else {
-                        this.#complete(output, resolve);
-                    }
-                } catch (e) {
-                    this.#freeConverter();
-                    reject(e);
-                }
-            };
-
-            // Use requestAnimationFrame instead of setTimeout for better performance
-            this.#frameId = requestAnimationFrame(tick);
-        });
-    }
-
-    #complete(output, resolve) {
-        const svgElement = document.getElementById(this.svgId);
-        const canvasElement = document.getElementById(this.canvasId);
-
-        const result = createOutputSvg(svgElement, canvasElement, output);
-
-        this.#freeConverter();
-        resolve(result);
-    }
-
-    stop() {
-        this.#stopped = true;
-        if (this.#frameId) {
-            cancelAnimationFrame(this.#frameId);
-            this.#frameId = null;
-        }
-        this.#freeConverter();
-    }
-
-    /**
-     * Explicit cleanup - call when done with this runner
-     */
-    dispose() {
-        this.stop();
-    }
-}
-
-/**
- * Prepares canvas with image data for vectorization.
- * Handles both ImageData and URL sources.
- */
-async function prepareCanvas(canvas, svg, imageSource) {
-    const ctx = canvas.getContext('2d', { colorSpace: "srgb" });
-
-    if (imageSource instanceof ImageData) {
-        canvas.width = imageSource.width;
-        canvas.height = imageSource.height;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // Replace black pixels efficiently
-        const pixels = new Uint32Array(imageSource.data.buffer);
-        replaceBlackPixels(pixels);
-
-        // Create new ImageData with modified buffer
-        const modifiedData = new ImageData(
-            new Uint8ClampedArray(pixels.buffer),
-            imageSource.width,
-            imageSource.height
-        );
-        ctx.putImageData(modifiedData, 0, 0);
-
-    } else {
-        // Load from URL
-        const img = await loadImage(imageSource);
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0);
-
-        // Get and modify pixel data
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const pixels = new Uint32Array(imageData.data.buffer);
-        replaceBlackPixels(pixels);
-
-        ctx.putImageData(imageData, 0, 0);
-    }
-
-    // Configure SVG element
-    svg.setAttribute("fill", "transparent");
-    svg.setAttribute("height", canvas.height + "px");
-    svg.setAttribute("width", canvas.width + "px");
+    return tracer;
 }
 
 /**
@@ -261,40 +117,72 @@ async function prepareCanvas(canvas, svg, imageSource) {
 function loadImage(src) {
     return new Promise((resolve, reject) => {
         const img = new Image();
+        // lets images from CORS-enabled hosts be read back; same-origin,
+        // data: and blob: URLs are unaffected
+        img.crossOrigin = "anonymous";
         img.onload = () => resolve(img);
-        img.onerror = reject;
+        img.onerror = () => reject(new Error(`Image could not be loaded: ${String(src).slice(0, 128)}`));
         img.src = src;
     });
 }
 
 /**
- * Creates or retrieves DOM elements for vectorization
+ * Decodes an image URL to pixels. Done here rather than in the worker so it
+ * works wherever a 2D canvas does.
  */
-function getOrCreateElements(canvasId, svgId) {
-    let canvas = document.getElementById(canvasId);
-    if (!canvas) {
-        canvas = document.createElement('canvas');
-        canvas.id = canvasId;
-        canvas.style.display = 'none';
-        document.body.appendChild(canvas);
+async function loadPixels(src) {
+    const img = await loadImage(src);
+    const width = img.naturalWidth;
+    const height = img.naturalHeight;
+    if (!width || !height) {
+        throw new Error("Image has no intrinsic size");
     }
 
-    let svg = document.getElementById(svgId);
-    if (!svg) {
-        svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.id = svgId;
-        svg.style.display = 'none';
-        document.body.appendChild(svg);
-    }
+    const canvas = typeof OffscreenCanvas === "function"
+        ? new OffscreenCanvas(width, height)
+        : Object.assign(document.createElement("canvas"), { width, height });
+    const ctx = canvas.getContext("2d", { colorSpace: "srgb", willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    const imageData = ctx.getImageData(0, 0, width, height);
 
-    return { canvas, svg };
+    // Drop the decoded copies now instead of waiting for the collector.
+    canvas.width = 1;
+    canvas.height = 1;
+    img.removeAttribute("src");
+    return imageData;
 }
 
-// Instance counter for unique IDs
-let instanceCounter = 0;
+/**
+ * One conversion. `n` is only used to label a cancellation.
+ */
+async function convert(imageSource, output, options, signal, n) {
+    try {
+        const fromUrl = typeof imageSource === "string" || imageSource instanceof URL;
+        const source = fromUrl ? await loadPixels(String(imageSource)) : imageSource;
+        if (signal.aborted) {
+            throw new ConversionCancelledError(n);
+        }
 
-// Registry of active runners by n - enables cancellation of previous runs
-const activeRunners = new Map();
+        // Pixels decoded here belong to nobody else: move them to the worker.
+        // A caller's ImageData is copied, and stays untouched and usable.
+        const call = { signal, transfer: fromUrl };
+
+        if (output === "blob") {
+            const bytes = await getTracer().trace(source, options, { ...call, output: "bytes" });
+            return URL.createObjectURL(new Blob([bytes], { type: 'image/svg+xml' }));
+        }
+        return await getTracer().trace(source, options, call);
+    } catch (e) {
+        // However the abort surfaced, report it the way this module always has.
+        if (signal.aborted) {
+            throw new ConversionCancelledError(n);
+        }
+        throw e;
+    }
+}
+
+// Running conversions by n - enables cancellation of previous runs
+const activeConversions = new Map();
 
 /**
  * Main API: Convert raster image to SVG
@@ -303,40 +191,26 @@ const activeRunners = new Map();
  * the previous conversion is cancelled and the new one takes over.
  *
  * @param {ImageData|string} imageSource - ImageData object or image URL
+ *        (ImageBitmap, Blob and canvas elements are accepted too)
  * @param {string} output - "svg" for string, "blob" for blob URL
  * @param {number} n - Instance identifier (required for cancellation tracking)
  * @returns {Promise<string>} - SVG string or blob URL
  */
 export default async function createSVG(imageSource, output = "svg", n = 0) {
-    // Cancel any existing runner with the same n
-    const existingRunner = activeRunners.get(n);
-    if (existingRunner) {
-        existingRunner.stop();
-        activeRunners.delete(n);
-    }
+    // Cancel any existing conversion with the same n
+    cancelSVG(n);
 
-    const canvasId = `vtracer-canvas-${n}`;
-    const svgId = `vtracer-svg-${n}`;
-
-    const { canvas, svg } = getOrCreateElements(canvasId, svgId);
-
-    await prepareCanvas(canvas, svg, imageSource);
-
-    const runner = new ConverterRunner(canvasId, svgId, {}, n);
-
-    // Register this runner
-    activeRunners.set(n, runner);
+    const controller = new AbortController();
+    activeConversions.set(n, controller);
 
     try {
-        const result = await runner.run(output);
-        return result;
+        return await convert(imageSource, output, DEFAULT_OPTIONS, controller.signal, n);
     } finally {
-        // Only delete if this runner is still the active one for this n
-        // (prevents race condition if a newer call already replaced it)
-        if (activeRunners.get(n) === runner) {
-            activeRunners.delete(n);
+        // Only delete if this conversion is still the active one for this n
+        // (a newer call may already have replaced it)
+        if (activeConversions.get(n) === controller) {
+            activeConversions.delete(n);
         }
-        runner.dispose();
     }
 }
 
@@ -344,13 +218,13 @@ export default async function createSVG(imageSource, output = "svg", n = 0) {
  * Cancel an in-progress conversion by its n identifier
  *
  * @param {number} n - Instance identifier to cancel
- * @returns {boolean} - true if a runner was cancelled, false if none found
+ * @returns {boolean} - true if a conversion was cancelled, false if none found
  */
 export function cancelSVG(n) {
-    const runner = activeRunners.get(n);
-    if (runner) {
-        runner.stop();
-        activeRunners.delete(n);
+    const controller = activeConversions.get(n);
+    if (controller) {
+        activeConversions.delete(n);
+        controller.abort();
         return true;
     }
     return false;
@@ -360,34 +234,49 @@ export function cancelSVG(n) {
  * Cancel all in-progress conversions
  */
 export function cancelAllSVG() {
-    for (const [n, runner] of activeRunners) {
-        runner.stop();
+    const controllers = Array.from(activeConversions.values());
+    activeConversions.clear();
+    for (const controller of controllers) {
+        controller.abort();
     }
-    activeRunners.clear();
 }
 
 /**
  * Advanced API: Create a reusable converter for batch processing
- * Caller is responsible for calling dispose() when done.
+ *
+ * `options` may use the old vtracer-color names and units (corner_threshold
+ * in radians, filter_speckle as an area, ...) or @pixagram/vtracer's own
+ * (cornerThreshold in degrees, filterSpeckle in pixels, ...).
+ * Invalid options throw here, not at the first conversion.
  */
 export function createConverter(options = {}) {
-    const instanceId = instanceCounter++;
-    const canvasId = `vtracer-canvas-${instanceId}`;
-    const svgId = `vtracer-svg-${instanceId}`;
+    const traceOptions = { ...DEFAULT_OPTIONS, ...toTracerOptions(options) };
+    resolveOptions(traceOptions);
 
-    const { canvas, svg } = getOrCreateElements(canvasId, svgId);
-    const runner = new ConverterRunner(canvasId, svgId, options);
+    let controller = null;
+
+    const stop = () => {
+        if (controller) {
+            controller.abort();
+            controller = null;
+        }
+    };
 
     return {
         async convert(imageSource, output = "svg") {
-            await prepareCanvas(canvas, svg, imageSource);
-            return runner.run(output);
+            // one conversion at a time per converter: a new one replaces the old
+            stop();
+            const own = new AbortController();
+            controller = own;
+            try {
+                return await convert(imageSource, output, traceOptions, own.signal, null);
+            } finally {
+                if (controller === own) {
+                    controller = null;
+                }
+            }
         },
-        stop() {
-            runner.stop();
-        },
-        dispose() {
-            runner.dispose();
-        }
+        stop,
+        dispose: stop,
     };
 }

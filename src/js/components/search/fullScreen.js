@@ -6,6 +6,7 @@ import {
     FULL_COLLAPSE_MS, FULL_COLUMN_PX, FULL_COLUMN_PX_DESKTOP, FULL_ENTER_PX, FULL_EXPAND_MS, FULL_HEIGHT,
     FULL_MAX_COLUMNS, FULL_MAX_COLUMNS_DESKTOP, FULL_WIDTH,
 } from "./config";
+import { focusOf, scrollToFocus } from "./sections";
 import { BAR_H, BAR_H_SM, SCROLL_MARGIN, SCROLL_MARGIN_SM } from "./styles";
 
 // ── Full screen ───────────────────────────────────────────────────────────────
@@ -47,6 +48,27 @@ import { BAR_H, BAR_H_SM, SCROLL_MARGIN, SCROLL_MARGIN_SM } from "./styles";
 // fewer, larger ones in the desktop sheet), from the moment the panel starts
 // growing until it starts shrinking: the moments the artworks are only just in
 // sight, or out of it.
+//
+// The subheader in focus (sections.js) — the list's sticky subheader standing at
+// the top of its window, none while the list is at its top — is read where the
+// reader's scrolling is: in the same handler, once a frame, after every move of
+// the panel, and whenever what the list shows changes. It is told to `onFocus`
+// (useSearch keeps it, Index puts it in the address: +search-…).
+//
+// An order (`order`, from useSearch.restore: the address moved — the back arrow,
+// a reload, a link) puts the list where the address says:
+//   a subheader   the search is the panel, whichever section it is — the
+//                 reader's own scrolling only grows it into the posts and the
+//                 artworks, the address does for any of them — and the list goes
+//                 to that subheader as soon as the results are in (`settled`):
+//                 to the nearest section when that one has nothing to show, and
+//                 back to the toolbar when the search found nothing at all
+//   none          the list at its top, the search in the toolbar
+// An order's panel is simply there, or gone: no transition, as the address
+// brings a state back, not a gesture — and the list is put in place in the
+// layout it ends in. While an order is under way the list's scrolling decides
+// nothing; the reader's hand on the list (wheel, touch, mouse, a key) ends it,
+// and so does a new text or filter (useSearch takes the order back).
 
 // Material's emphasized easing: a quick start that settles softly.
 const EASE = "cubic-bezier(0.2, 0, 0, 1)";
@@ -54,6 +76,7 @@ const EASE = "cubic-bezier(0.2, 0, 0, 1)";
 const MIN_SCROLL_PX = 8;
 // A pull down this long at the top of the list (touch screens) is a scroll up.
 const PULL_PX = 24;
+const NO_CONTENT = Object.freeze([]);
 
 const viewportSize = () =>
     (typeof window === "undefined" ? { w: 0, h: 0 } : { w: window.innerWidth, h: window.innerHeight });
@@ -162,8 +185,19 @@ function holdAnchor(list, anchor, anim, keepInSight) {
  *   setScroller  ref of the results' scrolling list
  * `panel` is the bar's element, `resultsRef` the dropdown's, `maxHeightRef` the
  * dropdown's maximum height under the bar in the toolbar (where the panel goes back).
+ *
+ * The subheader in focus, and the orders that put the list at one (see above):
+ *   order     { focus, n } — where the address says the list stands (results.focusOrder);
+ *             null: none under way
+ *   settled   the results are in: nothing of the search is still on its way
+ *   content   what the list shows, as dependencies: when one changes, the list may stand elsewhere
+ *   onFocus   (focus, order) — the subheader in focus (null: none), told whenever it may have
+ *             changed; `order` is the order that is over with it, else null
  */
-export function useFullScreen({ open, panel, resultsRef, maxHeightRef, reduceMotion }) {
+export function useFullScreen({
+    open, panel, resultsRef, maxHeightRef, reduceMotion,
+    order = null, settled = true, content = NO_CONTENT, onFocus = null,
+}) {
     const [full, setFull] = useState(false);
     const [shrinking, setShrinking] = useState(false);
     const [viewport, setViewport] = useState(viewportSize);
@@ -173,10 +207,17 @@ export function useFullScreen({ open, panel, resultsRef, maxHeightRef, reduceMot
 
     // What the listeners and the moves read: the decision taken (full), a move or its
     // aftermath under way (busy), the list's last scroll position (y), the running
-    // animation, what the next commit completes (pending), and the settling frame.
-    const st = useRef({ full: false, busy: false, y: 0, anim: null, release: null, pending: null, settle: 0 });
+    // animation, what the next commit completes (pending), the settling frame, and the
+    // order under way (order).
+    const st = useRef({ full: false, busy: false, y: 0, anim: null, release: null, pending: null, settle: 0, order: null });
     const live = useRef(null);
-    live.current = { panel, scroller, spacer, reduceMotion };
+    live.current = { panel, scroller, spacer, reduceMotion, onFocus };
+
+    // Tell where the list stands: its subheader in focus (`done`: the order that is over with it).
+    const tell = useCallback((list, done) => {
+        const told = live.current.onFocus;
+        if (told) told(focusOf(list), done || null);
+    }, []);
 
     // Two frames after the last layout change, the scrolling it caused is over: from then
     // on, the list's scroll position is the reader's again.
@@ -212,8 +253,9 @@ export function useFullScreen({ open, panel, resultsRef, maxHeightRef, reduceMot
     }, []);
 
     // Grow: the start box is measured now; the commit lays the panel out, and the layout
-    // effect below animates from the one to the other.
-    const grow = useCallback(() => {
+    // effect below animates from the one to the other. `ordered`: an order's panel, simply
+    // there (no transition), the list left for the order to place.
+    const grow = useCallback((ordered) => {
         const s = st.current;
         const { panel: bar, scroller: list, reduceMotion: still } = live.current;
         if (s.full || s.busy || !bar) return;
@@ -227,8 +269,8 @@ export function useFullScreen({ open, panel, resultsRef, maxHeightRef, reduceMot
             from: { top: b.top, left: b.left, width: b.width, height: Math.max(b.height, bottom - b.top) },
             radius: radiusOf(bar),
             // the posts or artworks that made it grow, and how far in sight: kept so
-            anchor: list ? indexAnchor(list) : null,
-            still: !!still || typeof bar.animate !== "function",
+            anchor: list && !ordered ? indexAnchor(list) : null,
+            still: !!ordered || !!still || typeof bar.animate !== "function",
         };
         setViewport(viewportSize());
         setFull(true);
@@ -236,14 +278,15 @@ export function useFullScreen({ open, panel, resultsRef, maxHeightRef, reduceMot
 
     // Shrink: the panel's box is animated, still in the panel's layout, to the bar's place
     // in the toolbar plus the dropdown it will have there; once there, the commit puts the
-    // toolbar layout back (and the layout effect lets go of the animation).
-    const shrink = useCallback(() => {
+    // toolbar layout back (and the layout effect lets go of the animation). `ordered`: an
+    // order's doing — back in the toolbar at once, the list where the order put it.
+    const shrink = useCallback((ordered) => {
         const s = st.current;
         const { panel: bar, scroller: list, spacer: home, reduceMotion: still } = live.current;
         if (!s.full || s.busy) return;
         s.busy = true;
         // shrinking because the posts and artworks left sight: they stay out of it
-        const anchor = list ? indexAnchor(list) : null;
+        const anchor = list && !ordered ? indexAnchor(list) : null;
         const hidden = anchor && anchor.above <= 0 ? anchor : null;
         const done = () => {
             s.full = false;
@@ -251,7 +294,7 @@ export function useFullScreen({ open, panel, resultsRef, maxHeightRef, reduceMot
             setShrinking(false);
             setFull(false);
         };
-        if (still || !bar || !home || typeof bar.animate !== "function") {
+        if (ordered || still || !bar || !home || typeof bar.animate !== "function") {
             done();
             return;
         }
@@ -337,10 +380,12 @@ export function useFullScreen({ open, panel, resultsRef, maxHeightRef, reduceMot
         }
     }, [full, settle]);
 
-    // Closed, the search is no panel anymore: at once (its results went with it).
+    // Closed, the search is no panel anymore: at once (its results went with it, and an
+    // order still under way).
     useLayoutEffect(() => {
         if (open) return;
         const s = st.current;
+        s.order = null;
         if (!s.full && !s.busy && !s.anim) return;
         stop();
         const bar = live.current.panel;
@@ -351,6 +396,60 @@ export function useFullScreen({ open, panel, resultsRef, maxHeightRef, reduceMot
     }, [open, stop]);
 
     useEffect(() => stop, [stop]);
+
+    // An order comes, or is taken back before the list got there (a new text, a filter: the
+    // reader moved on) — the panel it opened for nothing, its list still at the top, then goes
+    // back to the toolbar, as it does when a new text empties a list the reader had scrolled.
+    useLayoutEffect(() => {
+        const s = st.current;
+        const takenBack = !!s.order && !order;
+        s.order = order || null;
+        if (!takenBack || !s.full || s.busy) return;
+        const list = live.current.scroller;
+        if (!list || list.scrollTop <= 0) shrink();
+    }, [order, shrink]);
+
+    // The order under way is carried out as far as it can be, whenever something it waits for
+    // moves: the bar, the list, the results, the panel.
+    useLayoutEffect(() => {
+        const s = st.current;
+        const o = s.order;
+        if (!o || !open) return;
+        const list = live.current.scroller;
+        let placed = false;
+        if (o.focus) {
+            // A subheader: the panel at once…
+            if (!s.full && !s.busy) grow(true);
+            // … and the list at it once the results are in (their sections are not there before).
+            if (!list || !settled) return;
+            placed = scrollToFocus(list, o.focus);
+            s.y = list.scrollTop;
+            // In the panel's own layout only: once more when it has settled (tick).
+            if (placed && (s.busy || !s.full)) return;
+        }
+        if (!placed) {
+            // None — or a search that found nothing to stand at: the list at its top, the
+            // search in the toolbar.
+            if (list) {
+                list.scrollTop = 0;
+                s.y = 0;
+            }
+            if (s.busy) return;
+            if (s.full) shrink(true);
+        }
+        s.order = null;
+        tell(list, o);
+    }, [order, open, panel, scroller, settled, tick, full, grow, shrink, tell]);
+
+    // After a move of the panel, and whenever what the list shows changes, the list may
+    // stand elsewhere (and nowhere once it is gone: none). Not while the panel moves or an
+    // order is under way: their end tells.
+    useEffect(() => {
+        const s = st.current;
+        if (s.busy || s.order) return;
+        tell(scroller);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [scroller, tick, tell, ...content]);
 
     // Full, the panel follows the viewport (CSS insets); the columns and heights here too.
     useEffect(() => {
@@ -375,22 +474,35 @@ export function useFullScreen({ open, panel, resultsRef, maxHeightRef, reduceMot
             const y = scroller.scrollTop;
             const dy = y - s.y;
             s.y = y;
-            if (s.busy || !dy) return;
+            // (nor while an order is under way: the list is on its way to where the address says)
+            if (s.busy || s.order || !dy) return;
             if (dy > 0) {
                 if (!s.full && y > MIN_SCROLL_PX && indexShowing(scroller, FULL_ENTER_PX)) grow();
             } else if (s.full && (y <= 0 || !indexShowing(scroller, 0))) {
                 shrink();
             }
+            // the subheader in focus now (a move just started tells it when it has settled)
+            if (!s.busy) tell(scroller);
         };
         const onScroll = () => {
             if (!frame) frame = requestAnimationFrame(decide);
         };
+        // The reader's hand on the list ends an order under way: the list is theirs, where it stands.
+        const takeOver = () => {
+            const o = s.order;
+            if (!o) return;
+            s.order = null;
+            s.y = scroller.scrollTop;
+            tell(scroller, o);
+        };
         // At the top, a list has nothing left to scroll up: the wheel turned up is the scroll up…
         const onWheel = (e) => {
+            takeOver();
             if (s.full && !s.busy && e.deltaY < 0 && scroller.scrollTop <= 0) shrink();
         };
         // … and so is a finger pulling the list down.
         const onTouchStart = (e) => {
+            takeOver();
             pullFrom = e.touches.length === 1 && scroller.scrollTop <= 0 ? e.touches[0].clientY : null;
         };
         const onTouchMove = (e) => {
@@ -405,14 +517,19 @@ export function useFullScreen({ open, panel, resultsRef, maxHeightRef, reduceMot
         scroller.addEventListener("wheel", onWheel, passive);
         scroller.addEventListener("touchstart", onTouchStart, passive);
         scroller.addEventListener("touchmove", onTouchMove, passive);
+        // (the scrollbar dragged, a row clicked; a key while the focus is in the list)
+        scroller.addEventListener("mousedown", takeOver, passive);
+        scroller.addEventListener("keydown", takeOver, passive);
         return () => {
             scroller.removeEventListener("scroll", onScroll, passive);
             scroller.removeEventListener("wheel", onWheel, passive);
             scroller.removeEventListener("touchstart", onTouchStart, passive);
             scroller.removeEventListener("touchmove", onTouchMove, passive);
+            scroller.removeEventListener("mousedown", takeOver, passive);
+            scroller.removeEventListener("keydown", takeOver, passive);
             if (frame) cancelAnimationFrame(frame);
         };
-    }, [scroller, grow, shrink]);
+    }, [scroller, grow, shrink, tell]);
 
     // The panel: a centred FULL_WIDTH × FULL_HEIGHT sheet on desktop, the whole screen below.
     const desktop = viewport.w >= DESKTOP_MIN_WIDTH;

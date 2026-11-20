@@ -53,7 +53,13 @@
  * @module SecureVault
  */
 
-import argon2id from 'hash-wasm/dist/argon2.umd.min';
+// Named import, NOT default. This bundle exports { argon2id, argon2i, argon2d,
+// argon2Verify } and has no default export. A default import still builds
+// without a warning (webpack cannot see into the UMD wrapper), but at runtime
+// it is the whole exports object or undefined, depending on the hash-wasm
+// release — never the function: "…___default(...) is not a function" on every
+// derivation, not just the warm-up in initSecureVault().
+import { argon2id } from 'hash-wasm/dist/argon2.umd.min';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha512 } from '@noble/hashes/sha2.js';

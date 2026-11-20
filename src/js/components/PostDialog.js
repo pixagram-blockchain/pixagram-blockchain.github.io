@@ -52,7 +52,7 @@ import SendRounded from "@material-ui/icons/SendRounded";
 import VisibilityRounded from "@material-ui/icons/VisibilityRounded";
 import VisibilityOffRounded from "@material-ui/icons/VisibilityOffRounded";
 import CircularProgress from "@material-ui/core/CircularProgress";
-import CommentInList, { applyCommentEdit, withCommentEdits } from "./CommentInList";
+import CommentInList, { applyCommentEdit, withCommentEdits, MAX_VISIBLE_DEPTH } from "./CommentInList";
 import ProfileHoverAnchor from "./ProfileHoverCard";
 import { ToxicityWatcher } from "./ToxicityHint";
 import * as toxicity from "../utils/toxicity";
@@ -90,8 +90,10 @@ import { voteSign, countUpvotes, countDownvotes } from "../utils/voteValue";
 import { votesWithLocalVote } from "../utils/voteSync";
 import FavoriteRounded from "@material-ui/icons/FavoriteRounded";
 import FavoriteBorderRounded from "@material-ui/icons/FavoriteBorderRounded";
+import OpenInNewRounded from "@material-ui/icons/OpenInNewRounded";
 import * as favorites from "../utils/favorites";
-import { analyze_colors } from 'smart-downscaler';
+import * as sd from 'smart-downscaler/bundler';
+sd.init();
 
 import { pngdby } from "../utils/png-db";
 import PostOriginality from "./PostOriginality";
@@ -207,6 +209,88 @@ function createCanvas(width, height) {
     return canvas;
 }
 
+/* ── The thread on screen ─────────────────────────────────────────────
+ * `_current_comments` is the breadcrumb: the comments the reader drilled
+ * into, outermost first. Its last entry is the thread on screen — the list
+ * holds that comment's replies, the breadcrumb reads "Reply to …" and the
+ * composer posts under it (submitComment). At the post's top level there is
+ * none. levelKeyOf() names the level whose replies the list holds, as
+ * "author/permlink"; fetchRepliesFor checks every answer against it. */
+const threadOf = (st) => {
+    const cc = st && st._current_comments;
+    return (cc && cc.length) ? cc[cc.length - 1] : null;
+};
+const levelKeyOf = (st) => {
+    const c = threadOf(st);
+    if (c) return (c.username || (c.author || {}).username || "") + "/" + (c.permlink || "");
+    const d = (st && st.data) || {};
+    return ((d.author || {}).username || "") + "/" + (d.permlink || "");
+};
+
+// The levels CommentInList draws under one list: a comment, its replies and
+// theirs. A pinned comment deeper than that needs its thread opened (see the
+// focused-comment effect).
+const INLINE_LEVELS = typeof MAX_VISIBLE_DEPTH === "number" ? MAX_VISIBLE_DEPTH : 3;
+
+/* ── Replies sent from this dialog that the node does not serve yet ────
+ * The node's replies (condenser_api.get_content_replies) come from an indexer
+ * that trails the chain by a block or two: for some seconds after a comment
+ * is broadcast, neither its parent's reply list nor the parent's `children`
+ * count knows about it. The row built at broadcast time lived in `_comments`
+ * alone, so it was gone as soon as the list showed another level — back at
+ * the top the reply was missing under its parent, and going into the thread
+ * again did not bring it back.
+ *
+ * They are kept here instead, by parent ("author/permlink"), and added to
+ * every reply list of that parent — the thread level (fetchRepliesFor) and the
+ * inline replies CommentInList asks for (loadRepliesFor) — unless the node
+ * returned them itself. Each one counts for PENDING_REPLY_TTL_MS, long past
+ * any indexing delay. A parent's `children` is raised to the replies known to
+ * be under it: CommentInList only loads the replies of a comment that says it
+ * has some. */
+const PENDING_REPLY_TTL_MS = 2 * 60 * 1000;
+const pendingAlive = (c) => Date.now() - (c.date || 0) < PENDING_REPLY_TTL_MS;
+
+function prunePendingReplies(pending, keep) {
+    pending.forEach((list, key) => {
+        const kept = list.filter(keep);
+        if (kept.length === 0) pending.delete(key);
+        else if (kept.length !== list.length) pending.set(key, kept);
+    });
+}
+
+function addPendingReply(pending, parentKey, comment) {
+    prunePendingReplies(pending, pendingAlive);
+    pending.set(parentKey, [comment].concat(pending.get(parentKey) || []));
+}
+
+// A comment deleted while it is still pending must not be shown again.
+function dropPendingReply(pending, author, permlink) {
+    prunePendingReplies(pending, (c) => !(c.permlink === permlink && c.username === author));
+}
+
+/** `comments` — what the node returned as the replies of `parentKey`, in the
+ *  dialog's shape — plus the pending replies of that parent it did not return,
+ *  and each row's `children` raised to its own pending replies. The same array
+ *  when nothing is pending.
+ *  `first`: the thread level puts them first, as it always did with a comment
+ *  just sent (the list is sorted on top of that). Inline replies are drawn in
+ *  the node's order, oldest first: there they go last, where the node will
+ *  have them, so nothing moves when it catches up. */
+function withPendingReplies(pending, parentKey, comments, first) {
+    if (!pending || pending.size === 0) return comments;
+    const served = new Set(comments.map((c) => c.permlink));
+    const mine = (pending.get(parentKey) || []).filter((c) => pendingAlive(c) && !served.has(c.permlink));
+    const all = mine.length === 0 ? comments : first ? mine.concat(comments) : comments.concat(mine.slice().reverse());
+    return all.map((c) => {
+        const below = pending.get((c.username || "") + "/" + (c.permlink || ""));
+        const n = below ? below.filter(pendingAlive).length : 0;
+        // A copy, never the row itself: CommentInList tells a refreshed comment
+        // by its identity, and reads the count off it.
+        return n > (c.children || 0) ? { ...c, children: n } : c;
+    });
+}
+
 // Shared mapper: resolve author profiles for a batch of raw chain replies, then
 // map them into the flat comment shape the dialog renders. Used both when
 // loading a thread level (fetchRepliesFor) and when CommentInList lazily loads a
@@ -215,6 +299,11 @@ function buildReplyComments(rawReplies, accounts, localAuthors) {
     const profileMap = {};
     if (Array.isArray(accounts)) {
         for (const acc of accounts) {
+            // Defensive: api.accounts.getAccounts leaves out the accounts it
+            // cannot resolve, but a hole coming from anywhere else would throw
+            // on the next line — and one throw costs the whole level its
+            // replies (loadRepliesFor turns it into "no inline replies").
+            if (!acc) continue;
             const u = acc.name || acc.account || ""; if (!u) continue;
             let img = "", name = u;
             try { const m = typeof acc.posting_json_metadata === "string" ? JSON.parse(acc.posting_json_metadata) : (acc.posting_json_metadata || {}); const p = m.profile || {}; img = p.profile_image || p.image || ""; name = p.name || u; }
@@ -331,15 +420,17 @@ const ColorPalette = React.memo(function ColorPalette({ colors, classes }) {
     const anchor = swatch && swatch.isConnected ? swatch : null;
     const popperProps = useMemo(() => (anchor ? { anchorEl: anchor } : undefined), [anchor]);
     return (
-        <Tooltip arrow interactive title={anchor ? anchor.getAttribute("data-color") : ""} PopperProps={popperProps}>
-            <div ref={paletteRef} className={classes.colorBadges} onMouseOver={track} onTouchStart={track}>
-                {colors.map((o) => (
-                    <ColorBadge key={o.hex} color={o} className={classes.colorBadge} />
-                ))}
-            </div>
-        </Tooltip>
+        <Collapse in={colors.length > 0}>
+            <Tooltip arrow interactive title={anchor ? anchor.getAttribute("data-color") : ""} PopperProps={popperProps}>
+                <div ref={paletteRef} className={classes.colorBadges} onMouseOver={track} onTouchStart={track}>
+                    {colors.map((o) => (
+                        <ColorBadge key={o.hex} color={o} className={classes.colorBadge} />
+                    ))}
+                </div>
+            </Tooltip>
+        </Collapse>
     );
-});
+}, (a, b) => {return (a.colors.length > 0) && (a.colors.join("-") !== b.colors.join("-"))});
 
 const TagChip = React.memo(({ tag, index, onTagClick }) => (
     <Chip
@@ -784,8 +875,39 @@ const ShareSection = React.memo(function ShareSection({ postId, copied, onCopy, 
     );
 });
 
-const ActionsSection = React.memo(function ActionsSection({ isFavorite, onToggleFavorite }) {
+/* ── Other Pixa front ends ────────────────────────────────────────────
+ * json_metadata.app names the app a post was published through, as
+ * "name/version" — "pixtopia/0.1.0". A post that came through another front
+ * end gets a "View on <name>" row under Actions: a plain link to that front
+ * end. It is matched on the name alone (the version moves with every
+ * release), and only against this table — the label and the address are
+ * ours, never read from the post's metadata, which its author writes freely.
+ * A new front end is one line here; the row's text is one string for all of
+ * them (components.post_dialog.view_on_app). */
+const FRONT_ENDS = Object.freeze({
+    pixtopia: Object.freeze({ name: "Pixtopia", url: "https://pixtopia.net/" }),
+});
+
+/** The front end `json_metadata.app` names, when it is one of FRONT_ENDS; else null. */
+function readFrontEnd(jsonMetadata) {
+    let meta = jsonMetadata;
+    if (typeof meta === "string") {
+        try { meta = JSON.parse(meta); } catch (e) { return null; }
+    }
+    const app = meta && typeof meta === "object" ? meta.app : null;
+    if (typeof app !== "string") return null;
+    const name = app.split("/")[0].trim().toLowerCase();
+    // Own entries only: "constructor/1.0" must not find Object.prototype's.
+    return Object.prototype.hasOwnProperty.call(FRONT_ENDS, name) ? FRONT_ENDS[name] : null;
+}
+
+const STYLE_LINK_ROW = Object.freeze({ color: "inherit" });
+const STYLE_LINK_ROW_ICON = Object.freeze({ color: "#8a8a8a", marginLeft: "auto", flexShrink: 0 });
+
+const ActionsSection = React.memo(function ActionsSection({ isFavorite, onToggleFavorite, jsonMetadata }) {
     useLanguage();
+    // Parsed when the metadata changes, not on every render of the tab.
+    const frontEnd = useMemo(() => readFrontEnd(jsonMetadata), [jsonMetadata]);
     return (
         <React.Fragment>
             <ListSubheader disableSticky>{t("components.post_dialog.actions")}</ListSubheader>
@@ -801,6 +923,16 @@ const ActionsSection = React.memo(function ActionsSection({ isFavorite, onToggle
                         : <FavoriteBorderRounded style={STYLE_FAVORITE_OFF} />}
                 </ListItem>
             </Tooltip>
+            {/* A real link — new tab, long-press, copy address — in an <li>
+                of its own, so the list stays a list of items. */}
+            {frontEnd ? (
+                <li>
+                    <ListItem component="a" href={frontEnd.url} target="_blank" rel="noopener noreferrer" style={STYLE_LINK_ROW}>
+                        <ListItemText>{t("components.post_dialog.view_on_app", { app: frontEnd.name })}</ListItemText>
+                        <OpenInNewRounded style={STYLE_LINK_ROW_ICON} />
+                    </ListItem>
+                </li>
+            ) : null}
         </React.Fragment>
     );
 });
@@ -840,7 +972,8 @@ const DetailsView = React.memo(({
             <OriginSection jsonMetadata={data.json_metadata} />
             {isOwner ? <ManageSection onEditPost={onEditPost} /> : null}
             <ShareSection postId={id} copied={copied} onCopy={onCopy} className={classes.urlLink} />
-            <ActionsSection isFavorite={isFavorite} onToggleFavorite={onToggleFavorite} />
+            <ActionsSection isFavorite={isFavorite} onToggleFavorite={onToggleFavorite}
+                            jsonMetadata={data.json_metadata} />
             {/* Originality (copies on-chain) + Inspiration (similar themes), from the search
                 Worker. Keyed by post so every artwork opens with both collapsed.
                 onInspirationShown(bool): the Inspiration results are loaded and on
@@ -1367,18 +1500,21 @@ const BottomBarActions = React.memo(function BottomBarActions({
 
 const BottomBarComments = React.memo(function BottomBarComments({
                                                                     visible, barStyle, classes,
-                                                                    replyTarget, editTarget, commentSending, accountImage, dataAuthorUsername,
+                                                                    replyTarget, threadTarget, editTarget, commentSending, accountImage, dataAuthorUsername,
                                                                     onClearReply, onCancelEdit, onSubmitComment, onCommentKeyDown, account
                                                                 }) {
     useLanguage();
     const loggedOut = !account;
     const padding = (replyTarget || editTarget) ? "8px 16px 12px" : "12px 16px";
     const rootStyle = useMemo(() => ({ ...barStyle, padding }), [barStyle, padding]);
+    // Who the comment will answer: the thread on screen (threadTarget — see
+    // submitComment), with or without the "Replying to" banner above the field.
+    const labelTarget = replyTarget || threadTarget;
     const fieldLabel = editTarget
         ? t("components.post_dialog.edit_your_comment")
-        : replyTarget
+        : labelTarget
             ? t("words.reply_to", {
-                username: replyTarget.username || (replyTarget.author || {}).username
+                username: labelTarget.username || (labelTarget.author || {}).username
             })
             : t("words.reply_to_dataauthorusername", {
                 dataAuthorUsername: dataAuthorUsername
@@ -1460,6 +1596,7 @@ const BottomBarComments = React.memo(function BottomBarComments({
 }, function (a, b) {
     return a.visible === b.visible && a.commentSending === b.commentSending
         && a.replyTarget === b.replyTarget && a.editTarget === b.editTarget
+        && a.threadTarget === b.threadTarget
         && a.accountImage === b.accountImage
         && a.dataAuthorUsername === b.dataAuthorUsername && a.barStyle === b.barStyle
         && a.account === b.account;
@@ -1682,6 +1819,8 @@ const DrawerCardInner = React.memo(function DrawerCardInner({
                                                             }) {
     const tags = data.tags || EMPTY_TAGS;
     const author = data.author || EMPTY_AUTHOR;
+    // The comment whose replies are on screen, or null at the post's top level.
+    const threadTarget = _current_comments.length > 0 ? _current_comments[_current_comments.length - 1] : null;
     return (
         <Card ref={setMenuCardRefCb}
               className={classes.card + ((open && _view_mobile_opened) ? " opened " : " closed ") + (open ? " visible " : " hidden ")}>
@@ -1717,7 +1856,8 @@ const DrawerCardInner = React.memo(function DrawerCardInner({
                 payout={payout} data={data} voter={account} />
             <BottomBarComments
                 visible={tab_value === 1 && !_hidden2} barStyle={barStyle} classes={classes}
-                replyTarget={_reply_target} editTarget={_edit_target} commentSending={_comment_sending}
+                replyTarget={_reply_target} threadTarget={threadTarget}
+                editTarget={_edit_target} commentSending={_comment_sending}
                 accountImage={accountImage} dataAuthorUsername={dataAuthorUsername}
                 onClearReply={clearReplyTarget} onCancelEdit={cancelEditComment}
                 onSubmitComment={submitComment} onCommentKeyDown={onCommentKeyDown}
@@ -1775,11 +1915,14 @@ const TOOLTIP_DATE_OPTIONS = Object.freeze({ weekday: 'long', year: 'numeric', m
 const DRAWER_WIDTH = 480;
 const MOBILE_BREAKPOINT = 960;
 // Desktop only: while the Inspiration grid (Details tab) is loaded and on
-// screen, the panel widens to DRAWER_WIDTH_WIDE for a little more room on the
-// recommendations — but only where the artwork column keeps at least
-// WIDE_DRAWER_MIN_ART px beside it (a 1240 px viewport and up); narrower
-// desktops keep DRAWER_WIDTH. See syncDrawerWidth / computeSize.
-const DRAWER_WIDTH_WIDE = 600;
+// screen, the panel widens for more room on the recommendations — to
+// DRAWER_WIDTH_WIDE wherever the artwork column keeps WIDE_DRAWER_MIN_ART px
+// beside it (a 1300 px viewport and up). Under that it takes what the artwork
+// leaves, down to DRAWER_WIDTH_WIDE_MIN (a 1240 px viewport); narrower
+// desktops keep DRAWER_WIDTH. See wideDrawerWidth / syncDrawerWidth /
+// computeSize.
+const DRAWER_WIDTH_WIDE = 660;
+const DRAWER_WIDTH_WIDE_MIN = 600;
 const WIDE_DRAWER_MIN_ART = 640;
 // The panel's width transition, and the artwork glide that rides along with it.
 const DRAWER_GLIDE_MS = 420;
@@ -1791,7 +1934,15 @@ const DRAWER_NARROW_DELAY = 300;
 // or a layout pass (which snap, as they always did).
 const DRAWER_TOGGLE = "drawer-toggle";
 
-const wideDrawerFits = (vw) => vw > MOBILE_BREAKPOINT && vw - DRAWER_WIDTH_WIDE >= WIDE_DRAWER_MIN_ART;
+const wideDrawerFits = (vw) => vw > MOBILE_BREAKPOINT && vw - DRAWER_WIDTH_WIDE_MIN >= WIDE_DRAWER_MIN_ART;
+// The wide panel's width in a viewport where it fits: for computeSize's
+// arithmetic as a number, for the JSS as the same formula in CSS — 100vw there
+// is the innerWidth computeSize reads. Two spellings of one rule: change them
+// together. (vw rather than %: every term is then an absolute length, so the
+// computed width is plain px and a toggle's width transition goes px to px,
+// as it did with a fixed wide width.)
+const wideDrawerWidth = (vw) => Math.max(DRAWER_WIDTH_WIDE_MIN, Math.min(DRAWER_WIDTH_WIDE, vw - WIDE_DRAWER_MIN_ART));
+const DRAWER_WIDTH_WIDE_CSS = `clamp(${DRAWER_WIDTH_WIDE_MIN}px, 100vw - ${WIDE_DRAWER_MIN_ART}px, ${DRAWER_WIDTH_WIDE}px)`;
 
 const STYLE_ROOT_CONTAINER = Object.freeze({ userSelect: "none", width: "100%", height: "100%", display: "flex", overflow: "hidden", contain: "size style layout" });
 const STYLE_CLOSE_OVERLAY = Object.freeze({ position: "absolute", left: 0, top: 0, width: "100%", height: "100%" });
@@ -2229,7 +2380,8 @@ const styles = (theme) => ({
     },
     /* ── Wide desktop panel (Details → Inspiration on screen) ─────────────
      * Modifiers on the root container. drawerWide moves the panel and the
-     * artwork column to DRAWER_WIDTH_WIDE; drawerAnim carries the width
+     * artwork column to the wide width (DRAWER_WIDTH_WIDE_CSS — what
+     * wideDrawerWidth computes); drawerAnim carries the width
      * transition only for the length of a toggle (computeSize sets and clears
      * it), so window resizes — across the mobile breakpoint included — keep
      * snapping as they always did. Both sit behind up("md"): the mobile sheet
@@ -2239,10 +2391,10 @@ const styles = (theme) => ({
     drawerWide: {
         [theme.breakpoints.up("md")]: {
             "& $viewLeft": {
-                width: `calc(100% - ${DRAWER_WIDTH_WIDE}px)`,
+                width: `calc(100% - ${DRAWER_WIDTH_WIDE_CSS})`,
             },
             "& $viewRight, & $viewRightNoAnim, & $viewRightPrerender, & $viewRightHidden, & $viewRightHiddenNoDelay": {
-                width: `${DRAWER_WIDTH_WIDE}px`,
+                width: DRAWER_WIDTH_WIDE_CSS,
             },
         },
     },
@@ -2765,7 +2917,7 @@ const INITIAL_STATE = {
     _delete_target: null,     // comment pending the delete confirmation dialog
     _edit_post_open: false,   // EditPostDialog (post metadata) visibility
     _is_favorite: false,      // artwork bookmarked in the LacertaDB favorites store
-    // Desktop: the panel at DRAWER_WIDTH_WIDE (Inspiration on screen), and the
+    // Desktop: the panel at its wide width (Inspiration on screen), and the
     // width transition running for a toggle — both laid out by computeSize.
     _drawer_wide: false,
     _drawer_anim: false,
@@ -2860,6 +3012,14 @@ function createInst() {
 
         // Comment refresh
         commentRefreshTimer: null,
+        // Thread fetches (fetchRepliesFor): each request takes a number, and
+        // the number of the last answer applied is kept, so an answer that
+        // comes back late is never applied over a newer one.
+        commentsSeq: 0,
+        commentsAppliedSeq: 0,
+        // Replies sent from this dialog, by parent "author/permlink", until the
+        // node serves them (see withPendingReplies).
+        pendingReplies: new Map(),
 
         // Delayed post-close cleanup (clears data/metadata/canvas a beat
         // after the Backdrop fade-out so we don't free the image mid-anim).
@@ -4196,7 +4356,7 @@ function PostDialog(props) {
         // determined by our own chrome: the Backdrop is fixed fullscreen,
         // STYLE_ROOT_CONTAINER fills it, and viewLeft is its first flex
         // child — anchored at the viewport origin, full height, full width
-        // minus the drawer on desktop (DRAWER_WIDTH, or DRAWER_WIDTH_WIDE
+        // minus the drawer on desktop (DRAWER_WIDTH, or wideDrawerWidth(vw)
         // while the Inspiration grid widens it; the mobile drawer is a
         // fixed bottom sheet, out of flow). window.innerWidth/innerHeight
         // are viewport metrics, not layout metrics — reading them never
@@ -4211,7 +4371,7 @@ function PostDialog(props) {
         const wide = inst.drawerWide && wideDrawerFits(vw);
         const m = {
             left: 0, top: 0,
-            width: mobile ? vw : vw - (wide ? DRAWER_WIDTH_WIDE : DRAWER_WIDTH),
+            width: mobile ? vw : vw - (wide ? wideDrawerWidth(vw) : DRAWER_WIDTH),
             height: vh,
         };
         const m0 = inst.viewMeasurement;
@@ -4317,35 +4477,62 @@ function PostDialog(props) {
      * COMMENTS API
      * ================================================================ */
     const fetchRepliesFor = useCallback((author, permlink, silent) => {
-        const st = stateRef.current;
         const api = props.api;
-        if (!api) return;
-        if (!silent) dispatch({ _comments_loading: true });
+        if (!api || !api.content) return;
+        /* Every caller asks for the level it has just put on screen (the post,
+         * or the thread of the last breadcrumb comment), but the answers come
+         * back in any order: each takes two round-trips, and after a comment
+         * is posted the poll sends one every 3 s. The last answer to ARRIVE
+         * used to win, whatever it was for:
+         *   - a refresh of the level just left landed after the new level had
+         *     loaded and replaced its list — a thread showing the post's
+         *     comments instead of its replies (or the reverse), and for good
+         *     when it was the last poll;
+         *   - a slow refresh rolled the list back over a newer one, dropping
+         *     the reply that one had just brought in;
+         *   - the previous post's comments landed in the next post (arrows).
+         * An answer is now applied only while its level is still the one on
+         * screen, and never over a newer one. A dropped answer leaves the
+         * spinner alone: it belongs to the request that replaced it. */
+        const level = author + "/" + permlink;
+        const seq = ++inst.commentsSeq;
+        const onScreen = () => levelKeyOf(stateRef.current) === level;
+        const claim = () => {
+            if (!onScreen() || seq < inst.commentsAppliedSeq) return false;
+            inst.commentsAppliedSeq = seq;
+            return true;
+        };
+        if (!silent && onScreen()) dispatch({ _comments_loading: true });
 
         api.content.getContentReplies(author, permlink)
             .then((replies) => {
                 if (!replies || !Array.isArray(replies) || replies.length === 0) {
-                    const surviving = (stateRef.current._comments || [])
-                        .filter(c => c._optimistic && c.parent_author === author && c.parent_permlink === permlink);
-                    dispatch({ _comments: withCommentEdits(surviving), _comments_loading: false });
+                    if (!claim()) return;
+                    // Nothing served yet: what was sent from here is all there is.
+                    dispatch({ _comments: withCommentEdits(withPendingReplies(inst.pendingReplies, level, [], true)), _comments_loading: false });
                     return;
                 }
                 const uniqueAuthors = [...new Set(replies.map(r => r.author).filter(Boolean))];
                 const accsP = (uniqueAuthors.length > 0 && api.accounts)
                     ? api.accounts.getAccounts(uniqueAuthors).catch(() => []) : Promise.resolve([]);
 
-                accsP.then((accounts) => {
+                // Returned, so a failure while mapping reaches the catch below.
+                // Unchained, it left the spinner up over the level for good.
+                return accsP.then((accounts) => {
+                    if (!onScreen()) return;
                     const comments = buildReplyComments(replies, accounts, stateRef.current._authors);
-                    const chainPermlinks = new Set(comments.map(c => c.permlink));
-                    const surviving = (stateRef.current._comments || [])
-                        .filter(c => c._optimistic && !chainPermlinks.has(c.permlink) && c.parent_author === author && c.parent_permlink === permlink);
+                    if (!claim()) return;
+                    // The replies sent from here that this answer does not have
+                    // yet go first. They used to be picked out of `_comments`
+                    // (the rows flagged _optimistic), which only held them
+                    // while this level stayed on screen.
                     // Replay live edits: a fetch that lands before the chain
                     // serves an edit (e.g. the poll after posting) still
                     // carries the old body.
-                    dispatch({ _comments: withCommentEdits(surviving.concat(comments)), _comments_loading: false });
+                    dispatch({ _comments: withCommentEdits(withPendingReplies(inst.pendingReplies, level, comments, true)), _comments_loading: false });
                 });
             })
-            .catch(() => dispatch({ _comments_loading: false }));
+            .catch(() => { if (onScreen()) dispatch({ _comments_loading: false }); });
     }, [props.api]);
 
     const fetchComments = useCallback(() => {
@@ -4359,27 +4546,32 @@ function PostDialog(props) {
         if (author && permlink) fetchRepliesFor(author, permlink);
     }, [fetchRepliesFor]);
 
-    // Lazy loader handed to CommentInList so each top-level comment can render
-    // its own direct replies inline (the 2nd visible level). Returns the mapped
-    // comments rather than dispatching them into _comments.
+    // Lazy loader handed to CommentInList so each comment above the last inline
+    // level can render its own direct replies under it. Returns the mapped
+    // comments rather than dispatching them into _comments — with the replies
+    // sent from here that the node does not serve yet (withPendingReplies), so
+    // a reply shows under its parent as soon as the reader is back at a list
+    // that draws it, and not some seconds later.
     const loadRepliesFor = useCallback((comment) => {
         const api = props.api;
         if (!api || !api.content || !comment) return Promise.resolve([]);
         const author = comment.username || (comment.author || {}).username;
         const permlink = comment.permlink;
         if (!author || !permlink) return Promise.resolve([]);
+        const parent = author + "/" + permlink;
+        const pending = inst.pendingReplies;
 
         return api.content.getContentReplies(author, permlink)
             .then((replies) => {
-                if (!Array.isArray(replies) || replies.length === 0) return [];
+                if (!Array.isArray(replies) || replies.length === 0) return withPendingReplies(pending, parent, []);
                 const localAuthors = stateRef.current._authors || {};
                 const uniqueAuthors = [...new Set(replies.map(r => r.author).filter(Boolean))]
                     .filter(u => !localAuthors[u]);
                 const accsP = (uniqueAuthors.length > 0 && api.accounts)
                     ? api.accounts.getAccounts(uniqueAuthors).catch(() => []) : Promise.resolve([]);
-                return accsP.then((accounts) => buildReplyComments(replies, accounts, localAuthors));
+                return accsP.then((accounts) => withPendingReplies(pending, parent, buildReplyComments(replies, accounts, localAuthors)));
             })
-            .catch(() => []);
+            .catch(() => withPendingReplies(pending, parent, []));
     }, [props.api]);
 
     const cacheOwnProfile = useCallback(() => {
@@ -4824,14 +5016,20 @@ function PostDialog(props) {
         // reply's depth-0 parent), so the path stays complete when drilling in.
         const anc = Array.isArray(ancestors) ? ancestors : [];
         const cc = stateRef.current._current_comments.concat(...anc, comment);
-        dispatch({ _current_comments: cc });
+        // A "Replying to" banner left by an earlier Reply names another thread
+        // than the one this opens: drop it. The composer follows the thread on
+        // screen (see submitComment).
+        dispatch({ _current_comments: cc, _reply_target: null });
         const a = comment.username || (comment.author || {}).username, p = comment.permlink;
         if (a && p) fetchRepliesFor(a, p);
     }, [fetchRepliesFor]);
 
     const sliceReplies = useCallback((n) => {
         const cc = stateRef.current._current_comments.slice(0, n);
-        dispatch({ _current_comments: cc });
+        // Leaving a thread ends the reply to it. The banner used to stay
+        // ("Replying to @x" above a list that was no longer x's thread), and
+        // the comment written under it surfaced in that list, then vanished.
+        dispatch({ _current_comments: cc, _reply_target: null });
         if (n === 0) fetchComments();
         else { const p = cc[cc.length - 1]; const a = p.username || (p.author || {}).username, pl = p.permlink; if (a && pl) fetchRepliesFor(a, pl); }
     }, [fetchComments, fetchRepliesFor]);
@@ -5006,9 +5204,22 @@ function PostDialog(props) {
             return;
         }
 
-        const rt = st._reply_target;
-        const pa = rt ? (rt.username || (rt.author || {}).username) : (st.data.author || {}).username;
-        const pp = rt ? rt.permlink : st.data.permlink;
+        /* The composer follows the thread on screen: inside a comment's
+         * replies (breadcrumb "Reply to …") the new comment answers THAT
+         * comment, and only at the post's top level does it answer the post.
+         * It used to follow `_reply_target` alone, which "Show replies" never
+         * set and the first reply sent cleared. The comment then went to the
+         * POST while the list showed the thread: it sat among the replies for
+         * three seconds, and the next refresh dropped it — it was never one
+         * of them. `_reply_target` now only drives the "Replying to" banner;
+         * when set, it is this same comment (replyToComment). */
+        const rt = threadOf(st) || st._reply_target;
+        // The post under discussion NOW: the reader may be on another one by
+        // the time the broadcast is confirmed.
+        const post = st.data;
+        const postAuthor = (post.author || {}).username, postPermlink = post.permlink;
+        const pa = rt ? (rt.username || (rt.author || {}).username) : postAuthor;
+        const pp = rt ? rt.permlink : postPermlink;
         if (!pa || !pp) return;
         const cp = "re-" + pa + "-" + pp + "-" + Date.now().toString(36);
         dispatch({ _comment_sending: true });
@@ -5018,11 +5229,21 @@ function PostDialog(props) {
                 const la = st._authors || {}, la2 = st._accounts || {};
                 const profile = la[props.account] || la2[props.account] || { username: props.account, name: props.account, image: "" };
                 const opt = { username: props.account, body: sanitized, date: Date.now(), upVotesNumber: 0, downVotesNumber: 0, permlink: cp, children: 0, active_votes: [], author: profile, parent_author: pa, parent_permlink: pp, _optimistic: true };
-                dispatch({ _comments: [opt].concat(st._comments), _comment_sending: false, _reply_target: null });
+                // Kept by parent until the node serves it (withPendingReplies):
+                // the row put in `_comments` below only lives while this level
+                // stays on screen.
+                addPendingReply(inst.pendingReplies, pa + "/" + pp, opt);
+                // Listed only where it belongs: among its parent's replies, if
+                // those are still what the list shows (the reader may have
+                // moved to another thread, or another post, while it was sent).
+                const listed = levelKeyOf(st) === pa + "/" + pp;
+                dispatch(listed
+                    ? { _comments: [opt].concat(st._comments), _comment_sending: false, _reply_target: null }
+                    : { _comment_sending: false, _reply_target: null });
                 if (tf) { const inp = tf.querySelector?.("input, textarea"); if (inp) inp.value = ""; else if (tf.value !== undefined) tf.value = ""; const ev = new Event("input", { bubbles: true }); (inp || tf).dispatchEvent(ev); }
                 actions.trigger_snackbar(t("components.post_dialog.comment_posted"));
-                if (rt) rt.children = (rt.children || 0) + 1; else if (st.data) st.data.children = (st.data.children || 0) + 1;
-                props.onCommentPost?.({ parentAuthor: pa, parentPermlink: pp, author: props.account, permlink: cp, body, postAuthor: (st.data.author || {}).username, postPermlink: st.data.permlink, optimisticComment: opt });
+                if (rt) rt.children = (rt.children || 0) + 1; else post.children = (post.children || 0) + 1;
+                props.onCommentPost?.({ parentAuthor: pa, parentPermlink: pp, author: props.account, permlink: cp, body, postAuthor, postPermlink, optimisticComment: opt });
                 startCommentRefresh();
             })
             .catch((e) => { console.warn('[PostDialog] comment broadcast failed:', e.message); actions.trigger_snackbar(t("words.failed_to_post_comment")); dispatch({ _comment_sending: false }); });
@@ -5079,6 +5300,9 @@ function PostDialog(props) {
         const remaining = (stateRef.current._comments || []).filter(x =>
             !(x.permlink === cpl && (x.username || (x.author || {}).username) === ca)
         );
+        // Deleted before the node ever served it: it must not come back with
+        // the next reply list of its parent (withPendingReplies).
+        dropPendingReply(inst.pendingReplies, ca, cpl);
         // If the deleted comment was being edited, drop the edit too.
         const wasEditing = stateRef.current._edit_target?.comment?.permlink === cpl;
         dispatch({
@@ -5088,7 +5312,12 @@ function PostDialog(props) {
         if (wasEditing) setTextFieldValue("comment-textfield", "");
         if (stateRef.current.data) stateRef.current.data.children = Math.max(0, (stateRef.current.data.children || 1) - 1);
         actions.trigger_snackbar(t("words.comment_deleted"));
-    }, []);
+        // The filter above only reaches the level on screen. A reply deleted
+        // where it is drawn INLINE, under its parent, sits in that parent's own
+        // list (CommentInList): refresh the level as after a post, so the
+        // parent's count drops and it reloads its replies without it.
+        startCommentRefresh();
+    }, [startCommentRefresh]);
 
     /* ================================================================
      * POST METADATA EDIT (own post — EditPostDialog)
@@ -5341,6 +5570,13 @@ function PostDialog(props) {
     // level, as "author/permlink" keys. CommentInList brightens exactly these
     // segments of the tree — and because the keys are global rather than
     // positional, they stay valid across sorts and "Show replies" re-roots.
+    //
+    // The list draws INLINE_LEVELS levels. A pinned comment deeper than that
+    // was never on screen: the lit path ended on a "show replies" link the
+    // reader had to find and click, once per extra level, and the seek below
+    // gave up after ten seconds. The thread that puts it on the last drawn
+    // level is opened instead — the ancestors above the first one drawn go to
+    // the breadcrumb — unless the reader has already moved in the thread.
     useEffect(() => {
         const f = state._focusComment;
         const api = props.api;
@@ -5350,12 +5586,14 @@ function PostDialog(props) {
         let cancelled = false;
         (async () => {
             const keys = [];
+            const rows = [];    // the comment behind each key, pinned comment first
             let a = f.author, p = f.permlink;
             try {
                 for (let hop = 0; hop < 12 && !cancelled; hop++) {
                     keys.push(a + "/" + p);
                     const c = await api.content.getContent(a, p);
                     if (!c || !c.permlink) break;
+                    rows.push(c);
                     const pa = c.parent_author || "";
                     const pp = c.parent_permlink || "";
                     // Parent is the post itself (or a thread root): the chain
@@ -5364,7 +5602,23 @@ function PostDialog(props) {
                     a = pa; p = pp;
                 }
             } catch (e) {}
-            if (!cancelled) dispatch({ _focusPathKeys: keys });
+            if (cancelled) return;
+            dispatch({ _focusPathKeys: keys });
+
+            // Within the drawn levels already, or a hop that did not resolve
+            // (no comment to build its breadcrumb entry from): nothing to open.
+            if (keys.length <= INLINE_LEVELS || rows.length !== keys.length) return;
+            if (stateRef.current._current_comments.length > 0) return;
+            const outer = rows.slice(INLINE_LEVELS).reverse();   // breadcrumb order: outermost first
+            const names = [...new Set(outer.map((r) => r.author).filter(Boolean))];
+            let accounts = [];
+            try { if (names.length > 0 && api.accounts) accounts = await api.accounts.getAccounts(names); } catch (e) {}
+            if (cancelled || stateRef.current._current_comments.length > 0) return;
+            const crumbs = buildReplyComments(outer, accounts, stateRef.current._authors);
+            const thread = crumbs[crumbs.length - 1];
+            if (!thread || !thread.username || !thread.permlink) return;
+            dispatch({ _current_comments: crumbs, _reply_target: null });
+            fetchRepliesFor(thread.username, thread.permlink);
         })();
         return () => { cancelled = true; };
     }, [state.open, state._focusComment, props.api]);
@@ -5718,7 +5972,7 @@ function PostDialog(props) {
                         const fillColors = () => {
                             if (renderId !== inst.currentRenderId) return;
                             let colors = [];
-                            try { colors = analyze_colors(result.imgd.data, 256, "hilbert").to_json(); } catch (e) {}
+                            try { colors = sd.analyze_colors(result.imgd.data, 256, "hilbert").to_json(); } catch (e) {}
                             const md = stateRef.current.metadata;
                             if (md && md.imgd === result.imgd) dispatch({ metadata: { ...md, colors } });
                         };

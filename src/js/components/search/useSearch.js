@@ -10,6 +10,7 @@ import {
     fetchAnswer, fetchElaboration, fetchSuggestions, loadExamples, mergeElaboration, searchIndex, searchMore, sendAnswerFeedback, sendFeedback,
 } from "./searchApi";
 import { answerPlan, ghostFor } from "./intent";
+import { normalizeFocus } from "./sections";
 
 // ── useSearch ─────────────────────────────────────────────────────────────────
 // Replaces Index's useBlockchainSearch with the same contract
@@ -28,6 +29,8 @@ import { answerPlan, ghostFor } from "./intent";
 //   posts            [...]  blog posts incl. community (portal) posts, same request as artworks
 //   filters          the active filters (see filters.js)
 //   filtersOpen      whether the filter panel is expanded
+//   focusOrder       { focus, n } while the list is still to be put where the address says
+//                    (see "The subheader in focus" below); null otherwise
 // and, from the v3 Worker:
 //   suggest          { q, completion, items } what it proposes for the text typed
 //                    (completions, questions, titles, documentation sections,
@@ -52,14 +55,26 @@ import { answerPlan, ghostFor } from "./intent";
 //   controls = { setFilters, toggleFilters, suggestAuthors, suggestCommunities,
 //                applyText(text), pickSuggestion(s), acceptCompletion(),
 //                submit(), feedback(item, action),
-//                elaborateAgain(), rateAnswer(queryId, 1 | -1), loadMore() }
+//                elaborateAgain(), rateAnswer(queryId, 1 | -1), loadMore(),
+//                reportFocus(focus, order) }
 //
 // useSearch(apiRef, { lang }) — `lang` is the UI language (two letters): the
 // examples and the suggestions' questions come in it. Without it (settings
 // not loaded yet) the examples wait.
 //
-// and `restore({ query, filters, panel })`, which puts the whole state back at
-// once — how Index brings back a search from the address (+search-…).
+// and `restore({ query, filters, panel, focus })`, which puts the whole state
+// back at once — how Index brings back a search from the address (+search-…).
+//
+// The subheader in focus (sections.js): `focus` — "users", "tags", "communities",
+// "history", "posts" or "artworks", the list's sticky subheader standing at the
+// top of its window; null for none, the list at its top. The list tells it
+// (controls.reportFocus, from SearchBar's scroll handling) and Index keeps it in
+// the address with the rest. The other way round, restore() takes the address's
+// `focus` and gives an order (results.focusOrder) for the list to carry out once
+// the results are in: go to that subheader, the search as the full-screen panel
+// — any subheader makes it the panel — or, for none, back to its top and into
+// the toolbar. Until the list has done so, `focus` is what was asked for, so the
+// address is left alone meanwhile. A new text or filter takes the order back.
 //
 // Two-phase delivery: chain results (users/tags/communities + their profiles)
 // land as soon as the node answers; artworks and posts arrive in a second
@@ -96,7 +111,7 @@ export const SEARCH_IDLE = Object.freeze({
     users: EMPTY, tags: EMPTY, communities: EMPTY, communityTitles: EMPTY_OBJ,
     artworks: EMPTY, posts: EMPTY, overview: null,
     artworksMore: null, moreLoading: false, moreFailed: false, artworksCapped: false,
-    filters: EMPTY_FILTERS, filtersOpen: false,
+    filters: EMPTY_FILTERS, filtersOpen: false, focusOrder: null,
     loading: false, artworksLoading: false,
     suggest: null, answer: null, didYouMean: null, examples: EMPTY,
 });
@@ -163,6 +178,8 @@ function reducer(state, action) {
             return { ...state, filters: action.filters };
         case "filtersOpen":
             return state.filtersOpen === action.open ? state : { ...state, filtersOpen: action.open };
+        case "focusOrder":
+            return state.focusOrder === action.order ? state : { ...state, focusOrder: action.order };
         case "suggest":
             return state.suggest === action.suggest ? state : { ...state, suggest: action.suggest };
         case "answer":
@@ -239,6 +256,12 @@ export function useSearch(apiRef, { lang = null } = {}) {
     const termRef = useRef("");                 // trimmed, lower-cased input
     const filtersRef = useRef(EMPTY_FILTERS);   // mirrors results.filters for the stable callbacks
     const filtersOpenRef = useRef(false);       // mirrors results.filtersOpen
+    // The list's subheader in focus (null: none), and the order that puts the list at one.
+    const [focus, setFocus] = useState(null);
+    const focusRef = useRef(null);              // mirrors focus
+    const orderRef = useRef(null);              // mirrors results.focusOrder (restore sets it at once)
+    orderRef.current = results.focusOrder;
+    const orderCountRef = useRef(0);
     const debounceRef = useRef(null);
     const chainAbortRef = useRef(null);
     const indexAbortRef = useRef(null);
@@ -384,6 +407,35 @@ export function useSearch(apiRef, { lang = null } = {}) {
         const communities = communityRows.map((c) => ({ ...c, profile_image: imageOf(cache.get(c.name)) }));
         return { users, tags, communities };
     }, [addTitles, communityList, profilesFor]);
+
+    const putFocus = useCallback((next) => {
+        if (focusRef.current === next) return;
+        focusRef.current = next;
+        setFocus(next);
+    }, []);
+
+    /**
+     * The list tells where it stands: its subheader in focus (null: none). `order`: the order
+     * that is over with it — carried out, or given up because the reader took the list in hand.
+     * While an order is under way only its own end counts: until then the list is still where it
+     * was, and what it tells from there is not where the search is going.
+     */
+    const reportFocus = useCallback((section, order) => {
+        const pending = orderRef.current;
+        if (pending) {
+            if (order !== pending) return;
+            orderRef.current = null;
+            dispatch({ type: "focusOrder", order: null });
+        }
+        putFocus(normalizeFocus(section));
+    }, [putFocus]);
+
+    /** Take back an order the list has not carried out yet: a new text, a filter — the reader moved on. */
+    const dropOrder = useCallback(() => {
+        if (!orderRef.current) return;
+        orderRef.current = null;
+        dispatch({ type: "focusOrder", order: null });
+    }, []);
 
     /** Stop the artworks' next page on its way (a new search, a reset): its spinner goes with it. */
     const abortMore = useCallback(() => {
@@ -731,6 +783,7 @@ export function useSearch(apiRef, { lang = null } = {}) {
      * search runs at once and the suggestions go until the next keystroke).
      */
     const changeText = useCallback((value, how, forced) => {
+        dropOrder();
         queryRef.current = value;
         setQuery(value);
         if (debounceRef.current) {
@@ -782,7 +835,7 @@ export function useSearch(apiRef, { lang = null } = {}) {
             debounceRef.current = null;
             runSearch(trimmed, filtersRef.current, true);
         }, DEBOUNCE_MS);
-    }, [abortAll, abortSearch, cancelSuggest, runSearch, scheduleAnswer, scheduleSuggest, titlesObj]);
+    }, [abortAll, abortSearch, cancelSuggest, dropOrder, runSearch, scheduleAnswer, scheduleSuggest, titlesObj]);
 
     const handleChange = useCallback((e) => changeText(e.target.value, "type"), [changeText]);
 
@@ -791,6 +844,7 @@ export function useSearch(apiRef, { lang = null } = {}) {
      * Worker request only; the input's own debounce is left alone.
      */
     const setFilters = useCallback((patch) => {
+        dropOrder();
         const prev = filtersRef.current;
         const next = normalizeFilters(typeof patch === "function" ? patch(prev) : { ...prev, ...patch });
         filtersRef.current = next;
@@ -807,7 +861,7 @@ export function useSearch(apiRef, { lang = null } = {}) {
         if (debounceRef.current) return; // a search for the term being typed is pending: it runs with the new filters
         dispatch({ type: "indexLoading" });
         runSearch(trimmed, next, false);
-    }, [abortAll, runSearch]);
+    }, [abortAll, dropOrder, runSearch]);
 
     // ── v3: the box's own actions ──
 
@@ -922,10 +976,10 @@ export function useSearch(apiRef, { lang = null } = {}) {
         () => Object.freeze({
             setFilters, toggleFilters, suggestAuthors, suggestCommunities,
             applyText, pickSuggestion, acceptCompletion, submit, feedback,
-            elaborateAgain, rateAnswer, loadMore,
+            elaborateAgain, rateAnswer, loadMore, reportFocus,
             explainAgain: elaborateAgain, // v4's name, for a caller that still uses it
         }),
-        [setFilters, toggleFilters, suggestAuthors, suggestCommunities, applyText, pickSuggestion, acceptCompletion, submit, feedback, elaborateAgain, rateAnswer, loadMore],
+        [setFilters, toggleFilters, suggestAuthors, suggestCommunities, applyText, pickSuggestion, acceptCompletion, submit, feedback, elaborateAgain, rateAnswer, loadMore, reportFocus],
     );
 
     const reset = useCallback(() => {
@@ -936,24 +990,36 @@ export function useSearch(apiRef, { lang = null } = {}) {
         filtersOpenRef.current = false;
         // (the conversation stays: the next question typed may follow the answer just closed)
         setQuery("");
+        // closed, there is no list: no subheader in focus, no order for it
+        orderRef.current = null;
+        putFocus(null);
         dispatch({ type: "reset" });
-    }, [abortAll]);
+    }, [abortAll, putFocus]);
 
     /**
      * Put the search in a given state in one go — the address's +search-… (a
-     * reload, the back arrow, a shared link): query, filters and panel, then
-     * the search itself, with no debounce since nobody is typing. The filters
-     * are URL input, so they go through normalizeFilters. Returns the state it
-     * put in place — { query, filters, panel, open } — which is not always
-     * what was asked for (junk filters normalize away; a search left with
-     * nothing to show is not open at all).
+     * reload, the back arrow, a shared link): query, filters, panel and the
+     * subheader in focus, then the search itself, with no debounce since nobody
+     * is typing. The filters are URL input, so they go through normalizeFilters,
+     * and the focus through normalizeFocus. Returns the state it put in place —
+     * { query, filters, panel, focus, open } — which is not always what was
+     * asked for (junk filters normalize away; a search left with nothing to show
+     * is not open at all, and has no list for a subheader to be in focus in).
+     *
+     * The focus is an order to the list (results.focusOrder, carried out by
+     * SearchBar once the results are in): at that subheader, the search the
+     * full-screen panel; none, at its top and in the toolbar. Every restore
+     * of a search that has something to show gives one — the address says
+     * where the list stands, whichever way.
      */
-    const restore = useCallback(({ query: text, filters, panel } = {}) => {
+    const restore = useCallback(({ query: text, filters, panel, focus: asked } = {}) => {
         abortAll();
         const value = typeof text === "string" ? text : "";
         const next = normalizeFilters(filters);
         const out = !!panel;
         const trimmed = value.trim().toLowerCase();
+        const searching = !!trimmed || hasFilters(next);
+        const at = searching ? normalizeFocus(asked) : null;
         termRef.current = trimmed;
         queryRef.current = value;
         filtersRef.current = next;
@@ -963,8 +1029,12 @@ export function useSearch(apiRef, { lang = null } = {}) {
         dispatch({ type: "filtersOpen", open: out });
         // Nobody is typing: no suggestions; a question gets its answer at once.
         dispatch({ type: "suggest", suggest: null });
-        const restored = { query: value, filters: next, panel: out, open: openFor(value, next, out) };
-        if (!trimmed && !hasFilters(next)) {
+        const order = searching ? Object.freeze({ focus: at, n: ++orderCountRef.current }) : null;
+        orderRef.current = order;
+        putFocus(at);
+        dispatch({ type: "focusOrder", order });
+        const restored = { query: value, filters: next, panel: out, focus: at, open: openFor(value, next, out) };
+        if (!searching) {
             dispatch({ type: "clear" });
             return restored;
         }
@@ -972,7 +1042,7 @@ export function useSearch(apiRef, { lang = null } = {}) {
         dispatch({ type: trimmed ? "loading" : "indexLoading" });
         runSearch(trimmed, next, true);
         return restored;
-    }, [abortAll, runSearch, scheduleAnswer]);
+    }, [abortAll, putFocus, runSearch, scheduleAnswer]);
 
     // Examples for the placeholder, once per UI language (the Worker's, else built-in ones).
     // When the Worker could not give any, the built-in ones show, and it is asked again a minute
@@ -1009,6 +1079,7 @@ export function useSearch(apiRef, { lang = null } = {}) {
     return {
         query,
         results,
+        focus,
         handleChange,
         reset,
         restore,

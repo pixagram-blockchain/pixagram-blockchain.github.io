@@ -12,9 +12,9 @@
 //   3. The UI is split into independent leaves:
 //        MainView, CommunityItem, TagChip, TagChipIcon, ProfileImage,
 //        ActionButtons, ProfileHeader, CTASection, ProposalsTile, PortalIconTile,
-//        SeeAllPortalsTile, FriendTile, FeedTile, LoginView, LoggedOutHeader,
-//        LoadingView, NotificationsLayer, AppsMenu, AppsMenuEntry, AccountsMenu,
-//        AccountsMenuEntry.
+//        SeeAllPortalsTile, FriendTile, FeedTile, AskHelpTile, InfoTile,
+//        LoginView, LoggedOutHeader, LoadingView, NotificationsLayer, AppsMenu,
+//        AppsMenuEntry, AccountsMenu, AccountsMenuEntry.
 //      Each one re-renders only when its own slice of state changes - chips,
 //      communities, notif badge, profile header, etc. are skipped entirely.
 //   4. Per-item leaves (TagChip, CommunityItem) bind their click handler with
@@ -40,6 +40,12 @@
 //   - The header follows `account_switched`, and a logout that hands over to
 //     another account (session_ended { switching }) no longer flashes the
 //     logged-out header.
+//
+// Help & info (the toolbar's former Ask Help and Info buttons):
+//   - The main view closes on a "Help & info" section, shown logged in or
+//     out: "Ask Help", a link to the community's Telegram group, and "Info",
+//     which opens the app-info overlay (+info). Each row keeps its button's
+//     icon, label and tooltip.
 // ============================================================================
 
 import * as React from "preact/compat";
@@ -51,7 +57,7 @@ import AccountBalanceWallet from "@material-ui/icons/AccountBalanceWallet"; // e
 import ExitToApp from "@material-ui/icons/ExitToApp";
 import Tooltip from "@material-ui/core/Tooltip";
 import * as actions from "../actions/utils";
-import { HISTORY, PROPOSALS_PORTAL, COMMUNITY_PORTALS, buildFeedFocusHash } from "../utils/constants";
+import { HISTORY, PROPOSALS_PORTAL, COMMUNITY_PORTALS, buildFeedFocusHash, HELP_TELEGRAM_URL } from "../utils/constants";
 import { feedTagPath } from "../utils/feedSort";
 import NewspaperVariant from "../icons/NewspaperVariant";
 import Chip from "@material-ui/core/Chip";
@@ -79,6 +85,9 @@ import SecurityRounded from "@material-ui/icons/SecurityRounded";
 import BugReportRounded from "@material-ui/icons/BugReportRounded";
 import CodeRounded from "@material-ui/icons/CodeRounded";
 import ExploreRounded from "@material-ui/icons/ExploreRounded";
+// The Help & info rows wear the icons their toolbar buttons had.
+import TelegramIcon from "@material-ui/icons/Telegram";
+import HelpIcon from "@material-ui/icons/Help";
 import Community from "../icons/Community";
 import Avatar from "@material-ui/core/Avatar";
 import List from "@material-ui/core/List";
@@ -225,8 +234,12 @@ const styles = theme => ({
     // (the grid centres its items, so it must also stretch itself), keeps the
     // tiles' 56px height and radius, and carries a label + one-line hint
     // beside the avatar square instead of hiding the name in a tooltip.
+    // Also the shape of the Help & info rows. border-box is spelled out for
+    // the Ask Help row, which is a link: an <a> is sized by its content box
+    // unless told otherwise (a <button> is not), and width: 100% plus the
+    // right padding would then stick out of the grid.
     discoverWideTile: {
-        gridColumn: "1 / -1", justifySelf: "stretch", width: "100%", height: 56,
+        gridColumn: "1 / -1", justifySelf: "stretch", width: "100%", height: 56, boxSizing: "border-box",
         display: "flex", alignItems: "center", justifyContent: "flex-start", textAlign: "left",
         gap: "12px", paddingRight: "16px", backgroundColor: "#101010",
         transition: "background-color 250ms cubic-bezier(0.4, 0, 0.2, 1) 0ms",
@@ -455,7 +468,7 @@ const sampleIndices = (length, count) => {
 // transition too, so the cascade plays once at startup).
 const SECTION_FADE_MS = 350;
 const SECTION_STAGGER_MS = 100;
-const SECTION_FADE_STYLES = Array.from({ length: 4 }, (_, i) =>
+const SECTION_FADE_STYLES = Array.from({ length: 5 }, (_, i) =>
     Object.freeze({ transitionDelay: (i * SECTION_STAGGER_MS) + "ms" })
 );
 
@@ -844,10 +857,70 @@ const FeedTile = React.memo(({ classes, onGoToFeed, span }) => {
 }, cmpKeys(["onGoToFeed", "span"]));
 FeedTile.displayName = "FeedTile";
 
+// ----- Help & info rows: the toolbar's former "Ask Help" and "Info" buttons,
+// now the two rows of the section closing the main view. Each keeps what its
+// button had — icon, label, and the tooltip saying where it leads — in the
+// wide-tile anatomy (the proposals row's icon square and label, without a
+// hint line). The strings are the buttons' own (words.ask_help,
+// components.index.*), so the rows read as the buttons did in every locale.
+// The tooltips open to the RIGHT of the row: below (the default) one row's
+// tooltip lands on the other row's label, the two being stacked.
+
+// Ask Help: the community's Telegram group. A real link (href → ButtonBase
+// renders an <a>) rather than a window.open handler, so it keeps link
+// behaviour — middle-click, copy link, and phones handing t.me to the
+// Telegram app. No prop drives it: it re-renders on a language switch only.
+const AskHelpTile = React.memo(({ classes }) => {
+    useLanguage();
+    return (
+        <Tooltip title={t("components.index.ask_the_community_on_telegram")} placement="right">
+            <ButtonBase
+                className={classes.discoverTile + " " + classes.discoverWideTile}
+                href={HELP_TELEGRAM_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+            >
+                <Avatar className={classes.discoverTileAvatar}>
+                    <TelegramIcon />
+                </Avatar>
+                <span className={classes.discoverWideText}>
+                    <span className={classes.discoverWideTitle}>{t("words.ask_help")}</span>
+                </span>
+            </ButtonBase>
+        </Tooltip>
+    );
+}, cmpKeys([]));
+AskHelpTile.displayName = "AskHelpTile";
+
+// Info: the app-info dialog, by its overlay (`onClick` — handleOpenInfo).
+// It carries the tour anchor its toolbar button had: Index's first-visit
+// tour points its Info step at "nav-info".
+const InfoTile = React.memo(({ classes, onClick }) => {
+    useLanguage();
+    return (
+        <Tooltip title={t("components.index.navigate_through_the_information")} placement="right">
+            <ButtonBase
+                className={classes.discoverTile + " " + classes.discoverWideTile}
+                onClick={onClick}
+                data-tour="nav-info"
+            >
+                <Avatar className={classes.discoverTileAvatar}>
+                    <HelpIcon />
+                </Avatar>
+                <span className={classes.discoverWideText}>
+                    <span className={classes.discoverWideTitle}>{t("components.index.info")}</span>
+                </span>
+            </ButtonBase>
+        </Tooltip>
+    );
+}, cmpKeys(["onClick"]));
+InfoTile.displayName = "InfoTile";
+
 // ----- The main view: Friends row (led by the feed tile), random trending
 // tags (led by the home chip), random trending portals (closed by the "See
 // all portals" row, `onSeeAllPortals`), then the Governance
-// grid (full-width proposals row, then the 2 × 4 portal icons). Every
+// grid (full-width proposals row, then the 2 × 4 portal icons), and Help &
+// info closing the view (Ask Help link, Info row — `onOpenInfo`). Every
 // section carries its own <Fade> — one shared duration, index-staggered
 // transitionDelay — so they appear TOP → BOTTOM once at startup. Sections
 // with no data (e.g. Governance while logged out) simply never render. The
@@ -858,11 +931,12 @@ FeedTile.displayName = "FeedTile";
 // leads to the personal feed (/feed): the feed tile to its top
 // (`onGoToFeed`), each badged friend tile to that friend's newest unseen
 // post in it (`onGoToFeedPost`). The feed tile spans the columns the friend
-// tiles leave free, so the row is always full.
+// tiles leave free, so the row is always full. Help & info needs no data and
+// no session, so it renders in every state — always as the last section.
 const MainView = React.memo(({
                                  classes, proposalsPortal, governancePortals, friends, feedEnabled,
                                  trendingTags, trendingPortals,
-                                 onGoToCommunity, onGoToFeed, onGoToFeedPost, onTagClick, onSeeAllPortals
+                                 onGoToCommunity, onGoToFeed, onGoToFeedPost, onTagClick, onSeeAllPortals, onOpenInfo
                              }) => {
         useLanguage();
         const feedSpan = Math.max(1, FRIENDS_ROW_COLUMNS - friends.length);
@@ -919,6 +993,17 @@ const MainView = React.memo(({
                         </div>
                     </Fade>
                 )}
+                {/* Help & info: no gate — neither row needs data or a
+                    session. The last of the five staggered sections. */}
+                <Fade in timeout={SECTION_FADE_MS} style={SECTION_FADE_STYLES[4]}>
+                    <div>
+                        <ListSubheader className={classes.metaListHeader}>{tr("components.menu_content.help_and_info", "Help & Info")}</ListSubheader>
+                        <div className={classes.discoverGrid}>
+                            <AskHelpTile classes={classes} />
+                            <InfoTile classes={classes} onClick={onOpenInfo} />
+                        </div>
+                    </div>
+                </Fade>
             </React.Fragment>
         );
     }, (prev, next) =>
@@ -927,6 +1012,7 @@ const MainView = React.memo(({
         prev.onGoToFeedPost === next.onGoToFeedPost &&
         prev.onTagClick === next.onTagClick &&
         prev.onSeeAllPortals === next.onSeeAllPortals &&
+        prev.onOpenInfo === next.onOpenInfo &&
         prev.feedEnabled === next.feedEnabled &&
         prev.proposalsPortal === next.proposalsPortal &&
         shallowArrayEqual(prev.governancePortals, next.governancePortals) &&
@@ -1812,6 +1898,13 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
     const handleSeeAllPortals = useCallback(() => {
         dispatcher.dispatch({ type: "META", data: { kind: "portals" } });
     }, []);
+    // The Help & info section's Info row: the app-info dialog, by its overlay
+    // ("+info"). The META event again, so the row lands on the very address
+    // the toolbar's Info button opened. Ignores its arguments on purpose
+    // (handed straight to onClick).
+    const handleOpenInfo = useCallback(() => {
+        dispatcher.dispatch({ type: "META", data: { kind: "info" } });
+    }, []);
 
     // ---- Derived ----
     const theme = useTheme();
@@ -1940,8 +2033,11 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
                     />
                 )}
 
-                {/* The single scrolling view: flex-fills under the header. */}
-                <div className={classes.mainScroll}>
+                {/* The single scrolling view: flex-fills under the header.
+                    data-tour marks it for Index's first-visit tour, whose
+                    Info step scrolls it down to the last section: the tour's
+                    end brings it back to the top (resetMenuScroll). */}
+                <div className={classes.mainScroll} data-tour="menu-scroll">
                     <MainView
                         classes={classes}
                         proposalsPortal={proposalsPortal}
@@ -1955,6 +2051,7 @@ const MenuContent = ({ classes, closed_menu_ads, pixaAPI }) => {
                         onGoToFeedPost={handleFeedFocus}
                         onTagClick={handleTagNavigation}
                         onSeeAllPortals={handleSeeAllPortals}
+                        onOpenInfo={handleOpenInfo}
                     />
                 </div>
             </div>

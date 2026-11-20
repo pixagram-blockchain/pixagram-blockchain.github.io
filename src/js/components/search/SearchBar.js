@@ -33,7 +33,9 @@ import { LISTBOX_ID, fillable, optionId } from "./SuggestionList";
 // desktop (61.8 % × 82.7 % of the viewport), the whole screen on phones — in a
 // hero transition from where bar + dropdown stood; scrolled back up out of
 // them, it shrinks back. Meanwhile a hidden copy of the bar holds its place in
-// the toolbar, and the sizes below are measured on that copy.
+// the toolbar, and the sizes below are measured on that copy. The same hook
+// reads the list's subheader in focus for the address, and puts the list back
+// at one — the search back as the panel — when the address says so.
 //
 // The filter button's icon follows the search: a magnifier while it is closed
 // (so the bar reads as a search box), the filter icon once it is open, with the
@@ -273,7 +275,16 @@ const SearchBarInner = React.memo(
         // the sizes are the copy's then (the toolbar's, which the panel goes back to).
         const resultsRef = useRef(null);
         const maxHeightRef = useRef(0);
-        const fullScreen = useFullScreen({ open, panel: anchorEl, resultsRef, maxHeightRef, reduceMotion });
+        const fullScreen = useFullScreen({
+            open, panel: anchorEl, resultsRef, maxHeightRef, reduceMotion,
+            // The subheader in focus (sections.js): the list tells it to useSearch, which Index
+            // keeps in the address; when the address moves, useSearch's order puts the list back
+            // at it — and the search back as the panel — once the results are in.
+            order: results ? results.focusOrder || null : null,
+            settled: !!results && !results.loading && !results.artworksLoading,
+            content: [results, history, value],
+            onFocus: controls ? controls.reportFocus : null,
+        });
         const full = open && fullScreen.full;
         const { width, maxHeight, extra } = useBarMetrics(full ? fullScreen.spacer : anchorEl, wrapperEl, open);
         maxHeightRef.current = maxHeight;

@@ -596,7 +596,6 @@ function EditProfileDialog(props) {
 
                 // Fetch account data from blockchain
                 const accounts = await api.accounts.getAccounts([activeUsername]);
-                console.log(accounts)
 
                 if (!accounts || accounts.length === 0 || !accounts[0]) {
                     setLoadError(t(

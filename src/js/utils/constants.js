@@ -671,7 +671,7 @@ export const HELP_TELEGRAM_URL = "https://t.me/omnibus_pixagram/1";
 // beneficiaries are set once, before the first vote. Edits keep what the
 // post or comment was created with. UI that tells authors about the share
 // (the editor, a post's payout details) should read it from here too.
-export const REWARD_BENEFICIARY = Object.freeze({ account: "rex", weight: 1500 });
+export const REWARD_BENEFICIARY = Object.freeze({ account: "rex", weight: 1000 });
 
 // ── Post overlay URL helpers ──────────────────────────────────────────
 // The optional non-capturing tail accepts a "+meta" overlay suffix (see
