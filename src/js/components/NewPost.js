@@ -31,7 +31,7 @@ import ImageIcon from "@material-ui/icons/Image";
 import DescriptionIcon from "@material-ui/icons/Description";
 import CloseIcon from "@material-ui/icons/Close";
 import EditIcon from "@material-ui/icons/Edit";
-import {isArtworkPixelart, normalizeUpload, processImageFile, quantizeImageData} from "../utils/pix2art/file2imgd";
+import {isArtworkPixelart, normalizeUpload, processImageFile, quantizeImageData, AI_SLIDER_MIN, AI_SLIDER_MAX, AI_SLIDER_DEFAULT} from "../utils/pix2art/file2imgd";
 import JSLoader from "../utils/JSLoader";
 import Fade from "@material-ui/core/Fade";
 import LicenseCustomizationDialog from "./LicenseCustomizationDialog";
@@ -984,11 +984,12 @@ const checkIfImageIsOptimal = (preview, maxDimension = 160, maxColors = 64) => {
     return true;
 };
 
-// Percentage to transformation steps (0% -> 5, 100% -> 15)
-const percentToTransformationSteps = (percent) => Math.round(5 + (percent / 100) * 10);
-
-// Percentage to fidelity (0% -> 0.05, 100% -> 0.30)
-const percentToFidelity = (percent) => 0.05 + (percent / 100) * 0.45;
+// The AI sliders (transformation, conservation) run AI_SLIDER_MIN …
+// AI_SLIDER_MAX (−50 … +50 %) around a default of 0, and their positions go
+// to processImageFile as shown: utils/pix2art/AI.js turns them into steps,
+// guidance and img2img strength (SLIDER_VALUES there). Shown signed, since
+// they read as "more / less than the default": +20, 0, -20.
+const signedPercent = (value) => (value > 0 ? "+" + value : String(value));
 
 // Pictures whose longest side is at most this many pixels are treated as
 // pixel art for *display* purposes (nearest-neighbour scaling so the pixels
@@ -1166,8 +1167,8 @@ const initialState = {
     // Image settings
     preferredSize: "L",
     aspectRatio: "1:1",
-    transformationPercent: 50,
-    fidelityPercent: 50,
+    transformationPercent: AI_SLIDER_DEFAULT,
+    fidelityPercent: AI_SLIDER_DEFAULT,
     // Radio selection and Turbo checkbox in the AI dialog. Like the other
     // image settings they survive RESET_UPLOAD (back to step 0 keeps the
     // user's last choice) and go back to the defaults on RESET (dialog
@@ -1941,16 +1942,16 @@ const GenerationParameters = memo(({
                 >
                     <Box sx={{ flex: 1 }}>
                         <Typography className={classes.sliderLabel}>{t("components.new_post.transformation_strength", {
-                            transformationPercent: transformationPercent
+                            transformationPercent: signedPercent(transformationPercent)
                         })}</Typography>
                         <Slider
                             value={transformationPercent}
                             onChange={handleTransformationChange}
-                            min={0}
-                            max={100}
+                            min={AI_SLIDER_MIN}
+                            max={AI_SLIDER_MAX}
                             step={10}
                             valueLabelDisplay="auto"
-                            valueLabelFormat={(value) => `${value}%`}
+                            valueLabelFormat={(value) => `${signedPercent(value)}%`}
                             disabled={disabled}
                         />
                     </Box>
@@ -1958,16 +1959,16 @@ const GenerationParameters = memo(({
                     {showFidelity && (
                         <Box sx={{ flex: 1 }}>
                             <Typography className={classes.sliderLabel}>{t("components.new_post.conservation_strength", {
-                                fidelityPercent: fidelityPercent
+                                fidelityPercent: signedPercent(fidelityPercent)
                             })}</Typography>
                             <Slider
                                 value={fidelityPercent}
                                 onChange={handleFidelityChange}
-                                min={0}
-                                max={100}
+                                min={AI_SLIDER_MIN}
+                                max={AI_SLIDER_MAX}
                                 step={2}
                                 valueLabelDisplay="auto"
-                                valueLabelFormat={(value) => `${value}%`}
+                                valueLabelFormat={(value) => `${signedPercent(value)}%`}
                                 disabled={disabled}
                             />
                         </Box>
@@ -2582,31 +2583,31 @@ const PublishForm = memo(({
                         be posted there at all (see STORE_GATE), so there is
                         nothing to mark. The "Original content" switch stays. */}
                     {!STORE_GATE && <React.Fragment>
-                    <FormControlLabel
-                        control={
-                            <Switch
-                                checked={nsfw}
-                                onChange={onNsfwChange}
-                                color="primary"
-                            />
-                        }
-                        label={
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <FormControlLabel
+                            control={
+                                <Switch
+                                    checked={nsfw}
+                                    onChange={onNsfwChange}
+                                    color="primary"
+                                />
+                            }
+                            label={
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                                 {t("words.not_safe_for_work")}
-                                {nsfwDetecting && (
-                                    <CircularProgress size={12} thickness={5} style={{ color: '#888' }} />
-                                )}
+                                    {nsfwDetecting && (
+                                        <CircularProgress size={12} thickness={5} style={{ color: '#888' }} />
+                                    )}
                             </span>
-                        }
-                    />
-                    <Typography variant="caption" style={{ color: nsfwAutoFlagged ? '#aaa' : '#888', display: 'block', marginLeft: 48 }}>
-                        {nsfwDetecting
-                            ? t("components.new_post.analyzing_image_for_sensitive_content")
-                            : nsfwAutoFlagged
-                                ? t("components.new_post.automatically_flagged_from_image_analysis")
-                                // same sentence as EditPostDialog's NSFW switch: its key is reused
-                                : t("components.edit_post_dialog.enable_this_if_your_content_contains_mature")}
-                    </Typography>
+                            }
+                        />
+                        <Typography variant="caption" style={{ color: nsfwAutoFlagged ? '#aaa' : '#888', display: 'block', marginLeft: 48 }}>
+                            {nsfwDetecting
+                                ? t("components.new_post.analyzing_image_for_sensitive_content")
+                                : nsfwAutoFlagged
+                                    ? t("components.new_post.automatically_flagged_from_image_analysis")
+                                    // same sentence as EditPostDialog's NSFW switch: its key is reused
+                                    : t("components.edit_post_dialog.enable_this_if_your_content_contains_mature")}
+                        </Typography>
                     </React.Fragment>}
 
                     {/* Original content (json_metadata.oc): the picture was
@@ -3464,9 +3465,6 @@ function NewPost(props) {
         try {
             dispatch({ type: actionTypes.SET_FIELD, field: 'isGenerating', value: true });
 
-            const transformationSteps = percentToTransformationSteps(transformationPercent);
-            const fidelity = percentToFidelity(fidelityPercent);
-
             const result = await processImageFile(
                 {description: description.length ? description : undefined, file: inputFile ? inputFile : undefined},
                 2560,
@@ -3484,8 +3482,9 @@ function NewPost(props) {
                 },
                 useAi,
                 aspectRatio,
-                transformationSteps,
-                fidelity,
+                // The sliders' positions as shown (−50 … +50, 0 = default).
+                transformationPercent,
+                fidelityPercent,
                 style,
                 turbo
             );

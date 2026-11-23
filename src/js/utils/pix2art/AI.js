@@ -61,19 +61,22 @@ export const caption = async (file, callback = () => {}, callback2 = () => {}) =
 
 const PRESETS_TRANSFORM = {
     additional_prompt: "",
-    guidance_scale: 1.0,
-    num_inference_steps: 8,
-    lora_intensity: 0.834,
-    img2img_strength: 0.75,
+    // Replaced on every request by the sliders (SLIDER_VALUES below); the
+    // values here are their defaults. generate() replaces only steps and
+    // guidance: img2img_strength has no effect without a picture.
+    guidance_scale: 1.25,
+    num_inference_steps: 12,
+    lora_intensity: 0.85,
+    img2img_strength: 0.65,
     seed: -1,
     identity_preserve: true,
     lora_style: "retroart",
-    identitynet_strength: 0.85,
-    ip_adapter_scale: 0.85,
-    resolution: 1600,
+    identitynet_strength:1.0,
+    ip_adapter_scale: 1.0,
+    resolution: 1800,
     aspect_ratio: "1:1",
     use_tiled: false,
-    tile_size: 768,
+    tile_size: 832,
     tile_overlap: 192,
 };
 
@@ -103,6 +106,48 @@ const STYLE_OFFSETS = {
         img2img_strength: -0.1, // image strength
     },
 };
+
+// ── Sliders ───────────────────────────────────────────────────────────────
+// NewPost's "Transformation strength" and "Conservation strength" sliders
+// are signed percentages, −50 … +50, 0 being the default. Their positions
+// reach transform() / generate() as shown (through processImageFile) and
+// are turned into the Space's parameters here. ImageWizard, which shows no
+// sliders, sends the default.
+export const AI_SLIDER_MIN = -50;
+export const AI_SLIDER_MAX = 50;
+export const AI_SLIDER_DEFAULT = 0; // the scale is signed around it
+
+// What the sliders set: [value at −50 %, at 0, at +50 %], linear in between.
+// Read against the Space (face-to-pixel-art-4K):
+//  - img2img_strength becomes diffusers' denoising `strength` there
+//    (generator.py): the share of the picture that is redrawn, halved on
+//    pictures without a face (config.py). More conservation is therefore
+//    LESS strength: +50 % → 0.45. Swap the two ends to reverse it.
+//  - guidance_scale under FACE_GUIDANCE_MIN (1.5) is raised to it on face
+//    pictures, so the guidance part only acts on pictures without a face.
+// Style offsets (STYLE_OFFSETS) apply on top of these values.
+const SLIDER_VALUES = {
+    // Transformation strength
+    num_inference_steps: [8, 12, 16],
+    guidance_scale: [1.0, 1.25, 1.5],
+    // Conservation strength
+    img2img_strength: [0.85, 0.65, 0.45],
+};
+
+// A slider position → the value SLIDER_VALUES[key] gives it. A missing or
+// unreadable position reads as the default, an out-of-range one as the
+// nearest end.
+const fromSlider = (key, position) => {
+    const [atMin, atDefault, atMax] = SLIDER_VALUES[key];
+    const p = Math.min(AI_SLIDER_MAX, Math.max(AI_SLIDER_MIN, Number(position) || AI_SLIDER_DEFAULT));
+    return p < 0
+        ? atDefault + (atMin - atDefault) * (p / AI_SLIDER_MIN)
+        : atDefault + (atMax - atDefault) * (p / AI_SLIDER_MAX);
+};
+
+// Decimals go out as numbers rounded to 2 places, not toFixed() strings:
+// generator.py does arithmetic on img2img_strength with no float() cast.
+const round2 = (value) => Math.round(value * 100) / 100;
 
 // ── Provenance ────────────────────────────────────────────────────────────
 // What made a picture here, as processImageFile reports it: { type, model }.
@@ -134,30 +179,32 @@ export const describeGenerate = () => ({
 });
 
 // style: LoRA preset — "retroart" | "lucasart" | "vga" | "homm".
+// transformation / conservation: the two sliders' positions, −50 … +50
+// (0 = default; see SLIDER_VALUES).
 // turbo: one 768 px tile instead of the 1280 px pass (TURBO_TRANSFORM).
-export const transform = async (file, step_n, fidelity, callback = () => {}, callback2 = () => {}, description = "", style = "retroart", turbo = false) => {
+export const transform = async (file, transformation, conservation, callback = () => {}, callback2 = () => {}, description = "", style = "retroart", turbo = false) => {
 
     return new Promise(async function (resolve, reject) {
         callback("AI CONVERT");
         callback2("COMPUTE", Date.now(), Date.now() + (turbo ? TURBO_TRANSFORM_ETA_MS : TRANSFORM_ETA_MS));
 
         // Values come from the sliders first and are shifted afterwards, so a
-        // style's offsets hold at every slider position. Guidance and LoRA
-        // intensity stay derived from the slider's step count — deriving them
-        // from the shifted one would lower them a second time.
+        // style's offsets hold at every slider position. LoRA intensity is on
+        // no slider: the preset, shifted.
         const offsets = STYLE_OFFSETS[style] || {};
         const shift = (key, value) => value + (offsets[key] || 0);
 
         var input_image = (file.size > 1000000) ? await resizeImageTo2MP(file) : file;
-        var num_inference_steps = Math.max(1, shift("num_inference_steps", step_n));
-        var img2img_strength = shift("img2img_strength", 0.825 - Math.min(0.4, Math.max(0, fidelity)));
-        var guidance_scale = shift("guidance_scale", Math.max(1.0, 0.2+(step_n|0)/10));
-        var lora_intensity = shift("lora_intensity", PRESETS_TRANSFORM.lora_intensity + (step_n/100)/2);
+        var num_inference_steps = Math.max(1, shift("num_inference_steps", Math.round(fromSlider("num_inference_steps", transformation))));
+        var img2img_strength = round2(shift("img2img_strength", fromSlider("img2img_strength", conservation)));
+        var guidance_scale = round2(shift("guidance_scale", fromSlider("guidance_scale", transformation)));
+        var lora_intensity = round2(shift("lora_intensity", PRESETS_TRANSFORM.lora_intensity));
 
         var dynamic_config = {
             ...PRESETS_TRANSFORM,
             ...(turbo ? TURBO_TRANSFORM : null),
             lora_style: style,
+            lora_intensity,
             num_inference_steps,
             img2img_strength,
             input_image,
@@ -185,7 +232,9 @@ export const transform = async (file, step_n, fidelity, callback = () => {}, cal
 }
 
 
-export const generate = async (text, ratio, num_inference_steps, callback = () => {}, callback2 = () => {}) => {
+// transformation: the "Transformation strength" slider's position, −50 …
+// +50 (0 = default); it sets steps and guidance as in transform().
+export const generate = async (text, ratio, transformation, callback = () => {}, callback2 = () => {}) => {
 
     return new Promise(async function (resolve, reject) {
         callback("AI CONVERT");
@@ -193,7 +242,8 @@ export const generate = async (text, ratio, num_inference_steps, callback = () =
 
         var dynamic_config = {
             ...PRESETS_TRANSFORM,
-            num_inference_steps,
+            num_inference_steps: Math.round(fromSlider("num_inference_steps", transformation)),
+            guidance_scale: round2(fromSlider("guidance_scale", transformation)),
             additional_prompt: text,
         };
         try {

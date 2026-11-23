@@ -48,7 +48,7 @@ import Radio from "@material-ui/core/Radio";
 import Checkbox from "@material-ui/core/Checkbox";
 import Slider from "@material-ui/core/Slider";
 import Fade from "@material-ui/core/Fade";
-import { isArtworkPixelart, normalizeUpload, processImageFile, quantizeImageData } from "../utils/pix2art/file2imgd";
+import { isArtworkPixelart, normalizeUpload, processImageFile, quantizeImageData, AI_SLIDER_DEFAULT } from "../utils/pix2art/file2imgd";
 import JSLoader from "../utils/JSLoader";
 import PixelEditorDialog, { preloadPixelEditor } from "./pixel-editor";
 
@@ -386,12 +386,6 @@ const safeRevokeURL = (url) => {
     }
 };
 
-// Same defaults as NewPost's 50% / 50% sliders.
-const percentToTransformationSteps = (percent) => Math.round(5 + (percent / 100) * 10);
-const percentToFidelity = (percent) => 0.05 + (percent / 100) * 0.45;
-const DEFAULT_TRANSFORMATION_STEPS = percentToTransformationSteps(50);
-const DEFAULT_FIDELITY = percentToFidelity(50);
-
 // AI style presets offered as a radio list in the AI dialog, with the Turbo
 // checkbox under it. `value` is passed verbatim to processImageFile as its
 // `style` argument (selects the LoRA); `labelKey` is resolved with t() at
@@ -700,8 +694,10 @@ function ImageWizard(props) {
                 },
                 useAi,
                 "1:1",
-                DEFAULT_TRANSFORMATION_STEPS,
-                DEFAULT_FIDELITY,
+                // No sliders here: NewPost's transformation and
+                // conservation sliders at their default.
+                AI_SLIDER_DEFAULT,
+                AI_SLIDER_DEFAULT,
                 style,
                 turbo
             );

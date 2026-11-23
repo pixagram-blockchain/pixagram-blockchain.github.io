@@ -1,4 +1,7 @@
 import {generate, transform, describeGenerate, describeTransform} from "./AI";
+// The AI sliders' range, for the components that show them (NewPost) or send
+// their default (ImageWizard).
+export { AI_SLIDER_MIN, AI_SLIDER_MAX, AI_SLIDER_DEFAULT } from "./AI";
 import { NO_AI } from "../ai_provenance";
 import * as sd from 'smart-downscaler/bundler';
 sd.init();
@@ -347,6 +350,9 @@ export const normalizeUpload = async function(file) {
 // style: the AI LoRA ("retroart" | "lucasart" | "vga" | "homm"); turbo: one
 // 768 px tile instead of the 1280 px pass (~4x faster). Both only matter when
 // use_ai is set.
+// transformation / conservation: the AI sliders' positions as shown, −50 …
+// +50 with 0 the default; ./AI turns them into steps, guidance and img2img
+// strength (generation reads `transformation` only).
 //
 // The result's `ai` says which branch below ran, { type, model }, which the
 // post's AI disclosure is pre-filled from (utils/ai_provenance.js):
@@ -362,8 +368,8 @@ export const processImageFile = async function ({file, description},
                                                 callback2,
                                                 use_ai,
                                                 ratio = "1:1",
-                                                steps = 8,
-                                                fidelity=0.8,
+                                                transformation,
+                                                conservation,
                                                 style = "retroart",
                                                 turbo = false) {
 
@@ -499,11 +505,11 @@ export const processImageFile = async function ({file, description},
     // synchronous throw of transform(), not a rejected promise.
     if(typeof file === "undefined" && typeof description === "string") {
 
-        return generate(description, ratio, steps, callback, callback2).then((blob, title) => continue_it(blob, title, describeGenerate()));
+        return generate(description, ratio, transformation, callback, callback2).then((blob, title) => continue_it(blob, title, describeGenerate()));
 
     }else if(use_ai){
         try {
-            return transform(file, steps, fidelity, callback, callback2, description, style, turbo).then((blob, title) => continue_it(blob, title, describeTransform(style)));
+            return transform(file, transformation, conservation, callback, callback2, description, style, turbo).then((blob, title) => continue_it(blob, title, describeTransform(style)));
         } catch (e) {
             return continue_it(file, "", NO_AI);
         }
