@@ -725,7 +725,7 @@ const STYLE_FAVORITE_OFF = Object.freeze({ color: "#8a8a8a", marginLeft: "auto",
 const PostDescription = React.memo(function PostDescription({ html, summary }) {
     const markup = useMemo(() => (html ? { __html: safeHTML(html) } : null), [html]);
     if (markup) {
-        return <Typography variant="body1" color="textSecondary" component="div" style={STYLE_DESCRIPTION} dangerouslySetInnerHTML={markup} />;
+        return <Typography variant="body1" color="textSecondary" component="div" style={STYLE_DESCRIPTION} dangerouslySetInnerHTML={safeHTML(markup)} />;
     }
     if (summary) {
         return <Typography variant="body1" color="textSecondary" component="p" style={STYLE_DESCRIPTION}>{summary}</Typography>;

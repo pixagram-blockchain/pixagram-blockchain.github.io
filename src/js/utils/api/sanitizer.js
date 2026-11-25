@@ -12,16 +12,19 @@
  *   - Plain text extraction (HTML/Markdown → text)
  *   - TF-IDF extractive summarization
  *
+ * HTML engine: the browser's HTML Sanitizer API (Element.setHTML) where it
+ * exists, sanitize-html everywhere else — fetched by a dynamic import, so it is
+ * in no bundle and never downloaded where the native API is present. Both run
+ * the same SanitizeConfigs; see "HTML Engines".
+ *
  * Drop-in replacement for @pixagram/sanitizer WASM module.
  *
- * @version 2.0.1
+ * @version 2.1.0
  * @module ContentSanitizer
  */
 
-// 'sanitize-html/index' (extensionless deep path) only resolves under bundlers
-// that guess extensions. It fails under Node ESM and strict-resolution
-// bundlers; the package's documented entry point works everywhere.
-import sanitizeHtmlLib from 'sanitize-html';
+// sanitize-html is deliberately NOT imported here: loadSanitizeHtml() fetches
+// it on demand, only where the native HTML Sanitizer API is missing.
 import { marked } from 'marked';
 
 // ═══════════════════════════════════════════════════════════
@@ -659,9 +662,9 @@ export function getImageProxyBase() {
 /**
  * sanitize-html `transformTags` handler for `<img>`.
  *
- * Runs INSIDE sanitize-html — deliberately, so the sanitizer stays the only
- * stage that writes markup — and before scheme filtering, so a src it rewrites
- * is still scheme-checked afterwards.
+ * Runs INSIDE the sanitizer (either engine) — deliberately, so the sanitizer
+ * stays the only stage that writes markup — and before scheme filtering, so a
+ * src it rewrites is still scheme-checked afterwards.
  *
  * Three rules:
  *   1. Anything that is not `data:image/…` or `https://` loses its src and is
@@ -1065,7 +1068,7 @@ class LinkProcessor {
      * not modify the markup; `is_external` is read back from the data attribute
      * the transform above wrote.
      *
-     * @param {string} html — output of sanitize-html
+     * @param {string} html — output of the sanitizer
      * @returns {Array<{ href: string, text: string, domain: string, is_external: boolean }>}
      */
     static collect(html) {
@@ -1097,15 +1100,30 @@ class LinkProcessor {
 // sanitize-html Configurations
 // ═══════════════════════════════════════════════════════════
 
+/**
+ * sanitize-html's `simpleTransform`, same semantics. Local because the configs
+ * below are built at module load, and in a browser with the native API the
+ * library is never loaded at all.
+ */
+function simpleTransform(newTagName, newAttribs = {}, merge = true) {
+    return (tagName, attribs) => {
+        if (!merge) return { tagName: newTagName, attribs: newAttribs };
+        for (const k in newAttribs) attribs[k] = newAttribs[k];
+        return { tagName: newTagName, attribs };
+    };
+}
+
 const SAFE_CLASS_PATTERNS = [/^pixa-/, /^language-/, /^highlight-/, /^hljs/];
 
+// Written in sanitize-html's option format. The native engine reads the same
+// objects, and refuses any option it does not implement (see compilePolicy).
 const SanitizeConfigs = Object.freeze({
 
     memo: {
         allowedTags:       ['strong', 'b', 'em', 'i', 'a'],
         allowedAttributes: { 'a': ['href', 'class', 'data-username'] },
         allowedSchemes:    ['https', 'mailto'],
-        transformTags:     { 'a': sanitizeHtmlLib.simpleTransform('a', { rel: 'noopener noreferrer' }) },
+        transformTags:     { 'a': simpleTransform('a', { rel: 'noopener noreferrer' }) },
     },
 
     comment: {
@@ -1124,7 +1142,7 @@ const SanitizeConfigs = Object.freeze({
         },
         allowedClasses:  { '*': SAFE_CLASS_PATTERNS },
         allowedSchemes:  ['http', 'https', 'mailto'],
-        transformTags:   { 'a': sanitizeHtmlLib.simpleTransform('a', { rel: 'noopener noreferrer' }) },
+        transformTags:   { 'a': simpleTransform('a', { rel: 'noopener noreferrer' }) },
     },
 
     post: {
@@ -1173,7 +1191,7 @@ const SanitizeConfigs = Object.freeze({
         allowedClasses:            { '*': [...SAFE_CLASS_PATTERNS, /^text-/, /^align-/] },
         allowProtocolRelative:     true,
         transformTags:             {
-            'a':   sanitizeHtmlLib.simpleTransform('a', { rel: 'noopener noreferrer' }),
+            'a':   simpleTransform('a', { rel: 'noopener noreferrer' }),
             'img': makeImgTransform(undefined),
         },
         exclusiveFilter:                   dropSrclessImages,
@@ -1185,6 +1203,440 @@ const SanitizeConfigs = Object.freeze({
         allowedAttributes: {},
     },
 });
+
+// ═══════════════════════════════════════════════════════════
+// HTML Engines
+// ═══════════════════════════════════════════════════════════
+
+/*
+ * Two engines run the same SanitizeConfigs.
+ *
+ *   native         Element.setHTML() (HTML Sanitizer API) parses the input
+ *                  with the browser's own parser, into an inert document, and
+ *                  strips the XSS baseline no configuration can switch off:
+ *                  script, event handlers, javascript: URLs, and iframe,
+ *                  object and embed together with their fallback content
+ *                  (which sanitize-html would keep). It cannot express the
+ *                  rest of the policy — scheme allowlists, class patterns,
+ *                  transforms, exclusiveFilter — so a walk over the parsed
+ *                  tree applies the config and writes the output itself.
+ *
+ *   sanitize-html  Wherever setHTML is missing: Safari, older browsers,
+ *                  workers, Node. Fetched by a dynamic import that starts as
+ *                  soon as this module is evaluated.
+ *
+ * The walk writes what sanitize-html writes — same attribute order, the same
+ * escaping, ` />` on the same tags — because output crosses engines: the API
+ * layer and the component sanitize the same string twice and need not share an
+ * engine, and safeString() reverses exactly the entities sanitize-html writes.
+ * innerHTML would not do: it writes U+00A0 as &nbsp; and loses a <pre>'s
+ * leading newline. Where the engines still differ, htmlparser2 and the browser
+ * parsed the input differently, and the native result is the tree the browser
+ * itself would have built.
+ */
+
+/**
+ * Thrown by the HTML functions while sanitize-html is still loading, in an
+ * environment without the native API — never where the API exists. The API
+ * layer awaits pixaContentInit() before its first call, so seeing this means
+ * a new call site skipped it.
+ */
+export class SanitizerNotReadyError extends Error {
+    constructor() {
+        super('ContentSanitizer: sanitize-html is still loading; await pixaContentInit() first');
+        this.name = 'SanitizerNotReadyError';
+    }
+}
+
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+/**
+ * sanitize-html 2.18 defaults for options the configs leave unset, which the
+ * native engine has to spell out. Re-check them when upgrading the library.
+ */
+const LIB_DEFAULTS = Object.freeze({
+    allowedSchemes:         ['http', 'https', 'ftp', 'mailto', 'tel'],
+    allowedSchemesByTag:    {},
+    allowedSchemesAppliedToAttributes: [
+        'href', 'src', 'cite', 'action', 'formaction', 'data', 'xlink:href', 'poster',
+        'background', 'ping', 'longdesc', 'usemap', 'codebase', 'classid', 'archive',
+        'profile', 'manifest', 'itemid', 'dynsrc', 'lowsrc',
+    ],
+    allowProtocolRelative:  true,
+    selfClosing:            ['img', 'br', 'hr', 'area', 'base', 'basefont', 'input', 'link', 'meta', 'col'],
+    nonTextTags:            ['script', 'style', 'textarea', 'option', 'xmp'],
+    allowedEmptyAttributes: ['alt'],
+    // An empty value on one of these is dropped instead of being kept as a
+    // bare (boolean) attribute. The library's list also names every event
+    // handler; no config can allow those, so they are left out here.
+    nonBooleanAttributes: (
+        'abbr accept accept-charset accesskey action allow alt as autocapitalize autocomplete '
+        + 'blocking charset cite class color cols colspan content contenteditable coords '
+        + 'crossorigin data datetime decoding dir dirname download draggable enctype '
+        + 'enterkeyhint fetchpriority for form formaction formenctype formmethod formtarget '
+        + 'headers height hidden high href hreflang http-equiv id imagesizes imagesrcset '
+        + 'inputmode integrity is itemid itemprop itemref itemtype kind label lang list '
+        + 'loading low max maxlength media method min minlength name nonce optimum pattern '
+        + 'ping placeholder popover popovertarget popovertargetaction poster preload '
+        + 'referrerpolicy rel rows rowspan sandbox scope shape size sizes slot span '
+        + 'spellcheck src srcdoc srclang srcset start step style tabindex target title '
+        + 'translate type usemap value width wrap'
+    ).split(' '),
+});
+
+/** The options the native engine implements. A config with any other key is refused. */
+const NATIVE_OPTIONS = new Set([
+    'allowedTags', 'allowedAttributes', 'allowedClasses', 'transformTags', 'exclusiveFilter',
+    'allowedSchemes', 'allowedSchemesByTag', 'allowedSchemesAppliedToAttributes',
+    'allowProtocolRelative', 'nonTextTags', 'selfClosing', 'allowedEmptyAttributes',
+    'nonBooleanAttributes',
+]);
+
+/**
+ * Attributes sanitize-html rewrites (CSS, srcset parsing) in ways the native
+ * engine does not reproduce. Tags with special handling are refused through
+ * SAFE_HTML_FORBIDDEN_TAGS. Allowing either is refused rather than run with
+ * different semantics on the two engines.
+ */
+const NATIVE_REFUSED_ATTR_RE = /^(style|srcset|imagesrcset)$/;
+
+/** A plain tag or attribute name: no glob, nothing a parser would split on. */
+const PLAIN_NAME_RE = /^[a-z][a-z0-9_.:-]*$/;
+
+const POLICIES = new WeakMap();
+
+/**
+ * Compile a sanitize-html config into lookup tables for the native walk,
+ * with the library's semantics, defaults included. Cached per config object.
+ */
+function compilePolicy(config) {
+    let policy = POLICIES.get(config);
+    if (policy) return policy;
+
+    const refuse = (what) => {
+        throw new Error(`ContentSanitizer: the native engine does not implement ${what}`);
+    };
+    const option = (key) => (hasOwn(config, key) ? config[key] : LIB_DEFAULTS[key]);
+
+    for (const key of Object.keys(config)) {
+        if (!NATIVE_OPTIONS.has(key)) refuse(`option "${key}"`);
+    }
+    if (!Array.isArray(config.allowedTags)) refuse('allowedTags other than a list');
+    if (!config.allowedAttributes || typeof config.allowedAttributes !== 'object') {
+        refuse('allowedAttributes other than a map');
+    }
+
+    const tags = new Set();
+    for (const tag of config.allowedTags) {
+        if (!PLAIN_NAME_RE.test(tag) || SAFE_HTML_FORBIDDEN_TAGS.has(tag)) refuse(`tag "${tag}"`);
+        tags.add(tag);
+    }
+
+    const attrs = new Map();   // tag or '*' → Set of names
+    const allow = (tag, name) => {
+        if (typeof name !== 'string' || !PLAIN_NAME_RE.test(name) || NATIVE_REFUSED_ATTR_RE.test(name)) {
+            refuse(`attribute "${String(name)}"`);
+        }
+        if (!attrs.has(tag)) attrs.set(tag, new Set());
+        attrs.get(tag).add(name);
+    };
+    for (const [tag, names] of Object.entries(config.allowedAttributes)) {
+        for (const name of names) allow(tag, name);
+    }
+
+    const classes = new Map();   // tag or '*' → { exact, patterns }
+    for (const [tag, list] of Object.entries(config.allowedClasses || {})) {
+        allow(tag, 'class');     // as in sanitize-html, allowedClasses implies the attribute
+        const rule = { exact: new Set(), patterns: [] };
+        for (const c of list) {
+            // .test() on a g or y regex is stateful; drop those flags.
+            if (c instanceof RegExp) rule.patterns.push(new RegExp(c.source, c.flags.replace(/[gy]/g, '')));
+            else if (typeof c === 'string' && !c.includes('*')) rule.exact.add(c);
+            else refuse(`class pattern "${String(c)}"`);
+        }
+        classes.set(tag, rule);
+    }
+
+    const transforms = new Map();
+    let transformAll = null;
+    for (const [tag, t] of Object.entries(config.transformTags || {})) {
+        const fn = typeof t === 'string' ? simpleTransform(t) : t;
+        if (typeof fn !== 'function') refuse(`transformTags["${tag}"]`);
+        if (tag === '*') transformAll = fn;
+        else transforms.set(tag, fn);
+    }
+
+    const nonBoolean = option('nonBooleanAttributes');
+    policy = {
+        tags, attrs, classes, transforms, transformAll,
+        filter:           config.exclusiveFilter || null,
+        nonText:          new Set(config.nonTextTags || LIB_DEFAULTS.nonTextTags),
+        selfClosing:      new Set(option('selfClosing')),
+        emptyOk:          new Set(option('allowedEmptyAttributes')),
+        nonBoolean:       new Set(nonBoolean),
+        nonBooleanAll:    nonBoolean.includes('*'),
+        schemes:          option('allowedSchemes') || [],
+        schemesByTag:     option('allowedSchemesByTag') || {},
+        schemeAttrs:      new Set(option('allowedSchemesAppliedToAttributes')),
+        protocolRelative: option('allowProtocolRelative') !== false,
+    };
+    POLICIES.set(config, policy);
+    return policy;
+}
+
+/** sanitize-html's scheme check (launder's naughtyHref): true when the URL must go. */
+function naughtyHref(policy, tag, href) {
+    if (typeof href !== 'string') return false;
+    href = href.replace(/[\u0000- ]+/g, '');   // browsers ignore these in a URL
+    for (;;) {                                      // and comments, in an XML data island
+        const open = href.indexOf('<!--');
+        if (open === -1) break;
+        const close = href.indexOf('-->', open + 4);
+        if (close === -1) break;
+        href = href.slice(0, open) + href.slice(close + 3);
+    }
+    const m = /^([a-zA-Z][a-zA-Z0-9.\-+]*):/.exec(href);
+    if (!m) return /^[/\\]{2}/.test(href) ? !policy.protocolRelative : false;
+    const allowed = hasOwn(policy.schemesByTag, tag) ? policy.schemesByTag[tag] || [] : policy.schemes;
+    return !allowed.includes(m[1].toLowerCase());
+}
+
+/** sanitize-html's class filtering. Unfiltered when no rule covers the tag. */
+function filterClasses(policy, tag, value) {
+    const own = policy.classes.get(tag);
+    const any = policy.classes.get('*');
+    if (!own && !any) return value;
+    const ok = (rule, c) => rule && (rule.exact.has(c) || rule.patterns.some((re) => re.test(c)));
+    return value.split(/\s+/).filter((c) => ok(own, c) || ok(any, c)).join(' ');
+}
+
+const HTML_ESCAPES = Object.freeze({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' });
+/** sanitize-html's escaping: `& < >` in text, and `"` too in attribute values. */
+const escapeText = (s) => (/[&<>]/.test(s)
+    ? s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    : s);
+const escapeAttr = (s) => s.replace(/[&<>"]/g, (c) => HTML_ESCAPES[c]);
+
+const HTML_NS = 'http://www.w3.org/1999/xhtml';
+/** The parser drops one newline right after these start tags. */
+const LEADING_NEWLINE_TAGS = new Set(['pre', 'listing', 'textarea']);
+
+/**
+ * Build the native engine, or return null if the HTML Sanitizer API is missing
+ * or does not behave the way this engine relies on.
+ *
+ * @returns {{ name: 'native', run: function(string, object): string }|null}
+ */
+function createNativeEngine() {
+    try {
+        const { Sanitizer, document, Node, Element, CharacterData, HTMLTemplateElement } = globalThis;
+        if (typeof Sanitizer !== 'function' || !document
+            || typeof Element !== 'function' || typeof Element.prototype.setHTML !== 'function'
+            || typeof Sanitizer.prototype.get !== 'function') {
+            return null;
+        }
+
+        // Read the tree through prototype getters and methods, never
+        // node.attributes or node.firstChild: the baseline keeps <form>, and a
+        // child <input name="attributes"> shadows form.attributes (DOM
+        // clobbering). Called off the prototype, markup cannot shadow them.
+        const getter = (proto, key) => Object.getOwnPropertyDescriptor(proto, key).get;
+        const nodeType      = getter(Node.prototype, 'nodeType');
+        const firstChild    = getter(Node.prototype, 'firstChild');
+        const nextSibling   = getter(Node.prototype, 'nextSibling');
+        const textContent   = getter(Node.prototype, 'textContent');
+        const localName     = getter(Element.prototype, 'localName');
+        const namespace     = getter(Element.prototype, 'namespaceURI');
+        const attributes    = getter(Element.prototype, 'attributes');
+        const textData      = getter(CharacterData.prototype, 'data');
+        const content       = getter(HTMLTemplateElement.prototype, 'content');
+        const hasAttributes = Element.prototype.hasAttributes;
+        const setHTML       = Element.prototype.setHTML;
+
+        // No browsing context: nothing parsed into this document runs, fetches
+        // (the image URLs are not proxied yet at this point) or upgrades into
+        // one of the app's custom elements.
+        const doc = document.implementation.createHTMLDocument('');
+        // {} is a remove configuration with nothing in it: every element is
+        // kept for the walk to unwrap or drop, as sanitize-html would, while
+        // setHTML() still applies the baseline.
+        const sanitizer = new Sanitizer({});
+
+        // Check those semantics. The 2021–23 draft that some engines shipped
+        // had other config keys and other defaults.
+        const probe = doc.createElement('div');
+        setHTML.call(probe, '<x-p><b onclick="x">b</b></x-p><script>x<\/script>', { sanitizer });
+        if (probe.innerHTML !== '<x-p><b>b</b></x-p>') return null;
+
+        const DROP = {};   // openElement(): element removed with its contents
+
+        const transform = (fn, tagName, attribs) => {
+            const t = fn(tagName, attribs);
+            if (t.text !== undefined) throw new Error('ContentSanitizer: the native engine does not implement transformTags text');
+            return t;
+        };
+
+        // Write the start tag and return a frame to close later. null unwraps
+        // the element (contents kept), DROP removes it with its contents.
+        function openElement(el, tag, policy, out) {
+            let name = tag;
+            let attribs = null;
+            const fn = policy.transforms.get(tag);
+            if (fn || policy.transformAll || hasAttributes.call(el)) {
+                attribs = Object.create(null);
+                const list = attributes.call(el);
+                for (let i = 0; i < list.length; i++) attribs[list[i].name] = list[i].value;
+                if (fn) ({ tagName: name, attribs } = transform(fn, name, attribs));
+                if (policy.transformAll) ({ tagName: name, attribs } = transform(policy.transformAll, name, attribs));
+            }
+
+            if (!policy.tags.has(name)) return policy.nonText.has(name) ? DROP : null;
+
+            const kept = policy.filter ? {} : null;
+            let start = '<' + name;
+            if (attribs) {
+                const own = policy.attrs.get(name);
+                const any = policy.attrs.get('*');
+                for (const a of Object.keys(attribs)) {
+                    if (attribs[a] == null) continue;
+                    let value = String(attribs[a]);
+                    if (value === '' && !policy.emptyOk.has(a)
+                        && (policy.nonBooleanAll || policy.nonBoolean.has(a))) continue;
+                    if (!(own && own.has(a)) && !(any && any.has(a))) continue;
+                    if (policy.schemeAttrs.has(a) && naughtyHref(policy, name, value)) continue;
+                    if (a === 'class' && !(value = filterClasses(policy, name, value))) continue;
+                    if (kept) kept[a] = value;
+                    start += ' ' + a + (value ? `="${escapeAttr(value)}"` : policy.emptyOk.has(a) ? '=""' : '');
+                }
+            }
+            const selfClosing = policy.selfClosing.has(name);
+            out.push(start + (selfClosing ? ' />' : '>'));
+            return { el, tag, name, attribs: kept || {}, at: out.length - 1, selfClosing };
+        }
+
+        function closeElement(frame, policy, out) {
+            if (policy.filter) {
+                // Shaped like sanitize-html's frame: tag as parsed, attribs as
+                // they survived. text is read from the parsed tree on demand.
+                const verdict = policy.filter({
+                    tag: frame.tag,
+                    attribs: frame.attribs,
+                    get text() { return textContent.call(frame.el); },
+                });
+                if (verdict === 'excludeTag') { out[frame.at] = ''; return; }
+                if (verdict) { out.length = frame.at; return; }
+            }
+            if (frame.selfClosing) return;
+            // Content starting with a newline needs one more after the start
+            // tag, or the next parse eats it — and the next sanitize pass.
+            if (LEADING_NEWLINE_TAGS.has(frame.name)) {
+                for (let k = frame.at + 1; k < out.length; k++) {
+                    if (!out[k]) continue;
+                    if (out[k][0] === '\n') out[frame.at] += '\n';
+                    break;
+                }
+            }
+            out.push(`</${frame.name}>`);
+        }
+
+        // Iterative, so nesting depth cannot exhaust the call stack. `frame`
+        // belongs to the element whose children are being written; null for an
+        // unwrapped one and for the root.
+        function serialize(root, policy) {
+            const out = [];
+            const stack = [];
+            let node = firstChild.call(root);
+            let frame = null;
+            for (;;) {
+                if (node) {
+                    const type = nodeType.call(node);
+                    if (type === 3) {
+                        out.push(escapeText(textData.call(node)));
+                    } else if (type === 1) {   // comments and processing instructions are dropped
+                        const tag = localName.call(node).toLowerCase();
+                        const next = openElement(node, tag, policy, out);
+                        if (next && next.selfClosing) {
+                            closeElement(next, policy, out);
+                        } else if (next !== DROP) {
+                            stack.push(node, frame);
+                            frame = next;
+                            // A template's children live in its content fragment.
+                            node = firstChild.call(tag === 'template' && namespace.call(node) === HTML_NS
+                                ? content.call(node) : node);
+                            continue;
+                        }
+                    }
+                    node = nextSibling.call(node);
+                    continue;
+                }
+                if (frame) closeElement(frame, policy, out);
+                if (!stack.length) return out.join('');
+                frame = stack.pop();
+                node = nextSibling.call(stack.pop());
+            }
+        }
+
+        return {
+            name: 'native',
+            run(html, config) {
+                if (html == null) return '';
+                const policy = compilePolicy(config);
+                const host = doc.createElement('div');   // per call: re-entrant, nothing retained
+                setHTML.call(host, String(html), { sanitizer });
+                return serialize(host, policy);
+            },
+        };
+    } catch {
+        return null;
+    }
+}
+
+/** Decided once, when the module is evaluated. */
+const NATIVE_ENGINE = createNativeEngine();
+
+let libraryEngine = null;   // sanitize-html, once loaded
+let libraryLoad   = null;   // the in-flight import; reset on failure so a later call retries
+let preferLibrary = false;  // pixaContentInit({ native: false })
+
+/**
+ * Fetch sanitize-html. The bare specifier is the package's documented entry
+ * point ('sanitize-html/index' only resolves under bundlers that guess
+ * extensions); the chunk name gives a stable filename when
+ * output.chunkFilename contains [name].
+ */
+function loadSanitizeHtml() {
+    if (!libraryLoad) {
+        libraryLoad = import(/* webpackChunkName: "sanitize-html" */ 'sanitize-html')
+            .then((mod) => {
+                const lib = typeof mod.default === 'function' ? mod.default : mod;
+                if (typeof lib !== 'function') throw new TypeError('ContentSanitizer: sanitize-html has no default export');
+                libraryEngine = { name: 'sanitize-html', run: (html, config) => lib(html, config) };
+                return libraryEngine;
+            })
+            .catch((err) => {
+                libraryLoad = null;
+                throw err;
+            });
+    }
+    return libraryLoad;
+}
+
+// No native API: start the download while the app is still booting, not at
+// the first pixaContentInit(). Caught here so a failure is not an unhandled
+// rejection; pixaContentInit() reports it and retries.
+if (!NATIVE_ENGINE) loadSanitizeHtml().catch(() => {});
+
+/** The engine to use now, or null while sanitize-html is still loading. */
+function currentEngine() {
+    return (preferLibrary && libraryEngine) || NATIVE_ENGINE || libraryEngine;
+}
+
+/** Run a config on the current engine. */
+function runSanitizer(html, config) {
+    const engine = currentEngine();
+    if (!engine) throw new SanitizerNotReadyError();
+    return engine.run(html, config);
+}
 
 // ═══════════════════════════════════════════════════════════
 // JSON Sanitizer
@@ -1208,7 +1660,12 @@ class JsonSanitizer {
             const raw   = JSON.parse(jsonStr);
             const clean = JsonSanitizer.#sanitizeValue(raw, 0);
             return clean !== null ? JSON.stringify(clean) : '{}';
-        } catch { return '{}'; }
+        } catch (e) {
+            // Bad input degrades to '{}'. A missing engine must not: that
+            // would hand back an empty profile instead of failing.
+            if (e instanceof SanitizerNotReadyError) throw e;
+            return '{}';
+        }
     }
 
     static #sanitizeValue(value, depth) {
@@ -1393,8 +1850,35 @@ function parseOptions(optionsJson) {
 // Public API (same signatures as WASM module)
 // ═══════════════════════════════════════════════════════════
 
-/** Init — no-op for WASM API compatibility. */
-export default async function pixaContentInit() {}
+/**
+ * Initialise the HTML engine. Await it once before the first sanitize call.
+ *
+ * With the native HTML Sanitizer API this resolves at once, and sanitize-html
+ * is never fetched. Without it, it resolves when the dynamic import — started
+ * when this module was evaluated — has landed. Until then sanitizeMemo,
+ * sanitizeComment, sanitizePost, safeString and safeJson throw
+ * SanitizerNotReadyError, and safeHTML returns the text, escaped. Rejects if
+ * the import fails; the next call retries it.
+ *
+ * @param {{ native?: boolean }} [options]
+ *        native: false — use sanitize-html even where the native API exists.
+ *        A kill switch, like setSvgAllowlist(), for content the native engine
+ *        renders differently. The native engine keeps serving until the
+ *        library has loaded, so switching leaves no gap.
+ * @returns {Promise<'native'|'sanitize-html'>} the engine now in use
+ */
+export default async function pixaContentInit(options) {
+    if (options && typeof options === 'object' && options.native === false) preferLibrary = true;
+    if (NATIVE_ENGINE && !preferLibrary) return NATIVE_ENGINE.name;
+    await loadSanitizeHtml();
+    return currentEngine().name;
+}
+
+/** @returns {'native'|'sanitize-html'|null} the engine in use, or null while sanitize-html loads */
+export function getSanitizerEngine() {
+    const engine = currentEngine();
+    return engine ? engine.name : null;
+}
 
 /** Tier 1: Memo sanitization. */
 export function sanitizeMemo(body, optionsJson) {
@@ -1404,14 +1888,14 @@ export function sanitizeMemo(body, optionsJson) {
     const opts = parseOptions(optionsJson);
 
     if (body.startsWith('#')) {
-        const safe = sanitizeHtmlLib(body, SanitizeConfigs.strip);
+        const safe = runSanitizer(body, SanitizeConfigs.strip);
         return { html: `<span class="pixa-encrypted-memo">${safe}</span>` };
     }
 
     const input          = TextProcessor.truncate(body, Math.min(opts.max_body_length, 2048));
     const htmlRaw        = TextProcessor.isPredominantlyHtml(input) ? input : TextProcessor.markdownToHtml(input);
     const htmlMentions   = MentionProcessor.process(htmlRaw);
-    const html           = sanitizeHtmlLib(htmlMentions, SanitizeConfigs.memo);
+    const html           = runSanitizer(htmlMentions, SanitizeConfigs.memo);
     return { html };
 }
 
@@ -1425,9 +1909,9 @@ export function sanitizeComment(body, optionsJson) {
     const htmlRaw      = TextProcessor.isPredominantlyHtml(input) ? input : TextProcessor.markdownToHtml(input);
     const htmlMentions = MentionProcessor.process(htmlRaw);
 
-    // External-link marking happens INSIDE sanitize-html now, so the sanitizer
+    // External-link marking happens INSIDE the sanitizer now, so the sanitizer
     // is the last stage that writes markup.
-    const html  = sanitizeHtmlLib(htmlMentions, {
+    const html  = runSanitizer(htmlMentions, {
         ...SanitizeConfigs.comment,
         transformTags: { 'a': LinkProcessor.makeTransform(opts.internal_domains) },
     });
@@ -1454,9 +1938,9 @@ export function sanitizePost(body, optionsJson) {
     const htmlRaw      = TextProcessor.isPredominantlyHtml(input) ? input : TextProcessor.markdownToHtml(input);
     const htmlMentions = MentionProcessor.process(htmlRaw);
 
-    // External-link marking happens INSIDE sanitize-html now, so the sanitizer
+    // External-link marking happens INSIDE the sanitizer now, so the sanitizer
     // is the last and only stage that writes markup. Nothing runs after it.
-    const html = sanitizeHtmlLib(htmlMentions, {
+    const html = runSanitizer(htmlMentions, {
         ...SanitizeConfigs.post,
         transformTags: {
             'a':   LinkProcessor.makeTransform(opts.internal_domains),
@@ -1492,8 +1976,8 @@ export function safeJson(jsonStr) {
 }
 
 /**
- * Reverse the five entity substitutions sanitize-html performs when it
- * serialises TEXT. With allowedTags: [] the library both strips tags and
+ * Reverse the entity substitutions the sanitizer (either engine) performs
+ * when it serialises TEXT. With allowedTags: [] it both strips tags and
  * escapes what remains, so `Tom & Jerry` came back as `Tom &amp; Jerry`,
  * `5 < 10` as `5 &lt; 10` — and those values are rendered as text by React
  * (profile `about`, `name`, …), so users saw the raw entities.
@@ -1557,7 +2041,7 @@ export function safeString(s, maxLen) {
     if (isUrl) {
         cleaned = trimmed;
     } else {
-        const stripped = sanitizeHtmlLib(trimmed, SanitizeConfigs.strip);
+        const stripped = runSanitizer(trimmed, SanitizeConfigs.strip);
         const strippedLower = stripped.toLowerCase();
         if (strippedLower.includes('javascript:') || strippedLower.includes('vbscript:')) return null;
         // Un-escape AFTER the scheme checks above, so those still run against
@@ -1643,14 +2127,17 @@ export function safeProfileImage(value) {
 
 /**
  * Tags no option can ever re-enable, whatever the caller passes. Each one is
- * an execution or embedding vector; the post allowlist has none of them and
- * a widening API must not be able to add them back.
+ * an execution or embedding vector — or, for xmp and the SVG animation
+ * elements, gets sanitize-html handling the native engine does not reproduce;
+ * the native engine refuses every config that allows one. The post allowlist
+ * has none of them and a widening API must not be able to add them back.
  */
 const SAFE_HTML_FORBIDDEN_TAGS = Object.freeze(new Set([
     'script', 'style', 'iframe', 'frame', 'frameset', 'object', 'embed',
     'applet', 'link', 'meta', 'base', 'form', 'input', 'button', 'textarea',
     'select', 'option', 'template', 'slot', 'portal', 'noscript',
     'svg', 'math', 'foreignobject', 'audio', 'video', 'source', 'track',
+    'xmp', 'animate', 'animatecolor', 'animatemotion', 'animatetransform', 'set',
 ]));
 
 /**
@@ -1659,14 +2146,14 @@ const SAFE_HTML_FORBIDDEN_TAGS = Object.freeze(new Set([
  * attributes sanitize-html does not scheme-check, and `id`, which is only
  * ever admitted through `allowedIds` so it is always pattern-checked.
  */
-const SAFE_HTML_FORBIDDEN_ATTR_RE = /^(on[a-z]+|style|id|srcdoc|srcset|formaction|action|xlink:href|href|src|data|codebase|ping|target)$/;
+const SAFE_HTML_FORBIDDEN_ATTR_RE = /^(on[a-z]+|style|id|srcdoc|srcset|imagesrcset|formaction|action|xlink:href|href|src|data|codebase|ping|target)$/;
 
 /** What an id may look like at all, before the caller's own pattern applies. */
 const SAFE_HTML_ID_VALUE_RE = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 
 const SAFE_HTML_DEFAULT_ID_TAGS = Object.freeze(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
 
-/** Compiled sanitize-html config per options object (identity-keyed). */
+/** Built config per options object (identity-keyed). */
 const SAFE_HTML_CONFIGS = new WeakMap();
 
 /**
@@ -1693,7 +2180,7 @@ function buildSafeHtmlConfig(options) {
     const allowedTags = [...base.allowedTags];
     for (const raw of options.allowedTags || []) {
         const tag = String(raw).toLowerCase();
-        if (SAFE_HTML_FORBIDDEN_TAGS.has(tag) || allowedTags.includes(tag)) continue;
+        if (!PLAIN_NAME_RE.test(tag) || SAFE_HTML_FORBIDDEN_TAGS.has(tag) || allowedTags.includes(tag)) continue;
         allowedTags.push(tag);
     }
 
@@ -1707,7 +2194,9 @@ function buildSafeHtmlConfig(options) {
         const list = allowedAttributes[tag] || (allowedAttributes[tag] = []);
         for (const raw of attrs || []) {
             const attr = String(raw).toLowerCase();
-            if (SAFE_HTML_FORBIDDEN_ATTR_RE.test(attr) || list.includes(attr)) continue;
+            // Plain names only. sanitize-html expands a '*' glob AFTER this
+            // check, so 'on*' would have passed it and allowed every handler.
+            if (!PLAIN_NAME_RE.test(attr) || SAFE_HTML_FORBIDDEN_ATTR_RE.test(attr) || list.includes(attr)) continue;
             list.push(attr);
         }
     }
@@ -1718,7 +2207,7 @@ function buildSafeHtmlConfig(options) {
     };
 
     // ── Ids: pattern-checked, on the id-carrying tags only ──
-    // The check runs INSIDE sanitize-html as a transform. transformTags runs
+    // The check runs INSIDE the sanitizer as a transform. transformTags runs
     // before attribute filtering, so a rejected id is deleted from `attribs`
     // and never reaches the allowlist stage; an accepted one then passes it
     // because `id` is admitted for exactly these tags.
@@ -1774,15 +2263,20 @@ function buildSafeHtmlConfig(options) {
  *   allowedTags  string[]          Extra tags. Execution and embedding tags
  *                                  (script, style, iframe, object, form,
  *                                  svg, …) are refused whatever is passed.
- *   allowedAttributes  {tag: [attr]}  Extra attributes per tag ('*' for all).
- *                                  Event handlers, style, id (use allowedIds),
+ *   allowedAttributes  {tag: [attr]}  Extra attributes per tag ('*' for all),
+ *                                  plain names only (no globs). Event
+ *                                  handlers, style, id (use allowedIds),
  *                                  href/src/srcset/srcdoc/action/target and
  *                                  friends are refused whatever is passed.
  *   allowedClasses  RegExp[]       Extra class-name patterns.
  *
  * Pass the same options OBJECT on every call from a given site (a module
- * constant): the compiled sanitize-html config is cached per object, so a
- * fresh literal per render would rebuild it each time.
+ * constant): the built config is cached per object, so a fresh literal per
+ * render would rebuild it each time.
+ *
+ * Never throws for want of an engine: in the moments before sanitize-html has
+ * loaded (only possible without the native API) it returns the text content,
+ * escaped — no markup at all.
  *
  * @param {string} html — Pre-rendered HTML to sanitize
  * @param {{ allowedIds?: RegExp|string, idTags?: string[], allowedTags?: string[],
@@ -1792,13 +2286,15 @@ function buildSafeHtmlConfig(options) {
 export function safeHTML(html, options) {
     if (!html) return '';
     if (typeof html !== 'string') return '';
+    // A render must neither throw nor receive markup.
+    if (!currentEngine()) return escapeText(TextProcessor.htmlToPlainText(html));
     if (!options || typeof options !== 'object') {
-        return sanitizeHtmlLib(html, SanitizeConfigs.post);
+        return runSanitizer(html, SanitizeConfigs.post);
     }
     let config = SAFE_HTML_CONFIGS.get(options);
     if (!config) {
         config = buildSafeHtmlConfig(options);
         SAFE_HTML_CONFIGS.set(options, config);
     }
-    return sanitizeHtmlLib(html, config);
+    return runSanitizer(html, config);
 }

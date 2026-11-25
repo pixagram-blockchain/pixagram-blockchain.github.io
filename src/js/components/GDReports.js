@@ -317,7 +317,7 @@ function ReportDialog({ classes, report, onClose, copyState, onCopy }) {
                         <Skeleton height={180} />
                     </div>
                 ) : (
-                    <div ref={body} className={classes.markdown} onClick={openLinksOutside} dangerouslySetInnerHTML={{ __html: html }} />
+                    <div ref={body} className={classes.markdown} onClick={openLinksOutside} dangerouslySetInnerHTML={{ __html: safeHTML(html) }} />
                 )}
             </DialogContent>
             <DialogActions className={classes.dialogActions}>

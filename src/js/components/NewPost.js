@@ -31,6 +31,7 @@ import ImageIcon from "@material-ui/icons/Image";
 import DescriptionIcon from "@material-ui/icons/Description";
 import CloseIcon from "@material-ui/icons/Close";
 import EditIcon from "@material-ui/icons/Edit";
+import ErrorIcon from "@material-ui/icons/Error";
 import {isArtworkPixelart, normalizeUpload, processImageFile, quantizeImageData, AI_SLIDER_MIN, AI_SLIDER_MAX, AI_SLIDER_DEFAULT} from "../utils/pix2art/file2imgd";
 import JSLoader from "../utils/JSLoader";
 import Fade from "@material-ui/core/Fade";
@@ -135,7 +136,7 @@ function decodeBase64ToImageData(base64) {
 // ============================================================================
 
 const VALIDATION = {
-    TITLE_MAX_LENGTH: 24,
+    TITLE_MAX_LENGTH: 36,
     DESCRIPTION_MAX_LENGTH: 1024,
     AI_MAX_LENGTH: 128,
     TAGS_MIN_COUNT: 1,
@@ -670,13 +671,32 @@ const styles = theme => ({
         color: "#888",
         marginTop: theme.spacing(2)
     },
-    // Greyscale error styles
-    errorText: {
+    // Under a field: a grey hint (tip), or an error (FieldError) in white at
+    // the same size, led by a white error icon. Kept apart so restyling one
+    // never touches the other.
+    hintText: {
         color: "#888",
         fontSize: "0.75rem",
         marginTop: theme.spacing(0.5),
         marginLeft: theme.spacing(1.5)
     },
+    errorText: {
+        display: "flex",
+        alignItems: "flex-start",
+        color: "#fff",
+        fontSize: "0.75rem",
+        marginTop: theme.spacing(0.5),
+        marginLeft: theme.spacing(1.5)
+    },
+    // Takes the text's colour. 16px sits centred in the text's 18px line
+    // (0.75rem x 1.5), so the row keeps its height, and stays beside the
+    // first line when a long error wraps.
+    errorIcon: {
+        fontSize: "1rem",
+        marginTop: 1,
+        marginRight: theme.spacing(0.5)
+    },
+    // The field itself in error: greyscale outline and label
     errorField: {
         "& .MuiOutlinedInput-root": {
             "& fieldset": {
@@ -2308,6 +2328,16 @@ const LicenseSection = memo(({
     prev.licenseCustomization === next.licenseCustomization
 ));
 
+// The error line under a field (title, description, tags, AI used): white,
+// the size of the grey tips, after a white error icon. `error` is a tk()
+// descriptor, resolved here with tx() so it follows the active language.
+const FieldError = ({ classes, error }) => (
+    <Typography className={classes.errorText}>
+        <ErrorIcon className={classes.errorIcon} />
+        <span>{tx(error)}</span>
+    </Typography>
+);
+
 // Publish Form Component with Validation
 const PublishForm = memo(({
                               classes,
@@ -2409,23 +2439,25 @@ const PublishForm = memo(({
     const titleCharCount = title.length;
     const descriptionCharCount = description.length;
 
+    // charCounterWarning / charCounterError only set the colour: they go on
+    // top of charCounter, so a counter keeps its size near or past the limit.
     const getTitleCharCounterClass = () => {
-        if (titleCharCount > VALIDATION.TITLE_MAX_LENGTH) return classes.charCounterError;
-        if (titleCharCount > VALIDATION.TITLE_MAX_LENGTH * 0.8) return classes.charCounterWarning;
+        if (titleCharCount > VALIDATION.TITLE_MAX_LENGTH) return `${classes.charCounter} ${classes.charCounterError}`;
+        if (titleCharCount > VALIDATION.TITLE_MAX_LENGTH * 0.8) return `${classes.charCounter} ${classes.charCounterWarning}`;
         return classes.charCounter;
     };
 
     const getDescriptionCharCounterClass = () => {
-        if (descriptionCharCount > VALIDATION.DESCRIPTION_MAX_LENGTH) return classes.charCounterError;
-        if (descriptionCharCount > VALIDATION.DESCRIPTION_MAX_LENGTH * 0.8) return classes.charCounterWarning;
+        if (descriptionCharCount > VALIDATION.DESCRIPTION_MAX_LENGTH) return `${classes.charCounter} ${classes.charCounterError}`;
+        if (descriptionCharCount > VALIDATION.DESCRIPTION_MAX_LENGTH * 0.8) return `${classes.charCounter} ${classes.charCounterWarning}`;
         return classes.charCounter;
     };
 
     const aiCharCount = aiUsed.length;
 
     const getAiCharCounterClass = () => {
-        if (aiCharCount > VALIDATION.AI_MAX_LENGTH) return classes.charCounterError;
-        if (aiCharCount > VALIDATION.AI_MAX_LENGTH * 0.8) return classes.charCounterWarning;
+        if (aiCharCount > VALIDATION.AI_MAX_LENGTH) return `${classes.charCounter} ${classes.charCounterError}`;
+        if (aiCharCount > VALIDATION.AI_MAX_LENGTH * 0.8) return `${classes.charCounter} ${classes.charCounterWarning}`;
         return classes.charCounter;
     };
 
@@ -2446,9 +2478,7 @@ const PublishForm = memo(({
                 />
                 <Box display="flex" justifyContent="space-between" alignItems="flex-start">
                     {touched.title && validationErrors.title ? (
-                        <Typography className={classes.errorText}>
-                            {tx(validationErrors.title)}
-                        </Typography>
+                        <FieldError classes={classes} error={validationErrors.title} />
                     ) : <span />}
                     <Typography className={getTitleCharCounterClass()}>
                         {titleCharCount}/{VALIDATION.TITLE_MAX_LENGTH}
@@ -2467,10 +2497,10 @@ const PublishForm = memo(({
                     fullWidth
                 />
                 <Box display="flex" justifyContent="space-between" alignItems="flex-start">
-                    <Typography className={classes.errorText}>
+                    <Typography className={classes.hintText}>
                         {t("components.new_post.encoded_image")}
                     </Typography>
-                    <Typography className={getDescriptionCharCounterClass()}>
+                    <Typography className={classes.charCounter}>
                         {base64 ? `${formatKb(base64.length / 1000 * 3 / 4)} kB` : ''}
                     </Typography>
                 </Box>
@@ -2490,9 +2520,7 @@ const PublishForm = memo(({
                 />
                 <Box display="flex" justifyContent="space-between" alignItems="flex-start">
                     {touched.description && validationErrors.description ? (
-                        <Typography className={classes.errorText}>
-                            {tx(validationErrors.description)}
-                        </Typography>
+                        <FieldError classes={classes} error={validationErrors.description} />
                     ) : <span />}
                     <Typography className={getDescriptionCharCounterClass()}>
                         {descriptionCharCount}/{VALIDATION.DESCRIPTION_MAX_LENGTH}
@@ -2564,15 +2592,13 @@ const PublishForm = memo(({
                     />
                     <Box display="flex" justifyContent="space-between" alignItems="flex-start" mt={0.5}>
                         {touched.tags && validationErrors.tags ? (
-                            <Typography className={classes.errorText}>
-                                {tx(validationErrors.tags)}
-                            </Typography>
+                            <FieldError classes={classes} error={validationErrors.tags} />
                         ) : (
                             <Typography className={classes.charCounter} style={{ color: '#666' }}>
                                 {t("components.new_post.tags_lowercase_no_dots_min_4_chars")}
                             </Typography>
                         )}
-                        <Typography className={tags.length > VALIDATION.TAGS_MAX_COUNT ? classes.charCounterError : classes.charCounter}>
+                        <Typography className={tags.length > VALIDATION.TAGS_MAX_COUNT ? `${classes.charCounter} ${classes.charCounterError}` : classes.charCounter}>
                             {tags.length}/{VALIDATION.TAGS_MAX_COUNT}
                         </Typography>
                     </Box>
@@ -2652,11 +2678,9 @@ const PublishForm = memo(({
                 />
                 <Box display="flex" justifyContent="space-between" alignItems="flex-start" style={{ marginBottom: 16 }}>
                     {touched.ai && validationErrors.ai ? (
-                        <Typography className={classes.errorText}>
-                            {tx(validationErrors.ai)}
-                        </Typography>
+                        <FieldError classes={classes} error={validationErrors.ai} />
                     ) : (
-                        <Typography className={classes.errorText} style={{ color: '#666' }}>
+                        <Typography className={classes.hintText} style={{ color: '#666' }}>
                             {aiPrefilled
                                 ? t("components.new_post.ai_used_prefilled")
                                 : t("components.new_post.ai_used_hint")}

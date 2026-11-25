@@ -513,7 +513,7 @@ const ReplyCardContent = memo(function ReplyCardContent({
                 }
             />
             <CardContent>
-                <div dangerouslySetInnerHTML={{ __html: bodyHTML }} />
+                <div dangerouslySetInnerHTML={{ __html: safeHTML(bodyHTML) }} />
             </CardContent>
             <PaperCardActions
                 api={api}
