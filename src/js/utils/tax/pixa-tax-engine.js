@@ -21,6 +21,21 @@
  * the end); the dialog resolves descriptors on screen (utils/docLanguage.js
  * uiText) and the PDF/CSV resolve them in the document's language. Number
  * variables stay numbers, so they are formatted in that language too.
+ *
+ * OPTIMISATION (Nov 2026): buildAllReports() also returns `optimization` — the
+ * legal levers still open to the user, computed from the same ledger (dates
+ * when lots pass a holding period, unused allowances, losses that could still
+ * offset gains, Swiss private-investor checks, sends still taxed by default,
+ * a cheaper cost-basis method where the law lets the user choose), plus plain
+ * statements of what does NOT lower tax: powering up before the reference
+ * date, delaying a power-down, staking rewards. It never changes a reported
+ * figure — everything stays reported in full. Same pass, corrections the
+ * levers depend on: holding periods end on the calendar anniversary (a sale ON
+ * the anniversary is still short-term in US/DE/AU), the DE Freigrenze is
+ * "less than" EUR 1,000, UK and ZA losses brought forward follow the
+ * statutory order instead of being used up below the allowance, the US
+ * $3,000 ordinary-income offset is no longer carried forward, and sends to
+ * accounts the ingest marked as your own default to "own", not "payment".
  * ===========================================================================*/
 
 /** Deferred translation — same shape as utils/text.js tk(), resolved by the caller. */
@@ -336,10 +351,65 @@ export function summarizeCounterparties(events, ownAccounts = []) {
     for (const leg of ev.legs.filter(l => l.direction === "out")) e.byAsset[leg.asset] = (e.byAsset[leg.asset] || 0) + leg.amount;
     map.set(ev.counterparty, e);
   }
-  // Default suggestion is always "payment" (taxable) — the user deducts on purpose.
+  // Default suggestion is "payment" (taxable) — the user deducts on purpose.
+  // The one exception is an account the user already declared as their own
+  // (ingest cfg.ownAccounts → ev.counterpartyIsOwn, or the ownAccounts passed
+  // here): suggesting "payment" there made the user re-declare it.
+  const own = new Set(ownAccounts);
+  for (const ev of events) if (ev.category === "transfer_out" && ev.counterpartyIsOwn === true && ev.counterparty) own.add(ev.counterparty);
   return [...map.values()]
       .sort((a, b) => b.sends - a.sends)
-      .map(e => ({ counterparty: e.counterparty, sends: e.sends, byAsset: e.byAsset, suggestedIntent: "payment" }));
+      .map(e => ({ counterparty: e.counterparty, sends: e.sends, byAsset: e.byAsset, suggestedIntent: own.has(e.counterparty) ? "own" : "payment" }));
+}
+
+/**
+ * Intent of an outbound transfer: the user's explicit label wins; otherwise a
+ * send to an account the ingest marked as the user's own (cfg.ownAccounts) is
+ * an internal move, and everything else is a taxable payment — the
+ * conservative floor. Before, own-account sends were taxed as payments while
+ * the matching inbound transfer was skipped as internal, so a round trip
+ * between two of the user's accounts realised a phantom gain.
+ */
+/**
+ * Intent of an inbound transfer (profile.inboundIntents[counterparty]):
+ *   "own"      from one of the user's own accounts — an internal move, skipped
+ *   "income"   tokens received as pay for work, as a team or project reward,
+ *              or as an airdrop: income at market value on the day received
+ *              (ESTV crypto working paper §2.2.2 — airdrops are income from
+ *              movable assets at allocation; pay in tokens is employment or
+ *              self-employment income), and that value becomes the cost
+ *   "purchase" anything else: an acquisition at market value, no income (the
+ *              default, as before)
+ * Accounts the ingest marked as the user's own default to "own", as before.
+ */
+function inboundIntentOf(profile, ev) {
+  const explicit = profile.inboundIntents && profile.inboundIntents[ev.counterparty];
+  if (explicit) return explicit;
+  return ev.counterpartyIsOwn === true ? "own" : "purchase";
+}
+
+// Distinct inbound counterparties with their volume and a suggested intent —
+// the inbound twin of summarizeCounterparties, for the dialog's dropdowns.
+export function summarizeInboundCounterparties(events, ownAccounts = []) {
+  const own = new Set(ownAccounts);
+  const map = new Map();
+  for (const ev of events) {
+    if (ev.category !== "transfer_in" || !ev.counterparty) continue;
+    if (ev.counterpartyIsOwn === true) own.add(ev.counterparty);
+    const e = map.get(ev.counterparty) || { counterparty: ev.counterparty, receipts: 0, byAsset: {} };
+    e.receipts++;
+    for (const leg of ev.legs.filter(l => l.direction === "in")) e.byAsset[leg.asset] = (e.byAsset[leg.asset] || 0) + leg.amount;
+    map.set(ev.counterparty, e);
+  }
+  return [...map.values()]
+      .sort((a, b) => b.receipts - a.receipts)
+      .map(e => ({ ...e, suggestedIntent: own.has(e.counterparty) ? "own" : "purchase" }));
+}
+
+function intentOf(profile, ev) {
+  const explicit = profile.counterpartyIntents && profile.counterpartyIntents[ev.counterparty];
+  if (explicit) return explicit;
+  return ev.counterpartyIsOwn === true ? "own" : "payment";
 }
 
 // Turns the raw taxable GAIN into the taxable AMOUNT a rate would be applied to,
@@ -347,6 +417,18 @@ export function summarizeCounterparties(events, ownAccounts = []) {
 // carried-forward losses → long-term discount → inclusion rate → annual exemption.
 // Each step's running value is returned so the report can show the derivation.
 // Statutory ordering is simplified — always confirm with an adviser.
+//
+// Where losses brought forward sit is per jurisdiction (ruleset.carriedLossOrder):
+//   "first"             before every relief (the default);
+//   "down_to_allowance" UK (HMRC CG21500): this year's losses net in full, even
+//                       below the annual exempt amount, but losses brought
+//                       forward only bring the net gain DOWN TO the exempt
+//                       amount — what they don't need stays carried;
+//   "after_allowance"   ZA (8th Schedule paras 6–9): the annual exclusion
+//                       reduces the year's net result in either direction (a
+//                       net loss shrinks by it too), and the assessed loss
+//                       brought forward is set off only after it.
+// Both used to consume carried losses down to zero first, wasting them.
 function applyDeductions(ruleset, profile, shortT, longT) {
   const discountRate = ruleset.longTermDiscountRate || 0;
   const inclusionRate = ruleset.inclusionRate ?? 1;
@@ -357,35 +439,64 @@ function applyDeductions(ruleset, profile, shortT, longT) {
   const carryAllowed = ruleset.lossCarryforward !== false;
   const priorLoss = carryAllowed ? Math.max(0, profile.lossCarryforwardFiat || 0) : 0;
   const exemptionUsed = Math.max(0, profile.exemptionUsedFiat || 0);
+  const avail = Math.max(0, exemption - exemptionUsed);
+  const lossOrder = ruleset.carriedLossOrder || "first";
 
   // Step labels are descriptors (see TEXT in the header); numbers stay numbers.
   const steps = [{ label: tk("components.pixa_tax_engine.taxable_gain"), value: round2(shortT + longT) }];
   let base = shortT + longT;
   let carryOut = 0, anyApplied = false;
 
-  if (priorLoss > 0) {
-    const applied = Math.min(priorLoss, Math.max(0, base));
-    base -= applied; carryOut = priorLoss - applied; anyApplied = true;
-    steps.push({ label: tk("components.pixa_tax_engine.after_losses_carried_forward"), value: round2(base) });
+  // Losses brought forward, applied to at most `cap` of the base; whatever
+  // the cap leaves unused stays carried.
+  const applyCarried = (cap) => {
+    if (priorLoss <= 0) return;
+    const applied = Math.min(priorLoss, Math.max(0, cap));
+    carryOut += priorLoss - applied;
+    if (applied > 0) {
+      base -= applied; anyApplied = true;
+      steps.push({ label: tk("components.pixa_tax_engine.after_losses_carried_forward"), value: round2(base) });
+    }
+  };
+
+  // Annual allowance, extracted so jurisdictions can ORDER it: the default
+  // (UK) applies it LAST, after discount and inclusion; SARS-style (ZA) sets
+  // exemptionBeforeInclusion and applies it FIRST (annual exclusion → assessed
+  // loss → inclusion rate). Freigrenze (DE) is a threshold, not a deduction —
+  // it stays at the end regardless.
+  const applyAllowance = () => {
+    if (exemptionType !== "allowance" || base <= 0) return;
+    base -= Math.min(avail, base); anyApplied = true;
+    steps.push({ label: tk("components.pixa_tax_engine.after_annual_exemption"), value: round2(base) });
+  };
+
+  if (lossOrder === "after_allowance") {
+    if (exemptionType === "allowance" && base < 0 && avail > 0) {
+      base = Math.min(0, base + avail); anyApplied = true;
+      steps.push({ label: tk("components.pixa_tax_engine.net_loss_after_annual_exclusion"), value: round2(base) });
+    } else applyAllowance();
+    applyCarried(base);
+  } else if (lossOrder === "down_to_allowance") {
+    applyCarried(exemptionType === "allowance" ? base - avail : base);
+  } else {
+    applyCarried(base);
   }
   if (base < 0) {
     if (carryAllowed) carryOut += -base;
     else { steps.push({ label: tk("components.pixa_tax_engine.net_loss_not_carried_forward"), value: 0 }); anyApplied = true; }
     base = 0;
   }
+  // US §1211(b): up to $3,000 ($1,500 married filing separately) of a net
+  // capital loss reduces ordinary income this year; only the rest carries
+  // (§1212(b) computes the carryover as if the deduction were taken).
+  let ordinaryOffset = 0;
+  if (ruleset.ordinaryLossOffsetFiat > 0 && carryOut > 0) {
+    const cap = profile.filingStatus === "married_separate" ? ruleset.ordinaryLossOffsetFiat / 2 : ruleset.ordinaryLossOffsetFiat;
+    ordinaryOffset = Math.min(cap, carryOut);
+    carryOut -= ordinaryOffset;
+  }
 
-  // Annual allowance, extracted so jurisdictions can ORDER it: the default
-  // (UK) applies it LAST, after discount and inclusion; SARS-style (ZA) sets
-  // exemptionBeforeInclusion and applies it FIRST (losses → annual exclusion →
-  // inclusion rate). Freigrenze (DE) is a threshold, not a deduction — it
-  // stays at the end regardless.
-  const applyAllowance = () => {
-    if (exemptionType !== "allowance" || base <= 0) return;
-    const avail = Math.max(0, exemption - exemptionUsed);
-    base -= Math.min(avail, base); anyApplied = true;
-    steps.push({ label: tk("components.pixa_tax_engine.after_annual_exemption"), value: round2(base) });
-  };
-  if (ruleset.exemptionBeforeInclusion) applyAllowance();
+  if (ruleset.exemptionBeforeInclusion && lossOrder !== "after_allowance") applyAllowance();
 
   if (discountRate > 0 && longT > 0 && base > 0) {
     const longPortion = Math.min(base, Math.max(0, longT));
@@ -397,13 +508,60 @@ function applyDeductions(ruleset, profile, shortT, longT) {
     steps.push({ label: tk("components.pixa_tax_engine.after_inclusion_rate", { pct: Math.round(inclusionRate * 100) }), value: round2(base) });
   }
   if (!ruleset.exemptionBeforeInclusion) applyAllowance();
-  if (exemptionType === "freigrenze" && base > 0 && base <= exemption) {
+  // §23 Abs. 3 S. 5 EStG: tax-free only when the year's gain is LESS THAN the
+  // Freigrenze — exactly EUR 1,000 is fully taxable (the test used to be <=).
+  if (exemptionType === "freigrenze" && base > 0 && base < exemption) {
     base = 0; anyApplied = true;
     steps.push({ label: tk("components.pixa_tax_engine.within_exemption_threshold", { amount: round2(exemption) }), value: 0 });
   }
 
   const taxableAmount = round2(Math.max(0, base));
-  return { taxableAmountFiat: taxableAmount, lossCarryforwardOutFiat: round2(carryOut), steps, anyApplied };
+  return {
+    taxableAmountFiat: taxableAmount,
+    lossCarryforwardOutFiat: round2(carryOut),
+    ordinaryIncomeOffsetFiat: round2(ordinaryOffset),
+    steps,
+    anyApplied
+  };
+}
+
+// ---------------------------------------------------------------------------
+// HOLDING PERIODS  (calendar-exact; UTC days, like the rest of the engine)
+// ---------------------------------------------------------------------------
+
+const DAY_MS = 86400000;
+const dayOfIso = (ts) => String(ts).slice(0, 10);
+function addUtcDays(day, n) {
+  return new Date(Date.parse(dayOfIso(day) + "T00:00:00.000Z") + n * DAY_MS).toISOString().slice(0, 10);
+}
+// Same day-of-month `months` later (UTC). JS rolls an overflow forward — a lot
+// acquired 31 Aug plus 6 months lands on 3 Mar, never on the last day of
+// February — which errs on the late (conservative) side for every test below.
+function addUtcMonths(day, months) {
+  const d = new Date(Date.parse(dayOfIso(day) + "T00:00:00.000Z"));
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months, d.getUTCDate())).toISOString().slice(0, 10);
+}
+
+/**
+ * First UTC day on which a disposal of a lot acquired at `acquiredTs` counts
+ * as long-term, or null where the ruleset has no holding-period rule.
+ *   "anniversary" (US, DE, AU): the day AFTER the first anniversary. US: held
+ *     "more than 1 year" (IRC §1222); DE: taxable while "nicht mehr als ein
+ *     Jahr" (§23 Abs. 1 Nr. 2 EStG); AU: 12 months excluding the days of
+ *     acquisition and disposal. A sale ON the anniversary is short-term in all
+ *     three — the old test (heldDays >= 365) called it long-term (tax-free in
+ *     DE), and in leap-year spans it did so a day earlier still.
+ *   "days" (PT): held for 365 days or more (art. 10 n.º 19 CIRS).
+ */
+function longTermFrom(ruleset, acquiredTs) {
+  if (ruleset.longTermThresholdDays == null || !acquiredTs) return null;
+  if (ruleset.longTermRule === "days") return addUtcDays(acquiredTs, ruleset.longTermThresholdDays);
+  return addUtcDays(addUtcMonths(acquiredTs, 12), 1);
+}
+function termOf(ruleset, acquiredTs, disposalTs) {
+  if (ruleset.longTermThresholdDays == null) return "n/a";
+  const from = longTermFrom(ruleset, acquiredTs);
+  return from && dayOfIso(disposalTs) >= from ? "long" : "short";
 }
 
 /** Switzerland: wealth tax on year-end holdings; income taxable; private gains tax-free. */
@@ -434,7 +592,26 @@ const CH_RULESET = {
   longTermThresholdDays: null,
   longTermExempt: false,
   taxesCryptoToCrypto: true,
-  taxableOnlyOnFiatOfframp: false
+  taxableOnlyOnFiatOfframp: false,
+  // Income timing: the ESTV working paper on crypto (14 Dec 2021, §1 and
+  // §2.2.2 on staking) treats income as realised on receipt OR on acquiring a
+  // firm legal claim, whichever comes first, valued at that moment. A Pixa
+  // reward is a firm claim from its payout (claiming is a formality the user
+  // controls), so CH books the payout vops — not the claim, as it did before.
+  incomeTiming: "accrual",
+  // PXP wealth-tax valuation discount (fraction of the PIXA price). 0 = PXP is
+  // declared at the PIXA year-end price, which is what the ESTV documentation
+  // supports today: utility tokens are taxed at market value, and it names no
+  // lock-up discount for staked tokens. Set it (here, or per user as
+  // profile.pxpWealthDiscount) ONLY on a written ruling from the cantonal tax
+  // administration — the optimisation layer then tells users that powering up
+  // before 31 December lowers the declared value; at 0 it says it does not.
+  pxpWealthDiscount: 0,
+  // Safe-harbour test for private investors (ESTV Circular No. 36, applied to
+  // crypto by analogy — ESTV crypto working paper, fn. 7). Some cantons (e.g.
+  // Thurgau) now list a one-year holding period instead of six months; both
+  // shares are reported.
+  safeHarbour: { holdMonths: 6, strictHoldMonths: 12, volumeMultiple: 5, gainsShareOfIncome: 0.5 }
 };
 
 /** United States: no wealth tax; gains & swaps taxable; short/long split at 1yr. */
@@ -472,9 +649,15 @@ const US_RULESET = {
   incomeTiming: "claim",
   capitalGainsTaxableForPrivate: true,
   longTermThresholdDays: 365,
+  longTermRule: "anniversary", // long-term = held MORE than one year (IRC §1222)
   longTermExempt: false,
   taxesCryptoToCrypto: true,
-  taxableOnlyOnFiatOfframp: false
+  taxableOnlyOnFiatOfframp: false,
+  // §1211(b): up to $3,000 of net capital loss offsets ordinary income each year.
+  ordinaryLossOffsetFiat: 3000,
+  // Specific identification is allowed if recorded no later than the sale
+  // (Treas. Reg. §1.1012-1(j)) — the optimiser compares these methods.
+  methodChoice: ["FIFO", "HIFO", "LIFO"]
 };
 
 /** Germany: no wealth tax; private sales (§23 EStG) taxable if held <1yr, tax-free if ≥1yr. */
@@ -509,9 +692,14 @@ const DE_RULESET = {
   incomeTiming: "accrual",
   capitalGainsTaxableForPrivate: true,
   longTermThresholdDays: 365,
+  longTermRule: "anniversary", // taxable while held "nicht mehr als ein Jahr" (§23 Abs. 1 Nr. 2)
   longTermExempt: true,
   taxesCryptoToCrypto: true,
-  taxableOnlyOnFiatOfframp: false
+  taxableOnlyOnFiatOfframp: false,
+  // BMF Referentenentwurf of 30 Sep 2026: crypto acquired from the cut-off
+  // (1 Jan 2027 in the draft) taxed at 25% regardless of holding period;
+  // earlier acquisitions keep §23. Not law — shown as a "watch" item only.
+  pendingChange: "de_crypto_reform_draft_2026"
 };
 
 /** France: crypto-to-crypto NOT taxable; flat 30% PFU applies only on conversion to fiat. */
@@ -575,6 +763,7 @@ const UK_RULESET = {
   wealthValuation: [],
   defaultDisposalMethod: "POOL",
   matchingRules: "uk_sameday_30day",
+  carriedLossOrder: "down_to_allowance", // HMRC CG21500 — see applyDeductions
   capitalGainsTaxableForPrivate: true,
   longTermThresholdDays: null,
   longTermExempt: false,
@@ -629,6 +818,10 @@ const NL_RULESET = {
   categoryRules: baseCategoryRules(),
   wealthValuation: ["platform_price", "cost_basis"],
   wealthSnapshotAt: "year_start",
+  // Box 3 taxes a deemed return on the holdings; rewards are not taxed
+  // separately unless the activity is Box 1 "overige werkzaamheden". Used by
+  // the optimisation layer only (the operations report still lists them).
+  rewardIncomeTaxed: false,
   defaultDisposalMethod: "FIFO",
   capitalGainsTaxableForPrivate: false,
   longTermThresholdDays: null,
@@ -681,6 +874,7 @@ const PT_RULESET = {
   defaultDisposalMethod: "FIFO",
   capitalGainsTaxableForPrivate: true,
   longTermThresholdDays: 365,
+  longTermRule: "days", // "período igual ou superior a 365 dias" (art. 10 n.º 19 CIRS)
   longTermExempt: true,
   taxesCryptoToCrypto: true,
   taxableOnlyOnFiatOfframp: false
@@ -733,9 +927,12 @@ const AU_RULESET = {
   defaultDisposalMethod: "FIFO",
   capitalGainsTaxableForPrivate: true,
   longTermThresholdDays: 365,
+  longTermRule: "anniversary", // 12 months excluding the days of acquisition and disposal (ATO)
   longTermExempt: false,
   taxesCryptoToCrypto: true,
-  taxableOnlyOnFiatOfframp: false
+  taxableOnlyOnFiatOfframp: false,
+  // The ATO accepts identifying which units were sold when records show it.
+  methodChoice: ["FIFO", "HIFO", "LIFO"]
 };
 
 /** Japan: crypto gains & rewards are miscellaneous income (雑所得) at progressive rates; total-average cost basis; losses die with the year. */
@@ -852,6 +1049,7 @@ const IN_RULESET = {
 const SG_RULESET = {
   code: "SG",
   name: tk("components.pixa_wallet_taxes_dialog.jur_sg"),
+  rewardIncomeTaxed: false, // fact-specific for individuals — the optimiser makes no income claim
   fiat: "SGD",
   version: "SG-2026.1-illustrative",
   reports: {
@@ -877,6 +1075,7 @@ const SG_RULESET = {
 const AE_RULESET = {
   code: "AE",
   name: tk("components.pixa_wallet_taxes_dialog.jur_ae"),
+  rewardIncomeTaxed: false, // no personal income tax
   fiat: "AED",
   version: "AE-2026.1-illustrative",
   reports: {
@@ -902,6 +1101,7 @@ const AE_RULESET = {
 const HK_RULESET = {
   code: "HK",
   name: tk("components.pixa_wallet_taxes_dialog.jur_hk"),
+  rewardIncomeTaxed: false, // not chargeable for individuals outside a trade (DIPN 39)
   fiat: "HKD",
   version: "HK-2026.1-illustrative",
   reports: {
@@ -954,7 +1154,8 @@ const ZA_RULESET = {
   inclusionRate: 0.4,
   annualExemptionFiat: 40000,
   annualExemptionType: "allowance",
-  exemptionBeforeInclusion: true, // SARS ordering: losses → annual exclusion → 40% inclusion
+  exemptionBeforeInclusion: true, // SARS ordering: annual exclusion → assessed loss b/f → 40% inclusion
+  carriedLossOrder: "after_allowance", // 8th Schedule paras 6–9 — see applyDeductions
   name: tk("components.pixa_wallet_taxes_dialog.jur_za"),
   fiat: "ZAR",
   version: "ZA-2026.1-illustrative",
@@ -1226,13 +1427,13 @@ export function buildUkMatchPlan(profile, events, ruleset, prices, fiat) {
 
     // Mirror the main loop's intent handling for outbound transfers.
     if (ev.category === "transfer_out") {
-      const intent = (profile.counterpartyIntents && profile.counterpartyIntents[ev.counterparty]) || "payment";
+      const intent = intentOf(profile, ev);
       const isDisposalIntent = intent === "payment"
           || (intent === "gift" && giftIsDisposal)
           || (intent === "charity" && !charityExempt);
       if (!isDisposalIntent) continue;
     }
-    if (ev.category === "transfer_in" && ev.counterpartyIsOwn === true) continue;
+    if (ev.category === "transfer_in" && inboundIntentOf(profile, ev) === "own") continue;
 
     for (const leg of ev.legs) {
       if (leg.direction === "out" && rule.realizesDisposal) {
@@ -1361,6 +1562,9 @@ export function buildTotalAveragePlan(profile, events, ruleset, prices, fiat) {
     while (curYear < y) { finalize(curYear, yd); curYear++; yd = newYear(); }
 
     if (SKIP.has(ev.category)) continue;
+    // Own-account inbound moves are skipped by the main loop; the plan used to
+    // count them as acquisitions, pulling the year's average toward them.
+    if (ev.category === "transfer_in" && inboundIntentOf(profile, ev) === "own") continue;
     const outs = ev.legs.filter(l => l.direction === "out");
     const ins = ev.legs.filter(l => l.direction === "in");
 
@@ -1430,8 +1634,16 @@ function residenceForYear(profile, year) {
     midYearMove: touchingYear.length > 1
   };
 }
-export function buildAllReports(profile, events, year, prices, period, fiatOverride) {
+/**
+ * opts (all optional):
+ *   optimize  false skips the optimisation layer (used internally when the
+ *             optimiser re-runs the engine to compare cost-basis methods)
+ *   now       ISO timestamp treated as "now" — decides which levers can still
+ *             be acted on before the period ends; defaults to the clock
+ */
+export function buildAllReports(profile, events, year, prices, period, fiatOverride, opts = {}) {
   const warnings = [];
+  const nowIso = opts.now || new Date().toISOString();
   const residence = residenceForYear(profile, year);
   if (!residence) {
     return {
@@ -1461,6 +1673,16 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
       ? ruleset.defaultDisposalMethod
       : (profile.costBasisMethod ?? ruleset.defaultDisposalMethod);
 
+  // Trader status. Swiss gains are tax-free only for a private investor, so
+  // every report states the status it used (see TRADER STATUS below). A
+  // declaration wins: profile.traderStatus "private" | "professional" (the old
+  // boolean professionalTrader:true still means "professional"; false is
+  // treated as "not declared", since the dialog sends it by default). The
+  // engine never decides "professional" on its own — undeclared users are
+  // private investors, and the report says on what basis.
+  const declaredStatus = profile.traderStatus === "professional" || profile.professionalTrader === true ? "professional"
+      : profile.traderStatus === "private" ? "private" : null;
+
   // Reporting window. Defaults to the full calendar year (backward-compatible);
   // a caller-supplied period (e.g. the dialog's date-range pickers) overrides the
   // bounds. Residence + filing year stay keyed to `year`; only the scope and the
@@ -1475,6 +1697,24 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
     const t = Date.parse(iso);
     return t >= periodStartMs && t <= periodEndMs;
   };
+
+  // Statutory amounts (allowances, the US ordinary-loss offset) are written in
+  // the filing currency. When the report is shown in another currency they are
+  // converted at the provider's FX rate if it offers one (prices.fx(from, to,
+  // date)); without one they are compared as written and the report says so —
+  // the old code silently tested a EUR 1,000 Freigrenze against USD figures.
+  let dedRuleset = ruleset;
+  if (fiat !== ruleset.fiat && (ruleset.annualExemptionFiat || ruleset.ordinaryLossOffsetFiat)) {
+    const fx = typeof prices.fx === "function" ? Number(prices.fx(ruleset.fiat, fiat, refDate)) : NaN;
+    if (Number.isFinite(fx) && fx > 0) {
+      dedRuleset = Object.assign({}, ruleset, {
+        annualExemptionFiat: (ruleset.annualExemptionFiat || 0) * fx,
+        ordinaryLossOffsetFiat: (ruleset.ordinaryLossOffsetFiat || 0) * fx
+      });
+    } else {
+      warnings.push(tk("components.pixa_tax_engine.statutory_amounts_not_converted", { fiat: ruleset.fiat, shown: fiat }));
+    }
+  }
   const book = new LotBook();
 
   // Opening balances: lots the account already held before its earliest recorded
@@ -1521,10 +1761,15 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
   const snapshotBoundaryMs = Date.parse(`${year}-01-01T00:00:00.000Z`);
   let snapshotHoldings = null;
   const captureSnapshot = () => { if (wantYearStart && !snapshotHoldings) snapshotHoldings = book.remaining(profile.account); };
+  // Holdings when the reporting window opens — the denominator of the Swiss
+  // safe-harbour volume test in the optimisation layer. Same capture pattern.
+  let startHoldings = null;
+  const captureStart = () => { if (!startHoldings) startHoldings = book.remaining(profile.account); };
 
   const ordered = [...events].sort((a, b) => a.ts.localeCompare(b.ts));
   for (const ev of ordered) {
     if (wantYearStart && !snapshotHoldings && Date.parse(ev.ts) >= snapshotBoundaryMs) captureSnapshot();
+    if (!startHoldings && Date.parse(ev.ts) >= periodStartMs) captureStart();
     // Lots must reflect full history, but only events up to the ref date matter
     // for this window's holdings, and only in-scope events appear in the reports.
     if (Date.parse(ev.ts) > periodEndMs) continue;
@@ -1532,16 +1777,25 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
       warnings.push(tk("components.pixa_tax_engine.event_wallet_not_tagged_as_yours", { id: String(ev.id), wallet: String(ev.wallet) }));
     }
     // Inbound from your own wallet is an internal move — no new basis event.
-    if (ev.counterpartyIsOwn === true && ev.category === "transfer_in") continue;
+    // Inbound transfers: from an own account → internal move (skipped); marked
+    // "income" → booked like a reward, income at market value on receipt;
+    // otherwise an acquisition at market value (see inboundIntentOf).
+    let inboundAsIncome = false;
+    if (ev.category === "transfer_in") {
+      const inIntent = inboundIntentOf(profile, ev);
+      if (inIntent === "own") continue;
+      inboundAsIncome = inIntent === "income";
+    }
 
     // Outbound transfers: whether a send is a taxable disposal depends on INTENT
     // (who/why), which the user supplies via a counterparty map. Unlabelled sends
     // default to a third-party payment = disposal (the conservative case).
     if (ev.category === "transfer_out") {
-      // Default is ALWAYS a taxable payment — the conservative, audit-safe floor.
-      // The user must actively reclassify a send (own wallet, exchange, gift,
-      // charity) to make it non-taxable; nothing is deducted automatically.
-      const intent = (profile.counterpartyIntents && profile.counterpartyIntents[ev.counterparty]) || "payment";
+      // Default is a taxable payment — the conservative, audit-safe floor —
+      // except a send to an account the user already declared as their own at
+      // ingest (see intentOf). Anything else (exchange, gift, charity) must be
+      // reclassified actively; nothing else is deducted automatically.
+      const intent = intentOf(profile, ev);
       const giftIsDisposal = ruleset.giftIsDisposal ?? true;
       const charityExempt = ruleset.charityGiftExempt ?? false;
 
@@ -1649,10 +1903,10 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
       // power-up / power-down fall through to the POWER rule for the basis carry.
     }
 
-    const rule = ruleset.categoryRules[ev.category];
+    const rule = inboundAsIncome ? REWARD : ruleset.categoryRules[ev.category];
     const outLegs = ev.legs.filter(l => l.direction === "out");
     const inLegs = ev.legs.filter(l => l.direction === "in");
-    const isProfessional = profile.professionalTrader === true;
+    const isProfessional = declaredStatus === "professional";
     let carryBasis = 0;
     const carryLots = []; // consumed lots (qty, basisFiat, acquiredTs) to re-seed on the in-leg(s)
 
@@ -1711,10 +1965,9 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
           const heldDays = cl.acquiredTs
               ? Math.floor((Date.parse(ev.ts) - Date.parse(cl.acquiredTs)) / 86400000)
               : null;
-          let term;
-          if (ruleset.longTermThresholdDays == null) term = "n/a";
-          else if (heldDays != null && heldDays >= ruleset.longTermThresholdDays) term = "long";
-          else term = "short";
+          // Calendar-exact holding period (see longTermFrom): a sale on the
+          // anniversary is still short-term where the law says "more than".
+          const term = termOf(ruleset, cl.acquiredTs, ev.ts);
           const taxable = lotIsTaxable(ruleset, { isSwap, term, isProfessional });
           if (!taxable) exemptGain += lotGain;
           else if (term === "long") longGain += lotGain;
@@ -1893,6 +2146,10 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
     if (wantYearStart && period) {
       warnings.push(tk("components.pixa_tax_engine.box_3_peildatum_is_statutory", { year: String(year) }));
     }
+    // PXP is declared at the PIXA price unless a ruling sets a lock-up
+    // discount (see CH_RULESET.pxpWealthDiscount); a discount is never applied
+    // silently — the line carries it and the review notes say where it came from.
+    const pxpDiscount = pxpWealthDiscountOf(ruleset, profile);
     const lines = [];
     for (const [asset, {
       qty,
@@ -1908,13 +2165,19 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
             : tk("components.pixa_tax_engine.asset_no_year_end_value", { asset }));
         continue;
       }
+      const discounted = asset === "PXP" && pxpDiscount > 0 && source !== "cost_basis";
+      const u = discounted ? unit * (1 - pxpDiscount) : unit;
       lines.push({
         asset,
         qty: round4(qty),
-        fiatPerUnit: round4(unit),
-        valueFiat: round2(unit * qty),
-        source
+        fiatPerUnit: round4(u),
+        valueFiat: round2(u * qty),
+        source,
+        discount: discounted ? pxpDiscount : undefined
       });
+    }
+    if (lines.some(l => l.discount)) {
+      warnings.push(tk("components.pixa_tax_engine.pxp_wealth_discount_applied", { pct: round2(pxpDiscount * 100) }));
     }
     wealth = {
       kind: "wealth",
@@ -1928,6 +2191,7 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
 
   // ---- TRANSACTIONS ----
   let transactions;
+  let txShortT = 0, txLongT = 0; // kept for the optimisation layer's what-ifs
   if (ruleset.reports.transactions.enabled) {
     const totalGain = disposals.reduce((s, l) => s + l.gainFiat, 0);
     // India §115BBH: losses from VDA transfers cannot be set off against ANY
@@ -1942,7 +2206,8 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
         ? disposals.reduce((s, l) => s + Math.min(0, (l.shortTermGainFiat || 0) + (l.longTermGainFiat || 0)), 0)
         : 0;
     const exemptT = disposals.reduce((s, l) => s + (l.exemptGainFiat || 0), 0);
-    const ded = applyDeductions(ruleset, profile, shortT, longT);
+    const ded = applyDeductions(dedRuleset, profile, shortT, longT);
+    txShortT = shortT; txLongT = longT;
     transactions = {
       kind: "transactions",
       periodStart: periodStartDate,
@@ -1958,6 +2223,9 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
       taxableAmountFiat: ded.taxableAmountFiat,
       deductionSteps: ded.anyApplied ? ded.steps : undefined,
       lossCarryforwardOutFiat: ded.lossCarryforwardOutFiat,
+      // US only: the part of a net capital loss that offsets ordinary income
+      // this year instead of carrying forward.
+      ordinaryIncomeOffsetFiat: ded.ordinaryIncomeOffsetFiat || undefined,
       splitByTerm: ruleset.longTermThresholdDays != null,
       costBasisMethod: method,
       safeHarbourCheck: residence.code === "CH" ? {
@@ -2056,6 +2324,49 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
     return { fiat, asOf: refDate, timezone: "UTC", PXA: pxa, PXS: get("PXS"), PXP: pxa, vestingRatio: ratio != null ? round6(ratio) : null };
   })();
 
+  // ---- TRADER STATUS — defined on every report ----
+  // Declared → used as declared. Undeclared → private investor, with the
+  // basis stated: Swiss safe harbour met, no disposals at all, or presumed.
+  // Wherever a safe-harbour criterion is missed (declared private or not),
+  // the report says what would become taxable if the canton decided the user
+  // is a professional trader — computed by the engine itself, as a professional.
+  captureStart(); // no event crossed the window's start: the book IS that state
+  const safeHarbour = ruleset.safeHarbour && transactions && disposals.length && declaredStatus !== "professional"
+      ? swissSafeHarbour({
+        sh: ruleset.safeHarbour, profile, disposals, totalGainFiat: transactions.totalGainFiat, events,
+        startHoldings: startHoldings || new Map(), periodStartIso, periodEndMs, prices, fiat
+      })
+      : null;
+  let traderStatus;
+  if (declaredStatus === "professional") {
+    traderStatus = { status: "professional", basis: "declared" };
+  } else {
+    const missed = safeHarbour ? safeHarbour.missed : 0;
+    traderStatus = {
+      status: "private",
+      basis: declaredStatus === "private" ? "declared"
+          : !ruleset.safeHarbour ? "presumed"
+              : !safeHarbour ? "no_disposals"
+                  : missed ? "presumed" : "safe_harbour",
+      missedCriteria: missed
+    };
+    if (missed) {
+      const asPro = buildAllReports(Object.assign({}, profile, { traderStatus: "professional" }), events, year, prices,
+          period, fiatOverride, { optimize: false, now: nowIso });
+      const atStake = asPro && asPro.transactions ? asPro.transactions.taxableAmountFiat : null;
+      traderStatus.ifProfessionalTaxableFiat = atStake;
+      warnings.push(tk("components.pixa_tax_engine.trader_status_at_risk", { count: missed, amount: atStake ?? 0, fiat }));
+    }
+  }
+
+  // ---- OPTIMISATION (legal levers; changes no figure above) ----
+  const optimization = opts.optimize === false ? undefined : buildOptimization({
+    ruleset, dedRuleset, profile, events, year, prices, period, fiatOverride, fiat, method,
+    book, disposals, income, wealth, transactions, operations,
+    refDate, periodStartIso, periodEndMs, startHoldings: startHoldings || new Map(),
+    shortT: txShortT, longT: txLongT, nowIso, safeHarbour, traderStatus
+  });
+
   return {
     account: profile.account,
     year,
@@ -2065,10 +2376,11 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
     rulesVersion: ruleset.version,
     priceDataVersion: prices.version,
     priceSnapshot,
-    generatedAt: new Date().toISOString(),
+    generatedAt: nowIso,
     periodStart: periodStartDate,
     periodEnd: refDate,
     methodUsed: method,
+    traderStatus,
     incomeTiming: ruleset.incomeTiming || "claim",
     assumptionNote: ruleset.assumptionNote || "",
     lossCarryforwardInFiat: Math.max(0, profile.lossCarryforwardFiat || 0),
@@ -2080,8 +2392,77 @@ export function buildAllReports(profile, events, year, prices, period, fiatOverr
     tokenSummary,
     offPlatformBasis,
     outboundByIntent,
+    optimization,
     warnings
   };
+}
+
+/**
+ * Swiss safe-harbour test for private investors (ESTV Circular No. 36, applied
+ * to crypto by analogy — ESTV crypto working paper, fn. 7). Measures what the
+ * ledger can: how long what was disposed of had been held, purchase + sale
+ * volume against the holdings when the window opened, and — when the profile
+ * gives net income (profile.netIncomeFiat) — gains against income. Debt
+ * financing and derivatives cannot be seen on-chain; the user confirms those.
+ * missed = measurable criteria not met (the stricter cantonal one-year
+ * holding row is shown but not counted).
+ */
+function swissSafeHarbour({ sh, profile, disposals, totalGainFiat, events, startHoldings, periodStartIso, periodEndMs, prices, fiat }) {
+  const unitAt = (asset, day) => {
+    const q = prices.price(asset, fiat, day);
+    return q && q.fiatPerUnit > 0 ? q.fiatPerUnit : null;
+  };
+  let qty = 0, qShort = 0, qStrict = 0, qUnknown = 0;
+  for (const d of disposals) {
+    const day = dayOfIso(d.ts);
+    for (const lot of d.lots || []) {
+      qty += lot.qty;
+      if (!lot.acquiredTs || lot.missingBasis) { qUnknown += lot.qty; continue; }
+      if (day < addUtcMonths(lot.acquiredTs, sh.holdMonths)) qShort += lot.qty;
+      if (day < addUtcMonths(lot.acquiredTs, sh.strictHoldMonths)) qStrict += lot.qty;
+    }
+  }
+  // Only on-platform holdings are known, while the test counts every security
+  // and bank balance — so the real ratio is lower than the one shown.
+  const startDay = dayOfIso(periodStartIso);
+  let startValue = 0;
+  for (const [asset, h] of startHoldings) {
+    const u = unitAt(asset, startDay);
+    if (u != null) startValue += h.qty * u;
+  }
+  const startMs = Date.parse(periodStartIso);
+  let purchases = 0;
+  for (const ev of events) {
+    const t = Date.parse(ev.ts);
+    if (t < startMs || t > periodEndMs || (ev.category !== "swap" && ev.category !== "market_fill")) continue;
+    for (const leg of ev.legs) {
+      if (leg.direction !== "in") continue;
+      const u = unitAt(leg.asset, ev.ts);
+      if (u != null) purchases += u * leg.amount;
+    }
+  }
+  const sales = disposals.reduce((acc, d) => acc + (Number(d.proceedsFiat) || 0), 0);
+  const ratio = startValue > 0 ? (sales + purchases) / startValue : null;
+  const netIncome = Number(profile.netIncomeFiat);
+  const gainShare = Number.isFinite(netIncome) && netIncome > 0 ? Math.max(0, totalGainFiat) / netIncome : null;
+  const pct = (x) => (qty > 0 ? round2((100 * x) / qty) : 0);
+  const rows = [
+    { criterion: "hold", months: sh.holdMonths, value: pct(qShort), limit: 0, unit: "pct", met: qShort <= 1e-9 },
+    { criterion: "hold_strict", months: sh.strictHoldMonths, value: pct(qStrict), limit: 0, unit: "pct", met: qStrict <= 1e-9 },
+    { criterion: "volume", value: ratio != null ? round2(ratio) : null, limit: sh.volumeMultiple, unit: "x", met: ratio != null ? ratio <= sh.volumeMultiple : null },
+    { criterion: "gains_share", value: gainShare != null ? round2(100 * gainShare) : null, limit: 100 * sh.gainsShareOfIncome, unit: "pct", met: gainShare != null ? gainShare < sh.gainsShareOfIncome : null }
+  ];
+  return {
+    rows,
+    missed: rows.filter(r => r.met === false && r.criterion !== "hold_strict").length,
+    startValue, startDay, gainShare, qUnknown
+  };
+}
+
+/** Effective PXP wealth-valuation discount: profile (a user's ruling) over ruleset; 0 unless 0 < d < 1. */
+function pxpWealthDiscountOf(ruleset, profile) {
+  const d = Number(profile.pxpWealthDiscount ?? ruleset.pxpWealthDiscount ?? 0);
+  return Number.isFinite(d) && d > 0 && d < 1 ? d : 0;
 }
 
 /** Walk the jurisdiction's valuation fallback chain (e.g. CH: FTA -> platform -> cost). */
@@ -2117,7 +2498,430 @@ const round4 = n => Math.round(n * 10000) / 10000;
 const round6 = n => Math.round(n * 1e6) / 1e6;
 
 // ---------------------------------------------------------------------------
-// 7. DEMO
+// 7. OPTIMISATION — the legal levers left, read off the same ledger
+// ---------------------------------------------------------------------------
+
+/**
+ * What the user can still do, within the law, to lower the tax in this report,
+ * and plain statements of what does NOT lower it. Nothing here changes a
+ * reported figure; the reports above stay complete. Items:
+ *   { id, kind, title, detail, notes?, caveat?, rows?, savingBaseFiat?,
+ *     amountFiat?, deadline? }
+ *   kind  "opportunity" a lever the user controls: timing, allowances, losses,
+ *                       cost-basis method, (with a ruling) staking before 31 Dec
+ *         "check"       data to fix — sends still taxed by default, missing
+ *                       cost, undated opening lots, the Swiss private-investor
+ *                       criteria. Some of these can RAISE the figures: the
+ *                       point is a report that holds up, not just a low one
+ *         "fact"        a belief that does not lower tax here: powering up
+ *                       before the valuation date, delaying a power-down,
+ *                       staking rewards
+ *         "watch"       a pending law change that would move the levers
+ *   savingBaseFiat  how far the TAXABLE BASE would fall (the engine knows no
+ *                   rates); null where only the rate changes (US long-term)
+ *   savingKind      "exact" (re-computed through the deduction chain),
+ *                   "up_to" (only if every flagged item qualifies), or
+ *                   "at_stake" (unrealised gain at today's price — moves with it)
+ *   amountFiat      a related amount that is not a base reduction (unused
+ *                   allowance, declared-wealth reduction, ordinary offset)
+ * Items are not additive — realising a loss and using an allowance interact —
+ * so no grand total is offered. Texts are descriptors; numbers stay numbers,
+ * dates are ISO days.
+ */
+const LOSS_CAVEAT = { US: "us", UK: "uk", CA: "ca", AU: "au", DE: "holding", PT: "holding" };
+
+function buildOptimization(c) {
+  const { ruleset, profile, prices, fiat, refDate, book, method } = c;
+  const account = profile.account;
+  const isPro = c.traderStatus ? c.traderStatus.status === "professional" : profile.professionalTrader === true;
+  const nowDay = dayOfIso(c.nowIso);
+  const actionable = Date.parse(c.nowIso) <= c.periodEndMs; // the window is still open
+  // Unrealised figures are valued at the reference date, or today when the
+  // window is still open (a live provider has no price for 31 December yet,
+  // and a decision taken now is taken at today's price).
+  const valDay = refDate <= nowDay ? refDate : nowDay;
+  const gainsTaxable = isPro || (ruleset.capitalGainsTaxableForPrivate && !ruleset.taxableOnlyOnFiatOfframp);
+  const T = (k, v) => tk(`components.pixa_tax_engine.${k}`, v);
+  const unitAt = (asset, day) => {
+    const q = prices.price(asset, fiat, day);
+    return q && q.fiatPerUnit > 0 ? q.fiatPerUnit : null;
+  };
+  const holdings = book.remaining(account);
+  const lotsOf = (asset) => (book.lots.get(book.key(account, asset)) || []).filter(l => l.qty > 1e-12);
+  // Open lots in the order the active method would consume them next.
+  const inMethodOrder = (lots) => {
+    if (method === "POOL" || method === "TOTAL_AVG") {
+      const qty = lots.reduce((s, l) => s + l.qty, 0);
+      return qty > 1e-12 ? [{ qty, basisFiat: lots.reduce((s, l) => s + l.basisFiat, 0), acquiredTs: null }] : [];
+    }
+    // Same comparator as LotBook.consume(): FIFO, LIFO, anything else HIFO.
+    return [...lots].sort((a, b) => method === "FIFO" ? a.acquiredTs.localeCompare(b.acquiredTs)
+        : method === "LIFO" ? b.acquiredTs.localeCompare(a.acquiredTs)
+            : b.basisFiat / b.qty - a.basisFiat / a.qty);
+  };
+  const items = [];
+
+  // ---- FACTS — the user's questions about staking, answered per jurisdiction ----
+  const powerVariant = gainsTaxable ? "cgt"
+      : ruleset.taxableOnlyOnFiatOfframp ? "offramp"
+          : ruleset.code === "ID" ? "gross" : "none";
+  items.push({
+    id: "power_moves_not_taxed", kind: "fact",
+    title: T("opt_power_moves_title"),
+    detail: T(`opt_power_moves_${powerVariant}`)
+  });
+  if (c.operations && c.income.length && ruleset.rewardBasis !== "zero" && ruleset.rewardIncomeTaxed !== false) {
+    items.push({
+      id: "rewards_taxed_on_receipt", kind: "fact",
+      title: T("opt_rewards_title"),
+      detail: T("opt_rewards_detail", { amount: c.operations.totalIncomeFiat, fiat }),
+      amountFiat: c.operations.totalIncomeFiat
+    });
+  }
+  if (c.wealth) {
+    const d = pxpWealthDiscountOf(ruleset, profile);
+    const byCost = ruleset.wealthValuation[0] === "cost_basis";
+    const liquid = holdings.get("PXA");
+    const pxaUnit = unitAt("PXA", c.wealth.refDate);
+    if (d > 0 && !byCost && liquid && pxaUnit && c.wealth.refDate >= nowDay) {
+      // Only with a ruling on record: then staking before the valuation date
+      // really does lower the declared value, and the user should be told.
+      const amount = round2(liquid.qty * pxaUnit * d);
+      items.push({
+        id: "power_up_before_valuation_date", kind: "opportunity",
+        title: T("opt_power_up_wealth_title", { date: c.wealth.refDate }),
+        detail: T("opt_power_up_wealth_detail", { pct: round2(d * 100), qty: round4(liquid.qty), date: c.wealth.refDate, amount, fiat }),
+        amountFiat: amount,
+        deadline: c.wealth.refDate,
+        caveat: T("opt_power_up_wealth_caveat")
+      });
+    } else {
+      items.push({
+        id: "power_up_wealth_unchanged", kind: "fact",
+        title: T("opt_wealth_unchanged_title", { date: c.wealth.refDate }),
+        detail: byCost
+            ? T("opt_wealth_unchanged_cost")
+            : T("opt_wealth_unchanged_price", { unit: pxaUnit != null ? round4(pxaUnit) : 0, fiat })
+      });
+    }
+  }
+
+  // ---- OPPORTUNITY: hold past the holding period ----
+  // Lots still inside the period with an unrealised gain, grouped by the day
+  // they qualify. "Ready" is the quantity the next disposals can use before
+  // touching a short-term lot — a prefix of the method's own order, so the
+  // statement is true for FIFO, LIFO and HIFO alike.
+  const holdBenefit = isPro || ruleset.longTermThresholdDays == null ? null
+      : ruleset.longTermExempt ? "exempt"
+          : ruleset.longTermDiscountRate > 0 ? "discount"
+              : gainsTaxable ? "rate" : null;
+  if (holdBenefit) {
+    const byKey = new Map();
+    const ready = [];
+    let gainSum = 0, hasPxp = false;
+    for (const [asset] of holdings) {
+      const unit = unitAt(asset, valDay);
+      if (unit == null) continue;
+      let readyQty = 0, blocked = false;
+      for (const lot of inMethodOrder(lotsOf(asset))) {
+        const from = longTermFrom(ruleset, lot.acquiredTs);
+        if (!from) { blocked = true; continue; }
+        if (valDay >= from) { if (!blocked) readyQty += lot.qty; continue; }
+        blocked = true;
+        if (from <= nowDay) continue;            // qualified since the reference date
+        const gain = lot.qty * unit - lot.basisFiat;
+        if (gain <= 0.005) continue;             // waiting only changes gains
+        const k = `${from}|${asset}`;
+        const r = byKey.get(k) || { date: from, asset, qty: 0, gainFiat: 0 };
+        r.qty += lot.qty;
+        r.gainFiat += gain;
+        byKey.set(k, r);
+        gainSum += gain;
+        if (asset === "PXP") hasPxp = true;
+      }
+      if (readyQty > 1e-9) ready.push(tk("components.pixa_tax_engine.amount_asset", { amount: round4(readyQty), asset }));
+    }
+    const rows = [...byKey.values()]
+        .sort((a, b) => a.date.localeCompare(b.date) || a.asset.localeCompare(b.asset))
+        .map(r => ({ date: r.date, asset: r.asset, qty: round4(r.qty), gainFiat: round2(r.gainFiat) }));
+    if (rows.length) {
+      items.push({
+        id: "hold_past_holding_period", kind: "opportunity",
+        title: T(`opt_hold_title_${holdBenefit}`, { pct: Math.round((ruleset.longTermDiscountRate || 0) * 100) }),
+        detail: T(`opt_hold_detail_${holdBenefit}`, {
+          date: valDay, gain: round2(gainSum), fiat, pct: Math.round((ruleset.longTermDiscountRate || 0) * 100)
+        }),
+        notes: [
+          ready.length ? T("opt_hold_ready", { amounts: ready, date: valDay, method }) : null,
+          hasPxp ? T("opt_hold_pxp") : null
+        ].filter(Boolean),
+        caveat: ruleset.pendingChange === "de_crypto_reform_draft_2026" ? T("opt_hold_caveat_de") : undefined,
+        savingBaseFiat: holdBenefit === "exempt" ? round2(gainSum)
+            : holdBenefit === "discount" ? round2(gainSum * ruleset.longTermDiscountRate) : null,
+        savingKind: holdBenefit === "rate" ? undefined : "at_stake",
+        deadline: rows[0].date,
+        rows
+      });
+    }
+  }
+
+  // ---- OPPORTUNITY: unused allowance / Freigrenze headroom (window still open) ----
+  const exType = ruleset.annualExemptionType || "none";
+  if (actionable && gainsTaxable && c.transactions && exType !== "none") {
+    const exemption = c.dedRuleset.annualExemptionFiat || 0;
+    if (exType === "allowance") {
+      // Use-it-or-lose-it: the allowance does not carry forward. Losses brought
+      // forward don't eat into it (UK/ZA order), so only this year's net counts.
+      const avail = Math.max(0, exemption - Math.max(0, profile.exemptionUsedFiat || 0));
+      const headroom = round2(Math.max(0, avail - Math.max(0, c.shortT + c.longT)));
+      if (headroom > 0.005) {
+        items.push({
+          id: "unused_annual_allowance", kind: "opportunity",
+          title: T("opt_allowance_title", { amount: headroom, fiat }),
+          detail: T("opt_allowance_detail", { amount: headroom, fiat, date: refDate }),
+          caveat: T(ruleset.code === "UK" ? "opt_allowance_caveat_uk" : "opt_allowance_caveat"),
+          amountFiat: headroom,
+          deadline: refDate
+        });
+      }
+    } else if (exType === "freigrenze") {
+      const pre = applyDeductions(Object.assign({}, c.dedRuleset, { annualExemptionType: "none" }), profile, c.shortT, c.longT).taxableAmountFiat;
+      if (pre < exemption) {
+        const headroom = round2(Math.max(0, exemption - pre - 0.01));
+        items.push({
+          id: "freigrenze_headroom", kind: "opportunity",
+          title: T("opt_freigrenze_title", { amount: headroom, fiat }),
+          detail: T("opt_freigrenze_detail", { gain: round2(pre), threshold: round2(exemption), amount: headroom, fiat, date: refDate }),
+          caveat: T("opt_freigrenze_caveat"),
+          amountFiat: headroom,
+          deadline: refDate
+        });
+      }
+    }
+  }
+
+  // ---- OPPORTUNITY: realise losses that can still offset this period's gains ----
+  // Per asset, the prefix of the method's consumption order with the deepest
+  // cumulative TAXABLE loss at the reference price (FIFO cannot pick lots, so
+  // the quantity includes any older lots that come first). The saving is the
+  // engine's own deduction chain re-run with those losses added, so
+  // allowances, discounts, inclusion rates and the Freigrenze all count.
+  // Skipped where losses can't offset (IN, TH) and for JP's total average.
+  if (actionable && gainsTaxable && c.transactions && ruleset.lossOffset !== "none"
+      && method !== "TOTAL_AVG" && (c.transactions.taxableAmountFiat || 0) > 0.005) {
+    let dS = 0, dL = 0;
+    const rows = [];
+    for (const [asset] of holdings) {
+      const unit = unitAt(asset, valDay);
+      if (unit == null) continue;
+      let q = 0, cum = 0, cS = 0, cL = 0, best = null;
+      for (const lot of inMethodOrder(lotsOf(asset))) {
+        const g = lot.qty * unit - lot.basisFiat;
+        const term = termOf(ruleset, lot.acquiredTs, valDay);
+        q += lot.qty;
+        if (lotIsTaxable(ruleset, { term, isProfessional: isPro })) {
+          cum += g;
+          if (term === "long") cL += g; else cS += g;
+        }
+        if (cum < -0.005 && (!best || cum < best.loss)) best = { qty: q, loss: cum, s: cS, l: cL };
+      }
+      if (best) {
+        rows.push({ asset, qty: round4(best.qty), lossFiat: round2(-best.loss) });
+        dS += best.s;
+        dL += best.l;
+      }
+    }
+    if (rows.length) {
+      const after = applyDeductions(c.dedRuleset, profile, c.shortT + dS, c.longT + dL);
+      const saving = round2(c.transactions.taxableAmountFiat - after.taxableAmountFiat);
+      if (saving > 0.005) {
+        items.push({
+          id: "realise_losses", kind: "opportunity",
+          title: T("opt_losses_title", { date: refDate }),
+          detail: T("opt_losses_detail", { loss: round2(-(dS + dL)), amount: saving, fiat, date: refDate, priceDate: valDay }),
+          // Lot methods cannot pick lots: say the quantity includes whatever the
+          // method uses first (pooled costs need no such note).
+          notes: method === "POOL" ? [] : [T("opt_losses_order_note", { method })],
+          caveat: T(`opt_losses_caveat_${LOSS_CAVEAT[ruleset.code] || "generic"}`),
+          savingBaseFiat: saving,
+          savingKind: "exact",
+          deadline: refDate,
+          rows
+        });
+      }
+    }
+  }
+
+  // ---- OPPORTUNITY: a cheaper cost-basis method, where the law lets the user choose ----
+  if (Array.isArray(ruleset.methodChoice) && !ruleset.methodLocked && c.transactions
+      && (c.transactions.taxableAmountFiat || 0) > 0.005) {
+    const current = c.transactions.taxableAmountFiat;
+    const rows = [{ method, taxableFiat: current, current: true }];
+    for (const m of ruleset.methodChoice) {
+      if (m === method) continue;
+      const alt = buildAllReports(Object.assign({}, profile, { costBasisMethod: m }), c.events, c.year, prices,
+          c.period, c.fiatOverride, { optimize: false, now: c.nowIso });
+      const v = alt && alt.transactions ? alt.transactions.taxableAmountFiat : NaN;
+      if (Number.isFinite(v)) rows.push({ method: m, taxableFiat: v });
+    }
+    const best = rows.reduce((b, r) => (r.taxableFiat < b.taxableFiat ? r : b), rows[0]);
+    const saving = round2(current - best.taxableFiat);
+    if (best.method !== method && saving > 0.005) {
+      items.push({
+        id: "cost_basis_method", kind: "opportunity",
+        title: T("opt_method_title", { method: best.method }),
+        detail: T(ruleset.code === "US" ? "opt_method_detail_us" : "opt_method_detail", { method: best.method, current: method, amount: saving, fiat }),
+        savingBaseFiat: saving,
+        savingKind: "exact",
+        rows
+      });
+    }
+  }
+
+  // ---- CHECK: the Swiss private-investor criteria (gains tax-free only as one) ----
+  // Measured by the engine (swissSafeHarbour); a missed criterion carries what
+  // would become taxable for a professional trader as the figure at stake.
+  if (c.safeHarbour && !isPro) {
+    const sh = c.safeHarbour;
+    const atStake = c.traderStatus && c.traderStatus.ifProfessionalTaxableFiat;
+    items.push({
+      id: "ch_private_investor", kind: "check",
+      title: T("opt_ch_private_title"),
+      detail: T(sh.missed ? "opt_ch_private_detail_missed" : "opt_ch_private_detail_met", {
+        gain: round2(c.transactions.totalGainFiat), fiat, count: sh.missed
+      }),
+      notes: [
+        sh.startValue > 0 ? T("opt_ch_private_volume_note", { date: sh.startDay }) : T("opt_ch_private_volume_unknown"),
+        sh.gainShare == null ? T("opt_ch_private_income_note") : null,
+        sh.qUnknown > 1e-9 ? T("opt_ch_private_unknown_note", { qty: round4(sh.qUnknown) }) : null
+      ].filter(Boolean),
+      caveat: T("opt_ch_private_caveat"),
+      savingBaseFiat: sh.missed && atStake > 0 ? round2(atStake) : undefined,
+      savingKind: sh.missed && atStake > 0 ? "at_stake" : undefined,
+      rows: sh.rows
+    });
+  }
+
+  // ---- CHECK (CH): costs of earning the rewards are deductible from them ----
+  // ESTV crypto working paper §2.2.2: costs directly tied to earning the
+  // income and needed to administer the asset are deductible from income
+  // from movable assets (art. 32 al. 1 LIFD); transaction costs of buying,
+  // restructuring or selling are not.
+  if (ruleset.code === "CH" && c.operations && c.operations.totalIncomeFiat > 0) {
+    items.push({
+      id: "ch_deductible_costs", kind: "check",
+      title: T("opt_ch_costs_title"),
+      detail: T("opt_ch_costs_detail", { amount: c.operations.totalIncomeFiat, fiat })
+    });
+  }
+
+  // ---- CHECKS: data that changes the figures ----
+  if (gainsTaxable && c.transactions) {
+    // Sends never classified are taxed as payments. Only some of them should
+    // move: payments to other people for goods or services stay taxable.
+    const explicit = profile.counterpartyIntents || {};
+    const defaulted = c.disposals.filter(d => d.category === "transfer_out" && !explicit[d.counterparty]);
+    const sendGain = defaulted.reduce((s, d) => s + Math.max(0, (d.shortTermGainFiat || 0) + (d.longTermGainFiat || 0)), 0);
+    if (defaulted.length && sendGain > 0.005) {
+      const cps = [...new Set(defaulted.map(d => d.counterparty).filter(Boolean))];
+      items.push({
+        id: "classify_sends", kind: "check",
+        title: T("opt_sends_title", { count: defaulted.length }),
+        detail: T(ruleset.charityGiftExempt ? "opt_sends_detail_charity" : "opt_sends_detail", {
+          count: defaulted.length,
+          accounts: cps.slice(0, 5).join(", ") + (cps.length > 5 ? ", …" : ""),
+          amount: round2(sendGain), fiat
+        }),
+        savingBaseFiat: round2(sendGain),
+        savingKind: "up_to"
+      });
+    }
+    // Quantity sold with no cost on record is taxed as pure gain.
+    let missingGain = 0;
+    const missingAssets = new Set();
+    for (const d of c.disposals) {
+      for (const lot of d.lots || []) {
+        if (lot.missingBasis && lot.taxable) { missingGain += lot.gainFiat; missingAssets.add(d.asset); }
+      }
+    }
+    if (missingGain > 0.005) {
+      items.push({
+        id: "missing_cost_basis", kind: "check",
+        title: T("opt_missing_basis_title"),
+        detail: T("opt_missing_basis_detail", { amount: round2(missingGain), fiat, assets: [...missingAssets].join(", ") }),
+        savingBaseFiat: round2(missingGain),
+        savingKind: "up_to"
+      });
+    }
+    if (ruleset.lossCarryforward !== false && !(profile.lossCarryforwardFiat > 0) && (c.transactions.taxableAmountFiat || 0) > 0.005) {
+      items.push({ id: "enter_prior_losses", kind: "check", title: T("opt_prior_losses_title"), detail: T("opt_prior_losses_detail") });
+    }
+  }
+  // Tokens received from other accounts count as purchases unless marked:
+  // pay for work, team or project rewards and airdrops are income when
+  // received. This check can RAISE the figures — it is here so the report
+  // holds up, not to lower it.
+  if (c.operations && ruleset.rewardIncomeTaxed !== false) {
+    const startMs = Date.parse(c.periodStartIso);
+    const explicitIn = profile.inboundIntents || {};
+    const receipts = c.events.filter(ev => {
+      const t = Date.parse(ev.ts);
+      return ev.category === "transfer_in" && t >= startMs && t <= c.periodEndMs
+          && !explicitIn[ev.counterparty] && ev.counterpartyIsOwn !== true;
+    });
+    let value = 0;
+    for (const ev of receipts) {
+      for (const leg of ev.legs) {
+        if (leg.direction !== "in") continue;
+        const u = unitAt(leg.asset, ev.ts);
+        if (u != null) value += u * leg.amount;
+      }
+    }
+    if (receipts.length && value > 0.005) {
+      const cps = [...new Set(receipts.map(e => e.counterparty).filter(Boolean))];
+      items.push({
+        id: "classify_receipts", kind: "check",
+        title: T("opt_receipts_title", { count: receipts.length }),
+        detail: T("opt_receipts_detail", {
+          accounts: cps.slice(0, 5).join(", ") + (cps.length > 5 ? ", …" : ""),
+          amount: round2(value), fiat
+        }),
+        amountFiat: round2(value)
+      });
+    }
+  }
+  if (c.transactions && c.transactions.ordinaryIncomeOffsetFiat > 0) {
+    const amount = c.transactions.ordinaryIncomeOffsetFiat;
+    items.push({
+      id: "loss_offsets_other_income", kind: "check",
+      title: T("opt_ordinary_offset_title", { amount, fiat }),
+      detail: T("opt_ordinary_offset_detail", { amount, fiat, carry: c.transactions.lossCarryforwardOutFiat }),
+      amountFiat: amount
+    });
+  }
+  // Undated opening balances are dated 1970 by the engine — read as long-held,
+  // which can make their gains look tax-free. Honest dates may raise the tax.
+  if (ruleset.longTermThresholdDays != null && Array.isArray(profile.openingLots)
+      && profile.openingLots.some(l => l && Number(l.qty) > 0 && !l.date)) {
+    items.push({
+      id: "undated_opening_lots", kind: "check",
+      title: T("opt_undated_title"),
+      detail: T(ruleset.longTermExempt ? "opt_undated_detail_exempt" : "opt_undated_detail")
+    });
+  }
+
+  // ---- WATCH: pending law changes ----
+  if (ruleset.pendingChange === "de_crypto_reform_draft_2026") {
+    items.push({ id: "de_reform_draft", kind: "watch", title: T("opt_watch_de_title"), detail: T("opt_watch_de_detail") });
+  }
+
+  const ORDER = { opportunity: 0, check: 1, fact: 2, watch: 3 };
+  items.sort((a, b) => ORDER[a.kind] - ORDER[b.kind]); // stable: insertion order within a kind
+  return { asOf: refDate, fiat, actionable, items };
+}
+
+// ---------------------------------------------------------------------------
+// 8. DEMO
 // ---------------------------------------------------------------------------
 
 function demoEvents(account, wallet) {

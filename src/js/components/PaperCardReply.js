@@ -194,7 +194,20 @@ const styles = theme => ({
         "& .MuiCardContent-root p:first-child": {
             padding: 0,
             margin: 0
-        }
+        },
+        // The one image a comment may carry (comment tier, class
+        // pixa-comment-image), as a fixed-height banner: the card's height
+        // is the same before and after the picture loads, so the Masonry
+        // cell measured at mount stays right.
+        "& .MuiCardContent-root img.pixa-comment-image": {
+            display: 'block',
+            width: '100%',
+            height: 180,
+            objectFit: 'cover',
+            margin: '8px 0 0',
+            borderRadius: 16,
+            backgroundColor: '#0c0c0c',
+        },
     },
     titleText: { cursor: 'pointer' },
     typeChip: {
@@ -300,8 +313,10 @@ const ReplyCardContent = memo(function ReplyCardContent({
     // safeHTML() that wraps it sat in the JSX, so that WASM pass ran on
     // every render of every card — every scroll-driven Masonry render of
     // the comments and replies tabs included. It now runs once per body.
-    // The output is the same string it always was.
-    const bodyHTML = useMemo(() => safeHTML(renderCommentBody(api, data.body)), [api, data.body]);
+    // The output is the same string it always was. The memo is the
+    // dangerouslySetInnerHTML object itself: the JSX had kept a third
+    // safeHTML() around it, per render.
+    const bodyMarkup = useMemo(() => ({ __html: safeHTML(renderCommentBody(api, data.body)) }), [api, data.body]);
 
 
     const openAuthor = useCallback((username) => {
@@ -513,7 +528,7 @@ const ReplyCardContent = memo(function ReplyCardContent({
                 }
             />
             <CardContent>
-                <div dangerouslySetInnerHTML={{ __html: safeHTML(bodyHTML) }} />
+                <div dangerouslySetInnerHTML={bodyMarkup} />
             </CardContent>
             <PaperCardActions
                 api={api}

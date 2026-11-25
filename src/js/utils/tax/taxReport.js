@@ -37,6 +37,13 @@
  * use en-US. CSV column headers and data tokens (yes/no, category codes, ISO
  * dates, "(pooled/none)") stay as they are — they are the file's schema; the
  * human-text columns (tax_treatment, note) follow opts.i18n.
+ *
+ * OPTIMISATION (Nov 2026): a "Lowering your tax — legally" section renders the
+ * engine's bundle.optimization (levers still open, checks before filing, what
+ * does not change the tax, pending law changes), and two CSVs carry it
+ * (optimization, optimization_detail). It sits after the figures and changes
+ * none of them. Also: the US ordinary-income offset line under the gains, and
+ * a PXP sub-line when a ruling-based wealth discount was applied.
  * ===========================================================================*/
 
 import { PDFDocument, StandardFonts, rgb, PageSizes } from "pdf-lib";
@@ -266,6 +273,26 @@ const TIMING_LABELS = {
 };
 const timingLabel = (tr, k) => (TIMING_LABELS[k] ? TIMING_LABELS[k](tr) : String(k || ""));
 
+// The trader status the engine used, and on what basis — stated on the cover
+// and in the basis of preparation, because whether gains are taxed at all
+// (Switzerland above all) turns on it.
+function traderStatusText(tr, b) {
+  const s = b.traderStatus;
+  if (!s) return "";
+  if (s.status === "professional") return tr.t("components.tax_report.trader_professional_declared");
+  const count = tr.number(s.missedCriteria || 0, 0);
+  if (s.basis === "declared") {
+    return s.missedCriteria
+        ? tr.t("components.tax_report.trader_private_declared_missed", { count })
+        : tr.t("components.tax_report.trader_private_declared");
+  }
+  if (s.basis === "safe_harbour") return tr.t("components.tax_report.trader_private_safe_harbour");
+  if (s.basis === "no_disposals") return tr.t("components.tax_report.trader_private_no_disposals");
+  return s.missedCriteria
+      ? tr.t("components.tax_report.trader_private_presumed_missed", { count })
+      : tr.t("components.tax_report.trader_private_presumed");
+}
+
 // Human labels for the engine's category codes (the tables used to print the
 // raw codes: "reward_claim", "market_fill", "delegation_out" ...).
 const CATEGORY_LABELS = {
@@ -276,6 +303,8 @@ const CATEGORY_LABELS = {
   proposal_income: (tr) => tr.t("components.tax_report.category_proposal_income"),
   savings_interest: (tr) => tr.t("components.tax_report.category_savings_interest"),
   transfer_out: (tr) => tr.t("components.tax_report.category_transfer_out"),
+  // only reaches the income tables when the user marked a sender "income"
+  transfer_in: (tr) => tr.t("components.tax_report.category_transfer_in_income"),
   swap: (tr) => tr.t("components.tax_report.category_swap"),
   market_fill: (tr) => tr.t("components.tax_report.category_market_fill")
 };
@@ -742,7 +771,10 @@ function renderWealth(ctx, r) {
   }]);
   const rows = r.lines.map(l => ({
     cells: [assetName(l.asset), fmt(l.qty, 4), fmt(l.fiatPerUnit, 4), fmt(l.valueFiat), sourceLabel(tr, l.source)],
-    sub: l.asset === "PXP" ? tr.t("components.tax_report.pixa_power_staked_pixa_you_own") : undefined
+    sub: l.asset === "PXP"
+        ? [tr.t("components.tax_report.pixa_power_staked_pixa_you_own"),
+          l.discount ? tr.t("components.tax_report.pxp_discount_sub", { pct: fmt(l.discount * 100, 2) }) : ""].filter(Boolean).join("  ·  ")
+        : undefined
   }));
   sectionTitle(ctx, nextSection(ctx), title, note, tableHeight(rows, true));
   drawTable(ctx, cols, rows, {
@@ -935,6 +967,12 @@ function renderTransactions(ctx, r) {
   if (r.lossCarryforwardOutFiat) {
     ensure(ctx, 11);
     text(ctx.page, tr.t("components.tax_report.loss_to_carry_forward", { amount: fmt(r.lossCarryforwardOutFiat), fiat: r.fiat }), MRG, ctx.y - 2, 8.5, ctx.f.regular, SUB);
+    ctx.y -= 12;
+  }
+  // US: the part of a net capital loss that reduces ordinary income this year.
+  if (r.ordinaryIncomeOffsetFiat) {
+    ensure(ctx, 11);
+    text(ctx.page, tr.t("components.tax_report.loss_offsets_other_income", { amount: fmt(r.ordinaryIncomeOffsetFiat), fiat: r.fiat }), MRG, ctx.y - 2, 8.5, ctx.f.regular, SUB);
     ctx.y -= 12;
   }
   csvNote(ctx, tr.t("components.tax_report.summary_by_type_all_disposals", { count: fmt(r.lines.length, 0), csv: ctx.csv }));
@@ -1165,6 +1203,120 @@ function para(ctx, s, opts = {}) {
   ctx.y -= gap;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// LOWERING YOUR TAX — LEGALLY  (the engine's bundle.optimization)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Groups in reading order; the engine already sorts items this way.
+const OPT_GROUPS = [
+  ["opportunity", (tr) => tr.t("components.tax_report.opt_group_opportunity")],
+  ["check", (tr) => tr.t("components.tax_report.opt_group_check")],
+  ["fact", (tr) => tr.t("components.tax_report.opt_group_fact")],
+  ["watch", (tr) => tr.t("components.tax_report.opt_group_watch")]
+];
+const OPT_PDF_ROWS = 8; // detail tables are capped; the CSV has every row
+
+// The engine's descriptors carry dates as ISO days ("2026-12-31"); show them
+// in the document's language like every other date here. Nested descriptors
+// (amount lists) are walked too.
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+function withLocalDates(tr, x) {
+  if (Array.isArray(x)) return x.map(y => withLocalDates(tr, y));
+  if (!x || typeof x !== "object" || typeof x.$t !== "string" || !x.v) return x;
+  const v = {};
+  for (const [k, val] of Object.entries(x.v)) v[k] = typeof val === "string" && ISO_DAY.test(val) ? dayOf(tr, val) : withLocalDates(tr, val);
+  return { $t: x.$t, v };
+}
+const optText = (tr, x) => tr.text(withLocalDates(tr, x));
+// The figure beside a lever's title says how firm it is (engine savingKind).
+const OPT_FIGURE = {
+  exact: (tr, amount, fiat) => tr.t("components.tax_report.opt_base_reduction", { amount, fiat }),
+  up_to: (tr, amount, fiat) => tr.t("components.tax_report.opt_base_up_to", { amount, fiat }),
+  at_stake: (tr, amount, fiat) => tr.t("components.tax_report.opt_base_at_stake", { amount, fiat })
+};
+
+function renderOptimization(ctx, opt) {
+  if (!opt || !Array.isArray(opt.items) || !opt.items.length) return;
+  const tr = ctx.tr;
+  sectionTitle(ctx, nextSection(ctx), tr.t("components.tax_report.opt_section_title"),
+      opt.actionable
+          ? tr.t("components.tax_report.opt_section_note", { date: dayOf(tr, opt.asOf) })
+          : tr.t("components.tax_report.opt_section_note_closed", { date: dayOf(tr, opt.asOf) }));
+  for (const [kind, label] of OPT_GROUPS) {
+    const items = opt.items.filter(i => i.kind === kind);
+    if (!items.length) continue;
+    ensure(ctx, 60); // keep the group label with its first item
+    text(ctx.page, tr.upper(label(tr)), MRG, ctx.y - 9, 7.5, ctx.f.bold, SUB);
+    ctx.y -= 17;
+    for (const it of items) renderOptItem(ctx, it);
+  }
+}
+
+function renderOptItem(ctx, it) {
+  const tr = ctx.tr, fmt = ctx.fmt, f = ctx.bundle.fiat;
+  // The figure beside the title: the taxable-base change, worded by how firm
+  // it is. Other amounts (an unused allowance, a wealth reduction) are already
+  // in the title or the text, so they are not repeated here.
+  const figure = it.savingBaseFiat != null
+      ? (OPT_FIGURE[it.savingKind] || OPT_FIGURE.exact)(tr, fmt(it.savingBaseFiat), f)
+      : "";
+  const figW = figure ? ctx.f.bold.widthOfTextAtSize(safe(figure), 8.5) + 18 : 0;
+  const titleLines = wrap(optText(tr, it.title), ctx.f.bold, 9.5, CONTENT_W - figW);
+  ensure(ctx, titleLines.length * 12.5 + 34); // title stays with the start of its text
+  titleLines.forEach((ln, i) => {
+    text(ctx.page, ln, MRG, ctx.y - 10, 9.5, ctx.f.bold, INK);
+    if (i === 0 && figure) textR(ctx.page, figure, PAGE_W - MRG, ctx.y - 10, 8.5, ctx.f.bold, INK);
+    ctx.y -= 12.5;
+  });
+  ctx.y -= 1;
+  para(ctx, optText(tr, it.detail), { size: 8.5, color: INK, gap: 2 });
+  for (const n of it.notes || []) para(ctx, optText(tr, n), { size: 8.5, color: SUB, gap: 2 });
+  if (it.rows && it.rows.length) renderOptRows(ctx, it);
+  if (it.caveat) para(ctx, optText(tr, it.caveat), { size: 8, color: SUB, gap: 2, font: ctx.f.oblique });
+  ctx.y -= 9;
+}
+
+// One small table per kind of lever. Unknown ids print no table (the CSV
+// still has the rows).
+function renderOptRows(ctx, it) {
+  const tr = ctx.tr, fmt = ctx.fmt, f = ctx.bundle.fiat;
+  const col = (title, w, align) => ({ title, w, align });
+  const rows = it.rows.slice(0, OPT_PDF_ROWS);
+  let cols = null, body = null;
+  if (it.id === "hold_past_holding_period") {
+    cols = fit([col(tr.t("components.tax_report.opt_col_from"), 110, "l"), col(tr.t("components.tax_report.col_asset"), 70, "l"),
+      col(tr.t("components.tax_report.col_quantity"), 110, "r"), col(tr.t("components.tax_report.opt_col_unrealised_gain", { fiat: f }), 130, "r")]);
+    body = rows.map(r => ({ cells: [dayOf(tr, r.date), assetName(r.asset), fmt(r.qty, 4), fmt(r.gainFiat)] }));
+  } else if (it.id === "realise_losses") {
+    cols = fit([col(tr.t("components.tax_report.col_asset"), 90, "l"), col(tr.t("components.tax_report.opt_col_qty_to_dispose"), 150, "r"),
+      col(tr.t("components.tax_report.opt_col_loss", { fiat: f }), 150, "r")]);
+    body = rows.map(r => ({ cells: [assetName(r.asset), fmt(r.qty, 4), fmt(r.lossFiat)] }));
+  } else if (it.id === "cost_basis_method") {
+    cols = fit([col(tr.t("components.tax_report.opt_col_method"), 260, "l"), col(tr.t("components.tax_report.opt_col_taxable_amount", { fiat: f }), 150, "r")]);
+    body = rows.map(r => ({
+      cells: [r.current ? tr.t("components.tax_report.opt_current_method", { method: methodLabel(tr, r.method) }) : methodLabel(tr, r.method), fmt(r.taxableFiat)]
+    }));
+  } else if (it.id === "ch_private_investor") {
+    const label = (r) => r.criterion === "hold" ? tr.t("components.tax_report.opt_crit_hold", { months: fmt(r.months, 0) })
+        : r.criterion === "hold_strict" ? tr.t("components.tax_report.opt_crit_hold_strict", { months: fmt(r.months, 0) })
+            : r.criterion === "volume" ? tr.t("components.tax_report.opt_crit_volume")
+                : tr.t("components.tax_report.opt_crit_gains_share");
+    const val = (v, unit) => (v == null ? tr.t("components.tax_report.not_available") : unit === "x" ? `${fmt(v, 2)}×` : `${fmt(v, 2)}%`);
+    const limit = (r) => r.criterion === "volume" ? `≤ ${fmt(r.limit, 0)}×` : r.criterion === "gains_share" ? `< ${fmt(r.limit, 0)}%` : `${fmt(0, 0)}%`;
+    const status = (m) => m == null ? tr.t("components.tax_report.opt_status_unknown")
+        : m ? tr.t("components.tax_report.opt_status_met") : tr.t("components.tax_report.opt_status_missed");
+    cols = fit([col(tr.t("components.tax_report.opt_col_criterion"), 210, "l"), col(tr.t("components.tax_report.opt_col_this_period"), 90, "r"),
+      col(tr.t("components.tax_report.opt_col_limit"), 90, "r"), col(tr.t("components.tax_report.opt_col_status"), 90, "l")]);
+    body = rows.map(r => ({ cells: [label(r), val(r.value, r.unit), limit(r), status(r.met)] }));
+  }
+  if (!cols) return;
+  drawTable(ctx, cols, body);
+  ctx.y += 12; // tighter than a section table: the caveat belongs to it
+  if (it.rows.length > OPT_PDF_ROWS) {
+    para(ctx, tr.t("components.tax_report.opt_more_rows_in_csv", { count: fmt(it.rows.length - OPT_PDF_ROWS, 0), csv: ctx.csv }), { size: 8, gap: 2 });
+  }
+}
+
 function renderReview(ctx) {
   const tr = ctx.tr, fmt = ctx.fmt;
   const ing = ctx.ingest || {};
@@ -1255,6 +1407,7 @@ function renderCover(ctx) {
     [tr.t("components.tax_report.price_data"), String(b.priceDataVersion || "")],
     [tr.t("components.tax_report.cost_basis_method"), methodLabel(tr, b.methodUsed)],
     [tr.t("components.tax_report.income_recognition"), timingLabel(tr, b.incomeTiming)],
+    ...(b.traderStatus ? [[tr.t("components.tax_report.trader_status"), traderStatusText(tr, b)]] : []),
     [tr.t("components.tax_report.report_id"), ctx.reportId],
     [tr.t("components.tax_report.fingerprint_sha_256"), ctx.fingerprint
         ? `${ctx.fingerprint.slice(0, 32)}\n${ctx.fingerprint.slice(32)}`
@@ -1313,6 +1466,7 @@ function renderBasis(ctx) {
     [tr.t("components.tax_report.scope"), tr.t("components.tax_report.scope_value", { account: b.account, period })],
     [tr.t("components.tax_report.cost_basis_method"), methodLabel(tr, b.methodUsed)],
     [tr.t("components.tax_report.income_recognition"), timingLabel(tr, b.incomeTiming)],
+    ...(b.traderStatus ? [[tr.t("components.tax_report.trader_status"), traderStatusText(tr, b)]] : []),
     [tr.t("components.tax_report.tokens"), tr.t("components.tax_report.tokens_value")],
     [tr.t("components.tax_report.price_basis"), priceBasisText(tr, b, ctx.priceMode)],
     [tr.t("components.tax_report.deductions_supplied"), deductions]
@@ -1399,6 +1553,10 @@ function renderSwissAnnex(ctx) {
     return;
   }
   drawTable(ctx, cols, rows);
+  const stake = b.traderStatus && b.traderStatus.ifProfessionalTaxableFiat;
+  if (stake > 0) {
+    csvNote(ctx, tr.t("components.tax_report.if_professional_gains_taxable", { amount: fmt(stake), fiat: f }));
+  }
   csvNote(ctx, tr.t("components.tax_report.author_and_beneficiary_rewards_pay_for"));
 }
 
@@ -1632,6 +1790,9 @@ export async function generateTaxReportPdf(bundle, opts = {}) {
   if (bundle.outboundByIntent) renderOutbound(ctx, bundle.outboundByIntent);
   if (bundle.operations) renderOperations(ctx, bundle.operations);
   renderJurisdictionAnnex(ctx);
+  // After every figure, so nothing above depends on it: the levers are advice
+  // read off the same data, not part of what is filed.
+  renderOptimization(ctx, bundle.optimization);
   if (bundle.movements && bundle.movements.length) renderMovements(ctx, bundle.movements);
   renderReview(ctx);
   drawFooters(doc, f, bundle, reportId, tr);
@@ -1755,6 +1916,21 @@ export function generateTaxReportCsvs(bundle, opts = {}) {
         obRows.push([k, outboundTreatment(tr, k, s, send).replace(/\s*—\s*/g, " - "), a, q, s.count, s.taxable ? "yes" : "no"]);
   }
 
+  // Optimisation: one row per lever, and their detail rows (hold dates, losses
+  // to realise, methods, Swiss criteria) in long format keyed by lever id.
+  const opRows = [["id", "kind", "title", "detail", "saving_base", "saving_kind", "amount", "deadline", "fiat"]];
+  const odRows = [["id", "key", "asset", "date", "quantity", "amount", "value", "limit", "met", "fiat"]];
+  if (bundle.optimization && Array.isArray(bundle.optimization.items)) {
+    for (const it of bundle.optimization.items) {
+      const detail = [optText(tr, it.detail), ...(it.notes || []).map(n => optText(tr, n)), it.caveat ? optText(tr, it.caveat) : ""].filter(Boolean).join(" ");
+      opRows.push([it.id, it.kind, optText(tr, it.title), detail, it.savingBaseFiat ?? "", it.savingKind || "", it.amountFiat ?? "", it.deadline || "", fiat]);
+      for (const r of it.rows || []) {
+        odRows.push([it.id, r.criterion || r.method || "", r.asset || "", r.date || "", r.qty ?? "",
+          r.gainFiat ?? r.lossFiat ?? r.taxableFiat ?? "", r.value ?? "", r.limit ?? "", r.met == null ? "" : (r.met ? "yes" : "no"), fiat]);
+      }
+    }
+  }
+
   // combined long format: one normalised row per detail line across all reports
   const cRows = [["report", "date", "category", "asset", "direction", "quantity", "unit_value", "value", "cost_basis", "gain", "taxable", "source", "fiat"]];
   if (bundle.wealth) for (const l of bundle.wealth.lines) cRows.push(["wealth", bundle.wealth.refDate, "holding", l.asset, "hold", l.qty, l.fiatPerUnit, l.valueFiat, "", "", "", l.source, fiat]);
@@ -1771,6 +1947,8 @@ export function generateTaxReportCsvs(bundle, opts = {}) {
     tokens: toCsv(kRows),
     offplatform: toCsv(xRows),
     outbound: toCsv(obRows),
+    optimization: toCsv(opRows),
+    optimization_detail: toCsv(odRows),
     combined: toCsv(cRows)
   };
 }

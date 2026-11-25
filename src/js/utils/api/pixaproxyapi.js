@@ -602,6 +602,12 @@ let wasmSummarizeContent = null;
 let wasmSanitizeUsername = null;
 let wasmSanitizeForInjection = null;
 
+// A post's json_metadata.description may show one image, like a comment
+// (the comment tier's max_comment_images). ContentSanitizer.renderDescription
+// renders every other description — communities, sanitizeDescription() —
+// image-free, as the tier always did before it admitted images.
+const POST_DESCRIPTION_RENDER = Object.freeze({ max_comment_images: 1 });
+
 // ── Lazy-loaded: @pixagram/dpixa ──
 let Client = null;
 let PrivateKey = null;
@@ -3439,8 +3445,9 @@ export class PixaProxyAPI {
         try { meta = JSON.parse(safeMetaStr); } catch (e) {}
 
         const rawDesc = typeof meta.description === 'string' ? meta.description : '';
+        // One image in an artwork's description (see sanitizePost below).
         const descriptionHtml = rawDesc
-            ? this.contentSanitizer.renderDescription(rawDesc)
+            ? this.contentSanitizer.renderDescription(rawDesc, contentType === 'pixel_art' ? POST_DESCRIPTION_RENDER : undefined)
             : '';
         const summary = contentType === 'pixel_art'
             ? this.contentSanitizer.extractPlainText(rawDesc).slice(0, 500)
@@ -3631,8 +3638,10 @@ export class PixaProxyAPI {
 
     /**
      * Sanitize HTML for comment-level rendering.
-     * Allows: lists, blockquotes, code, links, inline formatting.
-     * Strips: headings, tables, images, iframes, and everything post-only.
+     * Allows: lists, blockquotes, code, links, inline formatting, and ONE
+     *         image (the first; class "pixa-comment-image", proxied, lazy).
+     * Strips: headings, tables, further images, iframes, and everything
+     *         post-only.
      *
      * Use for: comment bodies rendered via dangerouslySetInnerHTML.
      *
@@ -3664,7 +3673,9 @@ export class PixaProxyAPI {
     /**
      * Sanitize a description or any user-supplied text for safe innerHTML rendering.
      * Uses comment-tier: lists, blockquotes, code, links, inline formatting.
-     * No images, no headings, no tables.
+     * No images, no headings, no tables. (A post's own description is
+     * rendered by sanitizePost with one image allowed — see
+     * POST_DESCRIPTION_RENDER — not through this method.)
      *
      * Use for: json_metadata.description, profile "about" text, or any
      * user-supplied text field displayed via dangerouslySetInnerHTML.
@@ -11058,8 +11069,10 @@ class SanitizationPipeline {
         if (contentType === 'pixel_art') {
             rendered = this.sanitizer.renderPost(raw.body || '', renderOptions);
             const rawDesc = typeof meta.description === 'string' ? meta.description : '';
+            // The artwork's description — PostDialog's Details tab — may
+            // show one image. A blog's short description (below) stays text.
             descriptionHtml = rawDesc
-                ? this.sanitizer.renderDescription(rawDesc)
+                ? this.sanitizer.renderDescription(rawDesc, POST_DESCRIPTION_RENDER)
                 : '';
             summary = this.sanitizer.extractPlainText(rawDesc).slice(0, 500);
         } else {
@@ -11498,7 +11511,8 @@ class ContentSanitizer {
     }
 
     /**
-     * Render a comment body (stricter subset — no headings, tables, iframes)
+     * Render a comment body (stricter subset — no headings, tables, iframes;
+     * at most one image, `max_comment_images`).
      *
      * @param {string} body - Raw comment body
      * @param {object} [options] - Override render options
@@ -11512,7 +11526,7 @@ class ContentSanitizer {
 
         return {
             html: result.html || '',
-            images: [],
+            images: result.images || [],
             links: result.links || [],
             wordCount: this._countWords(result.html || body),
         };
@@ -11520,8 +11534,12 @@ class ContentSanitizer {
 
     /**
      * Sanitize a description or any user-supplied text for safe innerHTML rendering.
-     * Uses comment-tier (lists, blockquotes, code, links — no images, headings, tables).
+     * Uses comment-tier (lists, blockquotes, code, links — no headings, tables).
      * Returns just the sanitized HTML string.
+     *
+     * Image-free unless the caller passes `max_comment_images` — a post's own
+     * description does (POST_DESCRIPTION_RENDER, one image); community
+     * descriptions, profile text and sanitizeDescription() don't.
      *
      * Use this for: json_metadata.description, profile about, or any text
      * that will be rendered via dangerouslySetInnerHTML in the frontend.
@@ -11534,7 +11552,7 @@ class ContentSanitizer {
         if (!text || typeof text !== 'string') return '';
         this._requireReady('renderDescription');
 
-        const result = wasmSanitizeComment(text, this._serializeOptions(options));
+        const result = wasmSanitizeComment(text, this._serializeOptions({ max_comment_images: 0, ...options }));
         return result.html || '';
     }
 

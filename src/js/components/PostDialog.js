@@ -60,7 +60,7 @@ import Tabs from "@material-ui/core/Tabs";
 import Tab from "@material-ui/core/Tab";
 import Collapse from "@material-ui/core/Collapse";
 import SwipeableViews from "react-swipeable-views";
-import TextField from "@material-ui/core/TextField";
+import CommentComposerField, { commentBodyForBroadcast, commentImageProblem, commentImageLimitMessage, commentImageStyles } from "./CommentComposer";
 import Fade from "@material-ui/core/Fade";
 import Radio from "@material-ui/core/Radio";
 import FormControlLabel from "@material-ui/core/FormControlLabel";
@@ -721,14 +721,23 @@ const STYLE_FAVORITE_ON = Object.freeze({ color: "#e3e3e3", marginLeft: "auto", 
 const STYLE_FAVORITE_OFF = Object.freeze({ color: "#8a8a8a", marginLeft: "auto", flexShrink: 0 });
 
 /* Description — sanitized by the pipeline, safe for innerHTML. safeHTML()
- * now runs when the description changes, not on every render of the tab. */
-const PostDescription = React.memo(function PostDescription({ html, summary }) {
+ * now runs when the description changes, not on every render of the tab.
+ *
+ * `markup` IS the dangerouslySetInnerHTML object. It used to be passed
+ * through safeHTML() a second time — safeHTML(markup), an object — and
+ * safeHTML returns '' for anything that is not a string, so every post with
+ * a description rendered an empty div: the `summary` fallback below is only
+ * reached when there is no HTML at all, so nothing showed.
+ *
+ * The description renders at the comment tier (renderDescription), which
+ * admits one image for post descriptions; classes.description sizes it. */
+const PostDescription = React.memo(function PostDescription({ html, summary, className }) {
     const markup = useMemo(() => (html ? { __html: safeHTML(html) } : null), [html]);
     if (markup) {
-        return <Typography variant="body1" color="textSecondary" component="div" style={STYLE_DESCRIPTION} dangerouslySetInnerHTML={safeHTML(markup)} />;
+        return <Typography variant="body1" color="textSecondary" component="div" className={className} style={STYLE_DESCRIPTION} dangerouslySetInnerHTML={markup} />;
     }
     if (summary) {
-        return <Typography variant="body1" color="textSecondary" component="p" style={STYLE_DESCRIPTION}>{summary}</Typography>;
+        return <Typography variant="body1" color="textSecondary" component="p" className={className} style={STYLE_DESCRIPTION}>{summary}</Typography>;
     }
     return null;
 });
@@ -962,7 +971,7 @@ const DetailsView = React.memo(({
                                     onInspirationShown
                                 }) => (
     <React.Fragment>
-        <PostDescription html={data._description_html} summary={data._summary} />
+        <PostDescription html={data._description_html} summary={data._summary} className={classes.description} />
         <TagList tags={tags} className={classes.chipTags} onTagClick={onTagClick} />
         <List className={classes.list}>
             <ImageSection width={metadata.width} height={metadata.height}
@@ -1141,7 +1150,10 @@ const CommentsView = React.memo(({
                                      onEditComment,
                                      onDeleteComment
                                  }) => (
-    <div>
+    /* classes.commentsView sizes the one image a comment may carry
+       (img.pixa-comment-image) — in the parents above and in every
+       CommentInList below, inline replies included. */
+    <div className={classes.commentsView}>
         <Collapse in={currentComments.length > 0}>
             <div>
                 <ReplyBreadcrumb currentComments={currentComments} showParent={showParent}
@@ -1501,10 +1513,14 @@ const BottomBarActions = React.memo(function BottomBarActions({
 const BottomBarComments = React.memo(function BottomBarComments({
                                                                     visible, barStyle, classes,
                                                                     replyTarget, threadTarget, editTarget, commentSending, accountImage, dataAuthorUsername,
-                                                                    onClearReply, onCancelEdit, onSubmitComment, onCommentKeyDown, account
+                                                                    onClearReply, onCancelEdit, onSubmitComment, account
                                                                 }) {
     useLanguage();
     const loggedOut = !account;
+    // An image still uploading into the comment: sending now would post it
+    // without the image, so the send button waits (Enter waits on its own —
+    // see CommentComposer).
+    const [uploading, setUploading] = useState(false);
     const padding = (replyTarget || editTarget) ? "8px 16px 12px" : "12px 16px";
     const rootStyle = useMemo(() => ({ ...barStyle, padding }), [barStyle, padding]);
     // Who the comment will answer: the thread on screen (threadTarget — see
@@ -1545,7 +1561,11 @@ const BottomBarComments = React.memo(function BottomBarComments({
                         </IconButton>
                     </div>
                 )}
-                <Grid container spacing={1} alignItems="center">
+                {/* The format bar and the multi-line field (CommentComposer)
+                    stand in the middle column; avatar and send button sit at
+                    its bottom, by the text. The field is still the
+                    uncontrolled #comment-textfield submitComment reads. */}
+                <Grid container spacing={1} alignItems="flex-end">
                     <Grid item>
                         <Avatar style={STYLE_COMMENT_AVATAR} src={accountImage} />
                     </Grid>
@@ -1553,20 +1573,20 @@ const BottomBarComments = React.memo(function BottomBarComments({
                         {loggedOut ? (
                             <Tooltip title={t("words.log_in_or_create_an_account_to")} arrow>
                                 <div>
-                                    <TextField fullWidth={true} type="text"
-                                               className={classes.comment} id="comment-textfield" name="comment-textfield"
-                                               label={t("words.reply_to_dataauthorusername", {
-                                                   dataAuthorUsername: dataAuthorUsername
-                                               })}
-                                               disabled={true} />
+                                    <CommentComposerField id="comment-textfield" className={classes.comment}
+                                                          label={t("words.reply_to_dataauthorusername", {
+                                                              dataAuthorUsername: dataAuthorUsername
+                                                          })}
+                                                          disabled={true} />
                                 </div>
                             </Tooltip>
                         ) : (
-                            <TextField fullWidth={true} autoFocus={visible} type="text"
-                                       className={classes.comment} id="comment-textfield" name="comment-textfield"
-                                       label={fieldLabel}
-                                       disabled={commentSending}
-                                       onKeyDown={onCommentKeyDown} />
+                            <CommentComposerField id="comment-textfield" className={classes.comment}
+                                                  label={fieldLabel}
+                                                  autoFocus={visible}
+                                                  disabled={commentSending}
+                                                  onSubmit={onSubmitComment}
+                                                  onBusyChange={setUploading} />
                         )}
                     </Grid>
                     <Grid item>
@@ -1581,7 +1601,7 @@ const BottomBarComments = React.memo(function BottomBarComments({
                         ) : (
                             <Tooltip title={editTarget ? t("components.post_dialog.save_the_edit") : t("words.send")} arrow>
                                 <span>
-                                    <IconButton className={classes.commentSendButton} onClick={onSubmitComment} disabled={commentSending}>
+                                    <IconButton className={classes.commentSendButton} onClick={onSubmitComment} disabled={commentSending || uploading}>
                                         {commentSending ? <CircularProgress size={24} style={STYLE_REPLY_CAPTION} /> : editTarget ? <EditRounded /> : <SendRounded />}
                                     </IconButton>
                                 </span>
@@ -1814,7 +1834,7 @@ const DrawerCardInner = React.memo(function DrawerCardInner({
                                                                 _voted, _upvoteLoading, _downvoteLoading, upvoteToggle, downvoteToggle,
                                                                 triggerPositiveVotes, triggerNegativeVotes,
                                                                 /* comment bar */ _reply_target, _edit_target, _comment_sending, accountImage, dataAuthorUsername,
-                                                                clearReplyTarget, cancelEditComment, submitComment, onCommentKeyDown,
+                                                                clearReplyTarget, cancelEditComment, submitComment,
                                                                 /* card ref */ setMenuCardRefCb
                                                             }) {
     const tags = data.tags || EMPTY_TAGS;
@@ -1860,7 +1880,7 @@ const DrawerCardInner = React.memo(function DrawerCardInner({
                 editTarget={_edit_target} commentSending={_comment_sending}
                 accountImage={accountImage} dataAuthorUsername={dataAuthorUsername}
                 onClearReply={clearReplyTarget} onCancelEdit={cancelEditComment}
-                onSubmitComment={submitComment} onCommentKeyDown={onCommentKeyDown}
+                onSubmitComment={submitComment}
                 account={account} />
             <BottomBarNFT
                 visible={tab_value === 2 && !_hidden2} barStyle={barStyle} />
@@ -1956,7 +1976,9 @@ const STYLE_IMG_ANIM_INNER = Object.freeze({
 const STYLE_BLUR_1 = Object.freeze({ contain: "strict", contentVisibility: "auto", userSelect: "none", touchAction: "none", pointerEvents: "none", position: "absolute", zIndex: -2, width: "100%", height: "100%", filter: "blur(108px) brightness(1.314)" });
 const STYLE_BLUR_2 = Object.freeze({ contain: "strict", contentVisibility: "auto", userSelect: "none", touchAction: "none", pointerEvents: "none", position: "absolute", zIndex: -1, width: "100%", height: "100%", filter: "blur(192px) brightness(1.618)" });
 const STYLE_CARDCONTENT_0 = Object.freeze({ paddingBottom: 72, display: "inline-block", overflow: "overlay", width: "100%", flexGrow: "1", paddingTop: 72 });
-const STYLE_CARDCONTENT_1 = Object.freeze({ paddingBottom: 96, display: "inline-block", overflow: "overlay", width: "100%", flexGrow: "1", paddingTop: 72 });
+// Comments tab: the bottom padding clears the fixed comment bar, which is
+// taller now — format bar + three-line field (BottomBarComments).
+const STYLE_CARDCONTENT_1 = Object.freeze({ paddingBottom: 184, display: "inline-block", overflow: "overlay", width: "100%", flexGrow: "1", paddingTop: 72 });
 const STYLE_CARDCONTENT_2 = Object.freeze({ paddingBottom: 0, display: "inline-block", overflow: "overlay", width: "100%", flexGrow: "1", paddingTop: 72 });
 const STYLE_CARDCONTENT_3 = Object.freeze({ paddingBottom: 0, display: "inline-block", overflow: "overlay", width: "100%", flexGrow: "1", paddingTop: 88 });
 
@@ -2123,6 +2145,20 @@ const styles = (theme) => ({
             fontSize: "1rem !important",
             color: "#fff"
         }
+    },
+    /* The artwork's description (PostDescription): the one image it may
+     * carry (comment tier, class pixa-comment-image) a little larger than
+     * a comment's. */
+    description: {
+        "& img.pixa-comment-image": {
+            ...commentImageStyles,
+            maxHeight: 480,
+            margin: "12px 0",
+        },
+    },
+    /* Comments tab (CommentsView): the one image of each comment. */
+    commentsView: {
+        "& img.pixa-comment-image": commentImageStyles,
     },
     colorBadges: {
         width: "100%",
@@ -5066,14 +5102,17 @@ function PostDialog(props) {
     const clearReplyTarget = useCallback(() => { dispatch({ _reply_target: null }); }, []);
     const handleChangeIndex = useCallback((v) => handleTabChange({}, v), [handleTabChange]);
 
-    /* PERF: Stable callback for comment TextField — avoids new inline arrow fn per render.
-     * submitComment is declared further down: naming it in this deps array read it
-     * before its declaration — a TDZ ReferenceError wherever `const` is not compiled
-     * down to `var`, and a first-render (stale) submitComment where it is. The latest
-     * one is reached through a ref instead (assigned right after its declaration). */
+    /* PERF: Stable submit for the comment bar (send button + Enter, which
+     * CommentComposer now handles) — one identity for the dialog's life, so
+     * the memo'd bar never holds a stale submitComment. submitComment is
+     * declared further down: naming it in a deps array here read it before
+     * its declaration — a TDZ ReferenceError wherever `const` is not compiled
+     * down to `var`, and a first-render (stale) submitComment where it is.
+     * The latest one is reached through a ref instead (assigned right after
+     * its declaration). */
     const submitCommentRef = useRef(null);
-    const onCommentKeyDown = useCallback((e) => {
-        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (submitCommentRef.current) submitCommentRef.current(); }
+    const submitLatestComment = useCallback(() => {
+        if (submitCommentRef.current) submitCommentRef.current();
     }, []);
 
     // Vote helpers
@@ -5149,17 +5188,25 @@ function PostDialog(props) {
         if (!props.api) return;
         if (st._comment_sending) return; // async now — a second click mid-gate must not double-broadcast
         const tf = document.getElementById("comment-textfield");
-        const body = (tf?.value !== undefined ? tf.value : (tf?.querySelector?.("input, textarea")?.value || "")).trim();
-        if (!body) { actions.trigger_snackbar(t("words.comment_cannot_be_empty")); return; }
+        const typed = (tf?.value !== undefined ? tf.value : (tf?.querySelector?.("input, textarea")?.value || "")).trim();
+        if (!typed) { actions.trigger_snackbar(t("words.comment_cannot_be_empty")); return; }
+        // One image per comment: the format bar replaces rather than adds,
+        // but a pasted ![…](…) can still make two — the comment tier would
+        // show only the first, so say so instead of posting it.
+        if (commentImageProblem(typed)) { actions.trigger_snackbar(commentImageLimitMessage()); return; }
 
         // ── TOXIC COMMENT HELPER — pre-broadcast check. Instant when the
         //    debounced pass already scored this exact text (LRU-cached in the
         //    package), a no-op when the setting is off. First flagged click
         //    warns; a second click on the unchanged text broadcasts anyway. ──
-        if (await toxicity.confirm_before_send("comment-textfield", body)) {
+        if (await toxicity.confirm_before_send("comment-textfield", typed)) {
             actions.trigger_snackbar(t("words.this_might_come_across_as_toxic_press"));
             return;
         }
+
+        // What goes on chain: the markdown as typed, with each line break of
+        // the (now multi-line) field kept as one — see commentBodyForBroadcast.
+        const body = commentBodyForBroadcast(typed);
 
         // ── EDIT MODE — the textfield holds the new body of an existing comment.
         //    Same permlink + same parent ⇒ the chain treats the broadcast as an
@@ -5171,7 +5218,8 @@ function PostDialog(props) {
             const ca = c.username || (c.author || {}).username;
             const cpl = c.permlink;
             if (!ca || !cpl || ca !== props.account) { dispatch({ _edit_target: null }); return; }
-            if (body === (et.rawBody || "").trim()) {
+            const rawBody = (et.rawBody || "").trim();
+            if (typed === rawBody || body === commentBodyForBroadcast(rawBody)) {
                 // Nothing changed — just leave edit mode.
                 dispatch({ _edit_target: null });
                 setTextFieldValue("comment-textfield", "");
@@ -6362,7 +6410,7 @@ function PostDialog(props) {
                             _reply_target={_reply_target} _edit_target={_edit_target} _comment_sending={_comment_sending}
                             accountImage={accountImage} dataAuthorUsername={dataAuthorUsername}
                             clearReplyTarget={clearReplyTarget} cancelEditComment={cancelEditComment}
-                            submitComment={submitComment} onCommentKeyDown={onCommentKeyDown}
+                            submitComment={submitLatestComment}
                             setMenuCardRefCb={setMenuCardRefCb} />
                     </div>}
                 </div>

@@ -3,7 +3,8 @@
  *
  * Tiered sanitization for blockchain social content:
  *   Tier 1: Memo      — Minimal inline formatting only
- *   Tier 2: Comment   — Block elements + code, no images
+ *   Tier 2: Comment   — Block elements + code, at most one image
+ *                       (max_comment_images, default 1)
  *   Tier 3: Post      — Full rich content including images
  *
  * Also provides:
@@ -714,6 +715,57 @@ function dropSrclessImages(frame) {
     return frame.tag === 'img' && !frame.attribs.src;
 }
 
+/**
+ * Class carried by every image the comment tier admits (comment bodies and
+ * post descriptions). It is the hook the components size these images by —
+ * `img.pixa-comment-image` — without reaching avatars or anything else that
+ * renders an <img> next to a comment. It matches SAFE_CLASS_PATTERNS, so the
+ * post-allowlist guard (safeHTML) keeps it.
+ */
+export const COMMENT_IMAGE_CLASS = 'pixa-comment-image';
+
+/**
+ * `<img>` transform for the comment tier: the post tier's rules (base64 or
+ * https only, the rest proxied — see makeImgTransform), then the tier's own
+ * marks on an image that keeps its src: COMMENT_IMAGE_CLASS, and lazy
+ * loading, since a long thread can hold one image per comment. Idempotent,
+ * like the transform it wraps.
+ *
+ * @param {string|null|undefined} proxyBase — as for makeImgTransform
+ */
+function makeCommentImgTransform(proxyBase) {
+    const base = makeImgTransform(proxyBase);
+    return (tagName, attribs) => {
+        const t = base(tagName, attribs);
+        if (!t.attribs.src) return t;
+        return { tagName: t.tagName, attribs: { ...t.attribs, class: COMMENT_IMAGE_CLASS, loading: 'lazy' } };
+    };
+}
+
+/**
+ * exclusiveFilter for the comment tier: drops src-less images (as the post
+ * tier does) and every image past the first `max` in document order.
+ *
+ * One image is what the comment tier IS, the way "no headings" is — a rule
+ * of the tier, applied inside the sanitizer like the rest of its allowlist.
+ * (The post tier's `max_image_count` is different on purpose: it bounds the
+ * extracted index and never the body.) Stateful, so it is built per
+ * sanitize call: both engines call the filter once per surviving element,
+ * an <img> as soon as it is written, so the order is the document's.
+ *
+ * @param {number} max — images to keep; 0 drops them all
+ */
+function makeImageBudgetFilter(max) {
+    let left = Math.max(0, Math.floor(Number(max) || 0));
+    return (frame) => {
+        if (frame.tag !== 'img') return false;
+        if (!frame.attribs.src) return true;
+        if (left <= 0) return true;
+        left--;
+        return false;
+    };
+}
+
 // ═══════════════════════════════════════════════════════════
 // Text Processing Utilities
 // ═══════════════════════════════════════════════════════════
@@ -1131,18 +1183,29 @@ const SanitizeConfigs = Object.freeze({
             'strong', 'b', 'em', 'i', 'a', 'p', 'br',
             'blockquote', 'pre', 'code', 'ul', 'ol', 'li',
             'u', 's', 'del', 'sub', 'sup', 'mark', 'small',
+            // Admitted here; the one-image budget is per render and stateful,
+            // so sanitizeComment() puts it in the config it builds per call
+            // (makeImageBudgetFilter). Never run this static config without it.
+            'img',
         ],
         allowedAttributes: {
             // target/data-external/data-domain are what LinkProcessor adds AFTER
             // sanitization. Without them here, the documented "call safeHTML()
             // last" practice silently stripped the external-link treatment.
             'a':    ['href', 'title', 'rel', 'class', 'target', 'data-username', 'data-external', 'data-domain'],
+            'img':  ['src', 'alt', 'title', 'width', 'height', 'loading'],
             'code': ['data-language'],
             '*':    ['class'],
         },
         allowedClasses:  { '*': SAFE_CLASS_PATTERNS },
         allowedSchemes:  ['http', 'https', 'mailto'],
-        transformTags:   { 'a': simpleTransform('a', { rel: 'noopener noreferrer' }) },
+        // As in the post tier: an image is base64 or https, never plaintext.
+        allowedSchemesByTag: { img: ['https', 'data'] },
+        transformTags:   {
+            'a':   simpleTransform('a', { rel: 'noopener noreferrer' }),
+            'img': makeCommentImgTransform(undefined),
+        },
+        exclusiveFilter: dropSrclessImages,
     },
 
     post: {
@@ -1833,6 +1896,11 @@ const DEFAULT_OPTIONS = Object.freeze({
     // touched. null/undefined = no bound. This used to cap the HTML itself and
     // defaulted to 0, which deleted every image from every post body.
     max_image_count:  null,
+    // Comment tier only: how many images a rendered comment (or description)
+    // keeps, in document order — see makeImageBudgetFilter. Unlike
+    // max_image_count this is a rule of the tier and applies to the HTML.
+    // 0 renders the tier image-free, as it was before it admitted images.
+    max_comment_images: 1,
     // Per-call override for the image proxy prefix. undefined = use whatever
     // setImageProxyBase() configured; null = emit direct URLs for this call.
     image_proxy_base: undefined,
@@ -1899,10 +1967,16 @@ export function sanitizeMemo(body, optionsJson) {
     return { html };
 }
 
-/** Tier 2: Comment sanitization. */
+/**
+ * Tier 2: Comment sanitization — comment bodies and descriptions.
+ *
+ * Keeps at most `max_comment_images` images (default 1), the first ones in
+ * document order; each is proxied/validated like a post image and carries
+ * COMMENT_IMAGE_CLASS. `images` indexes the ones kept.
+ */
 export function sanitizeComment(body, optionsJson) {
-    if (!body) return { html: '', links: [] };
-    if (body.trim().startsWith('data:')) return { html: '', links: [] };
+    if (!body) return { html: '', links: [], images: [] };
+    if (body.trim().startsWith('data:')) return { html: '', links: [], images: [] };
 
     const opts         = parseOptions(optionsJson);
     const input        = TextProcessor.truncate(body, opts.max_body_length);
@@ -1910,13 +1984,22 @@ export function sanitizeComment(body, optionsJson) {
     const htmlMentions = MentionProcessor.process(htmlRaw);
 
     // External-link marking happens INSIDE the sanitizer now, so the sanitizer
-    // is the last stage that writes markup.
+    // is the last stage that writes markup. So does the image budget: a fresh
+    // filter per call (it counts), so this config is built per call as well.
+    const maxImages = opts.max_comment_images === null || opts.max_comment_images === undefined
+        ? DEFAULT_OPTIONS.max_comment_images
+        : opts.max_comment_images;
     const html  = runSanitizer(htmlMentions, {
         ...SanitizeConfigs.comment,
-        transformTags: { 'a': LinkProcessor.makeTransform(opts.internal_domains) },
+        transformTags: {
+            'a':   LinkProcessor.makeTransform(opts.internal_domains),
+            'img': makeCommentImgTransform(opts.image_proxy_base),
+        },
+        exclusiveFilter: makeImageBudgetFilter(maxImages),
     });
-    const links = LinkProcessor.collect(html);
-    return { html, links };
+    const links  = LinkProcessor.collect(html);
+    const images = ImageUtils.extract(html);
+    return { html, links, images };
 }
 
 /** Tier 3: Post sanitization (full rich content). */
