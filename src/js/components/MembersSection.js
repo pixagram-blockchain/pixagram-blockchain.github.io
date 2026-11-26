@@ -15,7 +15,8 @@ import SecurityRounded from "@material-ui/icons/SecurityRounded";
 import SettingsRounded from "@material-ui/icons/SettingsRounded";
 import GavelRounded from "@material-ui/icons/GavelRounded";
 import PersonAddRounded from "@material-ui/icons/PersonAddRounded";
-import { HISTORY } from "../utils/constants";
+import { HISTORY, profilePath } from "../utils/constants";
+import { link } from "../utils/link";
 
 import { t, useLanguage } from "../utils/text";
 
@@ -54,20 +55,26 @@ const MembersSection = React.memo(({ members, timeAgo, isAdmin, onAddSomeone, me
 
                     return (
                         <ListItem key={i} className={memberListItemClass}>
-                            <ListItemAvatar style={{cursor: "pointer"}} onClick={() => goToProfile(member.username)}>
-                                <Badge className={memberBadgeClass}
-                                       anchorOrigin={{vertical: 'bottom', horizontal: 'right'}}
-                                       overlap="rectangular"
-                                       badgeContent={roleLabel(member.role)}
-                                       color="primary">
-                                    <Avatar alt={displayName} src={member.image} className={"pixelated"} />
-                                </Badge>
+                            {/* Picture and name are links to the member's profile
+                                (utils/link). The picture's link fills the avatar
+                                column (display: block), which is what answered
+                                the click before. */}
+                            <ListItemAvatar>
+                                <a style={{display: "block"}} {...link(profilePath(member.username), () => goToProfile(member.username))}>
+                                    <Badge className={memberBadgeClass}
+                                           anchorOrigin={{vertical: 'bottom', horizontal: 'right'}}
+                                           overlap="rectangular"
+                                           badgeContent={roleLabel(member.role)}
+                                           color="primary">
+                                        <Avatar alt={displayName} src={member.image} className={"pixelated"} />
+                                    </Badge>
+                                </a>
                             </ListItemAvatar>
                             <ListItemText
                                 primary={
                                     <Typography style={{cursor: "pointer", lineHeight: "1.618rem", display: "block", fontWeight: "bold", fontSize: "14px", color: "#fff"}} component="span" variant="body2">
                                         <Tooltip title={'@' + member.username} placement="top" arrow>
-                                            <span style={{marginRight: "8px"}} onClick={() => goToProfile(member.username)}>{displayName}</span>
+                                            <a style={{marginRight: "8px"}} {...link(profilePath(member.username), () => goToProfile(member.username))}>{displayName}</a>
                                         </Tooltip>
                                         <Chip className={roleChipClass} size="small" icon={roleIcon} label={roleLabel(member.role)} />
                                     </Typography>

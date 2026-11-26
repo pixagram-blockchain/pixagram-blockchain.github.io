@@ -10,6 +10,7 @@ import AddAPhoto from "@material-ui/icons/AddAPhoto";
 import Tooltip from "@material-ui/core/Tooltip";
 
 import { t, useLanguage } from "../utils/text";
+import { isPlainClick } from "../utils/link";
 
 // Desktop shows an inline icon + text label per tab (the icons alone were
 // ambiguous); mobile keeps the compact icon-only tabs with tooltips.
@@ -23,6 +24,16 @@ import { t, useLanguage } from "../utils/text";
 // stable across scroll ticks exactly as before.
 const LABEL_ROW = { display: "inline-flex", alignItems: "center" };
 const LABEL_TEXT = { marginLeft: 8 };
+
+// A tab is a link to the address its click writes (utils/link): `hrefs[i]`,
+// handed by Profile ("/@name", "/@name/comments"…). Ctrl/Cmd+click, the
+// middle button and the browser's menu open that tab of the profile in
+// another browser tab; a plain click is onChange, as before. Without an
+// address (the profile's name is not known yet) a tab is the plain button it
+// was.
+const tabLink = (hrefs, i) => (hrefs && hrefs[i]
+    ? { component: "a", href: hrefs[i], "data-nav": "", draggable: false }
+    : null);
 
 // ── The bar's root element ─────────────────────────────────────────────
 // MUI renders the Tabs root through `component`. This one is the same <div>
@@ -68,6 +79,7 @@ const ProfileTabs = React.memo(({
                                     classes,
                                     category,
                                     onChange,
+                                    hrefs,
                                     lessThan960w,
                                     hidden,
                                     forceHidden,
@@ -85,6 +97,16 @@ const ProfileTabs = React.memo(({
     const repliesLabel = t("components.profile_tabs.replies");
     const historyLabel = t("words.history");
     const labelDeps = [postsLabel, commentsLabel, repliesLabel, historyLabel];
+
+    // The click rule of a link, for the tabs that are one: a modified click
+    // is the browser's and changes nothing here.
+    const handleChange = React.useCallback((event, value) => {
+        if (hrefs && hrefs[value]) {
+            if (!isPlainClick(event)) return;
+            event.preventDefault();
+        }
+        onChange(event, value);
+    }, [hrefs, onChange]);
 
     const MOBILE_ICONS = React.useMemo(() => [
         <Tooltip title={postsLabel}><Image /></Tooltip>,
@@ -143,22 +165,26 @@ const ProfileTabs = React.memo(({
             variant="fullWidth"
             indicatorColor="primary"
             textColor="primary"
-            onChange={onChange}
+            onChange={handleChange}
             fullwidth={true}
         >
             <Tab
+                {...tabLink(hrefs, 0)}
                 icon={lessThan960w ? MOBILE_ICONS[0] : undefined}
                 label={lessThan960w ? undefined : DESKTOP_LABELS[0]}
             />
             <Tab
+                {...tabLink(hrefs, 1)}
                 icon={lessThan960w ? MOBILE_ICONS[1] : undefined}
                 label={lessThan960w ? undefined : DESKTOP_LABELS[1]}
             />
             <Tab
+                {...tabLink(hrefs, 2)}
                 icon={lessThan960w ? MOBILE_ICONS[2] : undefined}
                 label={lessThan960w ? undefined : DESKTOP_LABELS[2]}
             />
             <Tab
+                {...tabLink(hrefs, 3)}
                 icon={lessThan960w ? MOBILE_ICONS[3] : undefined}
                 label={lessThan960w ? undefined : DESKTOP_LABELS[3]}
             />

@@ -10,7 +10,9 @@ import IconButton from '@material-ui/core/IconButton';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
 import Chip from '@material-ui/core/Chip';
 import DateLabel from './DateLabel';
-import { HISTORY, COMMUNITY_TAG_REGEX, buildCommentFocusHash } from '../utils/constants';
+import { HISTORY, COMMUNITY_TAG_REGEX, buildCommentFocusHash, buildCommentThreadUrl, profilePath } from '../utils/constants';
+import { link, deferredLink, pendingNavigation } from '../utils/link';
+import { resolveThreadUrl } from '../utils/threadRoot';
 import { t, tnode, useLanguage } from '../utils/text';
 import * as actions from '../actions/utils';
 import PaperCardActions from './PaperCardActions';
@@ -163,6 +165,23 @@ function blogRootPathFromChain(chainComment, data) {
     if (!author || !permlink) return null;
 
     return '/' + category + '/@' + author + '/' + permlink;
+}
+
+/**
+ * The address the card's title leads to — its thread's root post, opened on
+ * the replies with this comment pinned — for the title's href (utils/link),
+ * or null when the local data cannot prove it. Same witnesses as the click
+ * (openRoot): blogRootPath for a blog root, the root's category / author /
+ * permlink for a pixel art one — which is the address the host flow ends up
+ * pushing for it. Null means the title is not a link, only a click.
+ */
+function rootHref(data) {
+    const d = data || {};
+    if (rootIsBlog(d) === true) {
+        const path = blogRootPath(d);
+        return path ? path + buildCommentFocusHash(accountName(d.author), d.permlink) : null;
+    }
+    return buildCommentThreadUrl(d);
 }
 
 function rootTypeLabel(data) {
@@ -365,6 +384,27 @@ const ReplyCardContent = memo(function ReplyCardContent({
         onOpen?.(data);
     }, [data, onOpen, api]);
 
+    // The title is a link whenever the data proves where it leads (rootHref):
+    // Ctrl/Cmd+click, the middle button and the browser's menu then open the
+    // thread in another tab, and a plain click is openRoot as before.
+    const titleHref = useMemo(() => rootHref(data), [data]);
+
+    // When it cannot — which is every card of the Profile tabs today: a
+    // sanitised comment keeps neither its root's category nor a chain-shaped
+    // url — there is no href to carry a new-tab click, so the click itself
+    // does (utils/link, pendingNavigation): the tab opened for the click is
+    // pointed at the thread once the chain has named its root
+    // (utils/threadRoot — the walk the host's own flow makes, so it is the
+    // address a plain click ends up pushing), or closed again with the
+    // host's "could not load" notice. Nothing moves in this tab.
+    const openRootUnresolved = useCallback((event) => {
+        const nav = pendingNavigation(event);
+        if (!nav.newTab) { openRoot(); return; }
+        resolveThreadUrl(api, accountName(data.author), data.permlink).then((url) => {
+            if (!nav.go(url)) actions.trigger_snackbar(t('components.profile.could_not_load_the_original_post'));
+        });
+    }, [openRoot, data, api]);
+
     // Compute active_votes reflecting current local vote state — same as PaperCard
     const currentActiveVotes = useMemo(
         () => votesWithLocalVote(data.active_votes, voter, voted),
@@ -467,11 +507,12 @@ const ReplyCardContent = memo(function ReplyCardContent({
     // anchor adds no element: it attaches its pointer listeners to this very
     // span (and to the "to" name), and the card itself is the page's single
     // <ProfileHoverCardLayer/>. Click behavior is unchanged.
+    const authorHref = profilePath(author);
     const authorNode = (
         <ProfileHoverAnchor api={api} author={author} onOpenProfile={openAuthor}>
-            <span className={classes.subheaderName} onClick={() => openAuthor(author.username)}>
+            <a className={classes.subheaderName} {...link(authorHref, () => openAuthor(author.username))}>
                 {authorName}
-            </span>
+            </a>
         </ProfileHoverAnchor>
     );
 
@@ -481,7 +522,8 @@ const ReplyCardContent = memo(function ReplyCardContent({
                 className={classes.cardHeader}
                 avatar={
                     <FadeAvatar
-                        onClick={() => openAuthor(author.username)}
+                        component="a"
+                        {...link(authorHref, () => openAuthor(author.username))}
                         src={author.image}
                     />
                 }
@@ -492,9 +534,15 @@ const ReplyCardContent = memo(function ReplyCardContent({
                 }
                 title={
                     <span>
-                        <span className={classes.titleText} onClick={openRoot}>
-                            {data.title}
-                        </span>
+                        {titleHref ? (
+                            <a className={classes.titleText} {...link(titleHref, openRoot)}>
+                                {data.title}
+                            </a>
+                        ) : (
+                            <span className={classes.titleText} {...deferredLink(openRootUnresolved)}>
+                                {data.title}
+                            </span>
+                        )}
                         {typeLabel ? (
                             <Chip
                                 component="span"
@@ -517,9 +565,9 @@ const ReplyCardContent = memo(function ReplyCardContent({
                                 author: authorNode,
                                 recipient: (
                                     <ProfileHoverAnchor api={api} author={replyToAuthor} onOpenProfile={openAuthor}>
-                                        <span className={classes.subheaderName} onClick={() => openAuthor(replyToUsername)}>
+                                        <a className={classes.subheaderName} {...link(profilePath(replyToUsername), () => openAuthor(replyToUsername))}>
                                             {replyToDisplayName}
-                                        </span>
+                                        </a>
                                     </ProfileHoverAnchor>
                                 ),
                             })

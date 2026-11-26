@@ -5,6 +5,9 @@ import ListItem from "@material-ui/core/ListItem";
 import ListItemAvatar from "@material-ui/core/ListItemAvatar";
 import ListItemText from "@material-ui/core/ListItemText";
 
+import { profilePath } from "../../utils/constants";
+import { link } from "../../utils/link";
+
 import { highlightNode } from "./highlight";
 import { ARTWORK_RADIUS } from "./config";
 
@@ -12,6 +15,10 @@ import { ARTWORK_RADIUS } from "./config";
 // One account row: profile picture, "@username (Real Name)", bio on one line.
 // The picture is chain data (an on-chain data URI) through <Avatar src>, with
 // the initial as the load-error fallback so a dead image never shows broken.
+//
+// The row is a link to the profile (utils/link), like every result row: a
+// Ctrl/Cmd+click, the middle button or the browser's menu opens it in another
+// tab and leaves the search as it is; a plain click is onGoToUsername.
 
 const AVATAR_STYLE = { width: 36, height: 36, borderRadius: ARTWORK_RADIUS, backgroundColor: "#3a3a3a", color: "#bbb", fontSize: 15 };
 const PRIMARY_STYLE = { color: "#bbb", display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
@@ -28,7 +35,7 @@ export const UserResult = React.memo(
         const onClick = useCallback(() => onGoToUsername(username), [onGoToUsername, username]);
         const initial = (username || "?").charAt(0).toUpperCase();
         return (
-            <ListItem button dense onClick={onClick} className={classes.row}>
+            <ListItem button dense component="a" {...link(profilePath(username), onClick)} className={classes.row}>
                 <ListItemAvatar className={classes.rowAvatar}>
                     <Avatar variant="rounded" src={showImage ? profile_image : undefined} imgProps={imgProps} style={AVATAR_STYLE} alt={username}>
                         {initial}

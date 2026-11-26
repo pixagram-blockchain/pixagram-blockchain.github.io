@@ -25,7 +25,8 @@ import ArrowUpDropCircleOutline from '../icons/ArrowUpDropCircleOutline';
 import ArrowDownDropCircle from '../icons/ArrowDownDropCircle';
 import ArrowDownDropCircleOutline from '../icons/ArrowDownDropCircleOutline';
 import useLiveTimeAgo from "../hooks/useLiveTimeAgo";
-import { HISTORY, buildCommentFocusHash, parsePostUrl } from "../utils/constants";
+import { HISTORY, buildCommentFocusHash, parsePostUrl, profilePath } from "../utils/constants";
+import { link } from "../utils/link";
 import * as actions from "../actions/utils";
 import { voteSign } from "../utils/voteValue";
 import { votesWithLocalVote } from "../utils/voteSync";
@@ -1268,9 +1269,12 @@ class CommentInList extends React.PureComponent {
                 component={depth > 0 ? "div" : "li"}
             >
                 <ListItemAvatar>
+                    {/* Avatar and name are links to the author's profile
+                        (utils/link): a plain click is _open_comment_author. */}
                     <Avatar
+                        component="a"
                         alt={author.name}
-                        onClick={this._open_comment_author}
+                        {...link(profilePath(author), this._open_comment_author)}
                         src={author.image}
                     />
                 </ListItemAvatar>
@@ -1294,12 +1298,12 @@ class CommentInList extends React.PureComponent {
                                     // dialogs). Click behavior is unchanged.
                                     author: (
                                         <ProfileHoverAnchor api={this.st4te.api} author={author} onOpenProfile={this._open_author}>
-                                            <span
+                                            <a
                                                 className={classes.subheaderName}
-                                                onClick={this._open_comment_author}
+                                                {...link(profilePath(author), this._open_comment_author)}
                                             >
                                                 {author.name && author.name !== author.username ? author.name : ("@" + (author.username || ""))}
-                                            </span>
+                                            </a>
                                         </ProfileHoverAnchor>
                                     ),
                                     time: (

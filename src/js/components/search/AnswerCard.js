@@ -9,11 +9,12 @@ import SubdirectoryArrowRight from "@material-ui/icons/SubdirectoryArrowRight";
 import SearchIcon from "@material-ui/icons/Search";
 
 import { t, useLanguage } from "../../utils/text";
+import { link } from "../../utils/link";
 
 import { BODY_FOLD_CHARS, FOLLOW_UPS_SHOWN, SEARCHES_SHOWN } from "./config";
 import { tr } from "./highlight";
 import { citationNumbers, renderBlocks, renderInline, withMentions } from "./AnswerMarkdown";
-import { answerVote, modelLabel } from "./searchApi";
+import { answerVote, artworkPath, modelLabel } from "./searchApi";
 
 // ── AnswerCard ────────────────────────────────────────────────────────────────
 // The answer to the question typed, above the results (useSearch.answer):
@@ -53,10 +54,13 @@ function AnswerThumb({ classes, item, onOpen }) {
     const onError = useCallback(() => setFailed(true), []);
     const onClick = useCallback(() => onOpen(item), [onOpen, item]);
     if (failed) return null;
+    // A link to the artwork's post (utils/link): a plain click is onOpen.
+    // data-nav="button": it was a <button>, and keeps a button's typography
+    // (theme/overrides).
     return (
-        <button type="button" className={classes.answerThumb} onClick={onClick} title={item.title ? item.title + " · @" + item.author : "@" + item.author}>
+        <a className={classes.answerThumb} {...link(artworkPath(item), onClick)} data-nav="button" title={item.title ? item.title + " · @" + item.author : "@" + item.author}>
             <img src={item.src} alt={item.title || ""} loading="lazy" decoding="async" draggable={false} onError={onError} />
-        </button>
+        </a>
     );
 }
 

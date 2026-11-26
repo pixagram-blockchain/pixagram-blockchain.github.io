@@ -30,12 +30,13 @@ import { update_meta_title } from "../utils/meta-tags";
 import {
     PAGE_ROUTES, isPostUrl, hostPageForPostUrl,
     splitMetaPath, parseMeta, formatMeta, isHomePath, parseFeedFocusHash,
-    BROWSE_PATH, entryMeta, DEFAULT_NODES,
+    BROWSE_PATH, entryMeta, DEFAULT_NODES, profilePath,
 } from "../utils/constants";
 // The sort tag links open on: trending until the reader picks another on the
 // feed. Imported here, at boot, so it follows the address from the first
 // navigation on.
-import { feedTagPath } from "../utils/feedSort";
+import { feedTagPath, useFeedSort } from "../utils/feedSort";
+import { link } from "../utils/link";
 
 import LogoutModal from "../components/LogoutModal";
 import MenuContent from "../components/MenuContent";
@@ -4260,6 +4261,13 @@ function Index({ classes, history, settings: rawSettings }) {
     // via subscribe_language, so a locale swap re-resolves the string live.
     const searchBarPlaceholder = t("words.search");
 
+    // A History entry is a link (utils/link) to the tag's feed or the profile
+    // it names — the address goToTag / goToUsername push — so it opens in
+    // another tab on a Ctrl/Cmd+click, the middle button or the browser's
+    // menu. display: block: the link fills the row's text box, which is what
+    // answered the click before. `feedSort` keeps a tag entry's href on the
+    // sort a click would open it in.
+    const feedSort = useFeedSort();
     const historyList = useMemo(() => {
         if (!search.isOpen || !historyTags.length) return null;
         return (
@@ -4269,8 +4277,17 @@ function Index({ classes, history, settings: rawSettings }) {
                     <ListItem key={"$-" + i} className={classes.historyList}>
                         <ListItemText
                             className={classes.listItemText}
-                            onClick={() => o.startsWith("#") ? goToTag(o) : goToUsername(o)}
-                            primary={<span style={{ color: "#bbb" }}>{o}</span>}
+                            primary={
+                                <a
+                                    style={{ color: "#bbb", display: "block" }}
+                                    {...link(
+                                        o.startsWith("#") ? feedTagPath(o) : profilePath(o.replaceAll("@", "")),
+                                        () => o.startsWith("#") ? goToTag(o) : goToUsername(o),
+                                    )}
+                                >
+                                    {o}
+                                </a>
+                            }
                         />
                         <ListItemIcon className={classes.historyElement}>
                             <CloseIcon onClick={() => deleteHistoryTag(o)} />
@@ -4279,7 +4296,7 @@ function Index({ classes, history, settings: rawSettings }) {
                 ))}
             </React.Fragment>
         );
-    }, [search.isOpen, historyTags, classes, goToTag, goToUsername, deleteHistoryTag]);
+    }, [search.isOpen, historyTags, classes, goToTag, goToUsername, deleteHistoryTag, feedSort]);
 
     const wordmark = useMemo(
         () => <Wordmark classes={classes} onGoHome={goHome} />,

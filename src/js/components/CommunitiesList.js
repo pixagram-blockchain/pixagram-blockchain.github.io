@@ -13,6 +13,7 @@ import AccountCircleRounded from "@material-ui/icons/AccountCircleRounded";
 import Community from "../icons/Community";
 
 import { t, useLanguage } from "../utils/text";
+import { link } from "../utils/link";
 
 // Community role ids from the chain ("owner", "admin", "mod"…) as words in the
 // UI language; an id the catalogue doesn't know is shown as it came.
@@ -107,7 +108,9 @@ const CommunitiesList = React.memo(({ classes, subscriptions, onGoToCommunity, o
                             </ListItemAvatar>
                             <ListItemText
                                 primary={
-                                    <Typography onClick={() => onGoToCommunity(d.name)} style={ST_CUR_POINTER__LH_1_618REM__D_BLOCK} component="span" variant="body2">
+                                    /* A link to the portal (utils/link): "/<name>/created/" is
+                                       the address onGoToCommunity pushes (Profile). */
+                                    <Typography component="a" {...link(d.name ? "/" + d.name + "/created/" : null, () => onGoToCommunity(d.name))} style={ST_CUR_POINTER__LH_1_618REM__D_BLOCK} variant="body2">
                                         <span style={ST_C_717171}>{t("words.portal")} </span>
                                         <span style={ST_MR_8PX}>{d.title}</span>
                                         {d.role && d.role !== 'guest' && (

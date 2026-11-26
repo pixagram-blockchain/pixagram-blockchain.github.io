@@ -16,7 +16,13 @@
 // Only the feed counts: a community's own sort tabs, a profile or a post
 // leave the kept sort as it was. The landing page's Browse button always
 // enters on trending (BROWSE_PATH), and the kept sort follows it there.
+//
+// Tag links are real links (utils/link): what a click pushes is also printed
+// in the element's href, at render. A component that shows one calls
+// useFeedSort() so the href follows the kept sort when it changes — the click
+// itself reads the sort as it always did, when it happens.
 
+import { useEffect, useState } from "preact/hooks";
 import { HISTORY, PAGE_ROUTES, DEFAULT_FEED_SORT, splitMetaPath } from "./constants";
 
 // The router's own feed route. Its first capture is the sort, so the sorts
@@ -32,15 +38,34 @@ export function feedSortOf(pathname) {
 
 let current = feedSortOf(HISTORY.location.pathname) || DEFAULT_FEED_SORT;
 
+// The components showing a tag link (useFeedSort): told when the sort changes.
+const watchers = new Set();
+
 // For the app's lifetime: push, replace and the back/forward arrows alike.
 HISTORY.listen(({ location }) => {
     const sort = feedSortOf(location.pathname);
-    if (sort) current = sort;
+    if (!sort || sort === current) return;
+    current = sort;
+    watchers.forEach((notify) => notify(sort));
 });
 
 /** The sort a tag link opens on now. */
 export function getFeedSort() {
     return current;
+}
+
+/**
+ * The kept sort, as state: re-renders the caller when it changes, so the
+ * href it builds with feedTagPath() stays the address a click would push.
+ */
+export function useFeedSort() {
+    const [sort, setSort] = useState(current);
+    useEffect(() => {
+        setSort(current); // it may have moved between the render and this effect
+        watchers.add(setSort);
+        return () => { watchers.delete(setSort); };
+    }, []);
+    return sort;
 }
 
 /**

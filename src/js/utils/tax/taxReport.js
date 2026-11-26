@@ -44,6 +44,14 @@
  * (optimization, optimization_detail). It sits after the figures and changes
  * none of them. Also: the US ordinary-income offset line under the gains, and
  * a PXP sub-line when a ruling-based wealth discount was applied.
+ *
+ * ACCURACY AUDIT (25 Nov 2026), following the engine: the French portfolio
+ * method has a label; exchanges whose cost carries over (FR / AT / PT) are
+ * listed as movements, not disposals; the Brazilian annex tests each month
+ * against the reporting threshold in force that month (R$30,000 under IN 1888,
+ * R$35,000 under DeCripto from July 2026); the transactions CSV gains two
+ * trailing columns, portfolio_value and portfolio_cost — the form-2086 inputs —
+ * blank outside France.
  * ===========================================================================*/
 
 import { PDFDocument, StandardFonts, rgb, PageSizes } from "pdf-lib";
@@ -264,7 +272,8 @@ const METHOD_LABELS = {
   LIFO: (tr) => tr.t("components.tax_report.method_lifo"),
   HIFO: (tr) => tr.t("components.tax_report.method_hifo"),
   POOL: (tr) => tr.t("components.tax_report.method_pool"),
-  TOTAL_AVG: (tr) => tr.t("components.tax_report.method_total_avg")
+  TOTAL_AVG: (tr) => tr.t("components.tax_report.method_total_avg"),
+  PORTFOLIO: (tr) => tr.t("components.tax_report.method_portfolio")
 };
 const methodLabel = (tr, m) => (METHOD_LABELS[m] ? METHOD_LABELS[m](tr) : String(m || ""));
 const TIMING_LABELS = {
@@ -988,7 +997,7 @@ function renderOperations(ctx, r) {
   }
 
   // sub-details: aggregate by income type; every individual receipt goes to the
-  // CSV. Zero-basis jurisdictions (FR/AT) flag lines taxedAtReceipt=false —
+  // CSV. Zero-cost jurisdictions (AT, PT, KR) flag lines taxedAtReceipt=false —
   // those aggregate separately and are excluded from the income total, matching
   // the engine's totalIncomeFiat.
   const by = new Map();
@@ -1064,6 +1073,8 @@ function renderMovements(ctx, movements) {
     immediate_conversion: () => tr.t("components.pixa_wallet_taxes_dialog.movement_collateralized_immediate_leg"),
     to_own_exchange: () => tr.t("components.pixa_wallet_taxes_dialog.movement_sent_to_your_exchange"),
     to_own_wallet: () => tr.t("components.pixa_wallet_taxes_dialog.movement_sent_to_your_own_wallet"),
+    // FR / AT / PT: an exchange whose cost carries over — not a disposal there.
+    swap_rollover: () => tr.t("components.tax_report.movement_exchange_cost_carried_over"),
     gift_out: () => tr.t("components.pixa_wallet_taxes_dialog.movement_gift_sent"),
     charity_donation: () => tr.t("components.pixa_wallet_taxes_dialog.movement_charity_donation"),
     delegation_out: () => tr.t("components.tax_report.delegated_out_still_yours"),
@@ -1578,21 +1589,52 @@ function renderJurisdictionAnnex(ctx) {
   };
   const col = (title, w, align) => ({ title, w, align });
 
+  // France — form 2086 asks, for each taxable disposal, its price, the value
+  // of the whole portfolio at that moment and the portfolio's total
+  // acquisition price. The engine computes all three (on-platform holdings
+  // only, which the note says); the PDF lists the first dozen, the CSV all.
+  if (b.jurisdiction === "FR") {
+    const lines = t.lines.filter(l => l.taxable && l.portfolioValueFiat != null);
+    if (!lines.length) return;
+    const FR_ANNEX_CAP = 12;
+    const cols = fit([
+      col(tr.t("components.tax_report.col_date"), 84, "l"),
+      col(tr.t("components.tax_report.col_price_of_disposal_fiat", { fiat: b.fiat }), 100, "r"),
+      col(tr.t("components.tax_report.col_portfolio_value_fiat", { fiat: b.fiat }), 112, "r"),
+      col(tr.t("components.tax_report.col_total_acquisition_price_fiat", { fiat: b.fiat }), 124, "r"),
+      col(tr.t("components.tax_report.col_gain_fiat", { fiat: b.fiat }), 80, "r")
+    ]);
+    const rows = lines.slice(0, FR_ANNEX_CAP).map(l => ({
+      cells: [dayOf(tr, l.ts), fmt(l.proceedsFiat), fmt(l.portfolioValueFiat), fmt(l.portfolioCostFiat), fmt(l.gainFiat)]
+    }));
+    sectionTitle(ctx, nextSection(ctx), tr.t("components.tax_report.fr_annex_title"), tr.t("components.tax_report.fr_annex_note"), tableHeight(rows, false));
+    drawTable(ctx, cols, rows);
+    if (lines.length > FR_ANNEX_CAP) {
+      csvNote(ctx, tr.t("components.tax_report.fr_annex_more_in_csv", { shown: fmt(FR_ANNEX_CAP, 0), total: fmt(lines.length, 0), csv: ctx.csv }));
+    }
+    return;
+  }
+
   if (b.jurisdiction === "BR") {
     const inBRL = b.fiat === "BRL";
     sectionTitle(ctx, nextSection(ctx), tr.t("components.tax_report.br_annex_title"),
         inBRL
             ? tr.t("components.tax_report.br_annex_note")
             : `${tr.t("components.tax_report.br_annex_note")} ${tr.t("components.tax_report.br_annex_not_in_brl", { fiat: b.fiat })}`);
+    // The monthly reporting threshold for operations outside a Brazilian
+    // exchange: R$30,000 under IN RFB 1.888/2019, R$35,000 under the DeCripto
+    // (IN RFB 2.291/2025) from July 2026. Every month was tested against
+    // R$30,000, so a month of R$32,000 in late 2026 read "over — report".
+    const thresholdFor = (ym) => (ym >= "2026-07" ? 35000 : 30000);
     const cols = fit([
       col(tr.t("components.tax_report.col_month"), 92, "l"),
       col(tr.t("components.tax_report.col_disposals"), 80, "r"),
-      col(tr.t("components.tax_report.col_gross_proceeds_fiat", { fiat: b.fiat }), 170, "r"),
-      col(tr.t("components.tax_report.col_r30000_threshold"), 132, "r")
+      col(tr.t("components.tax_report.col_gross_proceeds_fiat", { fiat: b.fiat }), 150, "r"),
+      col(tr.t("components.tax_report.col_reporting_threshold"), 152, "r")
     ]);
     const rows = monthly().map(([m, g]) => ({
       cells: [monthOf(tr, m), fmt(g.n, 0), fmt(g.proceeds), inBRL
-          ? (g.proceeds > 30000 ? tr.t("components.tax_report.over_report") : tr.t("components.tax_report.under"))
+          ? `${fmt(thresholdFor(m), 0)} · ${g.proceeds > thresholdFor(m) ? tr.t("components.tax_report.over_report") : tr.t("components.tax_report.under")}`
           : tr.t("components.tax_report.not_available")]
     }));
     drawTable(ctx, cols, rows);
@@ -1832,13 +1874,17 @@ export function generateTaxReportCsvs(bundle, opts = {}) {
 
   // Disposals: one row per disposal, now with the term split, swap flag, counterparty
   // and the UK share-matching split (blank outside UK).
+  // The last two columns are the French form-2086 inputs for the disposal: the
+  // portfolio's value and its acquisition price just before it (blank elsewhere).
   const tRows = [["date", "block", "txid", "category", "asset", "qty_out", "proceeds", "cost_basis", "gain",
-    "short_term_gain", "long_term_gain", "exempt_gain", "matched_same_day_qty", "matched_30day_qty", "pooled_qty", "taxable", "is_swap", "counterparty", "method", "fiat"]];
+    "short_term_gain", "long_term_gain", "exempt_gain", "matched_same_day_qty", "matched_30day_qty", "pooled_qty", "taxable", "is_swap", "counterparty", "method", "fiat",
+    "portfolio_value", "portfolio_cost"]];
   if (bundle.transactions) for (const l of bundle.transactions.lines) tRows.push([
     l.ts, l.block ?? "", l.id || "", l.category, l.asset, l.qtyOut, l.proceedsFiat, l.basisFiat, l.gainFiat,
     l.shortTermGainFiat ?? "", l.longTermGainFiat ?? "", l.exemptGainFiat ?? "",
     l.matchedSameDayQty ?? "", l.matchedThirtyDayQty ?? "", l.pooledQty ?? "",
-    l.taxable ? "yes" : "no", l.isSwap ? "yes" : "no", l.counterparty || "", l.method, fiat]);
+    l.taxable ? "yes" : "no", l.isSwap ? "yes" : "no", l.counterparty || "", l.method, fiat,
+    l.portfolioValueFiat ?? "", l.portfolioCostFiat ?? ""]);
 
   // Lot-level audit trail: one row per cost-basis lot consumed by each disposal.
   // Micro-lot streams (hourly rewards, recurrent fills) can make ONE disposal

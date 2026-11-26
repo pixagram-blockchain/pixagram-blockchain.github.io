@@ -8,6 +8,8 @@ import CircularProgress from "@material-ui/core/CircularProgress";
 
 import { T } from "../../utils/T";
 import { t, useLanguage } from "../../utils/text";
+import { feedTagPath, useFeedSort } from "../../utils/feedSort";
+import { link } from "../../utils/link";
 
 import { NO_SLOTS, tr } from "./highlight";
 import { COMMUNITY_ACCOUNT_RE } from "./config";
@@ -69,6 +71,7 @@ export const SearchResults = React.memo(
          onGoToUsername, onGoToTag, onGoToCommunity, onGoToArtwork, onGoToPost, onSetTagNavigation,
      }) => {
         useLanguage();
+        useFeedSort(); // the "browse the tag" link below prints the tag's address in the kept sort
         const { users, tags, communities, artworks, posts, loading, artworksLoading, filters, filtersOpen, answer, didYouMean, overview } = results;
         const { artworksMore, moreLoading, moreFailed, artworksCapped } = results;
         const filtering = hasFilters(filters);
@@ -181,7 +184,7 @@ export const SearchResults = React.memo(
                 <T
                     k="components.search_results.no_result_found_for_0_0"
                     vars={{ searchInputText: tag }}
-                    slots={[<span className={classes.noResultLink} onClick={() => onSetTagNavigation(tag)} key="0" />]}
+                    slots={[<a className={classes.noResultLink} {...link(feedTagPath(tag), () => onSetTagNavigation(tag))} key="0" />]}
                 />
             ) : (
                 // Not a tag: no "browse #…" link to a page that cannot exist.

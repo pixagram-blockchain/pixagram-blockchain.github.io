@@ -10,7 +10,8 @@ import PixaLiquid from "../icons/PixaLiquid";
 import { utils } from "@pixagram/dpixa";
 
 import Portal from '@material-ui/core/Portal';
-import {HISTORY} from "../utils/constants";
+import {HISTORY, profilePath} from "../utils/constants";
+import { link } from "../utils/link";
 import { get_cached_settings, subscribe as subscribe_settings } from "../utils/settings";
 import DialogTitle from "@material-ui/core/DialogTitle";
 import InfoOutlined from "@material-ui/icons/InfoOutlined";
@@ -3170,6 +3171,11 @@ class PixaWalletDialog extends React.PureComponent {
         this.state._history.push("/@"+username);
     }
 
+    // The account pictures and names in the lists below are links to that
+    // profile (utils/link): a plain click is _open_author, as before; a
+    // Ctrl/Cmd or middle click opens the profile in another tab.
+    _author_link = (username) => link(profilePath(username), () => this._open_author(username));
+
     // A History row's round icon: open the one inspector on that record. The
     // icon's rect lets the inspector's own icon fly out of it.
     _open_inspector = (record, originRect) => {
@@ -3782,10 +3788,10 @@ class PixaWalletDialog extends React.PureComponent {
                         {rows.map((r, i) => (
                             <ListItem key={(r.to || '') + '-' + i} className={classes.delegationListItem}>
                                 <ListItemAvatar>
-                                    <Avatar src={r.image || ''} style={{borderRadius: "12px", cursor: "pointer", backgroundColor: "#000"}} className={"pixelated"} onClick={() => this._open_author(r.to)} />
+                                    <Avatar component="a" src={r.image || ''} style={{borderRadius: "12px", cursor: "pointer", backgroundColor: "#000"}} className={"pixelated"} {...this._author_link(r.to)} />
                                 </ListItemAvatar>
                                 <ListItemText
-                                    primary={<span style={{cursor: "pointer"}} onClick={() => this._open_author(r.to)}>{`@${r.to}`}</span>}
+                                    primary={<a style={{cursor: "pointer"}} {...this._author_link(r.to)}>{`@${r.to}`}</a>}
                                     secondary={t("components.pixa_wallet_dialog.every_h_left", {
                                         amount: formatAmount(r.amount_num, r.currency, 3),
                                         recurrence: formatInteger(r.recurrence),
@@ -4239,9 +4245,9 @@ class PixaWalletDialog extends React.PureComponent {
                                     {_outgoingDelegations.map((d, i) => (
                                         <ListItem key={d.delegatee || i} className={classes.delegationListItem}>
                                             <ListItemAvatar>
-                                                <Avatar src={d.image || ''} style={{borderRadius: "12px", cursor: "pointer", backgroundColor: "#000"}} className={"pixelated"} onClick={() => this._open_author(d.delegatee)} />
+                                                <Avatar component="a" src={d.image || ''} style={{borderRadius: "12px", cursor: "pointer", backgroundColor: "#000"}} className={"pixelated"} {...this._author_link(d.delegatee)} />
                                             </ListItemAvatar>
-                                            <ListItemText primary={<span style={{cursor: "pointer"}} onClick={() => this._open_author(d.delegatee)}>{`@${d.delegatee}`}</span>} secondary={t(_itsOwnProfile
+                                            <ListItemText primary={<a style={{cursor: "pointer"}} {...this._author_link(d.delegatee)}>{`@${d.delegatee}`}</a>} secondary={t(_itsOwnProfile
                                                 ? "components.pixa_wallet_dialog.you_delegated_pxp"
                                                 : "components.pixa_wallet_dialog.it_delegated_pxp", {
                                                 pxp: formatNumber(d.pxp, 2)
@@ -4265,9 +4271,9 @@ class PixaWalletDialog extends React.PureComponent {
                                     {_incomingDelegations.map((d, i) => (
                                         <ListItem key={d.delegator || i} className={classes.delegationListItem}>
                                             <ListItemAvatar>
-                                                <Avatar src={d.image || ''} style={{borderRadius: "12px", cursor: "pointer", backgroundColor: "#000"}} className={"pixelated"} onClick={() => this._open_author(d.delegator)} />
+                                                <Avatar component="a" src={d.image || ''} style={{borderRadius: "12px", cursor: "pointer", backgroundColor: "#000"}} className={"pixelated"} {...this._author_link(d.delegator)} />
                                             </ListItemAvatar>
-                                            <ListItemText primary={<span style={{cursor: "pointer"}} onClick={() => this._open_author(d.delegator)}>{`@${d.delegator}`}</span>} secondary={t(_itsOwnProfile
+                                            <ListItemText primary={<a style={{cursor: "pointer"}} {...this._author_link(d.delegator)}>{`@${d.delegator}`}</a>} secondary={t(_itsOwnProfile
                                                 ? "components.pixa_wallet_dialog.pxp_delegated_to_you"
                                                 : "components.pixa_wallet_dialog.pxp_delegated_to_it", {
                                                 pxp: formatNumber(d.pxp || 0, 2)

@@ -17,6 +17,7 @@ import CodeIcon from "@material-ui/icons/Code";
 import GroupIcon from "@material-ui/icons/Group";
 
 import { HISTORY, PROPOSALS_PORTAL, COMMUNITY_PORTALS } from "../utils/constants";
+import { link } from "../utils/link";
 import { t } from "../utils/text";
 
 import { withLanguage } from "../utils/withLanguage";
@@ -266,6 +267,10 @@ class GDDisruptions extends React.PureComponent {
     // so it closes itself on the way out — otherwise the page would change
     // underneath a dialog that stays open. GovernanceDialog threads its
     // onClose down for exactly this.
+    //
+    // The tiles are links to that page (utils/link): a plain click is this
+    // handler; Ctrl/Cmd+click, the middle button and the browser's menu open
+    // the portal in another tab, and the dialog stays open here.
     _openPortal = (portal) => {
         if (typeof this.props.onClose === "function") this.props.onClose();
         HISTORY.push("/" + portal.id);
@@ -297,7 +302,7 @@ class GDDisruptions extends React.PureComponent {
         return (
             <ButtonBase
                 className={classes.topicTile + " " + classes.proposalsTile}
-                onClick={() => this._openPortal(topic)}
+                {...link("/" + topic.id, () => this._openPortal(topic))}
             >
                 <IconComponent className={classes.topicBackgroundIcon} />
                 <div className={classes.topicContent}>
@@ -327,7 +332,7 @@ class GDDisruptions extends React.PureComponent {
             <ButtonBase
                 key={topic.name}
                 className={classes.topicTile}
-                onClick={() => this._openPortal(topic)}
+                {...link("/" + topic.id, () => this._openPortal(topic))}
             >
                 {topic.urgent && (
                     <span className={classes.urgentBadge}>{t("components.gddisruptions.urgent")}</span>

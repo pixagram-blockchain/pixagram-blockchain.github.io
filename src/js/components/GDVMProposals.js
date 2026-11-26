@@ -17,7 +17,8 @@ import InfoIcon from "@material-ui/icons/Info";
 import AddIcon from "@material-ui/icons/Add";
 import InboxIcon from "@material-ui/icons/InboxOutlined";
 import { Pageview } from "@material-ui/icons";
-import { HISTORY, PROPOSALS_PORTAL } from "../utils/constants";
+import { HISTORY, PROPOSALS_PORTAL, profilePath } from "../utils/constants";
+import { link } from "../utils/link";
 // usePrices is a Preact hook; it lives one level under src in hooks/.
 // Adjust this path if your layout differs (it imports ../utils/settings).
 import { usePrices } from "../hooks/usePrices";
@@ -905,8 +906,11 @@ const ProposalCard = ({
         return () => { cancelled = true; };
     }, [expanded, api, proposal.author, proposal.permlink]);
 
-    const stop = (e) => { if (e && e.stopPropagation) e.stopPropagation(); };
-    const goAuthor = (e, who) => { stop(e); HISTORY.push(`/@${who}`); };
+    // The author's picture and name (and the receiver's) are links to the
+    // profile (utils/link): a plain click pushes it, as before; a Ctrl/Cmd or
+    // middle click opens it in another tab and leaves Governance open here.
+    // `stop`: the click never reaches the card, which would toggle it.
+    const authorNav = (who) => link(profilePath(who), () => HISTORY.push(`/@${who}`), { stop: true });
     const toggle = () => onExpandChange(proposal.id, !expanded);
     const onKey = (e) => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
@@ -986,7 +990,7 @@ const ProposalCard = ({
                     <div className={classes.proposalAuthorRow}>
                         <ButtonBase
                             style={{ borderRadius: "10px" }}
-                            onClick={(e) => goAuthor(e, proposal.author)}
+                            {...authorNav(proposal.author)}
                         >
                             <div
                                 className={`pixelated ${classes.proposalAuthorAvatar}`}
@@ -994,19 +998,19 @@ const ProposalCard = ({
                             />
                         </ButtonBase>
                         <div className={classes.proposalAuthorInfo}>
-                            <span
+                            <a
                                 className={classes.proposalAuthorName}
                                 style={{ cursor: "pointer" }}
-                                onClick={(e) => goAuthor(e, proposal.author)}
-                            >@{proposal.author}</span>
+                                {...authorNav(proposal.author)}
+                            >@{proposal.author}</a>
                             {proposal.receiver && proposal.receiver !== proposal.author && (
-                                <span
+                                <a
                                     className={classes.proposalReceiverName}
                                     style={{ cursor: "pointer" }}
-                                    onClick={(e) => goAuthor(e, proposal.receiver)}
+                                    {...authorNav(proposal.receiver)}
                                 >{t("words.for_receiver", {
                                     receiver: proposal.receiver
-                                })}</span>
+                                })}</a>
                             )}
                         </div>
                     </div>
@@ -1057,10 +1061,12 @@ const ProposalCard = ({
                             }
                             label={t("components.gdvmproposals.vote")}
                         />
+                        {/* A link to the proposal's post: a plain click pushes
+                            it, as before (link() without a handler). */}
                         <Button
                             className={classes.viewProposalButton}
                             startIcon={<Pageview />}
-                            onClick={() => HISTORY.push(proposal.link)}
+                            {...link(proposal.link)}
                         >
                             {t("words.view_proposal")}
                         </Button>

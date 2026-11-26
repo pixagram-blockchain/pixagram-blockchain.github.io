@@ -24,6 +24,7 @@ import DescriptionRounded from "@material-ui/icons/DescriptionRounded";
 import FavoriteBorderRounded from "@material-ui/icons/FavoriteBorderRounded";
 import timeAgo from "../utils/TimeAgo";
 import { HISTORY } from "../utils/constants";
+import { link } from "../utils/link";
 import * as actions from "../actions/utils";
 import * as favorites from "../utils/favorites";
 
@@ -466,10 +467,18 @@ function itemUrl(it) {
 
 // ── Row (shared by both tabs) ───────────────────────────────────────────────
 
+// The row is a link to the favorite's post (utils/link; itemUrl is the
+// address onOpen pushes): Ctrl/Cmd+click, the middle button and the browser's
+// menu open it in another tab and leave the manager open. A favorite that
+// cannot be opened yet has no address, and stays a plain row.
 const FavoriteRow = React.memo(function FavoriteRow({ classes, item, square, pixelated, onOpen, onAskDelete }) {
     useLanguage();
     const handleOpen = useCallback(() => onOpen(item), [onOpen, item]);
+    // preventDefault with stopPropagation: the button sits inside the row's
+    // link, whose handler this click never reaches — without it the browser
+    // would follow the row's href as a page load.
     const handleDelete = useCallback((e) => {
+        e.preventDefault();
         e.stopPropagation();
         onAskDelete(item);
     }, [onAskDelete, item]);
@@ -501,7 +510,7 @@ const FavoriteRow = React.memo(function FavoriteRow({ classes, item, square, pix
     );
 
     return (
-        <ListItem button disableRipple className={classes.item} onClick={handleOpen}>
+        <ListItem button disableRipple component="a" className={classes.item} {...link(itemUrl(item), handleOpen)}>
             <ListItemIcon className={classes.thumbWrap}>
                 {item.image ? (
                     <img

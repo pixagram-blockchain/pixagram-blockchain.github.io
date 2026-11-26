@@ -1,6 +1,9 @@
 "use strict";
 import React from "preact/compat";
 
+import { link } from "../../utils/link";
+
+import { artworkPath } from "./searchApi";
 import { wikiUrl } from "./wiki";
 
 // ── AnswerMarkdown ────────────────────────────────────────────────────────────
@@ -12,7 +15,10 @@ import { wikiUrl } from "./wiki";
 //             "1. " numbered lists
 //   inline    **bold**, `code`, [text](https://…) links (https only, new tab; one
 //             to the documentation on GitHub opens the wiki's page instead),
-//             "@author" mentions (links to the profile), and the citations:
+//             "@author" mentions (links to the profile), and the citations
+//             (mentions and post citations are in-app links, utils/link: a
+//             plain click opens them here, a Ctrl/Cmd or middle click in
+//             another tab):
 //               [E12] [E12, E201]   an /ask body's evidence ids — the ones that name
 //                                   a post the answer holds become small numbered
 //                                   links that open the post; the others go
@@ -44,17 +50,16 @@ export function withMentions(text, onGoToUsername, className) {
         if (m.index > 0 && /[\p{L}\p{N}_]/u.test(text[m.index - 1])) continue; // an e-mail-like "a@b"
         const name = m[1].slice(1);
         if (m.index > last) out.push(text.slice(last, m.index));
+        // A link to the profile (utils/link): Enter and a plain click are
+        // onGoToUsername, as before; a modified click is the browser's.
         out.push(
-            <span
+            <a
                 key={"m" + m.index}
-                role="link"
-                tabIndex={0}
                 className={className}
-                onClick={() => onGoToUsername(name)}
-                onKeyDown={(e) => { if (e.key === "Enter") onGoToUsername(name); }}
+                {...link("/@" + name, () => onGoToUsername(name))}
             >
                 {m[1]}
-            </span>,
+            </a>,
         );
         last = m.index + m[0].length;
     }
@@ -94,11 +99,8 @@ function Cite({ classes, n, card, onOpenCard }) {
     return (
         <sup className={classes.answerCite}>
             <a
-                role="link"
-                tabIndex={0}
                 title={title}
-                onClick={(e) => { e.preventDefault(); if (onOpenCard) onOpenCard(card); }}
-                onKeyDown={(e) => { if (e.key === "Enter" && onOpenCard) onOpenCard(card); }}
+                {...link(artworkPath(card), () => { if (onOpenCard) onOpenCard(card); })}
             >
                 {n}
             </a>

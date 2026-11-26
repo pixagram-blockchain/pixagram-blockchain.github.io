@@ -43,7 +43,8 @@ import BookmarkBorder from "@material-ui/icons/BookmarkBorder";
 import NotificationsNone from "@material-ui/icons/NotificationsNone";
 import Notifications from "@material-ui/icons/Notifications";
 
-import { HISTORY } from "../utils/constants";
+import { HISTORY, isRoutablePath } from "../utils/constants";
+import { isPlainClick, wantsNewTab, pendingNavigation, deferredLink } from "../utils/link";
 
 import { t, tk, tx, useLanguage, getLocaleCode } from "../utils/text";
 
@@ -441,7 +442,31 @@ async function resolvePostPath(contentAPI, author, permlink, wantReplies) {
     return null;
 }
 
+// ── Where a notification leads, when its url alone tells ──
+// "c/portal-152228" is a portal's page and "@account" a profile: an address
+// the row can print as its href (utils/link). "@author/permlink" — a post or
+// a comment — is not one yet: post routes need the category segment, which
+// only the content API has (resolvePostPath), so the row has no href and its
+// click resolves the address (handleNotificationClick). The url is chain
+// data: only an address the router routes becomes a link.
+function notificationHref(notif) {
+    const url = ((notif && notif.url) || "").replace(/^\//, "");
+    if (!url) return null;
+    const community = /^c\/([\w.-]+)$/.exec(url);
+    if (community) return "/" + community[1];
+    if (/^@([^/]+)\/([^/#?]+)$/.test(url)) return null;
+    const path = "/" + url;
+    return isRoutablePath(path) ? path : null;
+}
+
 // ── Single notification row ──
+// A link when the notification has an address (notificationHref): the
+// browser's own new tab on a Ctrl/Cmd+click, the middle button or its menu.
+// Otherwise a deferredLink, whose click carries the same intent to the
+// handler. Either way `onClick(notification, event)` runs for every click —
+// the notification is marked read whichever tab it opens in — and a plain
+// click on a link row is taken from the browser first, so it is never
+// followed as a page load.
 const NotificationItem = React.memo(({ classes, notification, isRead, onClick }) => {
     useLanguage();
     const typeDef = NOTIFICATION_TYPE_MAP[notification.type] || DEFAULT_TYPE;
@@ -456,15 +481,23 @@ const NotificationItem = React.memo(({ classes, notification, isRead, onClick })
         ? tx(display.detail).join("  ·  ")
         : tx(display.detail);
 
-    const handleClick = useCallback(() => {
-        if (onClick) onClick(notification);
+    const href = useMemo(() => notificationHref(notification), [notification]);
+    const handleClick = useCallback((event) => {
+        if (href && isPlainClick(event)) event.preventDefault();
+        if (onClick) onClick(notification, event);
+    }, [notification, onClick, href]);
+    const handleAuxClick = useCallback((event) => {
+        if (event.button === 1 && onClick) onClick(notification, event);
     }, [notification, onClick]);
+    const rowLink = href
+        ? { component: "a", href, "data-nav": "", draggable: false, onClick: handleClick, onAuxClick: handleAuxClick }
+        : deferredLink(handleClick);
 
     return (
         <ListItem
             button
             className={`${classes.listItem} ${isRead ? classes.listItemRead : classes.listItemUnread}`}
-            onClick={handleClick}
+            {...rowLink}
         >
             <ListItemIcon className={classes.iconContainer}>
                 <Icon className={classes.notifIcon} style={{ color }} />
@@ -654,7 +687,19 @@ const NotificationsDialog = ({
     }, [pixaAPI, account, notifications, onUnreadCountChange]);
 
     // ── Click individual notification → mark read + navigate ──
-    const handleNotificationClick = useCallback(async (notif) => {
+    // `event` is the click: one that asked for another tab (Ctrl, Cmd, Shift,
+    // the middle button — utils/link) still marks the notification read, but
+    // moves nothing in this tab: the list stays open, no entry is pushed.
+    //   · a row with an address is a link, and the browser has opened it;
+    //   · a post has none until it is resolved below, so the tab is opened
+    //     now, blank, while the click still counts as a user gesture
+    //     (pendingNavigation — after the awaits it would be a blocked
+    //     pop-up), and pointed at the post once its path is known.
+    const handleNotificationClick = useCallback(async (notif, event) => {
+        const elsewhere = wantsNewTab(event);
+        const linked = !!notificationHref(notif);
+        const nav = elsewhere && !linked ? pendingNavigation(event) : null;
+
         // Mark this one as read
         if (pixaAPI && pixaAPI.accounts.markNotificationsRead && notif.id && !readIds.has(notif.id)) {
             try {
@@ -675,11 +720,14 @@ const NotificationsDialog = ({
             }
         }
 
+        // Another tab, and the browser opened it from the row's href: done.
+        if (elsewhere && linked) return;
+
         // Navigate to the relevant content. Post routes REQUIRE the category
         // segment, which only get_content can provide — so posts/comments are
         // resolved through the content API before pushing.
         const url = (notif.url || "").replace(/^\//, "");
-        if (!url) return;
+        if (!url) { if (nav) nav.cancel(); return; }
 
         // "c/portal-152228" — community notifications → portal page
         const communityMatch = /^c\/([\w.-]+)$/.exec(url);
@@ -694,6 +742,7 @@ const NotificationsDialog = ({
         if (postMatch) {
             if (!(pixaAPI && pixaAPI.content && pixaAPI.content.getContent)) {
                 console.warn("[NotificationsDialog] content API unavailable, cannot resolve:", notif.url);
+                if (nav) nav.cancel();
                 return;
             }
             const isReply = postMatch[2].indexOf("re-") === 0;
@@ -705,19 +754,24 @@ const NotificationsDialog = ({
                     root ? root.permlink : postMatch[2],
                     isReply
                 );
-                if (path) {
+                if (path && nav) {
+                    nav.go(path); // the tab opened for this click
+                } else if (path) {
                     onClose();
                     HISTORY.push(path);
                 } else {
                     console.warn("[NotificationsDialog] could not resolve path for:", notif.url);
+                    if (nav) nav.cancel();
                 }
             } catch (e) {
                 console.warn("[NotificationsDialog] resolve error:", e.message);
+                if (nav) nav.cancel();
             }
             return;
         }
 
         // "@account" (follows) and anything else — direct pass-through
+        if (nav) { nav.go("/" + url); return; }
         onClose();
         HISTORY.push("/" + url);
     }, [pixaAPI, account, readIds, notifications, onClose, onUnreadCountChange]);

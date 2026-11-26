@@ -5,6 +5,7 @@ import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, mem
 // continuation would otherwise re-render separately).
 import { unstable_batchedUpdates as batch } from "preact/compat";
 import { HISTORY, BROWSE_PATH, buildPostUrl, isPostUrl, parsePostUrl, isDeletedPost, POST_DRAWER_TAB_HASHES } from "../utils/constants";
+import { linkClick } from "../utils/link";
 import { getFeedSort } from "../utils/feedSort";
 import withStyles from "@material-ui/core/styles/withStyles";
 import * as actions from "../actions/utils";
@@ -234,8 +235,19 @@ const EMPTY_ITEMS = [];
 // references only and builds its style object inside, so a tick on which
 // `hidden` didn't flip costs it nothing at all. (The create FAB is the
 // shared <CreateFab>, built the same way — FeedPersonal renders it too.)
-const SortTabs = memo(function SortTabs({ className, hidden, value, isMobile, labels, onChange }) {
+//
+// Each tab is a link to the address its click writes (utils/link): `hrefs[i]`
+// is sortPath() for that sort. Ctrl/Cmd+click, the middle button and the
+// browser's menu open the sort in another tab; a plain click is onChange,
+// exactly as before (the feed swaps in place and the entry is replaced).
+const sortTabLink = (hrefs, i) => (hrefs && hrefs[i]
+    ? { component: "a", href: hrefs[i], "data-nav": "", draggable: false }
+    : null);
+
+const SortTabs = memo(function SortTabs({ className, hidden, value, isMobile, labels, hrefs, onChange }) {
     const style = useMemo(() => ({ transform: `translateY(${hidden ? -72 : 0}px)` }), [hidden]);
+    // The click rule of a link: a modified click is the browser's.
+    const handleChange = useMemo(() => linkClick(onChange), [onChange]);
     return (
         <Tabs
             style={style}
@@ -244,14 +256,14 @@ const SortTabs = memo(function SortTabs({ className, hidden, value, isMobile, la
             variant="fullWidth"
             indicatorColor="primary"
             textColor="primary"
-            onChange={onChange}
+            onChange={handleChange}
             fullwidth={true}
             data-tour="feed-tabs"
         >
-            <Tab icon={isMobile ? SORT_TAB_ICONS[0] : undefined} label={isMobile ? undefined : labels[0]} />
-            <Tab icon={isMobile ? SORT_TAB_ICONS[1] : undefined} label={isMobile ? undefined : labels[1]} />
-            <Tab icon={isMobile ? SORT_TAB_ICONS[2] : undefined} label={isMobile ? undefined : labels[2]} />
-            <Tab icon={isMobile ? SORT_TAB_ICONS[3] : undefined} label={isMobile ? undefined : labels[3]} />
+            <Tab {...sortTabLink(hrefs, 0)} icon={isMobile ? SORT_TAB_ICONS[0] : undefined} label={isMobile ? undefined : labels[0]} />
+            <Tab {...sortTabLink(hrefs, 1)} icon={isMobile ? SORT_TAB_ICONS[1] : undefined} label={isMobile ? undefined : labels[1]} />
+            <Tab {...sortTabLink(hrefs, 2)} icon={isMobile ? SORT_TAB_ICONS[2] : undefined} label={isMobile ? undefined : labels[2]} />
+            <Tab {...sortTabLink(hrefs, 3)} icon={isMobile ? SORT_TAB_ICONS[3] : undefined} label={isMobile ? undefined : labels[3]} />
         </Tabs>
     );
 });
@@ -271,6 +283,15 @@ const parseSortFromPathname = (pathname) => {
 const parseTagFromPathname = (pathname) => {
     const match = (pathname || '').match(/^\/(?:created|hot|trending|promoted)\/([a-z0-9\-]+)(?:\/|$)/);
     return match ? match[1] : '';
+};
+
+// The address of sort `sortIndex` for the tag `pathname` shows ("/hot/gaming/",
+// or "/hot/" without one): what a sort tab's click writes, and what the tab
+// prints as its href — one builder, so the two cannot differ.
+const sortPath = (sortIndex, pathname) => {
+    const tag = parseTagFromPathname(pathname);
+    const sortName = SORT_METHODS[sortIndex] || 'created';
+    return tag ? `/${sortName}/${tag}/` : `/${sortName}/`;
 };
 
 const resolveDisplayName = (account, fallback) => {
@@ -1034,9 +1055,7 @@ const useFeedData = (api, pathname, gridBridgeRef) => {
     const handleSortingChange = useCallback((e, newSorting) => {
         if (sorting === newSorting) return;
 
-        const tag = parseTagFromPathname(pathname);
-        const sortName = SORT_METHODS[newSorting] || 'created';
-        const newPath = tag ? `/${sortName}/${tag}/` : `/${sortName}/`;
+        const newPath = sortPath(newSorting, pathname);
 
         // Drive state + fetch directly. Don't rely on a history → parent →
         // pathname-prop round trip: if the parent doesn't re-render Feed on
@@ -1743,6 +1762,10 @@ const Feed = ({ classes, settings, pathname, api }) => {
 
     const locales = settings._selected_locales_code;
 
+    // One address per sort tab, for SortTabs' hrefs: the very address
+    // handleSortingChange writes for that tab (sortPath).
+    const sortTabHrefs = useMemo(() => SORT_METHODS.map((_, i) => sortPath(i, pathname)), [pathname]);
+
     // ── Callbacks ──────────────────────────────────────────────────────
     const handleSortingChangeWithScroll = useCallback((e, value) => {
         // Bank the outgoing sort's offset (cacheKeyRef still points at it —
@@ -1974,6 +1997,7 @@ const Feed = ({ classes, settings, pathname, api }) => {
                 value={sorting}
                 isMobile={isMobile}
                 labels={sortTabLabels}
+                hrefs={sortTabHrefs}
                 onChange={handleSortingChangeWithScroll}
             />
 

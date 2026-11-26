@@ -27,6 +27,8 @@ import PaletteRounded from "@material-ui/icons/PaletteRounded";
 
 import { t, getLocaleCode, useLanguage } from "../utils/text";
 import { T } from "../utils/T";
+import { profilePath } from "../utils/constants";
+import { link, deferredLink } from "../utils/link";
 import useLiveTimeAgo from "../hooks/useLiveTimeAgo";
 
 /**
@@ -110,42 +112,49 @@ const formatVests = (vestsString) => {
 // Used to print delegate_vesting_shares amounts without doubling the unit suffix.
 const stripUnit = (s) => typeof s === 'string' ? s.replace(/\s+/g, ' ').trim() : String(s);
 
-// Clickable @username span. Stops event propagation so a click on the username
-// doesn't bubble up to any wrapping click handler.
+// @username, a link to the profile (utils/link): a plain click (or Enter) is
+// onOpen, as before; Ctrl/Cmd+click, the middle button and the browser's menu
+// open the profile in another tab. `stop`: the click never bubbles up to any
+// wrapping click handler, either way.
 const UserLink = ({ name, onOpen, classes }) => {
     if (!name) return null;
-    const handle = (e) => { e.stopPropagation(); if (typeof onOpen === 'function') onOpen(name); };
+    const open = () => { if (typeof onOpen === 'function') onOpen(name); };
     return (
-        <span className={classes.timelineUsername} onClick={handle} role="link" tabIndex={0}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handle(e); } }}>
+        <a className={classes.timelineUsername} {...link(profilePath(name), open, { stop: true })}>
             @{name}
-        </span>
+        </a>
     );
 };
 
 // Clickable post reference (author + permlink). Renders the visible label —
 // usually the title or the permlink — but the click resolves to the post.
+// The reference may be a comment, and a post's address needs its category:
+// both are looked up on the chain when it is clicked, so there is no href to
+// print. The click carries the intent instead (utils/link, deferredLink):
+// onOpen gets the event, and a Ctrl/Cmd/Shift or middle click opens the post
+// in another tab once it is resolved.
 const PostLink = ({ author, permlink, label, onOpen, classes }) => {
     if (!label) return null;
     if (!author || !permlink) return <>"{label}"</>;
-    const handle = (e) => { e.stopPropagation(); if (typeof onOpen === 'function') onOpen(author, permlink); };
+    const handle = (e) => { if (typeof onOpen === 'function') onOpen(author, permlink, e); };
     return (
-        <span className={classes.timelinePostLink} onClick={handle} role="link" tabIndex={0}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handle(e); } }}>
+        <span className={classes.timelinePostLink} role="link" tabIndex={0}
+              {...deferredLink(handle, { stop: true })}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handle(e); } }}>
             "{label}"
         </span>
     );
 };
 
-// Clickable community name. Pushes /{community}/created/.
+// Community name, a link to its page: /{community}/created/ — the address
+// onOpen pushes.
 const CommunityLink = ({ name, onOpen, classes }) => {
     if (!name) return null;
-    const handle = (e) => { e.stopPropagation(); if (typeof onOpen === 'function') onOpen(name); };
+    const open = () => { if (typeof onOpen === 'function') onOpen(name); };
     return (
-        <span className={classes.timelineUsername} onClick={handle} role="link" tabIndex={0}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handle(e); } }}>
+        <a className={classes.timelineUsername} {...link("/" + name + "/created/", open, { stop: true })}>
             {name}
-        </span>
+        </a>
     );
 };
 

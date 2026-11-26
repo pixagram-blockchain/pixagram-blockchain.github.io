@@ -5,14 +5,88 @@ export const overrides = {
                 background: "#ddd",
                 color: "#171717"
             },
-            "a": {
-                color: "#eee"
+            // Link colours, for the links of CONTENT: post and comment bodies,
+            // the wiki, the FAQ, the legal texts. The app's own navigation
+            // links (utils/link.js — a card title, an author name, a tab…)
+            // carry data-nav and are left out: they were spans and buttons
+            // with a colour of their own, and must keep looking that way,
+            // visited or hovered included. `:where()` does both at no cost in
+            // specificity: the three content rules weigh exactly what they
+            // did, so nothing they used to lose to now loses to them, and the
+            // navigation reset weighs nothing, so any class on the link still
+            // decides its colour.
+            //
+            // The base colour is #ffffff: "a" was #eee here, but a second "a"
+            // rule further down (it shared a selector list with the checked
+            // checkbox) set #ffffff at the same weight and, coming later,
+            // won. It moved up here, so every anchor rule is in one place.
+            "@supports selector(:where(a))": {
+                "a:where(:not([data-nav]))": {
+                    color: "#ffffff"
+                },
+                "a:visited:where(:not([data-nav]))": {
+                    color: "#ddd"
+                },
+                "a:hover:where(:not([data-nav]))": {
+                    color: "#fff"
+                },
+                ":where(a[data-nav])": {
+                    color: "inherit",
+                    textDecoration: "none"
+                },
+                // A plain <button> has a colour of its own, the browser's for
+                // the page's colour scheme; a link that stands where one stood
+                // (data-nav="button", see below) keeps it rather than
+                // inheriting. Weightless too: a class that sets a colour
+                // decides, as it did on the button.
+                ":where(a[data-nav=\"button\"])": {
+                    color: "buttontext",
+                },
+                // A <button> does not inherit its typography: the browser's
+                // own sheet gives it a size, a weight, normal line height and
+                // letter spacing, centred text. A button that became a
+                // navigation link (a ButtonBase, Button or IconButton handed
+                // an href renders an <a>) would inherit all of that from its
+                // parent instead, and a label with no class of its own would
+                // shift by a fraction of a pixel per letter. Here are the same
+                // values, weighing nothing like the browser's, so MUI's and
+                // the app's classes win exactly as they did. List rows and
+                // chips are left out: as buttons they were <div>s. The other
+                // two selectors are the other shapes a former button takes: a
+                // plain <button> of the app's own that became a link says so
+                // (data-nav="button"), and a ripple box kept inside a
+                // navigation link is drawn as a <span> there (a <button> in a
+                // link would take the click from it).
+                ":where(a[data-nav].MuiButtonBase-root:not(.MuiListItem-button):not(.MuiChip-root)), :where(a[data-nav=\"button\"]), :where(a[data-nav] span.MuiButtonBase-root)": {
+                    fontSize: "13.3333px",
+                    fontWeight: 400,
+                    fontStyle: "normal",
+                    lineHeight: "normal",
+                    letterSpacing: "normal",
+                    wordSpacing: "normal",
+                    textTransform: "none",
+                    textIndent: 0,
+                    textShadow: "none",
+                    textAlign: "center",
+                    textRendering: "auto",
+                },
             },
-            "a:visited": {
-                color: "#ddd"
-            },
-            "a:hover": {
-                color: "#fff"
+            // Browsers without :where() (Chromium < 88, Firefox < 78) keep
+            // the rules as they were. Navigation links only lose their
+            // underline there, and may take the content colours.
+            "@supports not selector(:where(a))": {
+                "a": {
+                    color: "#ffffff"
+                },
+                "a:visited": {
+                    color: "#ddd"
+                },
+                "a:hover": {
+                    color: "#fff"
+                },
+                "a[data-nav]": {
+                    textDecoration: "none"
+                },
             },
             html: {
                 textRendering: "optimizespeed",
@@ -56,6 +130,29 @@ export const overrides = {
             },
             ".MuiFormLabel-root, svg, button, svg.recharts-surface, .MuiTab-wrapper, .MuiListSubheader-root, .MuiList-root > .MuiListSubheader-root": {
                 fontFamily: `"Industry Book", "Normative Pro" !important`,
+            },
+            // The `button` of the rule above, for a button that became a
+            // navigation link (utils/link.js — a ButtonBase, Button or
+            // IconButton handed an href renders an <a>, which `button` no
+            // longer matches). `:where()` keeps the selector at the weight of
+            // a bare element, the weight `button` has, so it wins and loses
+            // against the very same rules. It sits in a rule of its own: in
+            // a browser without :where() one unknown selector would void the
+            // whole list above. (The probe differs from the one at the top
+            // only because an object cannot hold the same key twice.)
+            "@supports selector(:where(button))": {
+                "a:where([data-nav].MuiButtonBase-root:not(.MuiListItem-button):not(.MuiChip-root))": {
+                    fontFamily: `"Industry Book", "Normative Pro" !important`,
+                },
+                // …for a plain <button> that became a link, and for a ripple
+                // box inside a navigation link, a <span> there (see the
+                // typography rule at the top).
+                "a:where([data-nav=\"button\"])": {
+                    fontFamily: `"Industry Book", "Normative Pro" !important`,
+                },
+                "span:where(.MuiButtonBase-root):where(a[data-nav] *)": {
+                    fontFamily: `"Industry Book", "Normative Pro" !important`,
+                },
             },
             "div.recharts-wrapper": {
                 overflow: "visible !important",
@@ -328,6 +425,13 @@ export const overrides = {
             },
             "button.MuiButtonGroup-groupedHorizontal:not(:last-child)":{borderTopRightRadius: "0px !important", borderBottomRightRadius: "0px !important"},
             "button.MuiButtonGroup-groupedHorizontal:not(:first-child)":{borderTopLeftRadius: "0px !important", borderBottomLeftRadius: "0px !important"},
+            // The same two for a grouped Button that is a navigation link (the
+            // follower / following counts), at the same weight: see the font
+            // rule above.
+            "@supports selector(:where(span))": {
+                "a.MuiButtonGroup-groupedHorizontal:where([data-nav]):not(:last-child)":{borderTopRightRadius: "0px !important", borderBottomRightRadius: "0px !important"},
+                "a.MuiButtonGroup-groupedHorizontal:where([data-nav]):not(:first-child)":{borderTopLeftRadius: "0px !important", borderBottomLeftRadius: "0px !important"},
+            },
             "div.MuiAccordion-rounded:first-child": { borderTopLeftRadius: "21px", borderTopRightRadius: "21px" },
             "div.MuiAccordion-rounded:last-child": { borderBottomLeftRadius: "21px", borderBottomRightRadius: "21px" },
             "div.MuiPaper-rounded": {
@@ -517,6 +621,16 @@ export const overrides = {
             "button.MuiButton-textPrimary": {
                 color: "#ffffff"
             },
+            // The same two for a Button that is a navigation link, at the same
+            // weight: see the font rule near the top.
+            "@supports selector(:where(div))": {
+                "a.MuiButton-root:where([data-nav])": {
+                    borderRadius: "12px"
+                },
+                "a.MuiButton-textPrimary:where([data-nav])": {
+                    color: "#ffffff"
+                },
+            },
             "span.MuiBadge-colorPrimary": {
                 color: "#aaa",
                 backgroundColor: "#333"
@@ -534,7 +648,8 @@ export const overrides = {
             "div.MuiLinearProgress-colorPrimary": {
                 backgroundColor: "#4b4b4b"
             },
-            ".MuiCheckbox-colorSecondary.Mui-checked, a": {
+            // (This rule also named "a": see the link colours at the top.)
+            ".MuiCheckbox-colorSecondary.Mui-checked": {
                 color: "#ffffff"
             },
             ".MuiCircularProgress-colorPrimary": {

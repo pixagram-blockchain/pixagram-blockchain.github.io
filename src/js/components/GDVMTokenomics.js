@@ -8,7 +8,8 @@ import Tooltip from "@material-ui/core/Tooltip";
 import ButtonBase from "@material-ui/core/ButtonBase";
 import InfoIcon from "@material-ui/icons/Info";
 import DescriptionIcon from "@material-ui/icons/Description";
-import { HISTORY } from "../utils/constants";
+import { HISTORY, profilePath } from "../utils/constants";
+import { link } from "../utils/link";
 import { cssBackgroundImage } from "../utils/safeUrl";
 // The TGE ledger — plain JSON so entries can be added by hand. Its `_readme`
 // key documents the schema; everything on this tab is recomputed from it, and
@@ -870,16 +871,21 @@ const Legend = ({ classes, items }) => (
     </div>
 );
 
-const Avatar = ({ classes, className, url, onClick }) => (
-    <ButtonBase style={{ borderRadius: "12px" }} onClick={onClick}>
+// An account's picture and name are links to its profile (utils/link): a
+// plain click pushes it, as goAccount did; Ctrl/Cmd+click, the middle button
+// and the browser's menu open it in another tab, with Governance left open
+// here. `stop`: the click goes no further up, as before.
+const accountNav = (who) => link(
+    profilePath(who),
+    () => { if (who) HISTORY.push(`/@${who}`); },
+    { stop: true },
+);
+
+const Avatar = ({ classes, className, url, who }) => (
+    <ButtonBase style={{ borderRadius: "12px" }} {...accountNav(who)}>
         <div className={`pixelated ${className}`} style={{ backgroundImage: cssBackgroundImage(url) }} />
     </ButtonBase>
 );
-
-const goAccount = (e, who) => {
-    if (e && e.stopPropagation) e.stopPropagation();
-    if (who) HISTORY.push(`/@${who}`);
-};
 
 // ──────────────────────────────────────────────────────────────
 // TGE summary — what genesis minted, what has left the treasuries since,
@@ -1176,9 +1182,9 @@ const LedgerTable = ({ classes, entries, avatars, live }) => (
                                     classes={classes}
                                     className={classes.recipientAvatar}
                                     url={avatars[e.to] || ''}
-                                    onClick={(ev) => goAccount(ev, e.to)}
+                                    who={e.to}
                                 />
-                                <span className={classes.recipientName} onClick={(ev) => goAccount(ev, e.to)}>@{e.to}</span>
+                                <a className={classes.recipientName} {...accountNav(e.to)}>@{e.to}</a>
                             </div>
                         </td>
                         <td>
@@ -1315,11 +1321,11 @@ const AccountCard = ({ classes, row, tgeMs, live, avatars, onOpenProposals }) =>
                     classes={classes}
                     className={classes.accountAvatar}
                     url={avatars[name] || ''}
-                    onClick={(e) => goAccount(e, name)}
+                    who={name}
                 />
                 <div className={classes.accountInfo}>
                     <div className={classes.accountTitleRow}>
-                        <span className={classes.accountName} onClick={(e) => goAccount(e, name)}>@{name}</span>
+                        <a className={classes.accountName} {...accountNav(name)}>@{name}</a>
                         <span className={classes.accountRole}>{roleLabel(account)}</span>
                     </div>
                     <div className={classes.chipRow}>{chips}</div>
@@ -1403,9 +1409,9 @@ const AccountCard = ({ classes, row, tgeMs, live, avatars, onOpenProposals }) =>
                                     classes={classes}
                                     className={classes.recipientAvatar}
                                     url={avatars[to] || ''}
-                                    onClick={(e) => goAccount(e, to)}
+                                    who={to}
                                 />
-                                <span className={classes.recipientName} onClick={(e) => goAccount(e, to)}>@{to}</span>
+                                <a className={classes.recipientName} {...accountNav(to)}>@{to}</a>
                             </div>
                             <div className={classes.recipientBar}>
                                 <StackedBar

@@ -57,8 +57,10 @@ import AccountBalanceWallet from "@material-ui/icons/AccountBalanceWallet"; // e
 import ExitToApp from "@material-ui/icons/ExitToApp";
 import Tooltip from "@material-ui/core/Tooltip";
 import * as actions from "../actions/utils";
-import { HISTORY, PROPOSALS_PORTAL, COMMUNITY_PORTALS, buildFeedFocusHash, HELP_TELEGRAM_URL } from "../utils/constants";
-import { feedTagPath } from "../utils/feedSort";
+import { HISTORY, PROPOSALS_PORTAL, COMMUNITY_PORTALS, buildFeedFocusHash, HELP_TELEGRAM_URL, profilePath } from "../utils/constants";
+import { feedTagPath, useFeedSort } from "../utils/feedSort";
+import { link, useLink, wantsNewTab, openInNewTab } from "../utils/link";
+import ChipLink from "./ChipLink";
 import NewspaperVariant from "../icons/NewspaperVariant";
 import Chip from "@material-ui/core/Chip";
 import Typography from "@material-ui/core/Typography";
@@ -269,8 +271,10 @@ const styles = theme => ({
     // The stretched form: same height and background, the icon kept in a
     // 56px square at the left so it sits exactly where the square form's
     // icon sits, the label beside it (discoverWideTitle) in the gained room.
+    // border-box spelled out as on discoverWideTile, and for the same reason:
+    // the tile is a link now (FeedTile).
     feedWideTile: {
-        justifySelf: "stretch", width: "100%",
+        justifySelf: "stretch", width: "100%", boxSizing: "border-box",
         display: "flex", alignItems: "center", justifyContent: "flex-start", textAlign: "left",
         gap: "12px", paddingRight: "16px"
     },
@@ -537,7 +541,12 @@ const LoadingView = React.memo(({ classes }) => (
 ));
 LoadingView.displayName = "LoadingView";
 
-const ProfileImage = React.memo(({ classes, onClick, imageUrl, loading }) => {
+// The drawer's navigation elements are links (utils/link): each prints the
+// address its click pushes as an href, so Ctrl/Cmd+click, the middle button
+// and the browser's own menu open it in another tab. A plain click still runs
+// the handler it was given, unchanged. `href` on the picture and the name
+// below: the session's own profile.
+const ProfileImage = React.memo(({ classes, onClick, href, imageUrl, loading }) => {
     useLanguage();
     // Stable style object per imageUrl change only.
     const bgStyle = useMemo(
@@ -549,13 +558,13 @@ const ProfileImage = React.memo(({ classes, onClick, imageUrl, loading }) => {
         [imageUrl]
     );
     return (
-        <ButtonBase className={classes.menuProfileImage}>
+        <ButtonBase className={classes.menuProfileImage} {...(loading ? null : link(href, onClick))}>
             {loading
                 ? <div style={PROFILE_LOADER_BOX}><Skeleton variant="rect" width="100%" height="100%" style={{ borderRadius: 32 }} /></div>
-                : <div style={bgStyle} onClick={onClick} className={"pixelated"} />}
+                : <div style={bgStyle} className={"pixelated"} />}
         </ButtonBase>
     );
-}, cmpKeys(["imageUrl", "loading", "onClick"]));
+}, cmpKeys(["imageUrl", "loading", "onClick", "href"]));
 ProfileImage.displayName = "ProfileImage";
 
 const NotificationBadge = React.memo(React.forwardRef(({ classes, onClick, count }, ref) => {
@@ -611,10 +620,25 @@ ActionButtons.displayName = "ActionButtons";
 // PIN-protected session whose keys are not unlocked.
 const ProfileHeader = React.memo(({ classes, onProfileClick, onLogoutClick, username, timeLeft, locked }) => {
     useLanguage();
+    const profileHref = profilePath(username);
+    // The heading's fade (its ::after) lies over the heading's right end and
+    // runs on past the log-out button. A click on it lands on the heading
+    // itself, not on the link inside it — and it opened the profile when the
+    // heading carried the click, so it still does: here, or in a new tab
+    // when the click asks for one (utils/link).
+    const onFadeClick = (event) => {
+        if (event.target !== event.currentTarget) return; // the link's own click
+        if (wantsNewTab(event)) { openInNewTab(profileHref); return; }
+        onProfileClick(event);
+    };
     return (
         <div>
             <div className={classes.menuProfileTextContainer}>
-                <Typography style={PROFILE_TEXT_STYLE} component="h2" variant="h6" onClick={onProfileClick} className={classes.menuProfileText}>@{username}</Typography>
+                {/* The link fills the heading's box (display: block); the
+                    heading keeps the click for its fade (onFadeClick). */}
+                <Typography style={PROFILE_TEXT_STYLE} component="h2" variant="h6" className={classes.menuProfileText} onClick={onFadeClick}>
+                    <a style={PROFILE_TEXT_STYLE} {...link(profileHref, onProfileClick)}>@{username}</a>
+                </Typography>
                 <Tooltip title={t("components.menu_content.logging_out")}><IconButton className={classes.exitButton} onClick={onLogoutClick}><ExitToApp /></IconButton></Tooltip>
             </div>
             {timeLeft && (
@@ -648,17 +672,22 @@ CTASection.displayName = "CTASection";
 
 // ----- Individual chip - memoized so the .map() in MainView returns stable
 // children. We bind the tag via a data prop instead of an inline arrow.
+// Links to the tag's feed in the kept sort (feedTagPath): useFeedSort
+// re-renders the chip when that sort changes, so its href stays the address
+// the click pushes. ChipLink keeps the chip a ButtonBase — ripple and look.
 const TagChip = React.memo(({ tag, onClick }) => {
     useLanguage();
+    useFeedSort();
     const handle = useCallback(() => onClick(tag), [tag, onClick]);
-    return <Chip label={"#" + tag} onClick={handle} />;
+    return <Chip component={ChipLink} label={"#" + tag} {...link(feedTagPath(tag), handle)} />;
 }, cmpKeys(["tag", "onClick"]));
 TagChip.displayName = "TagChip";
 
 const TagChipIcon = React.memo(({ icon, tag, onClick }) => {
     useLanguage();
+    useFeedSort();
     const handle = useCallback(() => onClick(tag), [tag, onClick]);
-    return <Chip icon={icon} onClick={handle} />;
+    return <Chip component={ChipLink} icon={icon} {...link(feedTagPath(tag), handle)} />;
 }, cmpKeys(["icon", "tag", "onClick"]));
 TagChipIcon.displayName = "TagChipIcon";
 
@@ -685,7 +714,7 @@ const CommunityItem = React.memo(({ classes, community, onGoToCommunity }) => {
                 </ListItemAvatar>
                 <ListItemText
                     primary={
-                        <Typography onClick={handleClick} style={COMMUNITY_TITLE_STYLE} component="span" variant="body2">
+                        <Typography component="a" {...link("/" + community.name, handleClick)} style={COMMUNITY_TITLE_STYLE} variant="body2">
                             <span style={COMMUNITY_LABEL_STYLE}>{t("words.portal")} </span>
                             <span style={COMMUNITY_NAME_STYLE}>{community.title || community.name}</span>
                         </Typography>
@@ -727,7 +756,7 @@ const PortalIconTile = React.memo(({ classes, portal, onGoToCommunity }) => {
     const Icon = portal.icon || Community;
     return (
         <Tooltip title={portalTitle(portal)}>
-            <ButtonBase className={classes.discoverTile} onClick={handleClick}>
+            <ButtonBase className={classes.discoverTile} {...link("/" + portal.id, handleClick)}>
                 <Avatar className={classes.discoverTileAvatar}>
                     <Icon />
                 </Avatar>
@@ -748,7 +777,7 @@ const ProposalsTile = React.memo(({ classes, portal, onGoToCommunity }) => {
     const handleClick = usePortalClick(portal, onGoToCommunity);
     const Icon = portal.icon || BallotRounded;
     return (
-        <ButtonBase className={classes.discoverTile + " " + classes.discoverWideTile} onClick={handleClick}>
+        <ButtonBase className={classes.discoverTile + " " + classes.discoverWideTile} {...link("/" + portal.id, handleClick)}>
             <Avatar className={classes.discoverTileAvatar}>
                 <Icon />
             </Avatar>
@@ -808,7 +837,10 @@ const FriendTile = React.memo(({ classes, friend, onGoToFeedPost }) => {
                 overlap="rectangular"
                 badgeContent={friend.unseen > 0 ? (<span><span>{friend.unseen}</span><sup style={{marginTop: -6}}>+</sup></span>) : null}
             >
-                <ButtonBase className={classes.discoverTile} onClick={handleClick}>
+                <ButtonBase
+                    className={classes.discoverTile}
+                    {...link("/feed" + (friend.permlink ? buildFeedFocusHash(friend.name, friend.permlink) : ""), handleClick)}
+                >
                     <Avatar src={friend.image || undefined} className={"pixelated " + classes.discoverTileAvatar}>
                         {!friend.image && "@"}
                     </Avatar>
@@ -833,10 +865,11 @@ FriendTile.displayName = "FriendTile";
 // into the freed columns.
 const FeedTile = React.memo(({ classes, onGoToFeed, span }) => {
     useLanguage();
+    const nav = useLink("/feed", onGoToFeed);
     if (!(span > 1)) {
         return (
             <Tooltip title={t("components.menu_content.feed")}>
-                <ButtonBase className={classes.discoverTile + " " + classes.feedTile} onClick={onGoToFeed}>
+                <ButtonBase className={classes.discoverTile + " " + classes.feedTile} {...nav}>
                     <NewspaperVariant />
                 </ButtonBase>
             </Tooltip>
@@ -846,7 +879,7 @@ const FeedTile = React.memo(({ classes, onGoToFeed, span }) => {
         <ButtonBase
             className={classes.discoverTile + " " + classes.feedTile + " " + classes.feedWideTile}
             style={FEED_TILE_SPAN_STYLES[Math.min(span, FRIENDS_ROW_COLUMNS)]}
-            onClick={onGoToFeed}
+            {...nav}
         >
             <span className={classes.feedTileIcon}><NewspaperVariant /></span>
             <span className={classes.discoverWideText}>
@@ -1192,7 +1225,7 @@ const LoggedInHeader = React.memo(({
                                    }) => (
     <div style={TOP_CONTAINER_STYLE}>
         <div className={classes.menuUserProfile}>
-            <Fade in timeout={200}><ProfileImage classes={classes} onClick={onProfileClick} imageUrl={profileImage} loading={false} /></Fade>
+            <Fade in timeout={200}><ProfileImage classes={classes} onClick={onProfileClick} href={profilePath(username)} imageUrl={profileImage} loading={false} /></Fade>
             <Fade in timeout={400}><ActionButtons
                 ref={notifAnchorRef}
                 classes={classes}

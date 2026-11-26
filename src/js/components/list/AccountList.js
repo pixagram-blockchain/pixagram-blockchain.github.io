@@ -5,6 +5,8 @@ import Checkbox from "@material-ui/core/Checkbox";
 import CircularProgress from "@material-ui/core/CircularProgress";
 
 import { useScrollParentWindowing, useEndReached } from "../../hooks/useScrollParentWindowing";
+import { profilePath } from "../../utils/constants";
+import { isPlainClick } from "../../utils/link";
 import { AccountImageStore, accountKey } from "./accountImageStore";
 
 // ── AccountList — the account lists' shared rows, windowing and hydration ─
@@ -31,6 +33,11 @@ import { AccountImageStore, accountKey } from "./accountImageStore";
 //     data changed. Plain elements, one shared stylesheet, no per-row
 //     closures: clicks are DELEGATED — one listener on the list reads
 //     data-account from the row that was hit.
+//   · A row's main area is a LINK to the account's profile (utils/link):
+//     Ctrl/Cmd+click, the middle button and the browser's menu open it in
+//     another tab and leave the dialog as it is. A plain click still goes
+//     through the delegated listener to onOpenAccount, which closes the
+//     dialog and pushes the profile, as before.
 //   · Avatars hydrate on demand through an AccountImageStore: the names in
 //     the window plus a look-ahead block, block-aligned (a slow scroll asks
 //     once per block, not once per row), debounced (a fling asks where it
@@ -71,12 +78,15 @@ export const useAccountListStyles = makeStyles(() => ({
             "&:hover": { backgroundColor: "#ffffff14" },
         },
     },
-    // The whole avatar + text area is one button: it opens the account
-    // (delegated, see AccountList) and is keyboard reachable.
+    // The whole avatar + text area is one link: it opens the account
+    // (delegated, see AccountList) and is keyboard reachable. It was a
+    // <button>; box-sizing and text-decoration are spelled out so the <a>
+    // lays out and reads exactly as that button did.
     rowMain: {
         flex: "1 1 auto",
         minWidth: 0,
         height: "100%",
+        boxSizing: "border-box",
         display: "flex",
         alignItems: "center",
         gap: 16,
@@ -88,6 +98,7 @@ export const useAccountListStyles = makeStyles(() => ({
         color: "inherit",
         font: "inherit",
         textAlign: "left",
+        textDecoration: "none",
         cursor: "pointer",
         WebkitTapHighlightColor: "transparent",
         userSelect: "none",
@@ -230,12 +241,15 @@ export const AccountAvatar = memo(function AccountAvatar({ className, username, 
 
 /**
  * avatar · @name [badge] / secondary line · [action]. `data-account` on the
- * main button is what AccountList's delegated click handler reads.
+ * main link is what AccountList's delegated click handler reads; its href is
+ * the profile that handler opens. data-nav="button": a navigation link, kept
+ * out of the content-link colours, that stands where a <button> stood and
+ * keeps that button's typography (theme/overrides).
  */
 export function AccountRowLayout({ classes, username, image, badge, secondary, secondaryTitle, action }) {
     return (
         <div className={classes.row}>
-            <button type="button" className={classes.rowMain} data-account={username}>
+            <a className={classes.rowMain} href={profilePath(username) || undefined} data-account={username} data-nav="button" draggable={false}>
                 <AccountAvatar className={classes.avatar} username={username} image={image} />
                 <span className={classes.rowText}>
                     <span className={classes.rowTitle}>
@@ -246,7 +260,7 @@ export function AccountRowLayout({ classes, username, image, badge, secondary, s
                         <span className={classes.rowSecondary} title={secondaryTitle || undefined}>{secondary}</span>
                     ) : null}
                 </span>
-            </button>
+            </a>
             {action}
         </div>
     );
@@ -377,16 +391,21 @@ export const AccountList = memo(function AccountList({
         store.request(names, slot);
     }, [active, store, list, count, start, end, getName, slot]);
 
-    // One delegated listener for every row: a click on a row's main button
-    // (or anything inside it) opens that account.
+    // One delegated listener for every row: a click on a row's main link
+    // (or anything inside it) opens that account. A plain click only — the
+    // row is a link, and a Ctrl/Cmd/Shift click belongs to the browser
+    // (utils/link). The plain one is taken from it either way, so a list
+    // without onOpenAccount never follows the href as a page load.
     const openRef = useRef(onOpenAccount);
     openRef.current = onOpenAccount;
     const onClick = useCallback((e) => {
-        const open = openRef.current;
-        if (typeof open !== "function") return;
         const t = e.target;
         const hit = t && typeof t.closest === "function" ? t.closest("[data-account]") : null;
-        if (hit && e.currentTarget.contains(hit)) open(hit.getAttribute("data-account"));
+        if (!hit || !e.currentTarget.contains(hit)) return;
+        if (!isPlainClick(e)) return;
+        e.preventDefault();
+        const open = openRef.current;
+        if (typeof open === "function") open(hit.getAttribute("data-account"));
     }, []);
 
     const height = count * ROW_H;

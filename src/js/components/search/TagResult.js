@@ -3,6 +3,9 @@ import React, { useCallback } from "preact/compat";
 import ListItem from "@material-ui/core/ListItem";
 import ListItemText from "@material-ui/core/ListItemText";
 
+import { feedTagPath, useFeedSort } from "../../utils/feedSort";
+import { link } from "../../utils/link";
+
 import { highlightNode } from "./highlight";
 
 // ── TagResult ─────────────────────────────────────────────────────────────────
@@ -15,8 +18,11 @@ const PRIMARY_STYLE = { color: "#bbb", display: "block", whiteSpace: "nowrap", o
 export const TagResult = React.memo(
     ({ classes, name, query, exact, onGoToTag }) => {
         const onClick = useCallback(() => onGoToTag(name), [onGoToTag, name]);
+        // A link to the tag's feed in the kept sort — the address onGoToTag
+        // pushes; useFeedSort keeps the href on that sort when it changes.
+        useFeedSort();
         return (
-            <ListItem button dense onClick={onClick} className={classes.row} title={exact ? undefined : "#" + name}>
+            <ListItem button dense component="a" {...link(feedTagPath(name), onClick)} className={classes.row} title={exact ? undefined : "#" + name}>
                 <ListItemText
                     className={classes.rowText}
                     disableTypography

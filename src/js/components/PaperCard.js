@@ -9,7 +9,8 @@ import IconButton from '@material-ui/core/IconButton';
 import MoreVertIcon from '@material-ui/icons/MoreVert';
 import { xbrzF, hexF, crtF, triF, releaseId, getCachedRender, acquireCachedBitmap, playAnimation } from '../utils/render-pool';
 import DateLabel from './DateLabel';
-import { HISTORY } from '../utils/constants';
+import { HISTORY, buildPostUrl, profilePath, POST_DRAWER_TAB_HASHES } from '../utils/constants';
+import { link } from '../utils/link';
 import ButtonBase from '@material-ui/core/ButtonBase';
 import * as actions from '../actions/utils';
 import { voteSign } from '../utils/voteValue';
@@ -766,6 +767,15 @@ function PaperCardInner({
         HISTORY.push('/@' + username);
     }, []);
 
+    // The addresses this card leads to, printed in its links' href (utils/link):
+    // the title, the artwork and the comments button lead to the post, the
+    // avatar and the name to the author. buildPostUrl is what every page
+    // hosting this card pushes for an artwork, so the address a Ctrl+click
+    // opens in a new tab is the one a click opens here. A plain click still
+    // goes through onOpen / openAuthor, untouched.
+    const postHref = useMemo(() => buildPostUrl(data), [data]);
+    const authorHref = profilePath(data.author);
+
     // active_votes reflecting the current local vote state. Once the page has
     // applied the vote to `data` (applyOptimisticVote → placeholder row with
     // the real weight, `_optimistic` and `_prev_rshares`), the rows are passed
@@ -966,7 +976,8 @@ function PaperCardInner({
                 className={classes.cardHeader}
                 avatar={
                     <FadeAvatar
-                        onClick={() => openAuthor(author.username)}
+                        component="a"
+                        {...link(authorHref, () => openAuthor(author.username))}
                         src={author.image}
                     />
                 }
@@ -979,9 +990,9 @@ function PaperCardInner({
                     </IconButton>
                 }
                 title={
-                    <span onClick={() => onOpen?.(data, getCanvasBoundingRect())}>
+                    <a {...link(postHref, () => onOpen?.(data, getCanvasBoundingRect()))}>
                         {data.title}
-                    </span>
+                    </a>
                 }
                 subheader={
                     // One sentence, "{{date}} by {{author}}", so a translation
@@ -997,9 +1008,9 @@ function PaperCardInner({
                             // behavior is unchanged.
                             author: (
                                 <ProfileHoverAnchor api={api} author={author} onOpenProfile={openAuthor}>
-                                    <span className={classes.subheaderName} onClick={() => openAuthor(author.username)}>
+                                    <a className={classes.subheaderName} {...link(authorHref, () => openAuthor(author.username))}>
                                         {(typeof author.name === 'string' && author.name.trim()) || author.username || ''}
-                                    </span>
+                                    </a>
                                 </ProfileHoverAnchor>
                             ),
                         })}
@@ -1007,10 +1018,18 @@ function PaperCardInner({
                 }
             />
 
+            {/* The artwork is a link to its post like the title: Ctrl/Cmd+click
+                and the middle button open it in a new tab. Two things stay as
+                they were. The browser's menu is still blocked here (it would
+                offer to save the artwork): the card's ⋮ menu has "Open in new
+                tab" and "Copy link" instead. And a blurred or unclassified
+                artwork is still no way in — no href, no click. */}
             <ButtonBase
+                {...(((effectiveNsfwFlag && !nsfw) || verdictPending)
+                    ? null
+                    : link(postHref, () => onOpen?.(data, getCanvasBoundingRect())))}
                 onContextMenu={e => e.preventDefault()}
                 style={{ width: '100%', borderRadius: (renderer === 'xbrz' || renderer === 'tri') ? '21px' : '0px' }}
-                onClick={() => ((effectiveNsfwFlag && !nsfw) || verdictPending) ? undefined : onOpen?.(data, getCanvasBoundingRect())}
             >
                 <CanvasImage
                     renderer={renderer}
@@ -1054,6 +1073,7 @@ function PaperCardInner({
                 commentsNumber={commentsNumber}
                 showComments={true}
                 onCommentsClick={handleCommentsClick}
+                commentsHref={postHref ? postHref + POST_DRAWER_TAB_HASHES[1] : null}
             />
         </Card>
     );

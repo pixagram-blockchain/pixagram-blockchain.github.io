@@ -1,4 +1,4 @@
-import { COMMUNITY_TAG_REGEX } from "./constants";
+import { COMMUNITY_TAG_REGEX, buildPostUrl } from "./constants";
 import { countUpvotes, countDownvotes } from "./voteValue";
 
 // ── Portal blog cards ───────────────────────────────────────────────────
@@ -83,6 +83,12 @@ export const buildPortalPostUrl = (card, hash) => {
     if (!slug || !author || !permlink) return null;
     return `/${slug}/@${author}/${permlink}${hash || ''}`;
 };
+
+// The address a card opens, whichever kind it is: what the pages push when
+// the card is clicked and what the card prints in its links' href. One
+// definition for both (Profile and FeedPersonal each kept a private copy),
+// so the address a Ctrl+click opens in a new tab is the one a click pushes.
+export const postUrlOf = (card) => (isBlogCard(card) ? buildPortalPostUrl(card) : buildPostUrl(card));
 
 export const enrichPostForBlogCard = (post, account, voterProfiles) => {
     const pendingPayout = parsePayoutValue(post.pending_payout_value);

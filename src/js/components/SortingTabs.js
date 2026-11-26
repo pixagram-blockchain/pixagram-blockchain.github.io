@@ -7,6 +7,7 @@ import Whatshot from "@material-ui/icons/Whatshot";
 import LocalOffer from "@material-ui/icons/LocalOffer";
 
 import { t, useLanguage } from "../utils/text";
+import { isPlainClick } from "../utils/link";
 
 // Icon + label pairs, in the order of the ranked-post sort methods used by the
 // pages mounting this component: created, hot, trending, promoted. (Icons were
@@ -32,6 +33,14 @@ const MOBILE_ICONS = [
     <LocalOffer />,
 ];
 
+// A tab is a link to the address its click writes (utils/link): `hrefs[i]`,
+// handed by the page. Ctrl/Cmd+click, the middle button and the browser's
+// menu open that sort in another tab; a plain click is onSortingChange, as
+// before. A tab without an address stays the plain button it was.
+const tabLink = (hrefs, i) => (hrefs && hrefs[i]
+    ? { component: "a", href: hrefs[i], "data-nav": "", draggable: false }
+    : null);
+
 // Whether the bar is tucked away: slid down off the bottom edge on mobile,
 // up off the top edge on desktop. Pages that track the scroll as flags pass
 // `hidden`; the raw y/scrollTop pair is still accepted and reduced to the
@@ -46,6 +55,7 @@ const isTucked = ({ hidden, lessThan960w, y, scrollTop }) => (
 const SortingTabs = React.memo(({
                                     sorting,
                                     onSortingChange,
+                                    hrefs,
                                     mainTabClass,
                                     lessThan960w,
                                     hidden,
@@ -53,6 +63,16 @@ const SortingTabs = React.memo(({
                                     scrollTop
                                 }) => {
     useLanguage();
+
+    // The click rule of a link, for the tabs that are one: a modified click
+    // is the browser's and changes nothing here.
+    const handleChange = React.useCallback((event, value) => {
+        if (hrefs && hrefs[value]) {
+            if (!isPlainClick(event)) return;
+            event.preventDefault();
+        }
+        onSortingChange(event, value);
+    }, [hrefs, onSortingChange]);
 
     const newerLabel = t("words.newer");
     const hottestLabel = t("words.hottest");
@@ -80,13 +100,13 @@ const SortingTabs = React.memo(({
             variant="fullWidth"
             indicatorColor="primary"
             textColor="primary"
-            onChange={onSortingChange}
+            onChange={handleChange}
             fullwidth={true}
         >
-            <Tab icon={lessThan960w ? MOBILE_ICONS[0] : undefined} label={lessThan960w ? undefined : DESKTOP_LABELS[0]} />
-            <Tab icon={lessThan960w ? MOBILE_ICONS[1] : undefined} label={lessThan960w ? undefined : DESKTOP_LABELS[1]} />
-            <Tab icon={lessThan960w ? MOBILE_ICONS[2] : undefined} label={lessThan960w ? undefined : DESKTOP_LABELS[2]} />
-            <Tab icon={lessThan960w ? MOBILE_ICONS[3] : undefined} label={lessThan960w ? undefined : DESKTOP_LABELS[3]} />
+            <Tab {...tabLink(hrefs, 0)} icon={lessThan960w ? MOBILE_ICONS[0] : undefined} label={lessThan960w ? undefined : DESKTOP_LABELS[0]} />
+            <Tab {...tabLink(hrefs, 1)} icon={lessThan960w ? MOBILE_ICONS[1] : undefined} label={lessThan960w ? undefined : DESKTOP_LABELS[1]} />
+            <Tab {...tabLink(hrefs, 2)} icon={lessThan960w ? MOBILE_ICONS[2] : undefined} label={lessThan960w ? undefined : DESKTOP_LABELS[2]} />
+            <Tab {...tabLink(hrefs, 3)} icon={lessThan960w ? MOBILE_ICONS[3] : undefined} label={lessThan960w ? undefined : DESKTOP_LABELS[3]} />
         </Tabs>
     );
 }, (prevProps, nextProps) => {
@@ -96,9 +116,11 @@ const SortingTabs = React.memo(({
     // and after a switch to another community — sort unchanged, page already
     // at the top — the bar kept the previous one, so the next tab click
     // replaced the URL with the OLD community's and navigated back to it.
+    // hrefs likewise: they name the community too.
     return prevProps.sorting === nextProps.sorting &&
         prevProps.lessThan960w === nextProps.lessThan960w &&
         prevProps.onSortingChange === nextProps.onSortingChange &&
+        prevProps.hrefs === nextProps.hrefs &&
         prevProps.mainTabClass === nextProps.mainTabClass &&
         isTucked(prevProps) === isTucked(nextProps);
 });

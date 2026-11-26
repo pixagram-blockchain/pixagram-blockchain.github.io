@@ -7,6 +7,7 @@ import ListItemText from "@material-ui/core/ListItemText";
 import GroupIcon from "@material-ui/icons/Group";
 
 import { T } from "../../utils/T";
+import { link } from "../../utils/link";
 
 import { highlightNode, NO_SLOTS } from "./highlight";
 import { ARTWORK_RADIUS } from "./config";
@@ -37,7 +38,7 @@ export const CommunityResult = React.memo(
         const onClick = useCallback(() => onGoToCommunity(community.name), [onGoToCommunity, community.name]);
         const about = typeof community.about === "string" ? community.about.trim() : "";
         return (
-            <ListItem button dense onClick={onClick} className={classes.row}>
+            <ListItem button dense component="a" {...link(community.name ? "/" + community.name : null, onClick)} className={classes.row}>
                 <ListItemAvatar className={classes.rowAvatar}>
                     <Avatar variant="rounded" src={showImage ? image : undefined} imgProps={imgProps} style={AVATAR_STYLE} alt={title}>
                         <GroupIcon style={{ fontSize: 20 }} />

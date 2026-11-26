@@ -20,11 +20,16 @@ import PushPin from "@material-ui/icons/Bookmark";
 import BookmarkIcon from "@material-ui/icons/Bookmark";
 import BookmarkBorderIcon from "@material-ui/icons/BookmarkBorder";
 import LinkIcon from "@material-ui/icons/Link";
+import OpenInNewRounded from "@material-ui/icons/OpenInNewRounded";
 import CodeIcon from "@material-ui/icons/Code";
 import EditRounded from "@material-ui/icons/EditRounded";
 import TuneRounded from "@material-ui/icons/TuneRounded";
 import DeleteOutlineRounded from "@material-ui/icons/DeleteOutlineRounded";
 import * as actions from "../actions/utils";
+import { buildCommentThreadUrl } from "../utils/constants";
+import { postUrlOf } from "../utils/blogCard";
+import { pendingTab } from "../utils/link";
+import { resolveThreadUrl } from "../utils/threadRoot";
 
 import { t, useLanguage } from "../utils/text";
 
@@ -213,6 +218,34 @@ const PaperCardMenuOption = React.memo(({ classes, data, xy = [], onClose, api, 
         onClose();
     }, [data, onClose]);
 
+    // ── Open in new tab ────────────────────────────────────────────────
+    // The address the card itself opens: a post card's post (postUrlOf, what
+    // the pages push), a comment or reply card's thread with that comment
+    // pinned (buildCommentThreadUrl). On an artwork card this entry is the
+    // way to a new tab from the artwork itself, whose browser menu is
+    // blocked; the title has the browser's own.
+    const openHref = useMemo(() => {
+        if (!data || !data.permlink) return null;
+        return data.parent_author ? buildCommentThreadUrl(data) : postUrlOf(data);
+    }, [data]);
+
+    // A comment card's data usually cannot prove its thread's root (no href
+    // on its title either: PaperCardReply resolves it when clicked). The
+    // entry then does the same: the tab is opened at once, while this click
+    // still counts as the user's (utils/link, pendingTab), and is pointed at
+    // the thread once the chain has named its root (utils/threadRoot) — or
+    // closed again, with the page's own "could not load" notice, when it
+    // cannot. It needs the page to hand this menu its `api`.
+    const canResolveThread = !openHref && isComment && Boolean(authorUsername && permlink)
+        && Boolean(api && api.content && typeof api.content.getContent === 'function');
+    const handleOpenThread = useCallback(() => {
+        const tab = pendingTab();
+        resolveThreadUrl(api, authorUsername, permlink).then((url) => {
+            if (!tab.go(url)) actions.trigger_snackbar(t("components.profile.could_not_load_the_original_post"));
+        });
+        onClose();
+    }, [api, authorUsername, permlink, onClose]);
+
     const handleCopyLink = useCallback(() => {
         const postUrl = data?.url || data?.permlink
             ? `${window.location.origin}/${data.category || data.community || ''}/@${getAuthorUsername(data.author)}/${data.permlink}`
@@ -284,6 +317,25 @@ const PaperCardMenuOption = React.memo(({ classes, data, xy = [], onClose, api, 
             anchorPosition={anchorPosition}
         >
             <MenuList>
+                {/* A real link with target="_blank": the browser opens the tab
+                    itself, so nothing here can be taken for a pop-up. data-nav
+                    keeps the content-link colours off it (theme/overrides). */}
+                {openHref && (
+                    <MenuItem component="a" href={openHref} target="_blank" rel="noopener" data-nav="" onClick={onClose}>
+                        <ListItemIcon>
+                            <OpenInNewRounded fontSize="small" />
+                        </ListItemIcon>
+                        <ListItemText primary={t("components.data_viewer_dialog.open_in_new_tab")} />
+                    </MenuItem>
+                )}
+                {canResolveThread && (
+                    <MenuItem onClick={handleOpenThread}>
+                        <ListItemIcon>
+                            <OpenInNewRounded fontSize="small" />
+                        </ListItemIcon>
+                        <ListItemText primary={t("components.data_viewer_dialog.open_in_new_tab")} />
+                    </MenuItem>
+                )}
                 <MenuItem onClick={handleCopyLink}>
                     <ListItemIcon>
                         <LinkIcon fontSize="small" />

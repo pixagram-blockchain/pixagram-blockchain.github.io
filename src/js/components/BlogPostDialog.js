@@ -43,7 +43,9 @@ import FavoriteRounded from "@material-ui/icons/FavoriteRounded";
 import FavoriteBorderRounded from "@material-ui/icons/FavoriteBorderRounded";
 import InfoOutlined from "@material-ui/icons/InfoOutlined";
 import useLiveTimeAgo from "../hooks/useLiveTimeAgo";
-import { HISTORY, getPostState, POST_STATE, parsePostDrawerHash, POST_DRAWER_HASH_TABS, POST_DRAWER_TAB_HASHES, parseCommentFocusHash } from "../utils/constants";
+import { HISTORY, getPostState, POST_STATE, parsePostDrawerHash, POST_DRAWER_HASH_TABS, POST_DRAWER_TAB_HASHES, parseCommentFocusHash, profilePath } from "../utils/constants";
+import { link } from "../utils/link";
+import ChipLink from "./ChipLink";
 import CommentInList, { applyCommentEdit, withCommentEdits } from "./CommentInList";
 import CommentComposerField, { commentBodyForBroadcast, commentImageProblem, commentImageLimitMessage, commentImageStyles } from "./CommentComposer";
 import ProfileHoverAnchor from "./ProfileHoverCard";
@@ -1440,11 +1442,16 @@ const mutedWords = (parts, style) => (Array.isArray(parts)
     : <span style={style}>{parts}</span>);
 
 // Memoized Tag Chip Component
+// A link to the tag's feed (utils/link) — the address _open_tag pushes. A
+// plain click is onClick (push, then close the dialog); a Ctrl/Cmd or middle
+// click opens the tag in another tab and leaves the post open. ChipLink keeps
+// the chip a ButtonBase: same ripple, same look.
 const TagChip = memo(({ tag, index, onClick }) => (
     <Chip
+        component={ChipLink}
         key={"#".concat(tag.concat(index.toString(10)))}
         label={"#".concat(tag.toLowerCase())}
-        onClick={() => onClick(tag.toLowerCase())}
+        {...link("/trending/" + tag.toLowerCase(), () => onClick(tag.toLowerCase()))}
     />
 ), (prev, next) => prev.tag === next.tag);
 
@@ -1482,9 +1489,9 @@ const ParentComment = memo(({ comment, index, classes, locales, onOpenAuthor, ap
                 // the host page's <ProfileHoverCardLayer/>.
                 author: (
                     <ProfileHoverAnchor api={api} author={comment.author} onOpenProfile={onOpenAuthor}>
-                        <span className={classes.subheaderName} onClick={() => { onOpenAuthor((comment.author || {}).username) }}>
+                        <a className={classes.subheaderName} {...link(profilePath(comment.author), () => { onOpenAuthor((comment.author || {}).username) })}>
                             {(comment.author || {}).name}
-                        </span>
+                        </a>
                     </ProfileHoverAnchor>
                 ),
                 time: (
@@ -3395,9 +3402,9 @@ class BlogPostDialog extends React.PureComponent {
 
                     {deleted && username && (
                         <Tooltip arrow classes={{ tooltip: classes.tooltipRoot }} title={"@" + username}>
-                            <div
+                            <a
                                 className={classes.unavailableAuthorRow}
-                                onClick={() => this._open_author(username)}
+                                {...link(profilePath(username), () => this._open_author(username))}
                             >
                                 <Avatar
                                     className={classes.unavailableAvatar}
@@ -3407,7 +3414,7 @@ class BlogPostDialog extends React.PureComponent {
                                 <span className={classes.unavailableAuthorName}>
                                     {t("components.post_unavailable.deleted_by", { author: displayName })}
                                 </span>
-                            </div>
+                            </a>
                         </Tooltip>
                     )}
 
@@ -3654,17 +3661,22 @@ class BlogPostDialog extends React.PureComponent {
 
                                                 <div className={classes.authorSection}>
                                                     <div style={ST_D_INLINE_FLEX__FLOAT_LEFT}>
+                                                        {/* Avatar, name and portal are links (utils/link):
+                                                            a plain click runs the handler they had, a
+                                                            Ctrl/Cmd or middle click opens the address in
+                                                            another tab and leaves the post open. */}
                                                         <Avatar
+                                                            component="a"
                                                             className={classes.authorAvatar}
                                                             src={author.image}
-                                                            onClick={this._open_post_author}
+                                                            {...link(profilePath(author), this._open_post_author)}
                                                             imgProps={LAZY_IMG_PROPS}
                                                         />
                                                         <div className={classes.authorDetails}>
                                                             <Tooltip title={'@' + (author.username || t("components.blog_post_dialog.author"))}>
-                                                                <span className={classes.authorName} onClick={this._open_post_author}>
+                                                                <a className={classes.authorName} {...link(profilePath(author), this._open_post_author)}>
                                                                     {author.name || t("components.blog_post_dialog.anonymous")}
-                                                                </span>
+                                                                </a>
                                                             </Tooltip>
                                                             <span className={classes.authorMeta}>
                                                                 {/* "3h in Portal's Name" — the card's line, minus the author,
@@ -3676,9 +3688,9 @@ class BlogPostDialog extends React.PureComponent {
                                                                         {tnode("components.blog_post_dialog.date_in_portal", {
                                                                             date: postDateNode,
                                                                             portal: (
-                                                                                <span className={classes.subheaderPortal} onClick={this._open_portal}>
+                                                                                <a className={classes.subheaderPortal} {...link(postPortal.name ? "/" + postPortal.name : null, this._open_portal)}>
                                                                                     {postPortal.title}
-                                                                                </span>
+                                                                                </a>
                                                                             ),
                                                                         })}
                                                                     </span>

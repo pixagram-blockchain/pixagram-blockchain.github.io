@@ -1,7 +1,8 @@
 import * as React from "preact/compat";
-import { memo, useCallback, useEffect, useRef, useState } from "preact/compat";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/compat";
 import withStyles from "@material-ui/core/styles/withStyles";
 import TextField from "@material-ui/core/TextField";
+import TextareaAutosize from "@material-ui/core/TextareaAutosize";
 import IconButton from "@material-ui/core/IconButton";
 import Tooltip from "@material-ui/core/Tooltip";
 import CircularProgress from "@material-ui/core/CircularProgress";
@@ -12,6 +13,8 @@ import FormatListBulletedIcon from "@material-ui/icons/FormatListBulleted";
 import FormatListNumberedIcon from "@material-ui/icons/FormatListNumbered";
 import ImageIcon from "@material-ui/icons/Image";
 import CloseIcon from "@material-ui/icons/Close";
+import EditIcon from "@material-ui/icons/Edit";
+import MarkdownIcon from "../icons/Markdown";
 
 import * as actions from "../actions/utils";
 import { t, tx, getLocaleCode, useLanguage } from "../utils/text";
@@ -21,27 +24,40 @@ import {
     MAX_COMMENT_IMAGES, commentBodyForBroadcast, toggleInline, toggleQuote, cycleList, continueOnNewline,
     insertImage, removeFirstImage, formatState, altFromFileName,
 } from "../utils/commentMarkdown";
+import { commentVisualizable } from "../utils/commentRichText";
 
 export { MAX_COMMENT_IMAGES, commentBodyForBroadcast, commentImageProblem } from "../utils/commentMarkdown";
 
 /* ══════════════════════════════════════════════════════════════════════
- * Comment composer: a format bar over a multi-line markdown text area.
+ * Comment composer: a format bar over the comment field, in two modes.
  *
- *   B  I  ❝  ≡  🖼            [thumbnail ×]
- *   ┌──────────────────────────────────────┐
- *   │ Reply to @author                     │
- *   └──────────────────────────────────────┘
+ *   B  I  ❝  ≡  🖼            [thumbnail ×]  (M)
+ *   ┌──────────────────────────────────────────┐
+ *   │ Reply to @author                         │
+ *   └──────────────────────────────────────────┘
  *
- * The dialogs still read and write the text area by id (submitComment,
- * setTextFieldValue), as they always have: it holds its text in state, which
- * follows the DOM through `input` events (see CommentComposerFieldInner for
- * why it can't be uncontrolled any more). The bar only rewrites its
- * markdown (utils/commentMarkdown): **bold**,
- * *italic*, > quote, the list button's three states (none → bullets →
- * numbers → none) and one image, uploaded to Arweave like the blog editor's
- * (utils/lexical/arweaveImage: WebP, ≤ 99 kB) and written as ![alt](url).
- * A comment holds MAX_COMMENT_IMAGES (one): picking another image replaces
- * it, and the comment tier renders only the first.
+ * VISUAL (the default): the field shows the comment as it will look — bold
+ * is bold, a quote is a quote, the image is the image — in a small Lexical
+ * editor (CommentVisualEditor, loaded on demand).
+ * MARKDOWN: the multi-line text area holding the markdown itself.
+ * The white round button at the right end of the bar switches between the
+ * two; the choice is remembered on the device.
+ *
+ * Either way a comment IS its markdown, and the text area holds it. In
+ * visual mode the text area stays in the page — hidden, same element, same
+ * id — and the editor writes every change into it (value + `input` event).
+ * So nothing changes for the dialogs: they read and write the field by id
+ * (submitComment, setTextFieldValue) as they always have, and whatever they
+ * write is shown by the editor in turn. The same goes for the toxicity
+ * watcher. See CommentComposerFieldInner.
+ *
+ * In markdown mode the bar only rewrites the markdown
+ * (utils/commentMarkdown): **bold**, *italic*, > quote, the list button's
+ * three states (none → bullets → numbers → none) and one image, uploaded to
+ * Arweave like the blog editor's (utils/lexical/arweaveImage: WebP, ≤ 99 kB)
+ * and written as ![alt](url). A comment holds MAX_COMMENT_IMAGES (one):
+ * picking another image replaces it, and the comment tier renders only the
+ * first.
  *
  * FormatBar is exported on its own for any other text area — give the
  * TextField an id and render <FormatBar targetId={id} /> above it (and
@@ -51,7 +67,9 @@ export { MAX_COMMENT_IMAGES, commentBodyForBroadcast, commentImageProblem } from
  * remounting under it. `maxImages` is 1 (the default) or 0 for a field
  * that takes no image. A multi-line field it edits must be controlled
  * (value + onChange) for the reason given in CommentComposerFieldInner;
- * its edits fire `input`, i.e. the field's onChange.
+ * its edits fire `input`, i.e. the field's onChange. On its own the bar is
+ * a markdown bar: the mode button and the visual editor come with
+ * CommentComposerField (props `visual`, `mode`, `onToggleMode`).
  * ══════════════════════════════════════════════════════════════════════ */
 
 /**
@@ -85,6 +103,65 @@ export function commentImageLimitMessage() {
         "A comment can show one image. Remove the other ones to post it.");
 }
 
+/* ── Visual / markdown ────────────────────────────────────────────────── */
+
+// The reader's mode, remembered on the device. Visual unless they chose
+// markdown.
+const MODE_KEY = "pixa:comment-composer-mode";
+let modeMemo = null;
+
+function readMode() {
+    if (modeMemo) return modeMemo;
+    let stored = null;
+    try { stored = typeof window !== "undefined" && window.localStorage ? window.localStorage.getItem(MODE_KEY) : null; } catch (e) { stored = null; }
+    modeMemo = stored === "markdown" ? "markdown" : "visual";
+    return modeMemo;
+}
+
+function writeMode(mode) {
+    modeMemo = mode;
+    try { window.localStorage.setItem(MODE_KEY, mode); } catch (e) { /* private mode: for this visit only */ }
+}
+
+/* The visual editor is Lexical: loaded when a composer that will use it is
+ * on screen, never with the dialogs themselves (the blog editor's bundle is
+ * deferred for the same reason). Until it is there — and if it never comes:
+ * offline, a failed chunk — the field is the text area, which does
+ * everything on its own. */
+let VisualEditor = null;
+let visualImport = null;
+
+function loadVisualEditor() {
+    if (VisualEditor) return Promise.resolve(VisualEditor);
+    if (!visualImport) {
+        visualImport = import("./CommentVisualEditor")
+            .then((mod) => {
+                VisualEditor = (mod && mod.default) || null;
+                return VisualEditor;
+            })
+            .catch((error) => {
+                console.warn("[CommentComposer] visual editor not loaded:", error && (error.message || error));
+                visualImport = null; // the next composer, or the mode button, tries again
+                return null;
+            });
+    }
+    return visualImport;
+}
+
+// Not on the way of the dialog's opening: the import starts once the
+// composer has been on screen this long.
+const VISUAL_LOAD_DELAY_MS = 600;
+
+function visualRefusedMessage() {
+    return tOr("components.comment_composer.visual_editor_cannot_show",
+        "This comment uses formatting the visual editor can't show. It stays in Markdown.");
+}
+
+function visualUnavailableMessage() {
+    return tOr("components.comment_composer.visual_editor_unavailable",
+        "The visual editor could not be loaded. You can keep writing in Markdown.");
+}
+
 /* ── Applying an edit ─────────────────────────────────────────────────── */
 
 function setNativeValue(el, value) {
@@ -92,6 +169,44 @@ function setNativeValue(el, value) {
     const desc = proto && Object.getOwnPropertyDescriptor(proto, "value");
     if (desc && desc.set) desc.set.call(el, value);
     else el.value = value;
+}
+
+// True while this module itself writes a field and dispatches `input` for
+// it. The composer tells its own writes from a dialog's by it (both are
+// script-made events): only a dialog's replaces the text.
+let ownWrite = false;
+
+function writeValue(el, value) {
+    ownWrite = true;
+    try {
+        setNativeValue(el, value);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+    } catch (e) {
+        /* a field that went away */
+    } finally {
+        ownWrite = false;
+    }
+}
+
+// The element's own focus(): the composer shadows it on the text area while
+// the visual editor stands in for it (see CommentComposerFieldInner).
+function nativeFocus(el) {
+    if (!el) return;
+    const focus = (typeof HTMLElement !== "undefined" && HTMLElement.prototype.focus) || el.focus;
+    try { focus.call(el, { preventScroll: true }); } catch (e) { try { focus.call(el); } catch (e2) { /* not focusable */ } }
+}
+
+// Hand the focus over when one field takes the other's place. At once: a
+// touch keyboard that is up stays up only if the focus goes from the one to
+// the other without a pause. And again a moment later if it did not take
+// (`missed`) and nobody else has it by then.
+function focusNow(focus, missed, from) {
+    focus();
+    setTimeout(() => {
+        if (!missed()) return;
+        const active = typeof document !== "undefined" ? document.activeElement : null;
+        if (!active || active === document.body || active === from) focus();
+    }, 0);
 }
 
 /**
@@ -108,18 +223,18 @@ export function applyEdit(el, edit) {
     let done = false;
     if (!el.disabled && !el.readOnly) {
         try { el.focus({ preventScroll: true }); } catch (e) { try { el.focus(); } catch (e2) {} }
+        ownWrite = true; // the `input` it fires is ours too
         try {
             el.setSelectionRange(edit.from, edit.to);
             if (edit.text) done = document.execCommand("insertText", false, edit.text);
             else done = edit.to > edit.from ? document.execCommand("delete", false) : true;
         } catch (e) {
             done = false;
+        } finally {
+            ownWrite = false;
         }
     }
-    if (!done || el.value !== expected) {
-        setNativeValue(el, expected);
-        try { el.dispatchEvent(new Event("input", { bubbles: true })); } catch (e) {}
-    }
+    if (!done || el.value !== expected) writeValue(el, expected);
     try { el.setSelectionRange(edit.selStart, edit.selEnd); } catch (e) {}
 }
 
@@ -292,6 +407,29 @@ const styles = () => ({
     fileInput: {
         display: "none",
     },
+    /* Visual ⇄ markdown: a white disc at the far end of the bar, apart from
+     * the formatting buttons it is not one of. The icon is the mode it
+     * switches TO, as on the blog editor's button. */
+    modeButton: {
+        width: 28,
+        height: 28,
+        padding: 0,
+        marginLeft: 6,
+        flexShrink: 0,
+        borderRadius: "50%",
+        color: "#101010",
+        backgroundColor: "#ffffff",
+        boxShadow: "0 1px 4px rgba(0,0,0,0.5)",
+        transition: "background-color 150ms ease, color 150ms ease",
+        "& .MuiSvgIcon-root": { fontSize: 18 },
+        "&:hover": { backgroundColor: "#d9d9d9" },
+        // a touch screen keeps :hover after the tap
+        "@media (hover: none)": { "&:hover": { backgroundColor: "#ffffff" } },
+        "&.Mui-disabled": { color: "#6a6a6a", backgroundColor: "#2b2b2b", boxShadow: "none" },
+    },
+    modeProgress: {
+        color: "#101010",
+    },
 });
 
 /* ── Format bar ───────────────────────────────────────────────────────── */
@@ -316,7 +454,22 @@ const BarButton = ({ classes, title, active, pressed, disabled, onClick, childre
 
 const NO_STATE = "0|0|0|none|0|";
 
-function FormatBarInner({ classes, className, targetId, disabled, maxImages = MAX_COMMENT_IMAGES, onBusyChange }) {
+/**
+ * Props, besides those documented at the top (targetId, disabled, maxImages,
+ * onBusyChange): what CommentComposerField adds for its two modes.
+ *   visual        the visual editor's handle while it is the field (see
+ *                 CommentVisualEditor: toggleBold, …, getState, subscribe);
+ *                 the buttons then act on it instead of the text area
+ *   mode          "visual" | "markdown" — what the field shows now
+ *   modeBusy      the visual editor is being fetched
+ *   onToggleMode  the mode button's click; no button without it
+ *   actionsRef    a ref the bar fills with { uploadImage(file) }, for image
+ *                 files pasted or dropped into the visual editor
+ */
+function FormatBarInner({
+                            classes, className, targetId, disabled, maxImages = MAX_COMMENT_IMAGES, onBusyChange,
+                            visual = null, mode, modeBusy, onToggleMode, actionsRef,
+                        }) {
     useLanguage();
     // What the buttons show, as one string so an unchanged state never
     // re-renders the bar: bold|italic|quote|list|imageCount|imageUrl.
@@ -327,16 +480,28 @@ function FormatBarInner({ classes, className, targetId, disabled, maxImages = MA
     const fileRef = useRef(null);
     const disabledRef = useRef(disabled);
     disabledRef.current = disabled;
+    const visualRef = useRef(visual);
+    visualRef.current = visual;
 
     const getEl = useCallback(() => (targetId && typeof document !== "undefined" ? document.getElementById(targetId) : null), [targetId]);
 
     const refresh = useCallback(() => {
+        if (visualRef.current) return; // the visual editor reports its own state
         const el = getEl();
         if (!el || typeof el.value !== "string") return;
         const st = formatState(el.value, el.selectionStart || 0, el.selectionEnd || 0);
         const next = [st.bold ? 1 : 0, st.italic ? 1 : 0, st.quote ? 1 : 0, st.list, st.imageCount, st.imageUrl].join("|");
         setState((prev) => (prev === next ? prev : next));
     }, [getEl]);
+
+    // In visual mode the buttons show the editor's state; back in markdown
+    // mode, the text area's again.
+    useEffect(() => {
+        if (!visual) { refresh(); return undefined; }
+        const show = (next) => setState((prev) => (prev === next ? prev : next));
+        show(visual.getState());
+        return visual.subscribe(show);
+    }, [visual, refresh]);
 
     const apply = useCallback((op) => {
         const el = getEl();
@@ -360,9 +525,16 @@ function FormatBarInner({ classes, className, targetId, disabled, maxImages = MA
         try {
             // Same storage policy as the blog editor's images.
             const stored = await storeImageOnArweave(file);
-            const el = getEl();
-            if (el && stored && stored.url) {
-                applyEdit(el, insertImage(el.value, el.selectionStart || 0, el.selectionEnd || 0, stored.url, altFromFileName(file.name)));
+            if (stored && stored.url) {
+                // The mode may have been switched while it uploaded: the image
+                // goes into the field as it is NOW.
+                const editor = visualRef.current;
+                const el = getEl();
+                if (editor) {
+                    editor.insertImage(stored.url, altFromFileName(file.name));
+                } else if (el) {
+                    applyEdit(el, insertImage(el.value, el.selectionStart || 0, el.selectionEnd || 0, stored.url, altFromFileName(file.name)));
+                }
             }
             const sizeKb = Math.max(1, Math.round(((stored && stored.bytes) || 0) / 1024)).toLocaleString(getLocaleCode());
             actions.trigger_snackbar(stored && stored.withinFreeBudget
@@ -385,6 +557,8 @@ function FormatBarInner({ classes, className, targetId, disabled, maxImages = MA
     }, [getEl, refresh, onBusyChange]);
     const uploadRef = useRef(uploadImage);
     uploadRef.current = uploadImage;
+    // For the visual editor's own paste / drop of image files.
+    if (actionsRef) actionsRef.current = { uploadImage: (file) => uploadRef.current(file) };
 
     // Follow the field: its selection, its value (typing, the dialogs'
     // setTextFieldValue, our own edits), and image paste / drop into it.
@@ -431,10 +605,17 @@ function FormatBarInner({ classes, className, targetId, disabled, maxImages = MA
         };
     }, [targetId, refresh, maxImages]);
 
-    const onBold = useCallback(() => apply((v, s, e) => toggleInline(v, s, e, "bold")), [apply]);
-    const onItalic = useCallback(() => apply((v, s, e) => toggleInline(v, s, e, "italic")), [apply]);
-    const onQuote = useCallback(() => apply(toggleQuote), [apply]);
-    const onList = useCallback(() => apply(cycleList), [apply]);
+    // Each button: the visual editor when it is the field, the markdown
+    // otherwise.
+    const act = useCallback((onEditor, onMarkdown) => {
+        if (disabledRef.current) return;
+        const editor = visualRef.current;
+        if (editor) onEditor(editor); else apply(onMarkdown);
+    }, [apply]);
+    const onBold = useCallback(() => act((ed) => ed.toggleBold(), (v, s, e) => toggleInline(v, s, e, "bold")), [act]);
+    const onItalic = useCallback(() => act((ed) => ed.toggleItalic(), (v, s, e) => toggleInline(v, s, e, "italic")), [act]);
+    const onQuote = useCallback(() => act((ed) => ed.toggleQuote(), toggleQuote), [act]);
+    const onList = useCallback(() => act((ed) => ed.cycleList(), cycleList), [act]);
     const onRemoveImage = useCallback(() => apply((v) => removeFirstImage(v)), [apply]);
     const onImage = useCallback(() => {
         if (busyRef.current || disabledRef.current) return;
@@ -454,7 +635,8 @@ function FormatBarInner({ classes, className, targetId, disabled, maxImages = MA
     const quote = parts[2] === "1";
     const list = parts[3];
     const imageUrl = parts.slice(5).join("|");
-    const thumb = maxImages > 0 ? previewSrc(imageUrl) : null;
+    // In visual mode the image is in the field itself, with its own "remove".
+    const thumb = !visual && maxImages > 0 ? previewSrc(imageUrl) : null;
     const off = !!disabled;
 
     const listTitle = list === "bullet"
@@ -462,6 +644,11 @@ function FormatBarInner({ classes, className, targetId, disabled, maxImages = MA
         : list === "number"
             ? t("components.format_menus.numbered_list")
             : t("components.editor_toolbar.lists");
+    const modeTitle = onToggleMode
+        ? (mode === "visual"
+            ? t("components.editor_toolbar.switch_to_markdown_code")
+            : t("components.editor_toolbar.switch_to_visual_editor"))
+        : "";
 
     return (
         <div className={className ? classes.bar + " " + className : classes.bar}>
@@ -504,6 +691,24 @@ function FormatBarInner({ classes, className, targetId, disabled, maxImages = MA
                     </Tooltip>
                 </span>
             )}
+            {onToggleMode && (
+                <Tooltip title={modeTitle} placement="top" enterDelay={400}>
+                    <span className={classes.wrap}>
+                        <IconButton
+                            size="small"
+                            aria-label={modeTitle}
+                            className={classes.modeButton}
+                            disabled={off}
+                            onMouseDown={preventFocusSteal}
+                            onClick={onToggleMode}
+                        >
+                            {modeBusy
+                                ? <CircularProgress size={14} thickness={6} className={classes.modeProgress} />
+                                : mode === "visual" ? <MarkdownIcon /> : <EditIcon />}
+                        </IconButton>
+                    </span>
+                </Tooltip>
+            )}
             {maxImages > 0 && (
                 <input ref={fileRef} type="file" accept="image/*" tabIndex={-1} aria-hidden="true"
                        className={classes.fileInput} onChange={onFile} />
@@ -515,6 +720,67 @@ function FormatBarInner({ classes, className, targetId, disabled, maxImages = MA
 export const FormatBar = memo(withStyles(styles)(FormatBarInner));
 
 /* ── The composer field ───────────────────────────────────────────────── */
+
+const HIDDEN = Object.freeze({ display: "none" });
+const NO_COMPOSER = Object.freeze({});
+// One row of the field: MUI's input line (InputBase, line-height 1.1876em).
+const ROW_EM = 1.1876;
+
+/**
+ * The field's input — what MUI's TextField draws its label and underline
+ * around. It is always the text area, the element the dialogs know by id,
+ * and in visual mode the editor as well, with the text area hidden behind
+ * it. The text area is the SAME element in both modes: a switch never
+ * remounts it, so whatever holds on to it (the toxicity watcher, a dialog)
+ * keeps the right one. TextField hands `composer` over through inputProps.
+ */
+function ComposerInput(props) {
+    const { inputRef, composer, className, style, rows, rowsMax, onFocus, onBlur, ...other } = props;
+    delete other.type; // InputBase adds it for a custom input; a text area has none
+    const c = composer || NO_COMPOSER;
+    const Visual = c.visualOn ? c.Visual : null;
+    const onTextBlur = c.onTextBlur;
+    const blur = useCallback((e) => {
+        if (onBlur) onBlur(e);
+        if (onTextBlur) onTextBlur(e);
+    }, [onBlur, onTextBlur]);
+    return (
+        <React.Fragment>
+            {Visual && (
+                <Visual
+                    className={className}
+                    minHeight={c.minHeight}
+                    maxHeight={c.maxHeight}
+                    disabled={other.disabled}
+                    maxImages={c.maxImages}
+                    labelledBy={c.labelId}
+                    describedBy={other["aria-describedby"]}
+                    resolveImage={previewSrc}
+                    enterSends={enterSends}
+                    onReady={c.onReady}
+                    onChange={c.onChange}
+                    onSubmit={c.onSubmit}
+                    onImageFiles={c.onImageFiles}
+                    onFocus={onFocus}
+                    onBlur={onBlur}
+                />
+            )}
+            <TextareaAutosize
+                {...other}
+                ref={inputRef}
+                className={className}
+                rows={rows}
+                rowsMax={rowsMax}
+                style={Visual ? HIDDEN : style}
+                aria-hidden={Visual ? "true" : undefined}
+                onFocus={onFocus}
+                onBlur={blur}
+            />
+        </React.Fragment>
+    );
+}
+
+const COMPOSER_INPUT = Object.freeze({ inputComponent: ComposerInput });
 
 function CommentComposerFieldInner({
                                        classes, id, name, className, label, disabled, autoFocus,
@@ -545,11 +811,270 @@ function CommentComposerFieldInner({
     // value and dispatches `input`, which lands here, as do typing and the
     // format bar's edits; reading it by id is unchanged.
     const [text, setText] = useState("");
-    const onChange = useCallback((e) => setText(e.target.value), []);
+
+    /* ── Visual mode ──────────────────────────────────────────────────
+     * `pref` is the mode the reader chose; `visualOn` whether the visual
+     * editor is the field right now. The two differ while the editor is
+     * being fetched, and for a text it cannot show without changing it —
+     * a code block, a list inside a quote (utils/commentRichText,
+     * commentVisualizable): that one stays in markdown, and the next text
+     * that can be shown is shown.
+     *
+     * The text area stays the comment's markdown throughout:
+     *   editor → text area   every change the reader makes (onVisualChange)
+     *   text area → editor   every text a dialog writes into it by script
+     *                        — a comment to edit, the blank after sending
+     * and never the other way round for the same text, so a comment that
+     * was only looked at is sent back exactly as it was loaded.
+     */
+    const [pref, setPref] = useState(readMode);
+    const [Visual, setVisual] = useState(() => VisualEditor);
+    const [visualOn, setVisualOn] = useState(false);
+    const [visualApi, setVisualApi] = useState(null);
+    const [waiting, setWaiting] = useState(false); // the reader asked for it; it is on its way
+
+    // What the stable callbacks below read: the current values, and a few
+    // flags no render depends on.
+    const live = useRef(null);
+    if (live.current === null) {
+        live.current = { api: null, value: "", echo: false, focusNext: false, focusText: false, swapOnBlur: false, waiting: false, mounted: true };
+    }
+    const st = live.current;
+    st.pref = pref;
+    st.visualOn = visualOn;
+    st.disabled = !!disabled;
+    const imageOptions = useMemo(() => ({ maxImages, isImageUrl: (url) => !!previewSrc(url) }), [maxImages]);
+    st.imageOptions = imageOptions;
+
+    const field = useCallback(() => (typeof document !== "undefined" ? document.getElementById(id) : null), [id]);
+
+    useEffect(() => {
+        st.mounted = true;
+        return () => { st.mounted = false; };
+    }, [st]);
+
+    /** Make the visual editor the field, if it can show the text there is.
+     *  how: "asked" (the mode button: say why not, and take the focus),
+     *       "told"  (a text a dialog wrote: say why not),
+     *       "quiet" (on its own initiative). */
+    const enterVisual = useCallback((how) => {
+        if (st.visualOn || !VisualEditor || st.disabled || st.pref !== "visual") return false;
+        const el = field();
+        if (!commentVisualizable(el ? el.value : "", st.imageOptions)) {
+            if (how !== "quiet") actions.trigger_snackbar(visualRefusedMessage());
+            return false;
+        }
+        st.swapOnBlur = false;
+        st.focusNext = how === "asked" || (!!el && typeof document !== "undefined" && document.activeElement === el);
+        st.visualOn = true;
+        setVisualOn(true);
+        return true;
+    }, [st, field]);
+
+    // The editor is there (or gone, with null): it shows the text there is.
+    const onVisualReady = useCallback((api) => {
+        st.api = api;
+        setVisualApi(api);
+        if (!api) return;
+        const el = field();
+        api.load(el ? el.value : "");
+        if (st.focusNext) {
+            st.focusNext = false;
+            focusNow(() => { if (st.api === api) api.focus(); }, () => st.api === api && !api.isFocused(), el);
+        }
+    }, [st, field]);
+
+    // The reader changed the text in the editor: the text area follows, and
+    // tells everyone who listens to it (`input`).
+    const onVisualChange = useCallback((markdown) => {
+        const el = field();
+        if (!el || el.value === markdown) return;
+        st.echo = true;
+        try { writeValue(el, markdown); } finally { st.echo = false; }
+    }, [st, field]);
+
+    const onChange = useCallback((e) => {
+        const value = e.target.value;
+        const same = value === st.value;
+        st.value = value;
+        setText(value);
+        // Typing, the bar's edits and the editor's own writes are the
+        // reader's. What is left is a dialog putting a text in the field by
+        // script: the editor has to show THAT text now — unless it is the
+        // text there is already (an `input` fired for the sake of it), which
+        // must not cost the reader their caret and their undo.
+        if (st.echo || ownWrite || e.isTrusted !== false || same) return;
+        if (st.visualOn) {
+            if (commentVisualizable(value, st.imageOptions)) {
+                if (st.api) st.api.load(value);
+            } else {
+                st.visualOn = false;
+                setVisualOn(false);
+                actions.trigger_snackbar(visualRefusedMessage());
+            }
+        } else if (st.pref === "visual") {
+            enterVisual(value ? "told" : "quiet");
+        }
+    }, [st, enterVisual]);
+
+    // Fetch the editor: only for a reader who can write (a logged-out
+    // field is disabled for good) and wants the visual mode.
+    useEffect(() => {
+        if (pref !== "visual" || disabled || Visual) return undefined;
+        let cancelled = false;
+        const timer = setTimeout(() => {
+            loadVisualEditor().then((Component) => {
+                if (!cancelled && st.mounted && Component) setVisual(() => Component);
+            });
+        }, VISUAL_LOAD_DELAY_MS);
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    }, [st, pref, disabled, Visual]);
+
+    // The editor has arrived, or the field can be written in again: show it.
+    // Not under the reader's fingers, though — a text being typed in the
+    // text area is left there until the field loses the focus.
+    useEffect(() => {
+        if (!Visual || pref !== "visual" || disabled || st.visualOn) return;
+        if (st.waiting) {
+            st.waiting = false;
+            setWaiting(false);
+            enterVisual("asked");
+            return;
+        }
+        const el = field();
+        if (el && el.value && typeof document !== "undefined" && document.activeElement === el) {
+            st.swapOnBlur = true;
+            return;
+        }
+        enterVisual("quiet");
+    }, [st, Visual, pref, disabled, enterVisual, field]);
+
+    const onTextBlur = useCallback(() => {
+        if (!st.swapOnBlur) return;
+        st.swapOnBlur = false;
+        enterVisual("quiet");
+    }, [st, enterVisual]);
+
+    // While the editor stands in for it, the text area cannot take the
+    // focus (it is not displayed) — but the dialogs focus the field by id
+    // (reply, edit). Its focus() is the editor's for that time.
+    useLayoutEffect(() => {
+        if (!visualOn) return undefined;
+        const el = field();
+        if (!el) return undefined;
+        const redirect = () => {
+            if (st.api) st.api.focus(); else st.focusNext = true;
+        };
+        try {
+            Object.defineProperty(el, "focus", { configurable: true, writable: true, value: redirect });
+        } catch (e) {
+            return undefined;
+        }
+        return () => {
+            try { delete el.focus; } catch (e) { /* stays the editor's */ }
+        };
+    }, [st, visualOn, field]);
+
+    // Back in markdown at the reader's request: the caret at the end of it,
+    // as soon as the text area is on screen again.
+    useLayoutEffect(() => {
+        if (visualOn || !st.focusText) return;
+        st.focusText = false;
+        const el = field();
+        if (!el) return;
+        focusNow(() => {
+            if (!st.mounted || st.visualOn) return;
+            nativeFocus(el);
+            try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) { /* not selectable */ }
+        }, () => st.mounted && !st.visualOn && typeof document !== "undefined" && document.activeElement !== el);
+    }, [st, visualOn, field]);
+
+    const onToggleMode = useCallback(() => {
+        if (st.disabled) return;
+        if (st.visualOn) {
+            writeMode("markdown");
+            st.pref = "markdown";
+            st.visualOn = false;
+            st.focusText = true;
+            setPref("markdown");
+            setVisualOn(false);
+            return;
+        }
+        writeMode("visual");
+        st.pref = "visual";
+        setPref("visual");
+        if (VisualEditor) {
+            setVisual(() => VisualEditor);
+            enterVisual("asked");
+            return;
+        }
+        st.waiting = true;
+        setWaiting(true);
+        loadVisualEditor().then((Component) => {
+            if (!st.mounted) return;
+            if (Component) {
+                setVisual(() => Component); // the effect above takes it from here
+                return;
+            }
+            st.waiting = false;
+            setWaiting(false);
+            actions.trigger_snackbar(visualUnavailableMessage());
+        });
+    }, [st, enterVisual]);
+
+    // The label is the text area's (htmlFor): a click on it focuses that —
+    // which a text area that is not displayed cannot take. While the editor
+    // stands in, the click is the editor's.
+    const onLabelClick = useCallback(() => {
+        if (st.visualOn && st.api && !st.disabled) st.api.focus();
+    }, [st]);
+    const labelProps = useMemo(() => ({ onClick: onLabelClick }), [onLabelClick]);
+
+    // Image files pasted or dropped into the editor: the bar uploads them.
+    const barActions = useRef(null);
+    const onImageFiles = useCallback((files) => {
+        const bar = barActions.current;
+        if (bar && files && files[0]) bar.uploadImage(files[0]);
+    }, []);
+
+    const labelId = label && id ? id + "-label" : undefined;
+    // Without a submit (a field that is not sent on Enter) Enter is a new line.
+    const visualSubmit = onSubmit ? submit : null;
+    const composer = useMemo(() => ({
+        visualOn,
+        Visual,
+        maxImages,
+        labelId,
+        minHeight: (rows * ROW_EM) + "em",
+        maxHeight: (rowsMax * ROW_EM) + "em",
+        onReady: onVisualReady,
+        onChange: onVisualChange,
+        onSubmit: visualSubmit,
+        onImageFiles,
+        onTextBlur,
+    }), [visualOn, Visual, maxImages, labelId, rows, rowsMax, onVisualReady, onVisualChange, visualSubmit, onImageFiles, onTextBlur]);
+    const inputProps = useMemo(() => ({ rowsMax, composer }), [rowsMax, composer]);
+
+    // The editor is the field as soon as `visualOn`; its handle follows
+    // within the same frame. The bar waits for it.
+    const editor = visualOn ? visualApi : null;
 
     return (
         <div className={classes.root}>
-            <FormatBar targetId={id} disabled={disabled} maxImages={maxImages} onBusyChange={handleBusy} />
+            <FormatBar
+                targetId={id}
+                disabled={disabled || (visualOn && !visualApi)}
+                maxImages={maxImages}
+                onBusyChange={handleBusy}
+                visual={editor}
+                mode={visualOn ? "visual" : "markdown"}
+                modeBusy={waiting}
+                onToggleMode={onToggleMode}
+                actionsRef={barActions}
+            />
             <TextField
                 fullWidth
                 multiline
@@ -564,6 +1089,9 @@ function CommentComposerFieldInner({
                 value={text}
                 onChange={onChange}
                 onKeyDown={onKeyDown}
+                InputProps={COMPOSER_INPUT}
+                inputProps={inputProps}
+                InputLabelProps={labelProps}
             />
         </div>
     );

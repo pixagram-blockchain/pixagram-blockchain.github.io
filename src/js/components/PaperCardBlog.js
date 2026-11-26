@@ -13,7 +13,9 @@ import ButtonBase from '@material-ui/core/ButtonBase';
 import MoreVert from '@material-ui/icons/MoreVert';
 import DateLabel from './DateLabel';
 import usePostPortal from '../hooks/usePostPortal';
-import { HISTORY } from '../utils/constants';
+import { HISTORY, POST_DRAWER_TAB_HASHES, profilePath } from '../utils/constants';
+import { postUrlOf } from '../utils/blogCard';
+import { link } from '../utils/link';
 import * as actions from '../actions/utils';
 import { voteSign } from '../utils/voteValue';
 import { votesWithLocalVote } from '../utils/voteSync';
@@ -368,6 +370,10 @@ function PaperCardBlog({
                            onOpen,
                            onMenuClick,
                            onCommentsClick,
+                           // (data) => the address the host pushes when this card is
+                           // opened. Only a host whose own builder is not postUrlOf
+                           // hands one (Community), so the href and the click agree.
+                           hrefOf,
                            column_width,
                            voter,
                            api,
@@ -546,6 +552,17 @@ function PaperCardBlog({
         onOpen?.(data, rect);
     }, [onOpen, data]);
 
+    // The addresses this card leads to, printed in its links' href (utils/link):
+    // title, cover and excerpt lead to the post, avatar and name to the
+    // author, the portal and the tags to their pages. A Ctrl/Cmd+click, the
+    // middle button or the browser's own menu opens them in another tab; a
+    // plain click still runs the handlers above, untouched.
+    const postHref = useMemo(
+        () => (typeof hrefOf === 'function' ? hrefOf(data) : postUrlOf(data)),
+        [hrefOf, data]
+    );
+    const authorHref = profilePath(data.author);
+
     const handleCommentsClick = useCallback(() => {
         onCommentsClick?.(data);
     }, [onCommentsClick, data]);
@@ -582,9 +599,9 @@ function PaperCardBlog({
     // Click behavior is unchanged.
     const authorNode = (
         <ProfileHoverAnchor api={api} author={author} onOpenProfile={openAuthor}>
-            <span className={classes.subheaderName} onClick={() => openAuthor(author.username)}>
+            <a className={classes.subheaderName} {...link(authorHref, () => openAuthor(author.username))}>
                 {authorLabel}
-            </span>
+            </a>
         </ProfileHoverAnchor>
     );
 
@@ -628,7 +645,8 @@ function PaperCardBlog({
                         className={classes.cardHeader}
                         avatar={
                             <FadeAvatar
-                                onClick={() => openAuthor(author.username)}
+                                component="a"
+                                {...link(authorHref, () => openAuthor(author.username))}
                                 src={author.image}
                             />
                         }
@@ -640,9 +658,9 @@ function PaperCardBlog({
                         title={
                             /* display block = the click target spans the whole title
                                row, not just the glyphs of a (possibly short) title */
-                            <span onClick={handleOpen} style={{ display: 'block' }}>
+                            <a {...link(postHref, handleOpen)} style={{ display: 'block' }}>
                                 {data.title}
-                            </span>
+                            </a>
                         }
                         subheader={
                             /* PaperCard's line — "timeago by author" — followed by where
@@ -659,9 +677,9 @@ function PaperCardBlog({
                                             date: dateNode,
                                             author: authorNode,
                                             portal: (
-                                                <span className={classes.subheaderName} onClick={() => openPortal(postPortal.name)}>
+                                                <a className={classes.subheaderName} {...link('/' + postPortal.name, () => openPortal(postPortal.name))}>
                                                     {postPortal.title}
-                                                </span>
+                                                </a>
                                             ),
                                         })
                                         // Portal title still loading: the segment waits.
@@ -675,9 +693,9 @@ function PaperCardBlog({
                                                     {headerTags.map((tag, i) => (
                                                         <React.Fragment key={i}>
                                                             {i > 0 ? ' ' : null}
-                                                            <span className={classes.subheaderTag} onClick={() => openTag(tag)}>
+                                                            <a className={classes.subheaderTag} {...link('/trending/' + String(tag).toLowerCase(), () => openTag(tag))}>
                                                                 {'#' + tag}
-                                                            </span>
+                                                            </a>
                                                         </React.Fragment>
                                                     ))}
                                                 </>
@@ -701,7 +719,7 @@ function PaperCardBlog({
                             className={stacked
                                 ? classes.imageContainerInline
                                 : `${classes.imageContainerInline} ${classes.imageContainerInlineResponsive}`}
-                            onClick={handleOpen}
+                            {...link(postHref, handleOpen)}
                             disableRipple
                         >
                             {renderImageContent(true)}
@@ -712,7 +730,7 @@ function PaperCardBlog({
                         on the excerpt Typography only, so short texts left most of the
                         (flex: 1) area dead. CardContent stretches between the header and
                         the actions bar, so clicking any empty space there now works too. */}
-                    <CardContent className={classes.cardContent} onClick={handleOpen}>
+                    <CardContent component="a" className={classes.cardContent} {...link(postHref, handleOpen)}>
                         <Typography
                             variant="body1"
                             className={classes.excerpt}
@@ -735,6 +753,7 @@ function PaperCardBlog({
                         triggerNegativeVotes={triggerNegativeVotes}
                         commentsNumber={commentsNumber}
                         onCommentsClick={handleCommentsClick}
+                        commentsHref={postHref ? postHref + POST_DRAWER_TAB_HASHES[1] : null}
                         showComments={true}
                         payout={payout}
                         data={data}
@@ -747,7 +766,7 @@ function PaperCardBlog({
                 {!stacked && data.image && (
                     <ButtonBase
                         className={classes.imageContainer}
-                        onClick={handleOpen}
+                        {...link(postHref, handleOpen)}
                         disableRipple
                     >
                         {renderImageContent(false)}

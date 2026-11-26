@@ -3,7 +3,7 @@ import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useReducer,
 // Coalesce co-arriving setState calls after an await into a single render
 // (Preact doesn't auto-batch in promise continuations).
 import { unstable_batchedUpdates as batch } from "preact/compat";
-import { HISTORY, buildPostUrl, isPostUrl, parsePostUrl } from "../utils/constants";
+import { HISTORY, buildPostUrl, isPostUrl, parsePostUrl, isRoutablePath } from "../utils/constants";
 import withStyles from "@material-ui/core/styles/withStyles";
 import * as actions from "../actions/utils";
 
@@ -1893,6 +1893,18 @@ const Community = ({ classes, settings, pathname, api }) => {
         // scrolling — the same narrowing Feed applies to its tab handler.
     }, [sorting, communityName, grid.scrollTo]);
 
+    // One address per sort tab — the one handleSortingChange writes — for
+    // SortingTabs to print as that tab's href (utils/link), so a sort opens in
+    // another tab on a Ctrl/Cmd+click, the middle button or the browser's
+    // menu. A sort the router cannot load on its own gets none and stays a
+    // plain tab: "votes" is not in the community route (PAGE_ROUTES lists
+    // "promoted"), so its address would open an empty shell.
+    const sortTabHrefs = useMemo(() => SORT_METHODS.map((sort) => {
+        if (!communityName) return null;
+        const url = buildCommunityUrl(communityName, sort);
+        return isRoutablePath(url) ? url : null;
+    }), [communityName]);
+
     const handleTabChange = useCallback((e, value) => setTabValue(value), []);
 
     const handleToggleJoined = useCallback(async () => {
@@ -2200,6 +2212,7 @@ const Community = ({ classes, settings, pathname, api }) => {
             <CellMeasurer cache={cellMeasurerCache} index={index} key={key} parent={parent}>
                 <PaperCardBlog
                     onOpen={openPost} onCommentsClick={openPostComments}
+                    hrefOf={buildPostUrl}
                     locales={locales} data={item}
                     onMenuClick={openCardMenu} is_scrolling={isScrolling}
                     selected={selectedPostIndex === index}
@@ -2254,6 +2267,7 @@ const Community = ({ classes, settings, pathname, api }) => {
                 )}
                 <div className={classes.viewRight}>
                     <SortingTabs sorting={sorting} onSortingChange={handleSortingChange}
+                                 hrefs={sortTabHrefs}
                                  mainTabClass={classes.mainTab} lessThan960w={isMobile}
                                  hidden={grid.tabsHidden}
                     />

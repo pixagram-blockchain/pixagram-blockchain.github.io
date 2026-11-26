@@ -1,5 +1,6 @@
 import * as React from "preact/compat";
 import { HISTORY, BROWSE_PATH } from "../utils/constants";
+import { link } from "../utils/link";
 import dispatcher from "../dispatcher";
 import { idle, cancelIdle } from "../utils/idle";
 import withStyles from "@material-ui/core/styles/withStyles";
@@ -2206,10 +2207,14 @@ class Home extends React.PureComponent {
                                     <InfoIcon />
                                     <span className="homeActionLearnText">{t("components.home.learn_more")}</span>
                                 </Button>
+                                {/* A link to the feed it enters (utils/link): a plain
+                                    click is _goToFeed, with the page's exit; a Ctrl/Cmd
+                                    or middle click opens the feed in another tab and the
+                                    landing page stays as it is. */}
                                 <Button
                                     variant="contained"
                                     size="large"
-                                    onClick={this._goToFeed}
+                                    {...link(BROWSE_PATH, this._goToFeed)}
                                     className={classes.homeActionBrowse}
                                 >
                                     <span className={signedOut ? "homeActionBrowseText withSub" : "homeActionBrowseText"}>

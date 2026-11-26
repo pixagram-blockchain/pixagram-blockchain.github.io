@@ -12,7 +12,8 @@ import BellIcon from '../icons/Bell';
 import BellRingIcon from '../icons/BellRing';
 import AccountArrowLeft from '../icons/AccountArrowLeft';
 import AccountArrowRight from '../icons/AccountArrowRight';
-import { HISTORY } from '../utils/constants';
+import { HISTORY, profilePath } from '../utils/constants';
+import { link } from '../utils/link';
 import { t, useLanguage } from '../utils/text';
 import { TRANSITION_FAST as TF, RAINBOW_RIPPLE as RIPPLE } from '../theme/motion';
 
@@ -92,6 +93,12 @@ if (typeof window !== 'undefined') {
  *
  * Count navigation reuses onOpenProfile('name/followers'), which the cards'
  * openAuthor turns into HISTORY.push('/@name/followers').
+ *
+ * Everything in the card that navigates is a link to that address
+ * (utils/link) — the picture and the two names to '/@name', the counts to
+ * '/@name/followers' and '/@name/following': Ctrl/Cmd+click, the middle
+ * button and the browser's menu open it in another tab (the card stays up);
+ * a plain click is onOpenProfile, as before.
  * ──────────────────────────────────────────────────────────────────────── */
 
 /* ── Module-level caches ─────────────────────────────────────────────────
@@ -529,6 +536,7 @@ const ProfileHoverCardBase = withStyles(cardStyles)(function ProfileHoverCard(pr
     const openFollowing = useCallback(() => {
         if (typeof onOpenProfile === 'function' && username) onOpenProfile(username + '/following');
     }, [onOpenProfile, username]);
+    const profileHref = profilePath(username);
 
     const isLoggedOut = follow.mode === 'logged-out';
     const bellTitle = isLoggedOut
@@ -550,7 +558,7 @@ const ProfileHoverCardBase = withStyles(cardStyles)(function ProfileHoverCard(pr
             {/* Flush avatar — no padding/margin, no ripple recolor. */}
             <ButtonBase
                 className={classes.avatarButton}
-                onClick={openProfile}
+                {...link(profileHref, openProfile)}
                 aria-label={'@' + username}
             >
                 {imageSrc && !imgFailed ? (
@@ -569,22 +577,20 @@ const ProfileHoverCardBase = withStyles(cardStyles)(function ProfileHoverCard(pr
             </ButtonBase>
 
             <div className={classes.col}>
-                <Fade in timeout={100}><span
+                <Fade in timeout={100}><a
                     className={classes.username}
-                    onClick={openProfile}
-                    role="link"
+                    {...link(profileHref, openProfile)}
                     tabIndex={-1}
                 >
                     {'@' + username}
-                </span></Fade>
-                <Fade in timeout={300}><span
+                </a></Fade>
+                <Fade in timeout={300}><a
                     className={classes.displayName}
-                    onClick={openProfile}
-                    role="link"
+                    {...link(profileHref, openProfile)}
                     tabIndex={-1}
                 >
                     {displayName}
-                </span></Fade>
+                </a></Fade>
 
                 {loading && !bundle ? (
                     <React.Fragment>
@@ -603,13 +609,13 @@ const ProfileHoverCardBase = withStyles(cardStyles)(function ProfileHoverCard(pr
                                     className={classes.countsGroup}
                                     aria-label={t('components.follow_buttons.follow_actions')}
                                 >
-                                    <Button onClick={openFollowers}>
+                                    <Button {...link(profileHref && profileHref + '/followers', openFollowers)}>
                                         <Typography component="span" style={{ textTransform: 'none' }}>
                                             <span style={{ marginRight: 4, opacity: 0.8 }}><AccountArrowLeft /></span>
                                             <strong>{formatCount(counts ? counts.follower_count : undefined)}</strong>
                                         </Typography>
                                     </Button>
-                                    <Button onClick={openFollowing}>
+                                    <Button {...link(profileHref && profileHref + '/following', openFollowing)}>
                                         <Typography component="span" style={{ textTransform: 'none' }}>
                                             <span style={{ marginRight: 4, opacity: 0.8 }}><AccountArrowRight /></span>
                                             <strong>{formatCount(counts ? counts.following_count : undefined)}</strong>

@@ -16,6 +16,7 @@ import ProfileDescription from "./ProfileDescription";
 import VotingPowerDisplay from "./VotingPowerDisplay";
 import Edit from "@material-ui/icons/EditRounded";
 import { cssBackgroundImage } from "../utils/safeUrl";
+import { link } from "../utils/link";
 
 const ProfileSidebar = React.memo(({
                                        classes,
@@ -31,6 +32,9 @@ const ProfileSidebar = React.memo(({
                                        rcMana,
                                        onOpenFollowersModal,
                                        onOpenFollowingModal,
+                                       followersHref,
+                                       followingHref,
+                                       walletHref,
                                        onToggleFollowing,
                                        onTabChange,
                                        onGoToCommunity,
@@ -75,8 +79,11 @@ const ProfileSidebar = React.memo(({
                             <div className={classes.walletButtons}>
                                 {/* fabAway: stepped left out from under the picture's edge
                                     while the picture flies to the viewer and back. */}
+                                {/* A link to the wallet's address (utils/link): a plain
+                                    click is onWalletOpen, a Ctrl/Cmd or middle click
+                                    opens the wallet in another tab. */}
                                 <IconButton className={fabAway ? `${classes.menuButton} ${classes.menuButtonAway}` : classes.menuButton}
-                                            onClick={onWalletOpen} data-tour="profile-wallet"><AccountBalanceWalletRounded/></IconButton>
+                                            {...link(walletHref, onWalletOpen)} data-tour="profile-wallet"><AccountBalanceWalletRounded/></IconButton>
                             </div>
                             {/* Click → PictureDialog (Profile's usePictureDialog measures
                                 this button: same box and same 56px corners as the picture,
@@ -101,6 +108,8 @@ const ProfileSidebar = React.memo(({
                         followingCount={account?.following_count}
                         onOpenFollowersModal={onOpenFollowersModal}
                         onOpenFollowingModal={onOpenFollowingModal}
+                        followersHref={followersHref}
+                        followingHref={followingHref}
                         onToggleFollowing={onToggleFollowing}
                         isMobile={false}
                     />

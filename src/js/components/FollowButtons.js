@@ -10,6 +10,7 @@ import AccountArrowLeft from "../icons/AccountArrowLeft";
 import AccountArrowRight from "../icons/AccountArrowRight";
 
 import { t, useLanguage, getLocaleCode } from "../utils/text";
+import { link } from "../utils/link";
 
 // Counts in the app's locale and its own short forms ("1.2K" in English,
 // "1,2 k" in French, "1,2 Mio." in German) rather than hand-made English
@@ -38,6 +39,13 @@ const FollowButtons = React.memo(({
                                       followingCount,
                                       onOpenFollowersModal,
                                       onOpenFollowingModal,
+                                      // The addresses the two counts lead to
+                                      // ("/@name/followers", "/@name/following"),
+                                      // printed as their href (utils/link): a plain
+                                      // click is the handler above, a Ctrl/Cmd or
+                                      // middle click opens the list in another tab.
+                                      followersHref,
+                                      followingHref,
                                       onToggleFollowing,
                                       isMobile
                                   }) => {
@@ -56,13 +64,13 @@ const FollowButtons = React.memo(({
     return (
         <div className={containerClass}>
             <ButtonGroup variant="contained" aria-label={t("components.follow_buttons.follow_actions")}>
-                <Button onClick={onOpenFollowersModal}>
+                <Button {...link(followersHref, onOpenFollowersModal)}>
                     <Typography component="span" style={{ textTransform: 'none' }}>
                         <span style={{ marginRight: 4, opacity: 0.8 }}><AccountArrowLeft/></span>
                         <strong>{formatCount(followerCount)}</strong>
                     </Typography>
                 </Button>
-                <Button onClick={onOpenFollowingModal}>
+                <Button {...link(followingHref, onOpenFollowingModal)}>
                     <Typography component="span" style={{ textTransform: 'none' }}>
                         <span style={{ marginRight: 4, opacity: 0.8 }}><AccountArrowRight/></span>
                         <strong>{formatCount(followingCount)}</strong>

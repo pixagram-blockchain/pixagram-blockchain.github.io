@@ -3,7 +3,10 @@ import React, { useCallback, useMemo, useState } from "preact/compat";
 import Tooltip from "@material-ui/core/Tooltip";
 import withStyles from "@material-ui/core/styles/withStyles";
 
+import { link } from "../../utils/link";
+
 import { ARTWORK_RADIUS } from "./config";
+import { artworkPath } from "./searchApi";
 
 // ── ArtworkCard ───────────────────────────────────────────────────────────────
 // The simplest possible card: the image, rounded corners, nothing else — no
@@ -16,6 +19,11 @@ import { ARTWORK_RADIUS } from "./config";
 //
 // Hovering (or focusing) a card shows a tooltip above it: the title, then
 // "@author" on the line below — the same "@author · …" line as the post rows.
+//
+// The card is a link to the artwork's post (utils/link; artworkPath is the
+// address onOpen pushes): Ctrl/Cmd+click, the middle button and the browser's
+// menu open it in another tab, a plain click — or Enter — is onOpen. Space
+// still opens it too, as it did when the card was a role="button".
 
 // Same faces as the post rows: "Industry Book" for the title, "Normative Pro" under it.
 const TIP_TITLE = {
@@ -62,12 +70,11 @@ export const ArtworkCard = React.memo(
         if (failed) return null;
         return (
             <ArtworkTooltip title={tip} placement="top" enterDelay={300}>
-                <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={onClick}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
+                <a
+                    {...link(artworkPath(item), onClick)}
+                    onKeyDown={(e) => { if (e.key === " ") { e.preventDefault(); onClick(); } }}
                     style={{
+                        display: "block",
                         position: "relative",
                         width: "100%",
                         aspectRatio: `${item.width || 1} / ${item.height || 1}`,
@@ -98,7 +105,7 @@ export const ArtworkCard = React.memo(
                             userSelect: "none",
                         }}
                     />
-                </div>
+                </a>
             </ArtworkTooltip>
         );
     },

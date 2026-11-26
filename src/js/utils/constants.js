@@ -48,6 +48,18 @@ export const PAGE_ROUTES = [
     }
 ];
 
+// True when a cold load of `pathname` mounts a page: a route other than the
+// catch-all matches its page part. A navigation element is only printed as a
+// link (utils/link) when this holds for its address — an address the app can
+// push while a page is up but that no route matches would open an empty
+// shell in a new tab. (None should exist. Community's fourth sort is one:
+// its tab pushes "/portal-N/votes", the community route lists "promoted".)
+export function isRoutablePath(pathname) {
+    const page = String(pathname || "").split("#")[0].split("?")[0];
+    const { path } = splitMetaPath(page);
+    return PAGE_ROUTES.some((route) => route.page_name !== "unknown" && route.page_regex.test(path));
+}
+
 // We use this to know which currency to select when we have the country code known
 export const CURRENCY_COUNTRIES = {
     ARS: ["AR"],
@@ -708,6 +720,16 @@ export function hostPageForPostUrl(pathname) {
     return isCommunityPostUrl(pathname) ? "community" : "feed";
 }
 
+// "/@name" for an account name ("alice", "@alice") or an author object
+// ({ username }); null when there is none — never the broken "/@", which no
+// route parses back into a name. What an author's name or avatar prints as
+// its href (utils/link); null leaves the element a plain, unlinked one.
+export function profilePath(account) {
+    const name = typeof account === "string" ? account : (account && account.username) || "";
+    const clean = String(name).replace(/^@+/, "");
+    return clean ? "/@" + clean : null;
+}
+
 export function buildPostUrl(data) {
     if (!data) return null;
     const category = (data.category || (data.tags && data.tags[0]) || "general").replace(/[^a-z0-9\-]/g, "");
@@ -851,6 +873,29 @@ export function parseCommentFocusHash(rawHash) {
     const h = (rawHash || "").replace(/^#/, "");
     const part = h.split("&").find((s) => s.indexOf("focus=") === 0);
     return part ? decodePostRef(part.slice(6)) : null;
+}
+
+// ── Comment thread links ───────────────────────────────────────────────
+// Where a comment or reply CARD leads: the root post of its thread, opened
+// on the replies with that very comment pinned ("#replies&focus=<b64url>").
+// It is the address the card's title prints in its href and the card menu's
+// "Open in new tab" opens. Built only from what the card's data proves — the
+// root's category, author and permlink (a comment carries its ROOT's
+// category on chain) — and null otherwise, never a guess: the "general"
+// placeholder buildPostUrl falls back to would be a link to nothing. A card
+// that gets null simply has no href; its click resolves the root from the
+// chain instead (PaperCardReply).
+export function buildCommentThreadUrl(data) {
+    const d = data || {};
+    const nameOf = (v) => (typeof v === "string" ? v : (v && (v.username || v.name)) || "");
+    const rootAuthor = nameOf(d.root_author);
+    if (!d.category || !rootAuthor || !d.root_permlink) return null;
+    const path = buildPostUrl({
+        category: d.category,
+        author: { username: rootAuthor },
+        permlink: d.root_permlink,
+    });
+    return path ? path + buildCommentFocusHash(nameOf(d.author), d.permlink) : null;
 }
 
 // ── Feed focus deep-links ──────────────────────────────────────────────

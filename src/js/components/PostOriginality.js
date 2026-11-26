@@ -22,6 +22,8 @@ import { ORIGINALITY, MATCH, fetchOriginality, fetchSimilar, timeline } from "./
 import timeAgo from "../utils/TimeAgo";
 import { t, useLanguage } from "../utils/text";
 import { T } from "../utils/T";
+import { buildPostUrl, profilePath } from "../utils/constants";
+import { link } from "../utils/link";
 import ButtonBase from "@material-ui/core/ButtonBase";
 
 // ── PostOriginality ───────────────────────────────────────────────────────────
@@ -72,6 +74,16 @@ const SHOWN_MARGIN = "0px 0px -160px 0px";
 
 const stagger = (index) => Math.min(index, STAGGER_MAX) * STAGGER_MS + "ms";
 const stopPropagation = (e) => e.stopPropagation();
+
+// The address of a related artwork's post — the one the dialog swaps in when
+// its tile is clicked (PostDialog, openRelatedArtwork builds it the same way).
+// The tiles print it as their href (utils/link): a Ctrl/Cmd+click, the middle
+// button or the browser's menu opens that artwork in another tab and leaves
+// this one where it is; a plain click is onOpen, the in-place swap, as before.
+const relatedHref = (item) => (item ? buildPostUrl({
+    category: item.category, tags: item.tags,
+    author: { username: item.author }, permlink: item.permlink,
+}) : null);
 const activateOnKey = (fn) => (e) => {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); }
 };
@@ -228,19 +240,22 @@ const MatchTile = React.memo(function MatchTile({ item, index, classes, reveal, 
     const imgClass = classes.tileImg + shown
         + (scale >= 1 ? " pixelated" : "")
         + (blurred ? " nsfw" : "");
+    // An openable tile is a link (see relatedHref); this artwork's own tile
+    // and a blurred one stay the inert <div>s they were. Inside a link the
+    // ripple box is a <span>: a <button> there would take the click's
+    // activation, and Ctrl+click on the picture would then open nothing. (The
+    // theme gives that <span> a button's typography — theme/overrides.js.)
+    const Tile = openable ? "a" : "div";
     return (
         <Tooltip arrow placement="top" enterDelay={300} title={<MatchTip item={item} locales={locales} />}>
-            <div
+            <Tile
                 className={classes.tile + (item.isSelf ? " self" : "") + (openable ? "" : " inert")}
                 data-self={item.isSelf ? "" : undefined}
                 style={{ width }}
-                role={openable ? "link" : undefined}
-                tabIndex={openable ? 0 : undefined}
                 aria-label={openable ? (item.title ? item.title + " — " : "") + "@" + item.author : undefined}
-                onClick={open}
-                onKeyDown={openable ? activateOnKey(open) : undefined}
+                {...(openable ? link(relatedHref(item), open) : null)}
             >
-                <ButtonBase className={classes.tileBox} style={{ height: TILE_H }}>
+                <ButtonBase component={openable ? "span" : undefined} tabIndex={openable ? -1 : undefined} className={classes.tileBox} style={{ height: TILE_H }}>
                     {reveal && item.src ? (
                         <img src={item.src} alt={item.title || ""} decoding="async" draggable={false}
                              onLoad={done} onError={done} className={imgClass} style={delay} />
@@ -252,7 +267,7 @@ const MatchTile = React.memo(function MatchTile({ item, index, classes, reveal, 
                     <span className={classes.captionAuthor}>@{item.author}</span>
                     <span className={classes.captionMeta}>{meta}</span>
                 </div>
-            </div>
+            </Tile>
         </Tooltip>
     );
 });
@@ -299,9 +314,11 @@ const IdeaTile = React.memo(function IdeaTile({ item, index, classes, reveal, ns
     );
     return (
         <Tooltip arrow placement="top" enterDelay={300} title={tip}>
-            <ButtonBase className={classes.cell} style={{ aspectRatio: "1 / " + cellRatio(item) }} role="link" tabIndex={0}
+            <ButtonBase className={classes.cell} style={{ aspectRatio: "1 / " + cellRatio(item) }}
                         aria-label={(item.title ? item.title + " — " : "") + "@" + item.author}
-                        onClick={open} onKeyDown={activateOnKey(open)}>
+                        {...(blurred
+                            ? { role: "link", tabIndex: 0, onClick: open, onKeyDown: activateOnKey(open) }
+                            : link(relatedHref(item), open))}>
                 {reveal ? (
                     <img src={item.src} alt={item.title || ""} decoding="async" draggable={false}
                          onLoad={done} onError={done} className={imgClass} style={{ animationDelay: stagger(index) }} />
@@ -366,7 +383,6 @@ const OriginalityStatus = React.memo(function OriginalityStatus({ classes, data,
     useLanguage();
     const sourceAuthor = data && data.source ? data.source.author : undefined;
     const openSource = useCallback(() => { if (onOpenAuthor) onOpenAuthor(sourceAuthor); }, [onOpenAuthor, sourceAuthor]);
-    const openSourceOnKey = useMemo(() => activateOnKey(openSource), [openSource]);
     const retryOnKey = useMemo(() => activateOnKey(onRetry), [onRetry]);
 
     let icon, title, body = null, warn = false;
@@ -379,8 +395,7 @@ const OriginalityStatus = React.memo(function OriginalityStatus({ classes, data,
         icon = <WarningRounded />;
         title = t(NS + "fake_title");
         const who = (
-            <span className={classes.author} role="link" tabIndex={0}
-                  onClick={openSource} onKeyDown={openSourceOnKey}>@{sourceAuthor}</span>
+            <a className={classes.author} {...link(profilePath(sourceAuthor), openSource)}>@{sourceAuthor}</a>
         );
         body = <T k={NS + (data.identical ? "fake_identical_body" : "fake_copy_body")} vars={{ author: who }} />;
     } else if (status === ORIGINALITY.UNDETERMINED) {

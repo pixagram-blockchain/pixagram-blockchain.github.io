@@ -27,9 +27,11 @@ import {crtF, hexF, sqrF, triF, xbrzF, acquireBestCachedBitmap, dropRendersAbove
 import ArrowForwardIosIcon from "@material-ui/icons/ArrowForwardIos";
 import InfoOutlined from "@material-ui/icons/InfoOutlined";
 import JSLoader from "../utils/JSLoader";
-import {HISTORY, POST_DRAWER_TAB_HASHES, parsePostDrawerHash, parseCommentFocusHash, buildCommentFocusHash, getPostState, POST_STATE, buildPostUrl} from "../utils/constants";
+import {HISTORY, POST_DRAWER_TAB_HASHES, parsePostDrawerHash, parseCommentFocusHash, buildCommentFocusHash, getPostState, POST_STATE, buildPostUrl, profilePath} from "../utils/constants";
+import { link } from "../utils/link";
+import ChipLink from "./ChipLink";
 import { isStoreBuild, getStoreName } from "../utils/store";
-import { feedTagPath } from "../utils/feedSort";
+import { feedTagPath, useFeedSort } from "../utils/feedSort";
 import Chip from "@material-ui/core/Chip";
 import Palette from '@material-ui/icons/Palette'
 import SwapVert from '@material-ui/icons/SwapVert'
@@ -432,13 +434,23 @@ const ColorPalette = React.memo(function ColorPalette({ colors, classes }) {
     );
 }, (a, b) => {return (a.colors.length > 0) && (a.colors.join("-") !== b.colors.join("-"))});
 
-const TagChip = React.memo(({ tag, index, onTagClick }) => (
-    <Chip
-        key={"#".concat(tag.concat(index.toString(10)))}
-        label={"#".concat(tag.toLowerCase())}
-        onClick={() => onTagClick(tag.toLowerCase())}
-    />
-), (a, b) => a.tag === b.tag);
+// A link to the tag's feed in the kept sort (utils/link, utils/feedSort) —
+// the address handleTagClick pushes; useFeedSort keeps the href on that sort
+// when it changes. A plain click is onTagClick (push, then close the dialog);
+// a Ctrl/Cmd or middle click opens the tag in another tab and leaves the
+// dialog open. ChipLink keeps the chip a ButtonBase: same ripple, same look.
+const TagChip = React.memo(({ tag, index, onTagClick }) => {
+    useFeedSort();
+    const name = tag.toLowerCase();
+    return (
+        <Chip
+            component={ChipLink}
+            key={"#".concat(tag.concat(index.toString(10)))}
+            label={"#".concat(name)}
+            {...link(feedTagPath(name), () => onTagClick(name))}
+        />
+    );
+}, (a, b) => a.tag === b.tag);
 
 const TagList = React.memo(function TagList({ tags, className, onTagClick }) {
     return (
@@ -498,9 +510,9 @@ const ParentComment = React.memo(({ comment, index, classes, locales, onOpenAuth
                     // the host page's <ProfileHoverCardLayer/>.
                     author: (
                         <ProfileHoverAnchor api={api} author={comment.author} onOpenProfile={onOpenAuthor}>
-                        <span className={classes.subheaderName} onClick={(event) => { onOpenAuthor((comment.author || {}).username) }}>
+                        <a className={classes.subheaderName} {...link(profilePath(comment.author), () => { onOpenAuthor((comment.author || {}).username) })}>
                             {(comment.author || {}).name}
-                        </span>
+                        </a>
                         </ProfileHoverAnchor>
                     ),
                     time: (
@@ -1714,10 +1726,12 @@ const DrawerHeader = React.memo(function DrawerHeader({
                                                       }) {
     useLanguage(); // memo'd: subscribe so the "by" line follows a language switch
     const fadeKey = hidden ? "0" : "1";
+    // Avatar and name are links to the author's profile (utils/link).
+    const authorNav = link(profilePath(authorUsername), onOpenAuthor);
     return (
         <CardHeader
             className={classes.cardHeader}
-            avatar={<Fade in={!hidden} timeout={FADE_TIMEOUT_AVATAR} key={fadeKey}><Avatar src={authorImage} onClick={onOpenAuthor} /></Fade>}
+            avatar={<Fade in={!hidden} timeout={FADE_TIMEOUT_AVATAR} key={fadeKey}><Avatar component="a" src={authorImage} {...authorNav} /></Fade>}
             action={<IconButton onClick={onMenuToggle}>{showClose ? <CloseIcon style={STYLE_ICON_GRAY} /> : <InfoOutlined style={STYLE_ICON_GRAY} />}</IconButton>}
             title={<Fade in={!hidden} timeout={FADE_TIMEOUT_TITLE} key={fadeKey}><span>{title}</span></Fade>}
             subheader={
@@ -1733,7 +1747,7 @@ const DrawerHeader = React.memo(function DrawerHeader({
                             ),
                             author: (
                                 <Tooltip title={"@" + authorUsername}>
-                                    <span className={classes.subheaderName} onClick={onOpenAuthor}>{authorName}</span>
+                                    <a className={classes.subheaderName} {...authorNav}>{authorName}</a>
                                 </Tooltip>
                             ),
                         })}
@@ -6064,7 +6078,7 @@ function PostDialog(props) {
             <ListItem key={key} style={style}>
                 <ListItemAvatar>
                     <Tooltip title={`@${author.username}`}>
-                        <Avatar src={author.image} style={STYLE_VOTER_AVATAR} className="pixelated" onClick={() => openAuthor(author.username)} />
+                        <Avatar component="a" src={author.image} style={STYLE_VOTER_AVATAR} className="pixelated" {...link(profilePath(author), () => openAuthor(author.username))} />
                     </Tooltip>
                 </ListItemAvatar>
                 {/* No secondary line: the voter entries carry no vote data
@@ -6300,15 +6314,15 @@ function PostDialog(props) {
 
                                 {isDeleted && unavailableUsername && (
                                     <Tooltip arrow title={"@" + unavailableUsername}>
-                                        <div className={classes.unavailableAuthorRow}
-                                             onClick={() => openAuthor(unavailableUsername)}>
+                                        <a className={classes.unavailableAuthorRow}
+                                           {...link(profilePath(unavailableUsername), () => openAuthor(unavailableUsername))}>
                                             <Avatar className={classes.unavailableAvatar}
                                                     src={unavailableAuthor.image}
                                                     imgProps={{ decoding: "async", loading: "lazy" }} />
                                             <span className={classes.unavailableAuthorName}>
                                                 {t("components.post_unavailable.deleted_by", { author: unavailableName })}
                                             </span>
-                                        </div>
+                                        </a>
                                     </Tooltip>
                                 )}
 

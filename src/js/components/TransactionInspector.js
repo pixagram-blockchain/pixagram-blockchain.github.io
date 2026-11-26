@@ -31,6 +31,8 @@ import useLiveTimeAgo from "../hooks/useLiveTimeAgo";
 import { t, tx as translate, useLanguage } from "../utils/text";
 import { formatDate, formatInteger, formatPercent, formatFiatFromUsd } from "../utils/numberFormat";
 import { get_cached_settings } from "../utils/settings";
+import { profilePath } from "../utils/constants";
+import { link, deferredLink, wantsNewTab } from "../utils/link";
 import { tr } from "./GDTowerKit";
 import {
     describeOperation, fmtUnit, toDisplayUnit, isAssetObj, isAssetString,
@@ -449,10 +451,13 @@ const CopyButton = ({ text, classes }) => {
     );
 };
 
+// A link to the account's profile (utils/link): a plain click is onOpen
+// (close the inspector, open the profile); a Ctrl/Cmd or middle click opens
+// the profile in another tab and leaves the inspector as it is.
 const AccountPill = ({ name, classes, onOpen }) => {
     if (!onOpen) return <span className={classes.accountStatic}>@{name}</span>;
     return (
-        <ButtonBase focusRipple className={classes.account} onClick={() => onOpen(name)}>
+        <ButtonBase focusRipple className={classes.account} {...link(profilePath(name), () => onOpen(name))}>
             @{name}
         </ButtonBase>
     );
@@ -1097,7 +1102,12 @@ function TransactionInspector(props) {
         if (onClose) onClose();
     };
     const openAccount = onOpenAccount ? (name) => { leave(); onOpenAccount(name); } : null;
-    const openPost = postRef ? () => { leave(); onOpenPost(postRef.author, postRef.permlink); } : null;
+    // The post's address is resolved by the host when this is clicked, so the
+    // button has no href: the click itself carries a new-tab intent
+    // (utils/link, deferredLink) to onOpenPost, and the inspector then stays.
+    const openPost = postRef
+        ? (event) => { if (!wantsNewTab(event)) leave(); onOpenPost(postRef.author, postRef.permlink, event); }
+        : null;
 
     const iconStyle = {
         color: iconColor || tint.fg,
@@ -1237,7 +1247,7 @@ function TransactionInspector(props) {
                         </dl>
                         {openPost ? (
                             <div className={classes.actions}>
-                                <ButtonBase focusRipple className={classes.action} onClick={openPost}>
+                                <ButtonBase focusRipple className={classes.action} {...deferredLink(openPost)}>
                                     {L("open_post", "Open post")}<OpenInNewRounded />
                                 </ButtonBase>
                             </div>

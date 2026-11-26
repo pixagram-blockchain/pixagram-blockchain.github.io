@@ -21,6 +21,7 @@ import ProfileDescription from "./ProfileDescription";
 import VotingPowerDisplay from "./VotingPowerDisplay";
 import Edit from "@material-ui/icons/Edit";
 import { cssBackgroundImage } from "../utils/safeUrl";
+import { link } from "../utils/link";
 import useMobileCardFit from "../hooks/useMobileCardFit";
 import { t, useLanguage } from "../utils/text";
 
@@ -93,6 +94,9 @@ const ProfileMobileCard = React.memo(({
                                           onCloseExpanded,
                                           onOpenFollowersModal,
                                           onOpenFollowingModal,
+                                          followersHref,
+                                          followingHref,
+                                          walletHref,
                                           onToggleFollowing,
                                           onTabChange,
                                           onGoToCommunity,
@@ -239,6 +243,8 @@ const ProfileMobileCard = React.memo(({
                                                 followingCount={account?.following_count}
                                                 onOpenFollowersModal={onOpenFollowersModal}
                                                 onOpenFollowingModal={onOpenFollowingModal}
+                                                followersHref={followersHref}
+                                                followingHref={followingHref}
                                                 onToggleFollowing={onToggleFollowing}
                                                 isMobile={true}
                                             />
@@ -303,7 +309,7 @@ const ProfileMobileCard = React.memo(({
                         unmountOnExit
                     >
                         <div className={classes.walletMobileButtons}>
-                            <IconButton className={classes.walletMobileButton} onClick={onWalletOpen} data-tour="profile-wallet"><AccountBalanceWalletRounded/></IconButton>
+                            <IconButton className={classes.walletMobileButton} {...link(walletHref, onWalletOpen)} data-tour="profile-wallet"><AccountBalanceWalletRounded/></IconButton>
                         </div>
                     </Grow>
                 </Card>

@@ -23,7 +23,7 @@ import ImageMeasurer from "../components/ImageMeasurer";
 
 import PaperCard, { isArtworkBlurred, paperCardLayoutKey } from "../components/PaperCard";
 import PaperCardBlog, { paperCardBlogLayoutKey } from "../components/PaperCardBlog";
-import { enrichPostForBlogCard, isPortalBlogPost, isBlogCard, buildPortalPostUrl } from "../utils/blogCard";
+import { enrichPostForBlogCard, isPortalBlogPost, isBlogCard, postUrlOf } from "../utils/blogCard";
 import PaperCardMenuOption from "../components/PaperCardMenuOption";
 import { ProfileHoverCardLayer } from "../components/ProfileHoverCard";
 import CreateFab from "../components/CreateFab";
@@ -185,9 +185,10 @@ const POST_KIND_ARTWORK = "artwork";
 const POST_KIND_BLOG = "blog";
 const postKindOfUrl = (pathname) => (isCommunityPostUrl(pathname) ? POST_KIND_BLOG : POST_KIND_ARTWORK);
 
-// The URL a card pushes when opened. Blog cards build theirs from the portal
-// slug they were classified with, so it always parses as a community post.
-const postUrlOf = (data) => (isBlogCard(data) ? buildPortalPostUrl(data) : buildPostUrl(data));
+// The URL a card pushes when opened is postUrlOf (utils/blogCard): blog
+// cards build theirs from the portal slug they were classified with, so it
+// always parses as a community post. The cards print the same address in
+// their links' href.
 
 // ── Blur-aware sibling walk (dialog prev/next) — see Feed.js ───────────
 // PaperCard owns the "is this card blurred" truth (author/server NSFW flag

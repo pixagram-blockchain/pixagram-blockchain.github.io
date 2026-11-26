@@ -4,8 +4,10 @@ import ListItem from "@material-ui/core/ListItem";
 import ListItemText from "@material-ui/core/ListItemText";
 
 import { T } from "../../utils/T";
+import { link } from "../../utils/link";
 
 import { highlightNode, NO_SLOTS } from "./highlight";
+import { artworkPath } from "./searchApi";
 
 // ── PostResult ────────────────────────────────────────────────────────────────
 // One blog-post row (community/portal posts included): title in "Industry Book" with
@@ -31,7 +33,7 @@ export const PostResult = React.memo(
         const where = post.community ? (communityTitles && communityTitles[post.community]) || post.community : null;
         const text = post.summary || post.excerpt;
         return (
-            <ListItem button dense onClick={onClick} className={classes.row + " " + classes.postRow}>
+            <ListItem button dense component="a" {...link(artworkPath(post), onClick)} className={classes.row + " " + classes.postRow}>
                 <ListItemText
                     className={classes.rowText}
                     disableTypography

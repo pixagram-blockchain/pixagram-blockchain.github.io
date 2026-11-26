@@ -25,7 +25,9 @@ import {
 } from "../theme/motion";
 import PaperCard, { isArtworkBlurred, paperCardLayoutKey } from "../components/PaperCard";
 import PaperCardBlog, { paperCardBlogLayoutKey } from "../components/PaperCardBlog";
-import { enrichPostForBlogCard, isPortalBlogPost, isBlogCard, buildPortalPostUrl } from "../utils/blogCard";
+import { enrichPostForBlogCard, isPortalBlogPost, isBlogCard, postUrlOf } from "../utils/blogCard";
+import { pendingNavigation } from "../utils/link";
+import { resolveThreadRoot, resolveThreadUrl } from "../utils/threadRoot";
 import PaperCardMenuOption from "../components/PaperCardMenuOption";
 import { ProfileHoverCardLayer } from "../components/ProfileHoverCard";
 import Button from "@material-ui/core/Button";
@@ -393,7 +395,10 @@ const styles = theme => ({
     // anchor's right edge) and half-way down the image. It used to be
     // position:fixed with no offsets, i.e. placed by its static position, which
     // Chrome centred (align-content on the anchor) and WebKit put at the top.
-    menuButton: { display: "block", position: "absolute", top: "50%", left: "100%", zIndex: 1, width: 80, height: 80, transform: "translate(calc(-50% + 17px), -50%) scale(1)", transition: `color ${TF}, background-color ${TF}, transform ${FAB_AWAY_MS}ms ${E}`, color: "#101010", backgroundColor: "#c7c7c7", boxShadow: "0 0 8px #c7c7c788, 0 0 16px #c7c7c7cc", "&:hover": { color: "#101010", backgroundColor: "#fff", boxShadow: "0 0 8px #ffffff88, 0 0 16px #ffffffcc" }, "& svg": { width: "1.375em", height: "1.375em" }, "& .MuiTouchRipple-child": { backgroundImage: RIPPLE } },
+    // display: flex, not block: the FAB is a link to the wallet (utils/link),
+    // and only a <button> centres its content by itself. ButtonBase's own
+    // align-items / justify-content do it for both.
+    menuButton: { display: "flex", position: "absolute", top: "50%", left: "100%", zIndex: 1, width: 80, height: 80, transform: "translate(calc(-50% + 17px), -50%) scale(1)", transition: `color ${TF}, background-color ${TF}, transform ${FAB_AWAY_MS}ms ${E}`, color: "#101010", backgroundColor: "#c7c7c7", boxShadow: "0 0 8px #c7c7c788, 0 0 16px #c7c7c7cc", "&:hover": { color: "#101010", backgroundColor: "#fff", boxShadow: "0 0 8px #ffffff88, 0 0 16px #ffffffcc" }, "& svg": { width: "1.375em", height: "1.375em" }, "& .MuiTouchRipple-child": { backgroundImage: RIPPLE } },
     // Picture viewer open (and until the dialog has faded out after closing):
     // the FAB's right half hovers over the picture, and the flying picture is
     // a layer above the page that would seem to slice through it at take-off
@@ -576,9 +581,10 @@ const POST_KIND_ARTWORK = "artwork";
 const POST_KIND_BLOG = "blog";
 const postKindOfUrl = (pathname) => (isCommunityPostUrl(pathname) ? POST_KIND_BLOG : POST_KIND_ARTWORK);
 
-// The URL a card pushes when opened. Blog cards build theirs from the portal
-// slug they were classified with, so it always parses as a community post.
-const postUrlOf = (data) => (isBlogCard(data) ? buildPortalPostUrl(data) : buildPostUrl(data));
+// The URL a card pushes when opened is postUrlOf (utils/blogCard): blog
+// cards build theirs from the portal slug they were classified with, so it
+// always parses as a community post. The cards print the same address in
+// their links' href.
 
 // ── Parsed-metadata cache ───────────────────────────────────────────────
 // json_metadata is consulted several times per post (NSFW here, the deleted
@@ -640,33 +646,9 @@ const isNsfwPost = (post) => {
 // wider match.
 const isCommunityCategory = (s) => COMMUNITY_TAG_REGEX.test(typeof s === 'string' ? s : '');
 
-// Walk a comment's parent links up to its thread root. Timeline references
-// can point at a COMMENT (a vote on one, a reply, a curation reward) just as
-// well as at a root post — and only root posts have URLs. Returns the root's
-// author/permlink plus its category (for a root, `parent_permlink` IS the
-// category: the community for a blog post, the first tag for a pixel art),
-// or null when the chain can't be resolved. A root reference resolves in one
-// fetch; sanitized content that already names root_author/root_permlink
-// shortcuts deeper chains to two.
-const resolveThreadRoot = async (commentApi, author, permlink) => {
-    if (!commentApi || !commentApi.content || !author || !permlink) return null;
-    let a = author, p = permlink, content = null;
-    for (let hops = 0; hops < 12; hops++) {
-        content = await commentApi.content.getContent(a, p);
-        if (!content || !content.permlink) return null;
-        if (!content.parent_author) break; // reached the thread root
-        if (content.root_author && content.root_permlink
-            && (content.root_author !== a || content.root_permlink !== p)) {
-            a = content.root_author; p = content.root_permlink; // jump straight to it
-        } else {
-            a = content.parent_author; p = content.parent_permlink || "";
-        }
-        if (!p) return null;
-    }
-    if (content.parent_author) return null; // never reached a root
-    const category = content.category || content.parent_permlink || "";
-    return { author: a, permlink: p, category };
-};
+// resolveThreadRoot — the walk from a comment up to its thread root, for the
+// timeline's references — lives in utils/threadRoot now: the comment cards
+// and their menu need the same answer.
 
 // Category of the root post a raw chain object belongs to. Read in order:
 //
@@ -3200,6 +3182,14 @@ const Profile = ({ classes, settings, pathname, api }) => {
         // every scroll tick.
     }, [category, accountName, grid.scrollTo]);
 
+    // One address per tab — the one handleCategoryChange writes — for
+    // ProfileTabs to print as that tab's href (utils/link). Memoised: the bar
+    // is memo'd on its props.
+    const tabHrefs = useMemo(
+        () => TAB_NAMES.map((name) => buildProfileUrl(accountName, name, '')),
+        [accountName]
+    );
+
     const handleWalletOpen = useCallback((view) => {
         const vn = typeof view === 'string' ? view : 'overview';
         const newUrl = buildProfileUrl(accountName, TAB_NAMES[category]||'posts', 'wallet', vn);
@@ -3498,8 +3488,20 @@ const Profile = ({ classes, settings, pathname, api }) => {
         HISTORY.push(`/${community}/created/`);
     }, []);
 
-    const onOpenPostFromTimeline = useCallback(async (author, permlink) => {
+    const onOpenPostFromTimeline = useCallback(async (author, permlink, event) => {
         if (!author || !permlink) return;
+        // A timeline post has no href to carry a Ctrl/Cmd/middle click — its
+        // address is only known after the lookups below — so the click itself
+        // does (utils/link, pendingNavigation): for a new-tab click the tab is
+        // open already, and is pointed at the thread once its root is known
+        // (same root, same "#replies&focus=<ref>" for a comment as the in-tab
+        // flow further down). Nothing moves in this tab.
+        const nav = pendingNavigation(event);
+        if (nav.newTab) {
+            const url = await resolveThreadUrl(api, author, permlink);
+            if (!nav.go(url)) actions.trigger_snackbar(t("components.profile.could_not_load_the_original_post"));
+            return;
+        }
         // A timeline reference can be a COMMENT (a vote on one, a reply, a
         // curation reward) just as well as a root post — and only root posts
         // have URLs. Resolve the thread root first: the root is what opens,
@@ -3700,6 +3702,11 @@ const Profile = ({ classes, settings, pathname, api }) => {
         subscriptions: profile.subscriptions, vpMana: profile.vpMana, rcMana: profile.rcMana,
         onOpenFollowersModal: () => openFollowListModal("FOLLOWERS"),
         onOpenFollowingModal: () => openFollowListModal("FOLLOWING"),
+        // The addresses those two and onWalletOpen push, for the buttons to
+        // print as their href (utils/link).
+        followersHref: buildProfileUrl(accountName, TAB_NAMES[category]||'posts', 'followers'),
+        followingHref: buildProfileUrl(accountName, TAB_NAMES[category]||'posts', 'following'),
+        walletHref: buildProfileUrl(accountName, TAB_NAMES[category]||'posts', 'wallet', 'overview'),
         onToggleFollowing: profile.toggleFollowing, onTabChange: (e,v) => setTabValue(v),
         onGoToCommunity: goToCommunity, onCreateCommunity: () => setCreateCommunityOpen(true),
         onWalletOpen: handleWalletOpen, onEditProfile: () => setEditOpen(true),
@@ -3711,7 +3718,7 @@ const Profile = ({ classes, settings, pathname, api }) => {
         // and in here it rebuilt this whole object — inline handlers
         // included — so the mobile card (tabs, swipeable views and all)
         // re-rendered on the picture's first frame for a prop it never reads.
-    }), [profile, postsCount, tabValue, classes, openFollowListModal, goToCommunity, handleWalletOpen, pictureNav.openPicture]);
+    }), [profile, postsCount, tabValue, classes, openFollowListModal, goToCommunity, handleWalletOpen, pictureNav.openPicture, accountName, category]);
 
     const bottomBarHidden = isMobile && mobileCardExpanded;
     const createLabel = t("words.create", {TUC: true});
@@ -3728,7 +3735,7 @@ const Profile = ({ classes, settings, pathname, api }) => {
             <div className={classes.root}>
                 {isMobile && <ProfileMobileCardLive scrollStore={scrollStore} {...sidebarProps} expanded={mobileCardExpanded} height={windowHeight} onToggleExpanded={toggleMobileCard} onCloseExpanded={closeMobileCard} />}
                 <div className={classes.viewLeft}>
-                    <ProfileTabsLive scrollStore={scrollStore} classes={classes} category={category} isOwnProfile={profile.isOwnProfile} onChange={handleCategoryChange} lessThan960w={isMobile} forceHidden={bottomBarHidden}
+                    <ProfileTabsLive scrollStore={scrollStore} classes={classes} category={category} isOwnProfile={profile.isOwnProfile} onChange={handleCategoryChange} hrefs={tabHrefs} lessThan960w={isMobile} forceHidden={bottomBarHidden}
                                      onCreate={openCreateArtwork} createLabel={createLabel} createOpen={createArtworkOpen} />
                     {!isMobile && <ProfileCreateFab className={classes.mainFab} scrollStore={scrollStore}
                                                     visible={!!profile.isOwnProfile}
@@ -3743,6 +3750,7 @@ const Profile = ({ classes, settings, pathname, api }) => {
             </div>
 
             <PaperCardMenuOption xy={menuCardXY} data={menuCardData} onClose={closeCardMenu}
+                                 api={api}
                                  viewer={profile.loggedInUser}
                                  onEditPost={onEditPost} onDeletePost={onDeletePost}
                                  onDeleteComment={onDeleteComment} />

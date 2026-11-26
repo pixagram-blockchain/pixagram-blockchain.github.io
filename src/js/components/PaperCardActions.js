@@ -18,6 +18,7 @@ import { usePrices } from '../hooks/usePrices';
 import useVotePayoutEstimate from '../hooks/useVotePayoutEstimate';
 
 import { t } from "../utils/text";
+import { link } from "../utils/link";
 
 // Mirrors the synchronous seed in hooks/usePrices (PricesAPI's
 // DESIGN_BIG_MAC_USD). Only reached when usePrices hands out 0.
@@ -340,33 +341,36 @@ function VoteCount({
 // `commentsActive`. Both open the post on its replies tab through
 // onCommentsClick. The dim/disabled look only survives for a host that
 // renders the card without a handler.
-function Comments({ classes, commentsNumber, onCommentsClick }) {
+// `commentsHref` is where that leads — the post's address with its replies
+// hash — so both are links (utils/link): a Ctrl+click or the middle button
+// opens the thread in a new tab. A card that hands none keeps plain buttons.
+function Comments({ classes, commentsNumber, onCommentsClick, commentsHref }) {
     // Unary plus: the count may arrive as a string from older payloads.
     const count = +commentsNumber || 0;
     const hasReplies = count > 0;
 
     const disabled = typeof onCommentsClick !== 'function';
-    const handleClick = disabled ? undefined : onCommentsClick;
+    const nav = disabled ? null : link(commentsHref, onCommentsClick);
     const colorClass = (disabled || !hasReplies) ? classes.comments : classes.commentsActive;
     return (
         <span className={colorClass} style={disabled ? COMMENTS_DISABLED_STYLE : undefined}>
             <IconButton
                 aria-label={t("words.comments")}
-                onClick={handleClick}
+                {...nav}
                 disabled={disabled}
                 style={COMMENTS_ICON_STYLE}
             >
                 <CommentRounded />
             </IconButton>
-            {hasReplies && (
-                <span
-                    onClick={handleClick}
-                    className={'monospace'}
-                    style={disabled ? COMMENTS_COUNT_DISABLED_STYLE : COMMENTS_COUNT_STYLE}
-                >
+            {hasReplies && (disabled ? (
+                <span className={'monospace'} style={COMMENTS_COUNT_DISABLED_STYLE}>
                     {count}
                 </span>
-            )}
+            ) : (
+                <a {...nav} className={'monospace'} style={COMMENTS_COUNT_STYLE}>
+                    {count}
+                </a>
+            ))}
         </span>
     );
 }
@@ -435,6 +439,7 @@ function VoteButtons({
                          triggerNegativeVotes,
                          commentsNumber,
                          onCommentsClick,
+                         commentsHref,
                          showComments = false,
                          payout,
                          data,
@@ -507,6 +512,7 @@ function VoteButtons({
                     classes={classes}
                     commentsNumber={commentsNumber}
                     onCommentsClick={onCommentsClick}
+                    commentsHref={commentsHref}
                 />
             )}
             <Payout
